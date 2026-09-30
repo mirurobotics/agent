@@ -34,9 +34,15 @@
 
     <StandardDirectory Id="CommonAppDataFolder">
       <Directory Id="MIRUDATA" Name="Miru">
-        <Directory Id="MIRULOGS" Name="logs" />
-        <Directory Id="MIRUAUTH" Name="auth" />
-        <Directory Id="MIRUTMP" Name="tmp" />
+        <Directory Id="MIRULOGS" Name="logs">
+          <Directory Id="MIRULOGSSENTINEL" Name="installer-sentinel" />
+        </Directory>
+        <Directory Id="MIRUAUTH" Name="auth">
+          <Directory Id="MIRUAUTHSENTINEL" Name="installer-sentinel" />
+        </Directory>
+        <Directory Id="MIRUTMP" Name="tmp">
+          <Directory Id="MIRUTMPSENTINEL" Name="installer-sentinel" />
+        </Directory>
       </Directory>
     </StandardDirectory>
 
@@ -88,7 +94,10 @@
          The last two ACEs let the service SID (`sc.exe showsid miru-agent`) use
          each directory but not delete or re-permission it, with full control of
          its contents. Hardcoded because CreateFolders runs before the service
-         exists; recompute if the service Name changes. -->
+         exists; recompute if the service Name changes.
+         The installer-sentinel folders, which the service cannot delete, keep
+         logs, auth, and tmp non-empty so that none can become a mount point that
+         a repair or upgrade follows; they are permanent. -->
     <ComponentGroup Id="DataDirs">
       <Component Id="MiruDataDir" Directory="MIRUDATA" Guid="D0542DF7-5B61-4F09-938B-57F05C1B5458" Bitness="always64" KeyPath="yes">
         <CreateFolder>
@@ -108,6 +117,21 @@
       <Component Id="MiruTmpDir" Directory="MIRUTMP" Guid="D654A9BF-2860-44FA-8FFB-A8E36986197B" Bitness="always64" KeyPath="yes">
         <CreateFolder>
           <PermissionEx Sddl="O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;;FRFWFX;;;S-1-5-80-1251439239-454917380-1008020685-2030257057-91624695)(A;OICIIO;FA;;;S-1-5-80-1251439239-454917380-1008020685-2030257057-91624695)" />
+        </CreateFolder>
+      </Component>
+      <Component Id="MiruLogsSentinel" Directory="MIRULOGSSENTINEL" Guid="51B41B07-B719-4D73-BD1E-3675FC8E7CA8" Bitness="always64" KeyPath="yes" Permanent="yes">
+        <CreateFolder>
+          <PermissionEx Sddl="O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)" />
+        </CreateFolder>
+      </Component>
+      <Component Id="MiruAuthSentinel" Directory="MIRUAUTHSENTINEL" Guid="6CDA574C-42E3-40A3-92C4-BF304E2F368A" Bitness="always64" KeyPath="yes" Permanent="yes">
+        <CreateFolder>
+          <PermissionEx Sddl="O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)" />
+        </CreateFolder>
+      </Component>
+      <Component Id="MiruTmpSentinel" Directory="MIRUTMPSENTINEL" Guid="7AF370AB-A333-4D60-BC95-ACAB7306D1C6" Bitness="always64" KeyPath="yes" Permanent="yes">
+        <CreateFolder>
+          <PermissionEx Sddl="O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)" />
         </CreateFolder>
       </Component>
     </ComponentGroup>

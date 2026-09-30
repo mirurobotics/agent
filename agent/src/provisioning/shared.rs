@@ -3,7 +3,7 @@ use std::env;
 
 // internal crates
 use crate::disk::settings;
-use crate::filesys::{self, dirs};
+use crate::filesys::{self, files};
 use crate::network::{BackendHost, MqttHost};
 use crate::provisioning::errors::*;
 
@@ -26,10 +26,13 @@ pub fn read_token_from_env() -> Result<String, ProvisionErr> {
     }))
 }
 
-pub(super) async fn cleanup_temp_dir(temp_dir: &filesys::Dir) {
-    if let Err(e) = dirs::delete(temp_dir).await {
-        debug_assert!(false, "failed to clean up temp dir: {e}");
-        warn!("failed to clean up temp dir: {e}");
+// tmp\ itself is installer-owned on Windows; delete only what provisioning wrote.
+pub(super) async fn cleanup_temp_files(temp_files: &[&filesys::File]) {
+    for file in temp_files {
+        if let Err(e) = files::delete(file).await {
+            debug_assert!(false, "failed to clean up temp file: {e}");
+            warn!("failed to clean up temp file: {e}");
+        }
     }
 }
 

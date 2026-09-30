@@ -4,7 +4,7 @@ use crate::test_utils::filesys::dirs as test_dirs;
 use backend_api::models::Device;
 use miru_agent::crypt::base64;
 use miru_agent::disk::{Layout, Settings};
-use miru_agent::filesys::{files, PathExt};
+use miru_agent::filesys::{dirs, files, PathExt};
 use miru_agent::http::{errors::MockErr, HTTPErr};
 use miru_agent::provisioning::provision;
 
@@ -12,6 +12,8 @@ use miru_agent::provisioning::provision;
 use serde_json::json;
 
 pub(super) const DEVICE_ID: &str = "75899aa4-b08a-4047-8526-880b1b832973";
+// Stands in for the Windows installer's sentinel folder in tmp\.
+pub(super) const TEMP_SENTINEL: &str = "installer-sentinel";
 
 pub(super) fn new_jwt(device_id: &str) -> String {
     let payload = json!({
@@ -53,6 +55,9 @@ impl Env {
     pub async fn new(prefix: &str) -> Self {
         let root = test_dirs::temp(prefix).unwrap();
         let layout = Layout::new(root.to_dir());
+        dirs::create_if_absent(&layout.temp_dir().subdir(TEMP_SENTINEL))
+            .await
+            .unwrap();
         Self {
             _root: root,
             layout,
@@ -143,7 +148,21 @@ pub(super) async fn validate_storage(layout: &Layout, expected_name: &str) {
     assert!(auth.public_key().exists(), "public key missing");
     assert!(auth.token().exists(), "token missing");
 
-    assert!(!layout.temp_dir().exists(), "temp dir not cleaned");
+    assert_temp_dir_cleaned(layout).await;
+}
+
+pub(super) async fn assert_temp_dir_cleaned(layout: &Layout) {
+    let temp_dir = layout.temp_dir();
+    let files = dirs::files(&temp_dir).await.unwrap();
+    assert!(files.is_empty(), "temp dir still contains files: {files:?}");
+
+    let subdirs: Vec<String> = dirs::subdirs(&temp_dir)
+        .await
+        .unwrap()
+        .iter()
+        .map(|dir| dir.name().unwrap().to_string())
+        .collect();
+    assert_eq!(subdirs, vec![TEMP_SENTINEL.to_string()]);
 }
 
 /// Byte-exact snapshot of every persisted blob, used to verify a failing

@@ -20,12 +20,12 @@ pub async fn reprovision<HTTPClientT: http::ClientI>(
     token: &str,
 ) -> Result<backend_client::Device, ProvisionErr> {
     let temp_dir = layout.temp_dir();
+    let private_key_file = temp_dir.file("private.key");
+    let public_key_file = temp_dir.file("public.key");
 
     let result = async {
         // generate new public and private keys in a temporary directory which
         // will become the device's new authentication if successful
-        let private_key_file = temp_dir.file("private.key");
-        let public_key_file = temp_dir.file("public.key");
         rsa::gen_key_pair(
             rsa::KeySize::Rsa4096,
             &private_key_file,
@@ -48,7 +48,7 @@ pub async fn reprovision<HTTPClientT: http::ClientI>(
     }
     .await;
 
-    shared::cleanup_temp_dir(&temp_dir).await;
+    shared::cleanup_temp_files(&[&private_key_file, &public_key_file]).await;
     result
 }
 

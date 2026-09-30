@@ -1,6 +1,7 @@
 // internal crates
 use super::shared::{
-    mock_failing_provision, mock_ok_provision, validate_storage, Env, StorageSnapshot, DEVICE_ID,
+    assert_temp_dir_cleaned, mock_failing_provision, mock_ok_provision, validate_storage, Env,
+    StorageSnapshot, DEVICE_ID,
 };
 use crate::mocks::http_client as mock;
 use crate::test_utils::filesys::files as test_files;
@@ -46,7 +47,7 @@ pub mod provision_fn {
             !env.layout.device().exists(),
             "device.json should not exist"
         );
-        assert!(!env.layout.temp_dir().exists(), "temp dir not cleaned");
+        assert_temp_dir_cleaned(&env.layout).await;
 
         env.cleanup().await;
     }
@@ -168,7 +169,7 @@ pub mod provision_fn {
 
         assert_eq!(mock.call_count(mock::Call::ProvisionDevice), 1);
         snapshot.assert_unchanged(&env.layout).await;
-        assert!(!env.layout.temp_dir().exists(), "temp dir not cleaned");
+        assert_temp_dir_cleaned(&env.layout).await;
 
         env.cleanup().await;
     }

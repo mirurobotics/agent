@@ -140,9 +140,11 @@ function Assert-ProtectedPermissionRows {
     $permissionQuery = "SELECT ``LockObject``, ``Table``, ``SDDLText`` " + `
         "FROM ``MsiLockPermissionsEx``"
     $permissions = @(Get-MsiRows $Database $permissionQuery 3)
-    $expected = @($MsiExpectedDirectories | ForEach-Object {
+    $expected = @(@($MsiExpectedDirectories | ForEach-Object {
         "$($_[2])|CreateFolder|$MsiExpectedSddl"
-    } | Sort-Object)
+    }) + @($MsiSentinelDirectoryIds | ForEach-Object {
+        "$_|CreateFolder|$MsiSentinelSddl"
+    }) | Sort-Object)
     $actual = @($permissions | ForEach-Object {
         "{0}|{1}|{2}" -f $_[0], $_[1], $_[2]
     } | Sort-Object)

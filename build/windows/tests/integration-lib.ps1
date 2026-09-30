@@ -58,6 +58,7 @@ function Invoke-IntegrationLifecycle {
     New-TestUser
     Initialize-CustomerState
     Invoke-InstallStage $packages
+    New-CustomerGrant
     Invoke-MaintenanceStage $packages
     Invoke-UpgradeStage $packages
     Invoke-DowngradeStage $packages
@@ -161,7 +162,7 @@ function Invoke-InstallStage {
 # Loosen every protected directory so the next installer operation must repair it.
 function Add-PermissiveAces {
     param([string]$OwnerSid = "")
-    foreach ($path in $protectedRoots) {
+    foreach ($path in @($protectedRoots) + @($installerSentinelDirs)) {
         Set-PermissiveAcl $path $OwnerSid
         Assert-PermissiveAcl $path $OwnerSid
     }
@@ -266,6 +267,28 @@ function Assert-CustomerStateRetained {
     Assert-ProtectedRootsRetained $Stage
     Assert-OwnedFilesRetained $customerOwnedFiles $Stage
     Assert-OwnedFilesRetained @($representativeFiles) $Stage
+    if ($null -ne $customerGrantPath) { Assert-CustomerGrant $Stage }
+}
+
+function New-CustomerGrant {
+    $script:customerGrantPath = Initialize-Directory (Join-Path $artifactsRoot "customer-grant")
+    & icacls.exe $customerGrantPath /grant "$MsiServiceAccount`:(OI)(CI)M" | Out-Null
+    Assert-Equal 0 $LASTEXITCODE "customer grant applied to $customerGrantPath"
+    Assert-CustomerGrant "grant"
+}
+
+function Assert-CustomerGrant {
+    param([Parameter(Mandatory = $true)][string]$Stage)
+    $rules = @((Get-Acl -LiteralPath $customerGrantPath).Access | Where-Object {
+        -not $_.IsInherited -and (Get-RuleSid $_) -eq $MsiServiceSid
+    })
+    Assert-Equal 1 $rules.Count "$Stage keeps one explicit customer grant ACE for the service SID"
+    $rule = $rules[0]
+    Assert-Equal "Allow" $rule.AccessControlType.ToString() "$Stage customer grant ACE type"
+    $modify = [int][Security.AccessControl.FileSystemRights]::Modify
+    Assert-Equal $modify ([int]$rule.FileSystemRights -band $modify) "$Stage customer grant includes Modify"
+    $inherit = [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [Security.AccessControl.InheritanceFlags]::ObjectInherit
+    Assert-Equal ([int]$inherit) ([int]$rule.InheritanceFlags) "$Stage customer grant inherits to containers and files"
 }
 
 function Assert-ProtectedRootsRetained {
@@ -290,6 +313,7 @@ function Assert-OwnedFilesRetained {
 
 function Assert-ProtectedAcls {
     foreach ($path in $protectedRoots) { Assert-ProtectedAcl $path }
+    foreach ($path in $installerSentinelDirs) { Assert-InstallerSentinelAcl $path }
 }
 
 function Assert-ProtectedAcl {
@@ -308,6 +332,23 @@ function Assert-ProtectedAcl {
     Assert-Equal (($expectedAdmins | Sort-Object) -join ",") (($adminSids | Sort-Object) -join ",") "$LiteralPath administrator ACE identities"
     & icacls.exe $LiteralPath 2>&1 | Out-Null
     Assert-Equal 0 $LASTEXITCODE "icacls can inspect $LiteralPath"
+}
+
+# SYSTEM and Administrators only: the service cannot delete it, so it cannot empty the parent.
+function Assert-InstallerSentinelAcl {
+    param([Parameter(Mandatory = $true)][string]$LiteralPath)
+    Assert-True (Test-Path -LiteralPath $LiteralPath -PathType Container) "$LiteralPath exists"
+    Assert-True (((Get-Item -LiteralPath $LiteralPath -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) "$LiteralPath is not a reparse point"
+    $acl = Get-Acl -LiteralPath $LiteralPath
+    Assert-Equal "S-1-5-18" $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value "$LiteralPath owner is SYSTEM"
+    Assert-True $acl.AreAccessRulesProtected "$LiteralPath DACL inheritance is disabled"
+    $rules = @($acl.Access)
+    Assert-Equal 2 $rules.Count "exactly 2 total $LiteralPath ACEs"
+    $sids = @($rules | ForEach-Object {
+        Assert-True (-not $_.IsInherited) "$LiteralPath ACE is explicit"
+        Assert-FullControlAce $_ $LiteralPath -Inheritable
+    })
+    Assert-Equal "S-1-5-18,S-1-5-32-544" (($sids | Sort-Object) -join ",") "$LiteralPath ACE identities"
 }
 
 # The service may use but not delete or re-permission the directory, and has

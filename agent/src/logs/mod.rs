@@ -11,6 +11,7 @@ use thiserror::Error;
 #[allow(unused_imports)]
 use tracing::{debug, error, info, trace, warn};
 use tracing_appender::non_blocking::WorkerGuard;
+use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::{fmt, prelude::*, registry::Registry, reload, EnvFilter};
 
 #[derive(Clone, Debug, Default, Serialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -64,6 +65,8 @@ pub enum LogsErr {
     SetGlobalDefault(#[from] tracing::subscriber::SetGlobalDefaultError),
     #[error("failed to reload tracing filter: {0}")]
     ReloadFailed(String),
+    #[error("failed to open log file: {0}")]
+    OpenLogFile(#[from] tracing_appender::rolling::InitError),
 }
 
 impl crate::errors::Error for LogsErr {}
@@ -100,9 +103,14 @@ impl LoggingGuard {
     }
 }
 
-pub fn build_layers(options: Options) -> (BoxedLogLayer, WorkerGuard, ReloadHandle, bool) {
+pub fn build_layers(
+    options: Options,
+) -> Result<(BoxedLogLayer, WorkerGuard, ReloadHandle, bool), LogsErr> {
     // initialize the file appender for logging
-    let file_appender = tracing_appender::rolling::hourly(options.log_dir, "miru.log");
+    let file_appender = RollingFileAppender::builder()
+        .rotation(Rotation::HOURLY)
+        .filename_prefix("miru.log")
+        .build(options.log_dir)?;
     let (non_blocking, worker_guard) = tracing_appender::non_blocking(file_appender);
 
     // respect RUST_LOG environment variable if set, otherwise use provided log level
@@ -131,11 +139,11 @@ pub fn build_layers(options: Options) -> (BoxedLogLayer, WorkerGuard, ReloadHand
         reload_layer.and_then(fmt_layer).boxed()
     };
 
-    (composite, worker_guard, reload_handle, env_filter_locked)
+    Ok((composite, worker_guard, reload_handle, env_filter_locked))
 }
 
 pub fn init(options: Options) -> Result<LoggingGuard, LogsErr> {
-    let (layers, worker_guard, reload_handle, env_filter_locked) = build_layers(options);
+    let (layers, worker_guard, reload_handle, env_filter_locked) = build_layers(options)?;
     let subscriber = Registry::default().with(layers);
     tracing::subscriber::set_global_default(subscriber)?;
     Ok(LoggingGuard {
