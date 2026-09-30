@@ -60,6 +60,8 @@ function Assert-ProductionTables {
     try {
         Assert-DirectoryComponents $handle.Database
         Assert-ProtectedPermissionRows $handle.Database
+        Assert-ClientsGroupRows $handle.Database
+        Assert-ClientsPermissionRows $handle.Database
         Assert-FixtureIsolation $handle.Database
         Assert-TransactionalMajorUpgrade $handle.Database
         Assert-DowngradeLaunchCondition $handle.Database
@@ -150,6 +152,48 @@ function Assert-ProtectedPermissionRows {
     } | Sort-Object)
     Assert-Equal ($expected -join "`n") ($actual -join "`n") `
         "exact protected permission rows"
+}
+
+# The WiX Util extension creates the local group (Wix4Group, Wix6Group), and
+# keeps it on uninstall: Wix6Group attribute 0x100 is DontRemoveOnUninstall.
+# 0x10 FailIfExists, 0x200 DontCreateGroup, and 0x400 NonVital must be clear,
+# so an existing group is reused and a failed creation fails the install.
+function Assert-ClientsGroupRows {
+    param([Parameter(Mandatory = $true)]$Database)
+    Assert-True (Test-MsiTable $Database "Wix4Group") "WiX Util group table present"
+    $groupQuery = "SELECT ``Group``, ``Component_``, ``Name``, ``Domain`` " + `
+        "FROM ``Wix4Group``"
+    $groups = @(Get-MsiRows $Database $groupQuery 4)
+    Assert-Equal 1 $groups.Count "one group row"
+    Assert-Equal $MsiClientsComponent $groups[0][1] "group owning component"
+    Assert-Equal $MsiClientsGroup $groups[0][2] "group name"
+    Assert-True ([string]::IsNullOrEmpty($groups[0][3])) "group is local"
+    $attributeQuery = "SELECT ``Group_``, ``Attributes`` FROM ``Wix6Group``"
+    $attributes = @(Get-MsiRows $Database $attributeQuery 2)
+    Assert-Equal 1 $attributes.Count "one group attributes row"
+    Assert-Equal $groups[0][0] $attributes[0][0] "group attributes key"
+    $flags = [int]$attributes[0][1]
+    Assert-True (($flags -band 0x100) -ne 0) "group is kept on uninstall"
+    Assert-Equal 0 ($flags -band 0x610) "group is created if missing, reused if present, and vital"
+}
+
+# Exactly one util:PermissionEx row: inheritable read on device-api for the
+# group. No other account (such as Users) gains access through the extension.
+function Assert-ClientsPermissionRows {
+    param([Parameter(Mandatory = $true)]$Database)
+    Assert-True (Test-MsiTable $Database "Wix4SecureObject") "WiX Util permission table present"
+    $query = "SELECT ``SecureObject``, ``Table``, ``Domain``, ``User``, " + `
+        "``Attributes``, ``Permission``, ``Component_`` FROM ``Wix4SecureObject``"
+    $rows = @(Get-MsiRows $Database $query 7)
+    Assert-Equal 1 $rows.Count "one extension permission row"
+    $row = $rows[0]
+    Assert-Equal $MsiClientsDirectoryId $row[0] "extension permission object"
+    Assert-Equal "CreateFolder" $row[1] "extension permission object table"
+    Assert-True ([string]::IsNullOrEmpty($row[2])) "extension permission account is local"
+    Assert-Equal $MsiClientsGroup $row[3] "extension permission account"
+    Assert-Equal 1 ([int]$row[4]) "extension permission is inheritable"
+    Assert-Equal $MsiClientsRights ([int]$row[5]) "extension permission grants read only"
+    Assert-Equal $MsiClientsComponent $row[6] "extension permission owning component"
 }
 
 function Assert-FixtureIsolation {

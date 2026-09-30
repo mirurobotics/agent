@@ -23,11 +23,17 @@ $MsiExpectedDirectories = @(
     @("MiruDataDir", "{D0542DF7-5B61-4F09-938B-57F05C1B5458}", "MIRUDATA", "CommonAppDataFolder", "Miru"),
     @("MiruLogsDir", "{C3AF8332-28E8-4707-8430-780C553D86EC}", "MIRULOGS", "MIRUDATA", "logs"),
     @("MiruAuthDir", "{A2AE361A-41E6-427A-AF4C-ACCEE7F451F9}", "MIRUAUTH", "MIRUDATA", "auth"),
-    @("MiruTmpDir", "{D654A9BF-2860-44FA-8FFB-A8E36986197B}", "MIRUTMP", "MIRUDATA", "tmp")
+    @("MiruTmpDir", "{D654A9BF-2860-44FA-8FFB-A8E36986197B}", "MIRUTMP", "MIRUDATA", "tmp"),
+    @("MiruDeviceApiDir", "{3CA14BB2-FB56-4907-93EF-45ED80886D9E}", "MIRUDEVICEAPI", "MIRUDATA", "device-api")
 )
 $MsiSentinelName = "installer-sentinel"
 $MsiSentinelSddl = "O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)"
-$MsiSentinelDirectoryIds = @("MIRULOGSSENTINEL", "MIRUAUTHSENTINEL", "MIRUTMPSENTINEL")
+$MsiSentinelDirectoryIds = @("MIRULOGSSENTINEL", "MIRUAUTHSENTINEL", "MIRUTMPSENTINEL", "MIRUDEVICEAPISENTINEL")
+# Local group whose members can read the device API discovery file in device-api.
+$MsiClientsGroup = "Miru Clients"
+$MsiClientsDirectoryId = "MIRUDEVICEAPI"
+$MsiClientsComponent = "MiruDeviceApiDir"
+$MsiClientsRights = 0x120089   # Read, ReadAttributes, ReadExtendedAttributes, ReadPermission, Synchronize: .NET reports Read
 $MsiFixtureProductCodes = @(
     "{B7AFDD4E-E6DB-4ED9-8C34-F318A04486B1}",
     "{3CE73709-ECE4-48A5-B7E7-1AC13C5EF30A}",
@@ -294,5 +300,9 @@ Export-ModuleMember -Function @(
     "MsiSentinelName",
     "MsiSentinelSddl",
     "MsiSentinelDirectoryIds",
+    "MsiClientsGroup",
+    "MsiClientsDirectoryId",
+    "MsiClientsComponent",
+    "MsiClientsRights",
     "MsiFixtureProductCodes"
 )
