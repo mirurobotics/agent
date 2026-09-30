@@ -58,6 +58,7 @@ function Invoke-IntegrationLifecycle {
     New-TestUser
     Initialize-CustomerState
     Invoke-InstallStage $packages
+    New-CustomerGrant
     Invoke-MaintenanceStage $packages
     Invoke-UpgradeStage $packages
     Invoke-DowngradeStage $packages
@@ -266,6 +267,28 @@ function Assert-CustomerStateRetained {
     Assert-ProtectedRootsRetained $Stage
     Assert-OwnedFilesRetained $customerOwnedFiles $Stage
     Assert-OwnedFilesRetained @($representativeFiles) $Stage
+    if ($null -ne $customerGrantPath) { Assert-CustomerGrant $Stage }
+}
+
+function New-CustomerGrant {
+    $script:customerGrantPath = Initialize-Directory (Join-Path $artifactsRoot "customer-grant")
+    & icacls.exe $customerGrantPath /grant "$MsiServiceAccount`:(OI)(CI)M" | Out-Null
+    Assert-Equal 0 $LASTEXITCODE "customer grant applied to $customerGrantPath"
+    Assert-CustomerGrant "grant"
+}
+
+function Assert-CustomerGrant {
+    param([Parameter(Mandatory = $true)][string]$Stage)
+    $rules = @((Get-Acl -LiteralPath $customerGrantPath).Access | Where-Object {
+        -not $_.IsInherited -and (Get-RuleSid $_) -eq $MsiServiceSid
+    })
+    Assert-Equal 1 $rules.Count "$Stage keeps one explicit customer grant ACE for the service SID"
+    $rule = $rules[0]
+    Assert-Equal "Allow" $rule.AccessControlType.ToString() "$Stage customer grant ACE type"
+    $modify = [int][Security.AccessControl.FileSystemRights]::Modify
+    Assert-Equal $modify ([int]$rule.FileSystemRights -band $modify) "$Stage customer grant includes Modify"
+    $inherit = [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [Security.AccessControl.InheritanceFlags]::ObjectInherit
+    Assert-Equal ([int]$inherit) ([int]$rule.InheritanceFlags) "$Stage customer grant inherits to containers and files"
 }
 
 function Assert-ProtectedRootsRetained {

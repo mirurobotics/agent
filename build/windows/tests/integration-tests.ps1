@@ -76,6 +76,7 @@ function Initialize-IntegrationRuntime {
     $script:failureEvidence = New-Object System.Collections.ArrayList
     $script:cleanupFailures = New-Object System.Collections.ArrayList
     $script:integrationFailure = $null
+    $script:customerGrantPath = $null
 }
 
 function Assert-TestUserAbsent {
