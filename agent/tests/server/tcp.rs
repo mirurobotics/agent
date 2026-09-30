@@ -119,20 +119,9 @@ pub mod serve {
         handle.await.unwrap().unwrap();
     }
 
-    async fn health_status_with_host(name: &str, host: impl FnOnce(u16) -> String) -> u16 {
-        health_status(name, |port| Some(host(port)), |_| None).await
-    }
-
-    async fn health_status_with_origin(name: &str, origin: impl FnOnce(u16) -> String) -> u16 {
-        health_status(name, |_| None, |port| Some(origin(port))).await
-    }
-
-    async fn health_status(
-        name: &str,
-        host: impl FnOnce(u16) -> Option<String>,
-        origin: impl FnOnce(u16) -> Option<String>,
-    ) -> u16 {
-        let fixture = Fixture::new(name).await;
+    #[tokio::test]
+    async fn rejects_foreign_host() {
+        let fixture = Fixture::new("tcp_rejects_foreign_host").await;
         let listener = tcp::bind(0).await.unwrap();
         let addr = listener.local_addr().unwrap();
         let mut shutdown_rx = fixture.shutdown_tx.subscribe();
@@ -141,96 +130,18 @@ pub mod serve {
         });
 
         let url = format!("http://{addr}/{}/health", ApiVersion::API_VERSION);
-        let mut request = no_proxy_client().get(&url);
-        if let Some(host) = host(addr.port()) {
-            request = request.header(reqwest::header::HOST, host);
-        }
-        if let Some(origin) = origin(addr.port()) {
-            request = request.header(reqwest::header::ORIGIN, origin);
-        }
-        let response = request.send().await.unwrap();
+        let response = no_proxy_client()
+            .get(&url)
+            .header(
+                reqwest::header::HOST,
+                format!("attacker.example:{}", addr.port()),
+            )
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), reqwest::StatusCode::FORBIDDEN);
 
         let _ = fixture.shutdown_tx.send(());
         handle.await.unwrap().unwrap();
-        response.status().as_u16()
-    }
-
-    #[tokio::test]
-    async fn accepts_localhost_host() {
-        let status = health_status_with_host("tcp_accepts_localhost_host", |port| {
-            format!("localhost:{port}")
-        })
-        .await;
-        assert_eq!(status, 200);
-    }
-
-    #[tokio::test]
-    async fn rejects_foreign_host() {
-        let status = health_status_with_host("tcp_rejects_foreign_host", |port| {
-            format!("attacker.example:{port}")
-        })
-        .await;
-        assert_eq!(status, 403);
-    }
-
-    #[tokio::test]
-    async fn rejects_loopback_host_on_another_port() {
-        let status = health_status_with_host("tcp_rejects_loopback_host_on_another_port", |port| {
-            format!("127.0.0.1:{}", port.wrapping_add(1))
-        })
-        .await;
-        assert_eq!(status, 403);
-    }
-
-    #[tokio::test]
-    async fn rejects_host_without_port() {
-        let status =
-            health_status_with_host("tcp_rejects_host_without_port", |_| "localhost".to_string())
-                .await;
-        assert_eq!(status, 403);
-    }
-
-    #[tokio::test]
-    async fn accepts_loopback_origin() {
-        let status = health_status_with_origin("tcp_accepts_loopback_origin", |port| {
-            format!("http://127.0.0.1:{port}")
-        })
-        .await;
-        assert_eq!(status, 200);
-    }
-
-    #[tokio::test]
-    async fn accepts_localhost_origin() {
-        let status = health_status_with_origin("tcp_accepts_localhost_origin", |port| {
-            format!("http://localhost:{port}")
-        })
-        .await;
-        assert_eq!(status, 200);
-    }
-
-    #[tokio::test]
-    async fn rejects_foreign_origin() {
-        let status = health_status_with_origin("tcp_rejects_foreign_origin", |_port| {
-            "https://attacker.example".to_string()
-        })
-        .await;
-        assert_eq!(status, 403);
-    }
-
-    #[tokio::test]
-    async fn rejects_null_origin() {
-        let status =
-            health_status_with_origin("tcp_rejects_null_origin", |_port| "null".to_string()).await;
-        assert_eq!(status, 403);
-    }
-
-    #[tokio::test]
-    async fn rejects_loopback_origin_on_another_port() {
-        let status =
-            health_status_with_origin("tcp_rejects_loopback_origin_on_another_port", |port| {
-                format!("http://127.0.0.1:{}", port.wrapping_add(1))
-            })
-            .await;
-        assert_eq!(status, 403);
     }
 }

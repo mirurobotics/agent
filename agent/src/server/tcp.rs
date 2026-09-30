@@ -124,3 +124,134 @@ fn is_loopback_host(host: &str, port: u16) -> bool {
     };
     host_port.parse() == Ok(port) && (name == "127.0.0.1" || name.eq_ignore_ascii_case("localhost"))
 }
+
+#[cfg(test)]
+mod tests {
+    // internal crates
+    use super::*;
+
+    // external crates
+    use axum::body::Body;
+    use axum::routing::get;
+    use axum::Router;
+    use tower::ServiceExt;
+
+    const PORT: u16 = 6478;
+
+    fn request(uri: &str, host: Option<&str>, origin: Option<&str>) -> Request {
+        let mut builder = Request::builder().uri(uri);
+        if let Some(host) = host {
+            builder = builder.header(header::HOST, host);
+        }
+        if let Some(origin) = origin {
+            builder = builder.header(header::ORIGIN, origin);
+        }
+        builder.body(Body::empty()).unwrap()
+    }
+
+    async fn status(request: Request) -> StatusCode {
+        let app = Router::new()
+            .route("/health", get(|| async { StatusCode::OK }))
+            .layer(middleware::from_fn(move |req, next| {
+                check_loopback(PORT, req, next)
+            }));
+        app.oneshot(request).await.unwrap().status()
+    }
+
+    #[tokio::test]
+    async fn allows_localhost_host() {
+        let status = status(request("/health", Some("localhost:6478"), None)).await;
+        assert_eq!(status, StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn allows_loopback_host() {
+        let status = status(request("/health", Some("127.0.0.1:6478"), None)).await;
+        assert_eq!(status, StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn rejects_foreign_host() {
+        let status = status(request("/health", Some("attacker.example:6478"), None)).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn rejects_loopback_host_on_another_port() {
+        let status = status(request("/health", Some("127.0.0.1:6479"), None)).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn rejects_host_without_port() {
+        let status = status(request("/health", Some("localhost"), None)).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn rejects_missing_host() {
+        let status = status(request("/health", None, None)).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn authority_wins_over_host_header() {
+        let status = status(request(
+            "http://attacker.example:6478/health",
+            Some("127.0.0.1:6478"),
+            None,
+        ))
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn allows_loopback_origin() {
+        let status = status(request(
+            "/health",
+            Some("127.0.0.1:6478"),
+            Some("http://127.0.0.1:6478"),
+        ))
+        .await;
+        assert_eq!(status, StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn allows_localhost_origin() {
+        let status = status(request(
+            "/health",
+            Some("127.0.0.1:6478"),
+            Some("http://localhost:6478"),
+        ))
+        .await;
+        assert_eq!(status, StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn rejects_foreign_origin() {
+        let status = status(request(
+            "/health",
+            Some("127.0.0.1:6478"),
+            Some("https://attacker.example"),
+        ))
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn rejects_null_origin() {
+        let status = status(request("/health", Some("127.0.0.1:6478"), Some("null"))).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn rejects_loopback_origin_on_another_port() {
+        let status = status(request(
+            "/health",
+            Some("127.0.0.1:6478"),
+            Some("http://127.0.0.1:6479"),
+        ))
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+}
