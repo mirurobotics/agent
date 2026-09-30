@@ -3,6 +3,9 @@
 #
 # pull_request_target runs this file from the base branch, so a PR cannot
 # edit or delete its own review.
+#
+# The reusable workflow is pinned to a commit, so a change to it only takes
+# effect here through a reviewed PR that bumps the SHA.
 
 name: AI Review
 
@@ -21,7 +24,7 @@ permissions:
 
 jobs:
   ai-review:
-    uses: mirurobotics/agents/.github/workflows/ai-review.yml@main
+    uses: mirurobotics/.github/.github/workflows/ai-review.yml@78e2fba753ddf238696af92184931ee08d3b0016
     with:
       runs-on: blacksmith-2vcpu-ubuntu-2404
     secrets:
