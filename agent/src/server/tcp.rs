@@ -64,17 +64,17 @@ pub async fn serve(
         .port();
     let token = BearerToken::generate()?;
     discovery::write(&discovery_file, port, &token).await?;
-    let app = app(state, port, Arc::new(token));
+    let router = router(state, port, Arc::new(token));
     Ok(tokio::task::spawn(run(
         listener,
-        app,
+        router,
         shutdown_signal,
         discovery_file,
     )))
 }
 
 /// The shared router behind the bearer check, behind the loopback check.
-fn app(state: Arc<State>, port: u16, token: Arc<BearerToken>) -> Router {
+fn router(state: Arc<State>, port: u16, token: Arc<BearerToken>) -> Router {
     routes::router(state)
         .layer(middleware::from_fn(move |req, next| {
             check_bearer(token.clone(), req, next)
@@ -86,11 +86,11 @@ fn app(state: Arc<State>, port: u16, token: Arc<BearerToken>) -> Router {
 
 async fn run(
     listener: TcpListener,
-    app: Router,
+    router: Router,
     shutdown_signal: impl Future<Output = ()> + Send + 'static,
     discovery_file: filesys::File,
 ) -> Result<(), ServerErr> {
-    let result = axum::serve(listener, app)
+    let result = axum::serve(listener, router)
         .with_graceful_shutdown(shutdown_signal)
         .await
         .map_err(|e| {
