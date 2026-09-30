@@ -86,9 +86,9 @@ pub mod app_options_default {
     }
 
     #[test]
-    fn tcp_server_disabled() {
+    fn tcp_server_enabled() {
         let options = AppOptions::default();
-        assert!(!options.enable_tcp_server);
+        assert!(options.enable_tcp_server);
         assert_eq!(
             options.server.tcp_port,
             miru_agent::server::DEFAULT_TCP_PORT

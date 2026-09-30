@@ -16,8 +16,7 @@ pub struct Settings {
     pub is_persistent: bool,
     pub enable_socket_server: bool,
     /// Loopback TCP listener for the local device API. Independent of the Unix
-    /// socket. Off unless set; a legacy `socket_server_tcp_port` value turns it
-    /// on at that port.
+    /// socket. On by default.
     pub enable_tcp_server: bool,
     pub tcp_server: TCPServer,
     pub enable_mqtt_worker: bool,
@@ -32,7 +31,7 @@ impl Default for Settings {
             mqtt_broker: MQTTBroker::default(),
             is_persistent: true,
             enable_socket_server: true,
-            enable_tcp_server: false,
+            enable_tcp_server: true,
             tcp_server: TCPServer::default(),
             enable_mqtt_worker: true,
             enable_poller: true,
@@ -49,7 +48,6 @@ struct DeserializeSettings {
     enable_socket_server: Option<bool>,
     enable_tcp_server: Option<bool>,
     tcp_server: Option<TCPServer>,
-    socket_server_tcp_port: Option<u16>,
     enable_mqtt_worker: Option<bool>,
     enable_poller: Option<bool>,
 }
@@ -89,12 +87,12 @@ impl<'de> Deserialize<'de> for Settings {
                     default.enable_socket_server
                 )
             }),
-            enable_tcp_server: tcp_server_enabled(
-                result.enable_tcp_server,
-                result.tcp_server.is_some(),
-                result.socket_server_tcp_port,
-            ),
-            tcp_server: tcp_server_from(result.tcp_server, result.socket_server_tcp_port),
+            enable_tcp_server: result.enable_tcp_server.unwrap_or_else(|| {
+                deserialize_warn!("settings", "enable_tcp_server", default.enable_tcp_server)
+            }),
+            tcp_server: result
+                .tcp_server
+                .unwrap_or_else(|| deserialize_warn!("settings", "tcp_server", default.tcp_server)),
             enable_mqtt_worker: result.enable_mqtt_worker.unwrap_or_else(|| {
                 deserialize_warn!("settings", "enable_mqtt_worker", default.enable_mqtt_worker)
             }),
@@ -102,29 +100,6 @@ impl<'de> Deserialize<'de> for Settings {
                 deserialize_warn!("settings", "enable_poller", default.enable_poller)
             }),
         })
-    }
-}
-
-/// A missing `enable_tcp_server` stays off. A legacy `socket_server_tcp_port`
-/// with no `tcp_server` object is the old way to turn the listener on.
-fn tcp_server_enabled(
-    enable: Option<bool>,
-    tcp_server_present: bool,
-    legacy_port: Option<u16>,
-) -> bool {
-    match enable {
-        Some(enabled) => enabled,
-        None => !tcp_server_present && legacy_port.is_some(),
-    }
-}
-
-fn tcp_server_from(configured: Option<TCPServer>, legacy_port: Option<u16>) -> TCPServer {
-    if let Some(server) = configured {
-        return server;
-    }
-    match legacy_port {
-        Some(port) => TCPServer { port },
-        None => TCPServer::default(),
     }
 }
 

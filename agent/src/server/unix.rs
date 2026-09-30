@@ -8,7 +8,7 @@ use std::sync::Arc;
 use crate::filesys::{self, files, PathExt};
 use crate::server::{
     errors::{BindUnixSocketErr, RunAxumServerErr, ServerErr},
-    routes, Options, State,
+    routes, State,
 };
 use crate::trace;
 
@@ -17,15 +17,15 @@ use tokio::net::UnixListener;
 use tokio::task::JoinHandle;
 
 pub(crate) async fn serve(
-    options: &Options,
+    socket_file: &filesys::File,
     state: Arc<State>,
     shutdown_signal: impl Future<Output = ()> + Send + 'static,
 ) -> Result<JoinHandle<Result<(), ServerErr>>, ServerErr> {
     let app = routes::router(state);
 
     // obtain the unix socket file listener
-    let listener = acquire_unix_socket_listener(&options.socket_file, async move {
-        create_unix_socket_listener(&options.socket_file).await
+    let listener = acquire_unix_socket_listener(socket_file, async move {
+        create_unix_socket_listener(socket_file).await
     })
     .await?;
 

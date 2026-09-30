@@ -2,7 +2,6 @@
 use miru_agent::disk::{Backend, MQTTBroker, Settings, TCPServer};
 use miru_agent::logs::LogLevel;
 use miru_agent::network::{BackendHost, MqttHost};
-use miru_agent::server::DEFAULT_TCP_PORT;
 
 // external crates
 use serde_json::json;
@@ -68,22 +67,6 @@ fn deserialize_settings() {
     let valid_input = json!({});
     let deserialized = serde_json::from_value::<Settings>(valid_input).unwrap();
     assert_eq!(deserialized, settings);
-
-    // a legacy port turns the tcp server on at that port
-    let deserialized = serde_json::from_value::<Settings>(json!({
-        "socket_server_tcp_port": 51823
-    }))
-    .unwrap();
-    assert!(deserialized.enable_tcp_server);
-    assert_eq!(deserialized.tcp_server.port, 51823);
-
-    // absent or null legacy port leaves the tcp server off at the default port
-    let deserialized = serde_json::from_value::<Settings>(json!({
-        "socket_server_tcp_port": null
-    }))
-    .unwrap();
-    assert!(!deserialized.enable_tcp_server);
-    assert_eq!(deserialized.tcp_server.port, DEFAULT_TCP_PORT);
 
     // invalid JSON
     assert!(serde_json::from_str::<Settings>("invalid-json").is_err());

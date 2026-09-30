@@ -430,9 +430,13 @@ async fn init_local_api_servers(
     if options.enable_socket_server {
         info!("Initializing socket server...");
         let mut shutdown_rx = shutdown_tx.subscribe();
-        let handle = serve(&options.server, server_state.clone(), async move {
-            let _ = shutdown_rx.recv().await;
-        })
+        let handle = serve(
+            &options.server.socket_file,
+            server_state.clone(),
+            async move {
+                let _ = shutdown_rx.recv().await;
+            },
+        )
         .await?;
         shutdown_manager.with_socket_server_handle(handle)?;
     }
