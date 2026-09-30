@@ -25,7 +25,7 @@ PR #263 made the Windows service run as the low-privilege virtual account `NT SE
 - [x] Milestone 3: installer sentinels and harness checks.
 - [x] Milestone 4: customer-grant retention check.
 - [x] Milestone 5: documentation.
-- [ ] Milestone 6: push, draft PR, preflight `CLEAN`.
+- [x] Milestone 6: push, draft PR, preflight `CLEAN`. (PR #269; CI green on 473284d and c95802d, including windows-package.)
 
 ## Surprises & Discoveries
 
@@ -33,11 +33,11 @@ PR #263 made the Windows service run as the low-privilege virtual account `NT SE
 
 ## Decision Log
 
-(Add entries as work proceeds. Design choices made while authoring are under "Design choices" in Context and Orientation.)
+- 2026-09-30: Design choices were made while authoring (see "Design choices" in Context and Orientation); implementation followed them without change. The Permanent-component fallback was not needed: the upgrade stage showed the sentinel descriptors are reapplied.
 
 ## Outcomes & Retrospective
 
-(Summarize at completion.)
+A log-open failure now returns `LogsErr::OpenLogFile`, so the Windows service stops with a service-specific exit code instead of aborting and crash-looping. The installer creates permanent `installer-sentinel` folders in `logs\`, `auth\` and `tmp\` that only SYSTEM and Administrators can modify, so a compromised service can no longer empty those directories and turn them into mount points, and provisioning deletes only its key files instead of `tmp\`. The integration matrix asserts the sentinels after every stage and that a customer grant outside `%ProgramData%\Miru` survives every stage. Remaining risks: an administrator deleting a sentinel reopens the exposure until the next repair or upgrade, and atomicwrites temp subfolders created by admin-run provision/reprovision are a narrow race (out of scope).
 
 ## Context and Orientation
 
