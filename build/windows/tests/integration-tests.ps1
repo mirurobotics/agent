@@ -43,7 +43,10 @@ function Initialize-IntegrationPaths {
         $script:authRoot,
         $script:tmpRoot
     )
-    $script:installerSentinelDirs = @($script:logsRoot, $script:authRoot, $script:tmpRoot | ForEach-Object { Join-Path $_ $MsiSentinelName })
+    # device-api also grants Miru Clients read access, so it is checked
+    # separately from protectedRoots (Assert-DeviceApiAcl).
+    $script:deviceApiRoot = Join-Path $script:programDataRoot "device-api"
+    $script:installerSentinelDirs = @($script:logsRoot, $script:authRoot, $script:tmpRoot, $script:deviceApiRoot | ForEach-Object { Join-Path $_ $MsiSentinelName })
     $script:markerPath = Join-Path $script:programDataRoot "rollback-payload.txt"
     $script:customerOwnedFiles = @(
         (New-CustomerOwnedFile (Join-Path $script:programDataRoot `
@@ -77,6 +80,7 @@ function Initialize-IntegrationRuntime {
     $script:cleanupFailures = New-Object System.Collections.ArrayList
     $script:integrationFailure = $null
     $script:customerGrantPath = $null
+    $script:clientsGroupSid = $null
 }
 
 function Assert-TestUserAbsent {
