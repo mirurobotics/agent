@@ -172,6 +172,23 @@ pub mod storage_layout {
             under_root(&["resources", "git_commits.json"])
         );
     }
+
+    #[test]
+    fn device_api_dir() {
+        let layout = Layout::default();
+        let dir = layout.device_api_dir();
+        assert_eq!(dir.to_string(), under_root(&["device-api"]));
+    }
+
+    #[test]
+    fn device_api_discovery() {
+        let layout = Layout::default();
+        let file = layout.device_api_discovery();
+        assert_eq!(
+            file.to_string(),
+            under_root(&["device-api", "device-api.json"])
+        );
+    }
 }
 
 pub mod auth_layout {

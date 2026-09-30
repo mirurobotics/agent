@@ -3,14 +3,16 @@ use std::path::PathBuf;
 
 // internal crates
 use crate::test_utils::filesys::dirs as test_dirs;
+use device_api::models::ApiVersion;
 use miru_agent::app::options::{AppOptions, LifecycleOptions, StorageOptions};
 use miru_agent::app::run::run;
 use miru_agent::disk::Layout;
-use miru_agent::filesys::{self, files, WriteOptions};
+use miru_agent::filesys::{self, files, PathExt, WriteOptions};
 use miru_agent::models::Device;
 use miru_agent::server::{tcp, Options};
 
 // external crates
+use serde_json::Value;
 use serial_test::serial;
 use tokio::time::Duration;
 
@@ -30,6 +32,20 @@ const NEVER: Duration = Duration::from_secs(3600);
 // Keep it above HANG_GUARD so a hung shutdown fails only the
 // offending test via the outer timeout instead.
 const SHUTDOWN_WATCHDOG: Duration = Duration::from_secs(300);
+
+fn no_proxy_client() -> reqwest::Client {
+    reqwest::Client::builder().no_proxy().build().unwrap()
+}
+
+async fn write_stale_discovery_file(layout: &Layout) {
+    files::write_string(
+        &layout.device_api_discovery(),
+        "stale",
+        WriteOptions::default(),
+    )
+    .await
+    .unwrap();
+}
 
 async fn prepare_valid_server_storage(dir: filesys::Dir) {
     let layout = Layout::new(dir);
@@ -57,9 +73,11 @@ async fn prepare_valid_server_storage(dir: filesys::Dir) {
 #[tokio::test]
 async fn invalid_app_state_initialization() {
     let dir = test_dirs::temp("testing").unwrap();
+    let layout = Layout::new(dir.to_dir());
+    write_stale_discovery_file(&layout).await;
     let options = AppOptions {
         storage: StorageOptions {
-            layout: Layout::new(dir.to_dir()),
+            layout: layout.clone(),
             ..Default::default()
         },
         ..Default::default()
@@ -73,6 +91,9 @@ async fn invalid_app_state_initialization() {
     })
     .await
     .unwrap();
+
+    // the stale file goes before the failing init step
+    assert!(!layout.device_api_discovery().exists());
 }
 
 #[serial]
@@ -118,10 +139,12 @@ async fn max_runtime_reached() {
 async fn tcp_port_in_use_does_not_abort_startup() {
     let dir = test_dirs::temp("testing").unwrap();
     prepare_valid_server_storage(dir.to_dir()).await;
+    let layout = Layout::new(dir.to_dir());
+    write_stale_discovery_file(&layout).await;
     let taken = tcp::bind(0).await.unwrap();
     let options = AppOptions {
         storage: StorageOptions {
-            layout: Layout::new(dir.to_dir()),
+            layout: layout.clone(),
             ..Default::default()
         },
         lifecycle: LifecycleOptions {
@@ -150,6 +173,161 @@ async fn tcp_port_in_use_does_not_abort_startup() {
     })
     .await
     .unwrap();
+
+    // no server wrote a fresh file, so the stale one stays removed
+    assert!(!layout.device_api_discovery().exists());
+}
+
+#[serial]
+#[tokio::test]
+async fn discovery_write_failure_does_not_abort_startup() {
+    let dir = test_dirs::temp("testing").unwrap();
+    prepare_valid_server_storage(dir.to_dir()).await;
+    let layout = Layout::new(dir.to_dir());
+    // a file at the device-api directory path makes the discovery write fail
+    files::write_string(
+        &layout.root().file("device-api"),
+        "x",
+        WriteOptions::default(),
+    )
+    .await
+    .unwrap();
+    let options = AppOptions {
+        storage: StorageOptions {
+            layout,
+            ..Default::default()
+        },
+        lifecycle: LifecycleOptions {
+            is_persistent: false,
+            max_runtime: Duration::from_millis(100),
+            idle_timeout: NEVER,
+            max_shutdown_delay: SHUTDOWN_WATCHDOG,
+            ..Default::default()
+        },
+        enable_tcp_server: true,
+        server: Options {
+            socket_file: filesys::File::new(PathBuf::from("/tmp").join("miru.sock")),
+            tcp_port: 0,
+        },
+        ..Default::default()
+    };
+
+    // serve fails, the agent keeps running, and max_runtime (~100ms) ends
+    // the run cleanly
+    tokio::time::timeout(HANG_GUARD, async move {
+        run(options, async {
+            let _ = tokio::signal::ctrl_c().await;
+        })
+        .await
+        .unwrap();
+    })
+    .await
+    .unwrap();
+}
+
+#[serial]
+#[tokio::test]
+async fn tcp_requires_bearer_and_cleans_up_discovery_file() {
+    let dir = test_dirs::temp("testing").unwrap();
+    prepare_valid_server_storage(dir.to_dir()).await;
+    let layout = Layout::new(dir.to_dir());
+    let discovery_file = layout.device_api_discovery();
+    let options = AppOptions {
+        storage: StorageOptions {
+            layout,
+            ..Default::default()
+        },
+        lifecycle: LifecycleOptions {
+            is_persistent: true,
+            idle_timeout: NEVER,
+            max_shutdown_delay: SHUTDOWN_WATCHDOG,
+            ..Default::default()
+        },
+        enable_tcp_server: true,
+        server: Options {
+            socket_file: filesys::File::new(PathBuf::from("/tmp").join("miru.sock")),
+            tcp_port: 0,
+        },
+        ..Default::default()
+    };
+
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let server_handle = tokio::spawn(async move {
+        run(options, async {
+            let _ = rx.await;
+        })
+        .await
+    });
+
+    // the discovery file appears once the tcp server is serving
+    let mut waited = Duration::ZERO;
+    while !discovery_file.exists() {
+        assert!(
+            waited < Duration::from_secs(10),
+            "discovery file not written within 10s"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        waited += Duration::from_millis(20);
+    }
+    let discovery: Value = files::read_json(&discovery_file).await.unwrap();
+    let port = discovery["port"].as_u64().unwrap();
+    let token = discovery["token"].as_str().unwrap();
+    let url = format!("http://127.0.0.1:{port}/{}/health", ApiVersion::API_VERSION);
+
+    let client = no_proxy_client();
+    let response = client.get(&url).send().await.unwrap();
+    assert_eq!(response.status(), reqwest::StatusCode::UNAUTHORIZED);
+    let response = client.get(&url).bearer_auth(token).send().await.unwrap();
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    drop(client);
+
+    tx.send(()).unwrap();
+    tokio::time::timeout(HANG_GUARD, server_handle)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert!(!discovery_file.exists());
+}
+
+#[serial]
+#[tokio::test]
+async fn stale_discovery_file_removed_when_tcp_disabled() {
+    let dir = test_dirs::temp("testing").unwrap();
+    prepare_valid_server_storage(dir.to_dir()).await;
+    let layout = Layout::new(dir.to_dir());
+    write_stale_discovery_file(&layout).await;
+    let options = AppOptions {
+        storage: StorageOptions {
+            layout: layout.clone(),
+            ..Default::default()
+        },
+        lifecycle: LifecycleOptions {
+            is_persistent: false,
+            max_runtime: Duration::from_millis(100),
+            idle_timeout: NEVER,
+            max_shutdown_delay: SHUTDOWN_WATCHDOG,
+            ..Default::default()
+        },
+        enable_tcp_server: false,
+        server: Options {
+            socket_file: filesys::File::new(PathBuf::from("/tmp").join("miru.sock")),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    tokio::time::timeout(HANG_GUARD, async move {
+        run(options, async {
+            let _ = tokio::signal::ctrl_c().await;
+        })
+        .await
+        .unwrap();
+    })
+    .await
+    .unwrap();
+
+    assert!(!layout.device_api_discovery().exists());
 }
 
 #[serial]

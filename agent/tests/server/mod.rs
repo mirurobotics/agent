@@ -1,3 +1,4 @@
+pub mod discovery;
 pub mod errors;
 pub mod handlers;
 pub mod response;

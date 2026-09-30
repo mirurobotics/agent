@@ -71,3 +71,138 @@ fn authorized(req: &Request, token: &Token) -> bool {
     scheme.eq_ignore_ascii_case("Bearer")
         && verify_slices_are_equal(credentials.as_bytes(), token.expose().as_bytes()).is_ok()
 }
+
+#[cfg(test)]
+mod tests {
+    // internal crates
+    use super::*;
+
+    // external crates
+    use axum::body::Body;
+    use axum::http::HeaderValue;
+    use axum::middleware::from_fn;
+    use axum::routing::get;
+    use axum::Router;
+    use tower::ServiceExt;
+
+    async fn call(token: Arc<Token>, auth: Option<HeaderValue>) -> Response {
+        let app = Router::new()
+            .route("/health", get(|| async { StatusCode::OK }))
+            .layer(from_fn(move |req, next| {
+                check_bearer(token.clone(), req, next)
+            }));
+        let mut builder = Request::builder().uri("/health");
+        if let Some(auth) = auth {
+            builder = builder.header(header::AUTHORIZATION, auth);
+        }
+        app.oneshot(builder.body(Body::empty()).unwrap())
+            .await
+            .unwrap()
+    }
+
+    async fn status_for(token: Arc<Token>, auth: &str) -> StatusCode {
+        let auth = HeaderValue::from_str(auth).unwrap();
+        call(token, Some(auth)).await.status()
+    }
+
+    fn token() -> Arc<Token> {
+        Arc::new(Token::generate().unwrap())
+    }
+
+    #[test]
+    fn generate_yields_43_char_base64url() {
+        let token = Token::generate().unwrap();
+        let raw = token.expose();
+        assert_eq!(raw.len(), 43);
+        assert!(
+            raw.chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'),
+            "token has a non-base64url character: {raw}"
+        );
+    }
+
+    #[test]
+    fn generate_is_unique() {
+        let a = Token::generate().unwrap();
+        let b = Token::generate().unwrap();
+        assert_ne!(a.expose(), b.expose());
+    }
+
+    #[test]
+    fn debug_redacts_secret() {
+        let token = Token::generate().unwrap();
+        let debug = format!("{token:?}");
+        assert!(
+            !debug.contains(token.expose()),
+            "debug leaks token: {debug}"
+        );
+    }
+
+    #[tokio::test]
+    async fn missing_header_is_401() {
+        let response = call(token(), None).await;
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            response.headers().get(header::WWW_AUTHENTICATE).unwrap(),
+            "Bearer"
+        );
+    }
+
+    #[tokio::test]
+    async fn basic_scheme_is_401() {
+        let token = token();
+        let auth = format!("Basic {}", token.expose());
+        assert_eq!(status_for(token, &auth).await, StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn wrong_token_is_401() {
+        let other = Token::generate().unwrap();
+        let auth = format!("Bearer {}", other.expose());
+        assert_eq!(status_for(token(), &auth).await, StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn different_length_token_is_401() {
+        let token = token();
+        let raw = token.expose();
+        let auth = format!("Bearer {}", &raw[..raw.len() - 1]);
+        assert_eq!(status_for(token, &auth).await, StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn empty_credentials_is_401() {
+        assert_eq!(
+            status_for(token(), "Bearer ").await,
+            StatusCode::UNAUTHORIZED
+        );
+    }
+
+    #[tokio::test]
+    async fn token_without_scheme_is_401() {
+        let token = token();
+        let auth = token.expose().to_string();
+        assert_eq!(status_for(token, &auth).await, StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn non_ascii_header_is_401() {
+        let auth = HeaderValue::from_bytes(b"Bearer \xff").unwrap();
+        let response = call(token(), Some(auth)).await;
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn correct_token_is_200() {
+        let token = token();
+        let auth = format!("Bearer {}", token.expose());
+        assert_eq!(status_for(token, &auth).await, StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn lowercase_scheme_is_200() {
+        let token = token();
+        let auth = format!("bearer {}", token.expose());
+        assert_eq!(status_for(token, &auth).await, StatusCode::OK);
+    }
+}
