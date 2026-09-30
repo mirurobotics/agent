@@ -173,7 +173,7 @@ jobs:
           MSI_VERSION: ${{ steps.msi.outputs.version }}
           MSI_NAME: ${{ steps.msi.outputs.name }}
         run: |
-          dotnet restore build/windows/miru-agent.wixproj
+          dotnet restore build/windows/miru-agent.wixproj --locked-mode
           dotnet build build/windows/miru-agent.wixproj --no-restore --configuration Release `
             -p:Platform=x64 "-p:Version=$env:MSI_VERSION" "-p:OutputName=$env:MSI_NAME" `
             "-p:BinDir=$env:GITHUB_WORKSPACE\build\prebuilt\windows_amd64" `

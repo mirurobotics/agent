@@ -58,7 +58,7 @@ package contract with explicit inputs:
 ```powershell
 Set-Location C:\src\agent
 cargo build --target x86_64-pc-windows-msvc --package miru-agent --locked --release
-dotnet restore build\windows\miru-agent.wixproj
+dotnet restore build\windows\miru-agent.wixproj --locked-mode
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File build\windows\tests\package-tests.ps1 -ProjectPath build\windows\miru-agent.wixproj -BinDir target\x86_64-pc-windows-msvc\release -ArtifactsDirectory build\windows\artifacts\package-tests
 ```
 
