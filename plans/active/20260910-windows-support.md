@@ -158,10 +158,10 @@ must carry `Authorization: Bearer <token>`; otherwise the agent returns 401 with
 `WWW-Authenticate: Bearer`. The check runs after the loopback check (403) and
 compares in constant time. The agent generates a fresh 32-byte token
 (43 base64url characters) at every start and atomically writes
-`{schema_version, port, token}` to `device-api/device-api.json` under the data
-root (mode 0640 on Unix; on Windows the file inherits the `device-api` directory
-ACL). The file is removed after graceful shutdown and any stale copy is removed
-at startup. A token or discovery-file failure is logged and the agent runs
+`{schema_version, port, token}` to `/run/miru/device-api.json` on Unix (mode
+0640, beside the socket) and to `device-api/device-api.json` under the data
+root on Windows (the file inherits the `device-api` directory ACL). The file
+is removed after graceful shutdown and any stale copy is removed at startup. A token or discovery-file failure is logged and the agent runs
 without TCP. Authorization headers are marked sensitive before request tracing,
 so tokens never reach logs. The Unix socket stays unauthenticated. Python SDK
 work happens in `python-device-sdk` (transport + discovery file +
@@ -197,6 +197,12 @@ Administrators, SYSTEM, and the service account can read the file on Windows.
 - 2026-09-30: The discovery file lives in a dedicated `device-api/` directory
   under the data root. Rationale: the MSI can grant readers that directory
   alone without exposing `settings.json` or `device.json`.
+- 2026-09-30: On Unix the discovery file moved to `/run/miru/device-api.json`.
+  Rationale: SDK clients are the readers, and `/run/miru` is already their
+  contract (the socket). `/var/lib/miru` stays private. The socket unit owns
+  the directory as `miru:miru` mode `0750`, so an idle exit does not remove it
+  and the `miru` group can read the file without a grant on the data root.
+  Windows stays at `ProgramData\Miru\device-api\`.
 - 2026-09-30: The discovery file mode is `0o640`. Rationale: it matches the
   `miru`-group boundary of the Unix socket and the public-key precedent;
   `0o600` would lock out `miru`-group SDK clients.

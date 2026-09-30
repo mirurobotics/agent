@@ -184,9 +184,10 @@ async fn discovery_write_failure_does_not_abort_startup() {
     let dir = test_dirs::temp("testing").unwrap();
     prepare_valid_server_storage(dir.to_dir()).await;
     let layout = Layout::new(dir.to_dir());
-    // a file at the device-api directory path makes the discovery write fail
+    // a file where the discovery directory should be makes the write fail
+    let parent = layout.device_api_discovery().parent().unwrap();
     files::write_string(
-        &layout.root().file("device-api"),
+        &filesys::File::new(parent.path().clone()),
         "x",
         WriteOptions::default(),
     )

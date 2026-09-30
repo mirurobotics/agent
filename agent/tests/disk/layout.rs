@@ -174,20 +174,19 @@ pub mod storage_layout {
     }
 
     #[test]
-    fn device_api_dir() {
-        let layout = Layout::default();
-        let dir = layout.device_api_dir();
-        assert_eq!(dir.to_string(), under_root(&["device-api"]));
-    }
-
-    #[test]
     fn device_api_discovery() {
         let layout = Layout::default();
         let file = layout.device_api_discovery();
-        assert_eq!(
-            file.to_string(),
-            under_root(&["device-api", "device-api.json"])
-        );
+        #[cfg(unix)]
+        let expected = PathBuf::from("/run/miru/device-api.json");
+        #[cfg(windows)]
+        let expected = {
+            let mut path = expected_root_under(&expected_default_base());
+            path.push("device-api");
+            path.push("device-api.json");
+            path
+        };
+        assert_eq!(file.to_string(), expected.display().to_string());
     }
 }
 
