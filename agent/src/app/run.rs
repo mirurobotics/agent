@@ -116,6 +116,7 @@ async fn init(
     shutdown_tx: broadcast::Sender<()>,
     shutdown_manager: &mut ShutdownManager,
 ) -> Result<Arc<AppState>, ServerErr> {
+    remove_stale_discovery_file(&options.storage.layout).await;
     let app_state = init_app_state(options, shutdown_manager).await?;
 
     init_token_refresh_worker(
@@ -139,7 +140,6 @@ async fn init_optional_services(
     shutdown_manager: &mut ShutdownManager,
     shutdown_tx: &broadcast::Sender<()>,
 ) -> Result<(), ServerErr> {
-    remove_stale_discovery_file(&options.storage.layout).await;
     if options.enable_socket_server || options.enable_tcp_server {
         init_local_api_servers(options, app_state.clone(), shutdown_manager, shutdown_tx).await?;
     }

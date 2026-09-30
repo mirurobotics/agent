@@ -36,7 +36,7 @@ impl Token {
         Ok(Token(SecretString::from(encoded)))
     }
 
-    /// The raw token, for writing the discovery file.
+    /// The raw token string.
     pub fn expose(&self) -> &str {
         self.0.expose_secret()
     }
