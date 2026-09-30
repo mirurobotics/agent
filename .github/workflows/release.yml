@@ -49,9 +49,7 @@ jobs:
     if: needs.check-main.outputs.on_main == 'true'
     uses: ./.github/workflows/ci.yml
 
-  # Build the Windows release binary natively and hand it, unsigned, to
-  # windows-sign. This job runs third-party build scripts, so it deliberately has
-  # no id-token permission and never touches the signing credentials.
+  # Build the Windows release binary natively and hand it, unsigned, to windows-sign.
   windows-release-build:
     needs: check-main
     if: needs.check-main.outputs.on_main == 'true'
@@ -105,27 +103,18 @@ jobs:
           path: build/prebuilt/windows_amd64/
           if-no-files-found: error
 
-  # Authenticode-sign miru-agent.exe with Azure Artifact Signing, build the MSI
-  # around the signed executable, then sign the MSI. The release job imports
-  # only this job's output, so an unsigned Windows binary cannot be published.
-  #
-  # Azure login uses GitHub OIDC (no stored credential) against a federated
-  # credential whose subject is this repository's `release` environment; restrict
-  # that environment's deployment refs to v* tags. See
-  # build/windows/README.md, "Code signing", for the Azure setup.
+  # Sign miru-agent.exe, build the MSI around it, and sign the MSI. Kept apart
+  # from windows-release-build so crate build scripts never run with the Azure
+  # OIDC token. Setup: build/windows/README.md, "Code signing".
   windows-sign:
     needs: [check-main, windows-release-build]
     if: needs.check-main.outputs.on_main == 'true'
-    # GitHub-hosted image: the signing action supports only GitHub's Windows
-    # images, and windows-package already builds the MSI on one.
-    runs-on: windows-2025
+    runs-on: windows-2025 # the signing action supports GitHub-hosted images only
     timeout-minutes: 30
     environment: release
     permissions:
       contents: read
       id-token: write
-    env:
-      PREBUILT_DIR: ${{ github.workspace }}\build\prebuilt\windows_amd64
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -137,13 +126,8 @@ jobs:
           name: agent-windows-amd64-msvc-unsigned
           path: build/prebuilt/windows_amd64
 
-      # Stable tags keep their version as the MSI version (v0.10.4 -> 0.10.4).
-      # Prereleases add a fourth field that names the stage: alpha.N -> 1NN,
-      # beta.N -> 2NN, rc.N -> 3NN (v0.10.4-beta.1 -> 0.10.4.201). Windows
-      # Installer ignores the fourth field when comparing products, so the MSI
-      # allows same-version upgrades (build/windows/miru-agent.wxs) and later
-      # betas and the stable release replace a beta in place. The file name
-      # keeps the tag's version: miru-agent-0.10.4-beta.1.msi.
+      # v0.10.4 -> 0.10.4; v0.10.4-beta.1 -> 0.10.4.201 (alpha 1NN, beta 2NN, rc 3NN).
+      # See build/windows/README.md, "Code signing", for why.
       - name: Resolve MSI version
         id: msi
         shell: pwsh
@@ -157,11 +141,10 @@ jobs:
           } elseif ($release -match '^([0-9]+\.[0-9]+\.[0-9]+)-(alpha|beta|rc)\.([1-9][0-9]?)$') {
             $version = '{0}.{1}' -f $Matches[1], ($stages[$Matches[2]] + [int]$Matches[3])
           } else {
-            throw "No MSI version mapping for tag '$env:REF_NAME'. Expected vX.Y.Z or vX.Y.Z-(alpha|beta|rc).N with N from 1 to 99."
+            throw "No MSI version mapping for tag '$env:REF_NAME'"
           }
           "version=$version" >> $env:GITHUB_OUTPUT
-          "file=miru-agent-$release.msi" >> $env:GITHUB_OUTPUT
-          Write-Host "Building miru-agent-$release.msi with MSI version $version"
+          "name=miru-agent-$release" >> $env:GITHUB_OUTPUT
 
       - name: Azure login
         uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
@@ -170,45 +153,28 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      # `description` is signtool's /d: UAC shows it as the program name when the
-      # MSI is launched, instead of the downloaded file's name.
+      # `description` is what UAC shows as the program name.
       - name: Sign miru-agent.exe
         uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
         with:
           endpoint: ${{ vars.AZURE_ARTIFACT_SIGNING_ENDPOINT }}
           signing-account-name: ${{ vars.AZURE_ARTIFACT_SIGNING_ACCOUNT }}
           certificate-profile-name: ${{ vars.AZURE_ARTIFACT_SIGNING_PROFILE }}
-          files: ${{ env.PREBUILT_DIR }}\miru-agent.exe
-          file-digest: SHA256
-          timestamp-rfc3161: http://timestamp.acs.microsoft.com
-          timestamp-digest: SHA256
+          files: ${{ github.workspace }}\build\prebuilt\windows_amd64\miru-agent.exe
           description: Miru Agent
-          description-url: https://mirurobotics.com
-          # Authenticate only through the Azure CLI session from azure/login.
-          exclude-environment-credential: true
-          exclude-azure-powershell-credential: true
 
-      - name: Restore pinned WiX SDK
-        run: dotnet restore build/windows/miru-agent.wixproj
-
-      # Same build arguments as the package tests (build/windows/tests/MsiTest.psm1,
-      # Invoke-DotNetBuild), with BinDir pointing at the signed executable.
       - name: Build MSI
-        shell: pwsh
         env:
           MSI_VERSION: ${{ steps.msi.outputs.version }}
-          MSI_FILE: ${{ steps.msi.outputs.file }}
+          MSI_NAME: ${{ steps.msi.outputs.name }}
         run: |
-          $out = Join-Path $env:GITHUB_WORKSPACE 'build\windows\artifacts\msi'
-          New-Item -ItemType Directory -Force -Path $out | Out-Null
-          dotnet build build\windows\miru-agent.wixproj --no-restore --configuration Release `
-            -p:Platform=x64 "-p:Version=$env:MSI_VERSION" "-p:BinDir=$env:PREBUILT_DIR" `
-            "-p:OutputPath=$out\" "-p:IntermediateOutputPath=$out\obj\"
-          if ($LASTEXITCODE -ne 0) { throw "dotnet build failed" }
-          $msi = Get-ChildItem -LiteralPath $out -Filter '*.msi' -File -Recurse |
-            Where-Object { $_.FullName -notmatch '\\obj\\' } | Select-Object -First 1
-          if ($null -eq $msi) { throw "No MSI was produced" }
-          Copy-Item -LiteralPath $msi.FullName -Destination (Join-Path $env:PREBUILT_DIR $env:MSI_FILE)
+          dotnet restore build/windows/miru-agent.wixproj
+          dotnet build build/windows/miru-agent.wixproj --no-restore --configuration Release `
+            -p:Platform=x64 "-p:Version=$env:MSI_VERSION" "-p:OutputName=$env:MSI_NAME" `
+            "-p:BinDir=$env:GITHUB_WORKSPACE\build\prebuilt\windows_amd64" `
+            "-p:OutputPath=$env:GITHUB_WORKSPACE\build\windows\artifacts\msi\"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item "build\windows\artifacts\msi\$env:MSI_NAME.msi" build\prebuilt\windows_amd64\
 
       - name: Sign MSI
         uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
@@ -216,35 +182,19 @@ jobs:
           endpoint: ${{ vars.AZURE_ARTIFACT_SIGNING_ENDPOINT }}
           signing-account-name: ${{ vars.AZURE_ARTIFACT_SIGNING_ACCOUNT }}
           certificate-profile-name: ${{ vars.AZURE_ARTIFACT_SIGNING_PROFILE }}
-          files: ${{ env.PREBUILT_DIR }}\${{ steps.msi.outputs.file }}
-          file-digest: SHA256
-          timestamp-rfc3161: http://timestamp.acs.microsoft.com
-          timestamp-digest: SHA256
+          files: ${{ github.workspace }}\build\prebuilt\windows_amd64\${{ steps.msi.outputs.name }}.msi
           description: Miru Agent
-          description-url: https://mirurobotics.com
-          exclude-environment-credential: true
-          exclude-azure-powershell-credential: true
 
-      # Artifact Signing certificates are valid for only a few days, so a
-      # signature without an RFC 3161 timestamp would stop verifying soon after
-      # the release. Require both a valid chain and a timestamp.
+      # Artifact Signing certificates expire within days, so require a timestamp too.
       - name: Verify signatures
-        shell: pwsh
         run: |
-          $files = @(Get-ChildItem -LiteralPath $env:PREBUILT_DIR -File |
-            Where-Object { $_.Extension -in '.exe', '.msi' })
-          if ($files.Count -eq 0) { throw "No signable files in $env:PREBUILT_DIR" }
-          foreach ($file in $files) {
-            $sig = Get-AuthenticodeSignature -LiteralPath $file.FullName
-            if ($sig.Status -ne 'Valid') {
-              throw "$($file.Name): signature status $($sig.Status): $($sig.StatusMessage)"
+          Get-ChildItem build\prebuilt\windows_amd64\* -Include *.exe, *.msi | ForEach-Object {
+            $sig = Get-AuthenticodeSignature -LiteralPath $_.FullName
+            if ($sig.Status -ne 'Valid' -or -not $sig.TimeStamperCertificate) {
+              throw "$($_.Name): signature $($sig.Status), timestamped: $([bool]$sig.TimeStamperCertificate)"
             }
-            if ($null -eq $sig.TimeStamperCertificate) {
-              throw "$($file.Name): signature is not timestamped"
-            }
-            Write-Host "$($file.Name): signed by $($sig.SignerCertificate.Subject)"
+            Write-Host "$($_.Name): signed by $($sig.SignerCertificate.Subject)"
           }
-          Get-ChildItem -LiteralPath $env:PREBUILT_DIR
 
       - name: Upload signed Windows artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

@@ -229,58 +229,32 @@ discovery-directory permissions remain deferred.
 
 ## Code signing
 
-Release builds are Authenticode-signed with
-[Azure Artifact Signing](https://learn.microsoft.com/azure/artifact-signing/)
-in the `windows-sign` job of `.github/workflows/release.yml`:
+The `windows-sign` job in `.github/workflows/release.yml` signs
+`miru-agent.exe` with
+[Azure Artifact Signing](https://learn.microsoft.com/azure/artifact-signing/),
+builds the MSI around it, signs the MSI, and checks that both signatures are
+valid and timestamped. The release publishes only these signed files; if the
+job fails, nothing is released.
 
-1. `windows-release-build` compiles `miru-agent.exe` and uploads it unsigned.
-   It has no OIDC permission, so crate build scripts never run next to the
-   signing credentials.
-2. `windows-sign` signs `miru-agent.exe`, builds the MSI around the signed
-   executable, signs the MSI, and fails unless both signatures are `Valid` and
-   RFC 3161 timestamped. Artifact Signing certificates are valid for only a few
-   days; the timestamp keeps signatures verifiable after they expire.
-3. The release job publishes only `windows-sign`'s output: the zip carries the
-   signed executable, and the MSI is attached as `miru-agent-<version>.msi` and
-   listed in the checksums file.
-
-Stable tags use their version as the MSI version. Prerelease tags add a fourth
-field naming the stage: `alpha.N` becomes `1NN`, `beta.N` `2NN`, and `rc.N`
-`3NN`, with `N` from 1 to 99. Other tag shapes fail the release.
+MSI versions follow the tag. Prereleases add a fourth field (`alpha.N` → `1NN`,
+`beta.N` → `2NN`, `rc.N` → `3NN`); other tag shapes fail the release:
 
 | Tag | MSI version | File |
 | --- | --- | --- |
-| `v0.10.4-alpha.2` | `0.10.4.102` | `miru-agent-0.10.4-alpha.2.msi` |
 | `v0.10.4-beta.1` | `0.10.4.201` | `miru-agent-0.10.4-beta.1.msi` |
 | `v0.10.4` | `0.10.4` | `miru-agent-0.10.4.msi` |
 
-Windows Installer ignores the fourth field when comparing products, so
-`0.10.4.201` and `0.10.4` count as the same version. The MSI therefore allows
-same-version upgrades: `0.10.3` → `0.10.4-beta.1` → `0.10.4-beta.2` →
-`0.10.4` all upgrade in place, and installing anything below `0.10.4` over them
-is rejected as a downgrade. The tradeoff is that ordering *within* one
-`MAJOR.MINOR.PATCH` is not enforced: an older beta can be installed over a newer
-beta or the stable release of the same version.
+Windows Installer ignores the fourth field, so the MSI allows same-version
+upgrades: betas and the stable release of `0.10.4` replace each other in place,
+and anything below `0.10.4` is rejected as a downgrade. Ordering within one
+version is not enforced, so an older beta can be installed over a newer build.
 
-A failed `windows-sign` run publishes nothing, since the release job depends
-on it, so a prerelease tag is the way to check the Azure setup.
+Setup (GitHub OIDC; no Azure secret is stored in GitHub):
 
-### Azure and GitHub setup
-
-The job authenticates with GitHub OIDC; no Azure secret or certificate is
-stored in GitHub.
-
-- An Entra app registration (or user-assigned managed identity) holding the
-  **Artifact Signing Certificate Profile Signer** role on the certificate
-  profile.
-- A federated credential on it with issuer
-  `https://token.actions.githubusercontent.com`, subject
-  `repo:mirurobotics/agent:environment:release`, and audience
-  `api://AzureADTokenExchange`.
-- A GitHub environment named `release` whose deployment refs are limited to
-  `v*` tags, so no branch can obtain a token for that subject.
-- Secrets (repository or `release` environment): `AZURE_CLIENT_ID`,
-  `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`.
-- Variables: `AZURE_ARTIFACT_SIGNING_ENDPOINT` (the account's regional
-  endpoint, for example `https://eus.codesigning.azure.net/`),
-  `AZURE_ARTIFACT_SIGNING_ACCOUNT`, and `AZURE_ARTIFACT_SIGNING_PROFILE`.
+- An Entra app or managed identity with the **Artifact Signing Certificate
+  Profile Signer** role, and a federated credential for subject
+  `repo:mirurobotics/agent:environment:release`.
+- A GitHub environment `release`, limited to `v*` tags.
+- Secrets `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, and
+  variables `AZURE_ARTIFACT_SIGNING_ENDPOINT`, `AZURE_ARTIFACT_SIGNING_ACCOUNT`,
+  `AZURE_ARTIFACT_SIGNING_PROFILE`.
