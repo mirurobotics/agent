@@ -50,11 +50,14 @@ jobs:
     uses: ./.github/workflows/ci.yml
 
   # Build the Windows release binary natively and hand it, unsigned, to windows-sign.
+  # Crate build scripts run here, so the token is read-only.
   windows-release-build:
     needs: check-main
     if: needs.check-main.outputs.on_main == 'true'
     runs-on: blacksmith-4vcpu-windows-2025
     timeout-minutes: 45
+    permissions:
+      contents: read
     env:
       # Line/module-level debug info so the shipped PDB supports symbolized backtraces.
       # On MSVC debug info is "packed" into the .pdb, so the .exe is unchanged.

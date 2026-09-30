@@ -82,9 +82,10 @@ not purchase a subscription.
 
 ## Install and provision
 
-Run installation from an elevated 64-bit Windows PowerShell 5.1 session. Stable
-releases attach a signed `miru-agent-<version>.msi` to the GitHub release (see
-[Code signing](#code-signing)); a WinGet manifest remains follow-up work.
+Run installation from an elevated 64-bit Windows PowerShell 5.1 session. Every
+release, including prereleases, attaches a signed `miru-agent-<version>.msi` to
+the GitHub release (see [Code signing](#code-signing)); a WinGet manifest
+remains follow-up work.
 Install a trusted MSI directly with Windows Installer:
 
 ```powershell

@@ -324,7 +324,8 @@ $invalidDirectory = Reset-ChildDirectory $resolvedArtifacts "invalid"
 
 $v1 = Build-ProductionPackage "1.0.0" (Reset-ChildDirectory $resolvedArtifacts "v1")
 $v2 = Build-ProductionPackage "1.1.0" (Reset-ChildDirectory $resolvedArtifacts "v2")
-# Four-field form used for prerelease builds (v1.1.0-beta.1 -> 1.1.0.201).
+# Four-field form used for prerelease builds (v1.1.0-beta.1 -> 1.1.0.201);
+# Assert-Package checks the built ProductVersion.
 $null = Build-ProductionPackage "1.1.0.201" (Reset-ChildDirectory $resolvedArtifacts "v2-beta")
 Assert-True (-not [string]::Equals($v1.ProductCode, $v2.ProductCode, `
     [StringComparison]::OrdinalIgnoreCase)) "normal ProductCodes differ"
@@ -340,9 +341,11 @@ Write-Host "PASS fixture custom-action contract"
 $common = @("-p:BinDir=$resolvedBinDir", "-p:Platform=x64")
 Invoke-ExpectedBuildFailure "prerelease-version" `
     ($common + "-p:Version=1.2.3-beta.1") "MIRUMSI1002"
+Invoke-ExpectedBuildFailure "build-field-out-of-range" `
+    ($common + "-p:Version=1.2.3.65536") "MIRUMSI1010"
 Invoke-ExpectedBuildFailure "omitted-bindir" `
     @("-p:Version=1.2.3", "-p:Platform=x64") "MIRUMSI1003"
 Invoke-ExpectedBuildFailure "missing-fixture-payload" `
     ($common + @("-p:Version=1.2.3", `
         "-p:TestWixSource=integration-test.wxs")) "MIRUMSI1009"
-Write-Host "PASS invalid inputs rejected (3 cases)"
+Write-Host "PASS invalid inputs rejected (4 cases)"
