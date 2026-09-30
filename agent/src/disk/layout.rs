@@ -91,6 +91,15 @@ impl Layout {
     pub fn events_log_file(&self) -> filesys::File {
         self.events_dir().file("events.jsonl")
     }
+
+    pub fn device_api_dir(&self) -> filesys::Dir {
+        self.root().subdir("device-api")
+    }
+
+    /// Port and bearer token for TCP clients of the local device API.
+    pub fn device_api_discovery(&self) -> filesys::File {
+        self.device_api_dir().file("device-api.json")
+    }
 }
 
 impl Default for Layout {

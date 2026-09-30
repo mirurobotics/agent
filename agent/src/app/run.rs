@@ -12,6 +12,7 @@ use crate::app::{
 };
 use crate::authn::{self, TokenManagerExt};
 use crate::data_uploads::scan;
+use crate::disk::Layout;
 use crate::http;
 #[cfg(unix)]
 use crate::server::unix::serve;
@@ -138,6 +139,7 @@ async fn init_optional_services(
     shutdown_manager: &mut ShutdownManager,
     shutdown_tx: &broadcast::Sender<()>,
 ) -> Result<(), ServerErr> {
+    remove_stale_discovery_file(&options.storage.layout).await;
     if options.enable_socket_server || options.enable_tcp_server {
         init_local_api_servers(options, app_state.clone(), shutdown_manager, shutdown_tx).await?;
     }
@@ -163,6 +165,14 @@ async fn init_optional_services(
     }
 
     Ok(())
+}
+
+// a discovery file left by a crash or a forced exit would point clients at a
+// dead port with a stale token; tcp::serve writes a fresh one when it starts
+async fn remove_stale_discovery_file(layout: &Layout) {
+    if let Err(e) = server::discovery::remove(&layout.device_api_discovery()).await {
+        tracing::warn!("Failed to remove stale discovery file: {e}");
+    }
 }
 
 async fn init_data_upload_workers(
@@ -475,9 +485,17 @@ async fn init_tcp_server(
         }
     };
     let mut shutdown_rx = shutdown_tx.subscribe();
-    let handle = tcp::serve(listener, server_state, async move {
+    let discovery_file = options.storage.layout.device_api_discovery();
+    let shutdown_signal = async move {
         let _ = shutdown_rx.recv().await;
-    });
+    };
+    let handle = match tcp::serve(listener, server_state, discovery_file, shutdown_signal).await {
+        Ok(handle) => handle,
+        Err(e) => {
+            error!("Failed to start tcp server, continuing without it: {e}");
+            return Ok(());
+        }
+    };
     shutdown_manager.with_tcp_server_handle(handle)
 }
 

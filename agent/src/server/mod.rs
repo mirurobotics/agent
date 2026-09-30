@@ -1,6 +1,8 @@
 // internal crates
 use crate::filesys;
 
+pub mod auth;
+pub mod discovery;
 pub mod errors;
 pub mod handlers;
 pub mod response;
@@ -16,7 +18,8 @@ pub use self::state::State;
 
 /// Whether the TCP server is on when settings don't say. It is on for Windows,
 /// where it is the only transport, and off elsewhere, where the Unix socket
-/// restricts access to the `miru` group and the TCP listener has no auth yet.
+/// restricts access to the `miru` group. TCP requests must carry the bearer
+/// token the agent writes to the discovery file.
 pub const DEFAULT_ENABLE_TCP_SERVER: bool = cfg!(windows);
 
 /// Loopback port used when the TCP server is enabled and no other port is set.

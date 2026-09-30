@@ -7,7 +7,9 @@ use crate::server::{handlers, state::State};
 // external crates
 use axum::{
     extract::Request,
+    http::header::{Entry, AUTHORIZATION},
     middleware::{from_fn, Next},
+    response::Response,
     routing::{get, post},
     Router,
 };
@@ -23,10 +25,12 @@ pub fn router(state: Arc<State>) -> Router {
     middleware(table(state.clone()), state)
 }
 
-/// Activity tracking and request tracing applied to every transport.
+/// Authorization redaction, activity tracking, and request tracing applied to
+/// every transport. Redaction runs outermost so trace spans never log a token.
 fn middleware(router: Router, state: Arc<State>) -> Router {
     router.layer(
         ServiceBuilder::new()
+            .layer(from_fn(redact_authorization))
             .layer(from_fn(move |req: Request, next: Next| {
                 let state = state.clone();
                 async move {
@@ -45,6 +49,17 @@ fn middleware(router: Router, state: Arc<State>) -> Router {
                     ),
             ),
     )
+}
+
+/// Mark every Authorization header value sensitive so Debug output, including
+/// `TraceLayer` spans, prints `Sensitive` instead of the credential.
+async fn redact_authorization(mut req: Request, next: Next) -> Response {
+    if let Entry::Occupied(mut entry) = req.headers_mut().entry(AUTHORIZATION) {
+        for value in entry.iter_mut() {
+            value.set_sensitive(true);
+        }
+    }
+    next.run(req).await
 }
 
 fn table(state: Arc<State>) -> Router {

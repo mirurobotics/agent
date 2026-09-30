@@ -11,6 +11,7 @@ use crate::test_utils::{
 use device_api::models::ApiVersion;
 use miru_agent::activity;
 use miru_agent::events::hub::{EventHub, SpawnOptions};
+use miru_agent::filesys::{self, files};
 use miru_agent::server::{tcp, ServerErr, State};
 use miru_agent::sync::Syncer;
 
@@ -20,6 +21,7 @@ use tokio::sync::{broadcast, mpsc};
 struct Fixture {
     state: Arc<State>,
     shutdown_tx: broadcast::Sender<()>,
+    discovery_file: filesys::File,
     _dir: test_dirs::TempDir,
 }
 
@@ -37,6 +39,7 @@ impl Fixture {
             .await
             .unwrap();
         let (shutdown_tx, _) = broadcast::channel::<()>(1);
+        let discovery_file = dir.dir().subdir("device-api").file("device-api.json");
 
         let state = Arc::new(State::new(
             storage,
@@ -50,8 +53,14 @@ impl Fixture {
         Self {
             state,
             shutdown_tx,
+            discovery_file,
             _dir: dir,
         }
+    }
+
+    async fn token(&self) -> String {
+        let discovery: serde_json::Value = files::read_json(&self.discovery_file).await.unwrap();
+        discovery["token"].as_str().unwrap().to_string()
     }
 }
 
@@ -107,12 +116,24 @@ pub mod serve {
         let listener = tcp::bind(0).await.unwrap();
         let addr = listener.local_addr().unwrap();
         let mut shutdown_rx = fixture.shutdown_tx.subscribe();
-        let handle = tcp::serve(listener, fixture.state.clone(), async move {
-            let _ = shutdown_rx.recv().await;
-        });
+        let handle = tcp::serve(
+            listener,
+            fixture.state.clone(),
+            fixture.discovery_file.clone(),
+            async move {
+                let _ = shutdown_rx.recv().await;
+            },
+        )
+        .await
+        .unwrap();
 
         let url = format!("http://{addr}/{}/health", ApiVersion::API_VERSION);
-        let response = no_proxy_client().get(&url).send().await.unwrap();
+        let response = no_proxy_client()
+            .get(&url)
+            .bearer_auth(fixture.token().await)
+            .send()
+            .await
+            .unwrap();
         assert_eq!(response.status(), reqwest::StatusCode::OK);
 
         let _ = fixture.shutdown_tx.send(());
@@ -125,9 +146,16 @@ pub mod serve {
         let listener = tcp::bind(0).await.unwrap();
         let addr = listener.local_addr().unwrap();
         let mut shutdown_rx = fixture.shutdown_tx.subscribe();
-        let handle = tcp::serve(listener, fixture.state.clone(), async move {
-            let _ = shutdown_rx.recv().await;
-        });
+        let handle = tcp::serve(
+            listener,
+            fixture.state.clone(),
+            fixture.discovery_file.clone(),
+            async move {
+                let _ = shutdown_rx.recv().await;
+            },
+        )
+        .await
+        .unwrap();
 
         let url = format!("http://{addr}/{}/health", ApiVersion::API_VERSION);
         let response = no_proxy_client()
