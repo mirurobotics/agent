@@ -50,7 +50,7 @@
                         Type="ownProcess"
                         Start="auto"
                         ErrorControl="normal"
-                        Account="LocalSystem"
+                        Account="NT SERVICE\miru-agent"
                         Vital="yes"
                         Interactive="no">
           <!-- SCM restarts the service on failure; the Util extension is the
@@ -60,6 +60,11 @@
                               ThirdFailureActionType="restart"
                               RestartServiceDelayInSeconds="10"
                               ResetPeriodInDays="1" />
+          <!-- Service SID in the token; no privileges but SeChangeNotify (so no
+               impersonation). util:ServiceConfig can't set these (WIX1149). -->
+          <ServiceConfig ServiceSid="unrestricted" OnInstall="yes" OnReinstall="yes">
+            <RequiredPrivilege Name="SeChangeNotifyPrivilege" />
+          </ServiceConfig>
         </ServiceInstall>
         <ServiceControl Id="MiruAgentServiceControl"
                         Name="miru-agent"
@@ -73,29 +78,46 @@
     <!-- These directory-keyed components deliberately contain no RemoveFolder or
          registry resource. Windows Installer reapplies the protected descriptor
          during repair and upgrade, while populated customer state survives an
-         ordinary uninstall. -->
+         ordinary uninstall.
+         The last two ACEs let the service SID (`sc.exe showsid miru-agent`) use
+         each directory but not delete or re-permission it, with full control of
+         its contents. Hardcoded because CreateFolders runs before the service
+         exists; recompute if the service Name changes. -->
     <ComponentGroup Id="DataDirs">
       <Component Id="MiruDataDir" Directory="MIRUDATA" Guid="D0542DF7-5B61-4F09-938B-57F05C1B5458" Bitness="always64" KeyPath="yes">
         <CreateFolder>
-          <PermissionEx Sddl="O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)" />
+          <PermissionEx Sddl="O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;;FRFWFX;;;S-1-5-80-1251439239-454917380-1008020685-2030257057-91624695)(A;OICIIO;FA;;;S-1-5-80-1251439239-454917380-1008020685-2030257057-91624695)" />
         </CreateFolder>
       </Component>
       <Component Id="MiruLogsDir" Directory="MIRULOGS" Guid="C3AF8332-28E8-4707-8430-780C553D86EC" Bitness="always64" KeyPath="yes">
         <CreateFolder>
-          <PermissionEx Sddl="O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)" />
+          <PermissionEx Sddl="O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;;FRFWFX;;;S-1-5-80-1251439239-454917380-1008020685-2030257057-91624695)(A;OICIIO;FA;;;S-1-5-80-1251439239-454917380-1008020685-2030257057-91624695)" />
         </CreateFolder>
       </Component>
       <Component Id="MiruAuthDir" Directory="MIRUAUTH" Guid="A2AE361A-41E6-427A-AF4C-ACCEE7F451F9" Bitness="always64" KeyPath="yes">
         <CreateFolder>
-          <PermissionEx Sddl="O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)" />
+          <PermissionEx Sddl="O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;;FRFWFX;;;S-1-5-80-1251439239-454917380-1008020685-2030257057-91624695)(A;OICIIO;FA;;;S-1-5-80-1251439239-454917380-1008020685-2030257057-91624695)" />
         </CreateFolder>
       </Component>
       <Component Id="MiruTmpDir" Directory="MIRUTMP" Guid="D654A9BF-2860-44FA-8FFB-A8E36986197B" Bitness="always64" KeyPath="yes">
         <CreateFolder>
-          <PermissionEx Sddl="O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)" />
+          <PermissionEx Sddl="O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;;FRFWFX;;;S-1-5-80-1251439239-454917380-1008020685-2030257057-91624695)(A;OICIIO;FA;;;S-1-5-80-1251439239-454917380-1008020685-2030257057-91624695)" />
         </CreateFolder>
       </Component>
     </ComponentGroup>
+
+    <!-- If removing this version fails (uninstall or upgrade), rollback recreates
+         the service without the settings above. This rollback-only action, between
+         StopServices and DeleteServices, reapplies them before it restarts. -->
+    <CustomAction Id="MiruRollbackServiceConfig" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec64"
+                  Execute="rollback" Impersonate="no" Return="ignore" />
+    <SetProperty Id="MiruRollbackServiceConfig" Before="MiruRollbackServiceConfig" Sequence="execute"
+                 Condition='REMOVE~="ALL"'
+                 Value='"[System64Folder]cmd.exe" /d /s /c "cd /d "[System64Folder]" &amp; sc.exe failure miru-agent reset= 86400 actions= restart/10000/restart/10000/restart/10000 &amp; sc.exe sidtype miru-agent unrestricted &amp; sc.exe privs miru-agent SeChangeNotifyPrivilege"' />
+    <InstallExecuteSequence>
+      <Custom Action="MiruRollbackServiceConfig" Before="DeleteServices"
+              Condition='REMOVE~="ALL"' />
+    </InstallExecuteSequence>
 
     <Feature Id="Main" Title="$(ProductName)" Level="1">
       <ComponentGroupRef Id="AgentBinary" />

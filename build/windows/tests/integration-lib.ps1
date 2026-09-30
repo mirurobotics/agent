@@ -75,9 +75,10 @@ function Uninstall-Msi {
     param(
         [Parameter(Mandatory = $true)][string]$ProductCode,
         [Parameter(Mandatory = $true)][string]$Name,
-        [int[]]$AllowedExitCodes = @(0, 3010)
+        [int[]]$AllowedExitCodes = @(0, 3010),
+        [string[]]$Properties = @()
     )
-    Invoke-Msi @("/x", $ProductCode) $Name $AllowedExitCodes | Out-Null
+    Invoke-Msi (@("/x", $ProductCode) + $Properties) $Name $AllowedExitCodes | Out-Null
 }
 
 function Invoke-Msi {
@@ -134,6 +135,7 @@ function Initialize-CustomerState {
     foreach ($path in $protectedRoots) {
         Initialize-Directory $path | Out-Null
     }
+    foreach ($log in @(Get-AgentLogFiles)) { Remove-Item -LiteralPath $log.FullName -Force }
     foreach ($file in $customerOwnedFiles) {
         [IO.File]::WriteAllText($file.Path, $file.Contents)
     }
@@ -142,12 +144,15 @@ function Initialize-CustomerState {
 function Invoke-InstallStage {
     param([Parameter(Mandatory = $true)]$Packages)
     Add-PermissiveAces -OwnerSid $testUserSid
+    # The service must create the first log file through its own ACE.
+    Assert-Equal 0 (@(Get-AgentLogFiles)).Count "no agent log file exists before install"
     Install-Msi $Packages.V1 "fixture-v1"
     Assert-True (Test-Path -LiteralPath $agentPath -PathType Leaf) "v1 executable installed"
     Assert-InstalledVersion $fixtureProducts[0] "fixture-v1" "v1"
     Assert-ProtectedState "initial install"
     Invoke-NonAdminProbe -Stage "install"
     Assert-ServiceInstalled "install"
+    Assert-ServiceRuntimeIdentity "install" 0
     Write-Host "PASS initial install, ACL correction, denial, and service installed"
 }
 
@@ -290,13 +295,45 @@ function Assert-ProtectedAcl {
     $acl = Get-Acl -LiteralPath $LiteralPath
     Assert-Equal "S-1-5-18" $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value "$LiteralPath owner is SYSTEM"
     Assert-True $acl.AreAccessRulesProtected "$LiteralPath DACL inheritance is disabled"
-    Assert-Equal 2 @($acl.Access).Count "only two total $LiteralPath ACEs"
-    $explicit = @($acl.Access | Where-Object { -not $_.IsInherited })
-    Assert-Equal 2 $explicit.Count "only two explicit $LiteralPath ACEs"
-    $sids = @($explicit | ForEach-Object { Assert-FullControlAce $_ $LiteralPath -Inheritable })
-    Assert-TrustedIdentities $sids $LiteralPath
+    $rules = @($acl.Access)
+    Assert-Equal 4 $rules.Count "exactly 4 total $LiteralPath ACEs"
+    $explicit = @($rules | Where-Object { -not $_.IsInherited })
+    Assert-Equal 4 $explicit.Count "exactly 4 explicit $LiteralPath ACEs"
+    Assert-ServiceDirectoryAces @($explicit | Where-Object { (Get-RuleSid $_) -eq $MsiServiceSid }) $LiteralPath
+    $adminSids = @($explicit | Where-Object { (Get-RuleSid $_) -ne $MsiServiceSid } |
+        ForEach-Object { Assert-FullControlAce $_ $LiteralPath -Inheritable })
+    $expectedAdmins = @($MsiTrustedSids | Where-Object { $_ -ne $MsiServiceSid })
+    Assert-Equal (($expectedAdmins | Sort-Object) -join ",") (($adminSids | Sort-Object) -join ",") "$LiteralPath administrator ACE identities"
     & icacls.exe $LiteralPath 2>&1 | Out-Null
     Assert-Equal 0 $LASTEXITCODE "icacls can inspect $LiteralPath"
+}
+
+# The service may use but not delete or re-permission the directory, and has
+# full control of its contents.
+function Assert-ServiceDirectoryAces {
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Rules,
+        [Parameter(Mandatory = $true)][string]$Label
+    )
+    Assert-Equal 2 $Rules.Count "$Label has two service SID ACEs"
+    $inheritOnly = [int][Security.AccessControl.PropagationFlags]::InheritOnly
+    $direct = @($Rules | Where-Object { ([int]$_.PropagationFlags -band $inheritOnly) -eq 0 })
+    $children = @($Rules | Where-Object { ([int]$_.PropagationFlags -band $inheritOnly) -ne 0 })
+    Assert-Equal 1 $direct.Count "$Label has one service SID ACE for the directory itself"
+    Assert-Equal "Allow" $direct[0].AccessControlType.ToString() "$Label service directory ACE type"
+    Assert-Equal $MsiServiceDirectoryRights ([int]$direct[0].FileSystemRights) "$Label service directory ACE grants read, write, and traverse only"
+    Assert-Equal 0 ([int]$direct[0].InheritanceFlags) "$Label service directory ACE is not inherited"
+    Assert-Equal 1 $children.Count "$Label has one inherit-only service SID ACE"
+    Assert-Equal "Allow" $children[0].AccessControlType.ToString() "$Label service child ACE type"
+    Assert-Equal ([int][Security.AccessControl.FileSystemRights]::FullControl) ([int]$children[0].FileSystemRights) "$Label service child ACE grants full control"
+    $inherit = [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [Security.AccessControl.InheritanceFlags]::ObjectInherit
+    Assert-Equal ([int]$inherit) ([int]$children[0].InheritanceFlags) "$Label service child ACE inherits to containers and files"
+    Assert-Equal $inheritOnly ([int]$children[0].PropagationFlags) "$Label service child ACE is inherit-only"
+}
+
+function Get-RuleSid {
+    param([Parameter(Mandatory = $true)]$Rule)
+    return $Rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value
 }
 
 function Assert-TrustedIdentities {
@@ -304,7 +341,7 @@ function Assert-TrustedIdentities {
         [Parameter(Mandatory = $true)][string[]]$Sids,
         [Parameter(Mandatory = $true)][string]$Label
     )
-    Assert-Equal "S-1-5-18,S-1-5-32-544" (($Sids | Sort-Object) -join ",") "$Label ACE identities"
+    Assert-Equal (($MsiTrustedSids | Sort-Object) -join ",") (($Sids | Sort-Object) -join ",") "$Label ACE identities"
 }
 
 function Invoke-NonAdminProbe {
@@ -347,7 +384,7 @@ function Assert-InheritedProtection {
     param([Parameter(Mandatory = $true)][string]$Path)
     $acl = Get-Acl -LiteralPath $Path
     Assert-True (-not $acl.AreAccessRulesProtected) "$Path inherits its DACL"
-    Assert-Equal 2 @($acl.Access).Count "$Path has only trusted inherited ACEs"
+    Assert-Equal $MsiTrustedSids.Count @($acl.Access).Count "$Path has only trusted inherited ACEs"
     $sids = @($acl.Access | ForEach-Object {
         Assert-True $_.IsInherited "$Path ACE is inherited"
         Assert-FullControlAce $_ $Path
@@ -409,17 +446,17 @@ function Assert-ProbeDenied {
     }
 }
 
-# Install success with Start="install" Wait="yes" proves the service reached
-# Running, so this asserts SCM configuration rather than racing the runtime state
-# of the unprovisioned agent, which exits shortly after start.
+# SCM configuration only; Assert-ServiceRuntimeIdentity checks the running agent.
 function Assert-ServiceInstalled {
     param([Parameter(Mandatory = $true)][string]$Stage)
     $service = Get-AgentService
     Assert-True ($null -ne $service) "$Stage installs the miru-agent service"
     Assert-Equal "Auto" $service.StartMode "$Stage service start mode is automatic"
-    Assert-Equal "LocalSystem" $service.StartName "$Stage service runs as LocalSystem"
+    Assert-Equal $MsiServiceAccount $service.StartName "$Stage service runs as NT SERVICE\miru-agent"
     Assert-Equal $agentPath ($service.PathName.Trim('"')) "$Stage service binary path"
     Assert-ServiceRecovery $Stage
+    Assert-ServiceSidIdentity $Stage
+    Assert-ServicePrivileges $Stage
 }
 
 function Assert-ServiceAbsent {
@@ -432,12 +469,185 @@ function Get-AgentService {
         -ErrorAction SilentlyContinue
 }
 
+# sc.exe reports seconds and milliseconds; the spec uses days and seconds.
 function Assert-ServiceRecovery {
     param([Parameter(Mandatory = $true)][string]$Stage)
     $out = & sc.exe qfailure miru-agent 2>&1 | Out-String
     Assert-Equal 0 $LASTEXITCODE "$Stage sc.exe qfailure succeeds"
-    Assert-True ($out -match 'RESET_PERIOD') "$Stage service has a reset period"
-    Assert-True ($out -match 'RESTART') "$Stage service restarts on failure"
+    Assert-True ($out -match 'RESET_PERIOD[^:]*:\s*(\d+)') "$Stage service has a reset period`n$out"
+    Assert-Equal ([string]($MsiServiceSettings.ResetPeriodDays * 86400)) $Matches[1] `
+        "$Stage service failure count reset period in seconds`n$out"
+    $delayMilliseconds = $MsiServiceSettings.RestartDelaySeconds * 1000
+    $expected = @($MsiServiceSettings.FailureActions | ForEach-Object {
+        "{0}/{1}" -f $_.ToUpperInvariant(), $delayMilliseconds
+    }) -join ","
+    $actual = @([regex]::Matches($out, '(\w+) -- Delay = (\d+) milliseconds') | ForEach-Object {
+        "{0}/{1}" -f $_.Groups[1].Value, $_.Groups[2].Value
+    }) -join ","
+    Assert-Equal $expected $actual "$Stage service failure actions`n$out"
+}
+
+# The SID hardcoded in the installer's descriptors is the one the service runs as.
+function Assert-ServiceSidIdentity {
+    param([Parameter(Mandatory = $true)][string]$Stage)
+    $q = & sc.exe qsidtype miru-agent 2>&1 | Out-String
+    Assert-Equal 0 $LASTEXITCODE "$Stage sc.exe qsidtype succeeds"
+    $sidType = $MsiServiceSettings.SidType.ToUpperInvariant()
+    Assert-True ($q -match "SERVICE_SID_TYPE:\s+$sidType\b") "$Stage service SID type is $sidType`n$q"
+    $s = & sc.exe showsid miru-agent 2>&1 | Out-String
+    Assert-Equal 0 $LASTEXITCODE "$Stage sc.exe showsid succeeds"
+    Assert-True ($s -match 'SERVICE SID:\s+(S-1-5-80-[\d-]+)') "$Stage sc.exe showsid reports a service SID`n$s"
+    Assert-Equal $MsiServiceSid $Matches[1] "$Stage Windows derives the hardcoded service SID"
+}
+
+function Assert-ServicePrivileges {
+    param([Parameter(Mandatory = $true)][string]$Stage)
+    $out = & sc.exe qprivs miru-agent 2>&1 | Out-String
+    Assert-Equal 0 $LASTEXITCODE "$Stage sc.exe qprivs succeeds"
+    $privileges = @([regex]::Matches($out, 'Se\w+Privilege') | ForEach-Object { $_.Value } | Sort-Object)
+    Assert-Equal (($MsiServiceSettings.RequiredPrivileges | Sort-Object) -join ",") ($privileges -join ",") "$Stage service required privileges`n$out"
+}
+
+# Checks the live token, not just the configuration (after rollback, this proves
+# the settings were reapplied before the service started).
+function Assert-ServiceProcessPrivileges {
+    param(
+        [Parameter(Mandatory = $true)][string]$Stage,
+        [Parameter(Mandatory = $true)][int]$ProcessId
+    )
+    $privileges = @(Get-ProcessTokenPrivileges $ProcessId | Sort-Object)
+    $unexpected = @($privileges | Where-Object { $MsiServiceSettings.RequiredPrivileges -notcontains $_ })
+    Assert-Equal 0 $unexpected.Count "$Stage service process $ProcessId token holds only required privileges: $($privileges -join ', ')"
+}
+
+function Get-ProcessTokenPrivileges {
+    param([Parameter(Mandatory = $true)][int]$ProcessId)
+    if (-not ('MiruTest.TokenPrivileges' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Text;
+
+namespace MiruTest
+{
+    public static class TokenPrivileges
+    {
+        const uint ProcessQueryLimitedInformation = 0x1000;
+        const uint TokenQuery = 0x0008;
+        const int TokenPrivilegesClass = 3;
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        static extern IntPtr OpenProcess(uint access, bool inheritHandle, int processId);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        static extern bool CloseHandle(IntPtr handle);
+
+        [DllImport("advapi32.dll", SetLastError = true)]
+        static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
+
+        [DllImport("advapi32.dll", SetLastError = true)]
+        static extern bool GetTokenInformation(IntPtr token, int infoClass, IntPtr info, int length, out int returnLength);
+
+        [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        static extern bool LookupPrivilegeName(string systemName, IntPtr luid, StringBuilder name, ref int length);
+
+        public static string[] Get(int processId)
+        {
+            IntPtr process = OpenProcess(ProcessQueryLimitedInformation, false, processId);
+            if (process == IntPtr.Zero) { throw new Win32Exception(Marshal.GetLastWin32Error(), "OpenProcess"); }
+            IntPtr token = IntPtr.Zero;
+            IntPtr buffer = IntPtr.Zero;
+            try
+            {
+                if (!OpenProcessToken(process, TokenQuery, out token)) { throw new Win32Exception(Marshal.GetLastWin32Error(), "OpenProcessToken"); }
+                int length;
+                GetTokenInformation(token, TokenPrivilegesClass, IntPtr.Zero, 0, out length);
+                buffer = Marshal.AllocHGlobal(length);
+                if (!GetTokenInformation(token, TokenPrivilegesClass, buffer, length, out length)) { throw new Win32Exception(Marshal.GetLastWin32Error(), "GetTokenInformation"); }
+                // TOKEN_PRIVILEGES: a DWORD count, then 12-byte LUID_AND_ATTRIBUTES entries.
+                int count = Marshal.ReadInt32(buffer);
+                List<string> names = new List<string>();
+                for (int i = 0; i < count; i++)
+                {
+                    StringBuilder name = new StringBuilder(64);
+                    int size = name.Capacity;
+                    if (!LookupPrivilegeName(null, IntPtr.Add(buffer, 4 + i * 12), name, ref size)) { throw new Win32Exception(Marshal.GetLastWin32Error(), "LookupPrivilegeName"); }
+                    names.Add(name.ToString());
+                }
+                return names.ToArray();
+            }
+            finally
+            {
+                if (buffer != IntPtr.Zero) { Marshal.FreeHGlobal(buffer); }
+                if (token != IntPtr.Zero) { CloseHandle(token); }
+                CloseHandle(process);
+            }
+        }
+    }
+}
+'@
+    }
+    # Enables SeDebugPrivilege so the elevated session can open the service process.
+    [Diagnostics.Process]::EnterDebugMode()
+    return [MiruTest.TokenPrivileges]::Get($ProcessId)
+}
+
+function Get-AgentLogFiles {
+    if (-not (Test-Path -LiteralPath $logsRoot -PathType Container)) { return @() }
+    return @(Get-ChildItem -LiteralPath $logsRoot -Filter "miru.log*" -File)
+}
+
+# The running service holds the current file open for writing, so each file is
+# opened with read-write sharing.
+function Get-ActivationWaitCount {
+    $count = 0
+    foreach ($log in @(Get-AgentLogFiles)) {
+        $fs = $null
+        $reader = $null
+        try {
+            $fs = [IO.File]::Open($log.FullName, 'Open', 'Read', 'ReadWrite')
+            $reader = New-Object IO.StreamReader($fs)
+            $text = $reader.ReadToEnd()
+        }
+        finally {
+            if ($null -ne $reader) { $reader.Dispose() }
+            if ($null -ne $fs) { $fs.Dispose() }
+        }
+        $count += [regex]::Matches($text, 'waiting for provisioning').Count
+    }
+    return [int]$count
+}
+
+# The unprovisioned agent logs "waiting for provisioning" once per start, so a new
+# line proves it can write logs\ through the installer's ACE.
+function Assert-ServiceRuntimeIdentity {
+    param(
+        [Parameter(Mandatory = $true)][string]$Stage,
+        [Parameter(Mandatory = $true)][int]$Baseline
+    )
+    $service = $null
+    $count = 0
+    for ($attempt = 0; $attempt -lt 30; $attempt++) {
+        $service = Get-AgentService
+        $count = Get-ActivationWaitCount
+        if ($null -ne $service -and $service.State -eq 'Running' -and
+            [int]$service.ProcessId -ne 0 -and $count -gt $Baseline) { break }
+        Start-Sleep -Seconds 1
+    }
+    Assert-True ($null -ne $service) "$Stage miru-agent service present"
+    $processId = [int]$service.ProcessId
+    $observed = "state $($service.State), pid $processId, activation waits $count, baseline $Baseline"
+    Assert-Equal "Running" $service.State "$Stage service is running ($observed)"
+    Assert-True ($processId -ne 0) "$Stage service has a process ($observed)"
+    Assert-True ($count -gt $Baseline) "$Stage service logged a new activation wait ($observed)"
+    $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$processId"
+    Assert-True ($null -ne $proc) "$Stage service process $processId exists"
+    $ownerSid = $proc | Invoke-CimMethod -MethodName GetOwnerSid
+    Assert-Equal 0 ([int]$ownerSid.ReturnValue) "$Stage GetOwnerSid succeeds for process $processId"
+    Assert-Equal $MsiServiceSid $ownerSid.Sid "$Stage service process token user is the service SID"
+    Assert-ServiceProcessPrivileges $Stage $processId
 }
 
 function Invoke-MaintenanceStage {
@@ -460,11 +670,13 @@ function Get-AgentHash {
 function Invoke-UpgradeStage {
     param([Parameter(Mandatory = $true)]$Packages)
     Add-PermissiveAces -OwnerSid $testUserSid
+    $baseline = Get-ActivationWaitCount
     Install-Msi $Packages.V2 "fixture-v2-upgrade"
     Assert-InstalledVersion $fixtureProducts[1] "fixture-v2" "v2"
     Assert-ProtectedState "upgrade"
     Invoke-NonAdminProbe -Stage "upgrade"
     Assert-ServiceInstalled "upgrade"
+    Assert-ServiceRuntimeIdentity "upgrade" $baseline
     Write-Host "PASS v1-to-v2 upgrade repairs ACL and registers one product"
 }
 
@@ -478,17 +690,28 @@ function Invoke-DowngradeStage {
     Write-Host "PASS downgrade rejected with v2 intact"
 }
 
+# Exercises v2's rollback action, scheduled by v2's uninstall.
 function Invoke-RollbackStage {
     param([Parameter(Mandatory = $true)]$Packages)
     $v2Hash = Get-AgentHash
+    $baseline = Get-ActivationWaitCount
     Install-Msi $Packages.V3 "fixture-v3-rollback" -AllowedExitCodes @(1603) -Properties @("FAIL_UPGRADE_FOR_TEST=1")
     Assert-InstalledVersion $fixtureProducts[1] "fixture-v2" "rollback restores v2"
     Assert-Equal $v2Hash (Get-AgentHash) "rollback restores v2 executable"
     Assert-ProtectedState "rollback"
-    Write-Host "PASS failed v3 upgrade rolls back registration, hash, marker, sentinel, and DACL"
+    Assert-ServiceInstalled "rollback"
+    Assert-ServiceRuntimeIdentity "rollback" $baseline
+    Write-Host "PASS failed v3 upgrade rolls back registration, hash, marker, sentinel, DACL, and full service config; the restored service holds only its required privileges"
 }
 
 function Invoke-UninstallStage {
+    # The fixture's failing action also runs during uninstall, after DeleteServices.
+    $baseline = Get-ActivationWaitCount
+    Uninstall-Msi $fixtureProducts[1] "fixture-v2-failed-uninstall" -AllowedExitCodes @(1603) `
+        -Properties @("FAIL_UPGRADE_FOR_TEST=1")
+    Assert-InstalledVersion $fixtureProducts[1] "fixture-v2" "failed uninstall"
+    Assert-ServiceInstalled "failed uninstall"
+    Assert-ServiceRuntimeIdentity "failed uninstall" $baseline
     Uninstall-Msi $fixtureProducts[1] "fixture-v2-uninstall"
     Assert-Equal 0 (@(Get-RelatedProducts)).Count "product registration removed"
     Assert-True (-not (Test-ArpProductCode $fixtureProducts[1])) "installer-owned registry metadata removed"
@@ -497,7 +720,7 @@ function Invoke-UninstallStage {
     Assert-True (Test-Path -LiteralPath $programDataRoot -PathType Container) "ProgramData retained"
     Assert-ProtectedState "uninstall"
     Assert-ServiceAbsent
-    Write-Host "PASS uninstall removes package state, service, and retains protected customer state"
+    Write-Host "PASS failed uninstall restores the full service config; uninstall removes package state, service, and retains protected customer state"
 }
 
 function Write-FailureEvidence {

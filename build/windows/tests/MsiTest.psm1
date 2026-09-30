@@ -6,7 +6,19 @@ $ErrorActionPreference = "Stop"
 $MsiProductName = "Miru Agent"
 $MsiManufacturer = "Miru"
 $MsiUpgradeCode = "{B5ED0336-5F14-4308-A667-3CE8CDEF7D48}"
-$MsiExpectedSddl = "O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)"
+$MsiServiceAccount = "NT SERVICE\miru-agent"
+$MsiServiceSid = "S-1-5-80-1251439239-454917380-1008020685-2030257057-91624695"
+# Single source for every service-settings assertion (units as in util:ServiceConfig).
+$MsiServiceSettings = [pscustomobject]@{
+    FailureActions = @("restart", "restart", "restart")
+    RestartDelaySeconds = 10
+    ResetPeriodDays = 1
+    SidType = "unrestricted"
+    RequiredPrivileges = @("SeChangeNotifyPrivilege")
+}
+$MsiExpectedSddl = "O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;;FRFWFX;;;$MsiServiceSid)(A;OICIIO;FA;;;$MsiServiceSid)"
+$MsiServiceDirectoryRights = 0x1201BF   # FRFWFX: .NET reports ReadAndExecute, Write, Synchronize
+$MsiTrustedSids = @("S-1-5-18", "S-1-5-32-544", $MsiServiceSid)
 $MsiExpectedDirectories = @(
     @("MiruDataDir", "{D0542DF7-5B61-4F09-938B-57F05C1B5458}", "MIRUDATA", "CommonAppDataFolder", "Miru"),
     @("MiruLogsDir", "{C3AF8332-28E8-4707-8430-780C553D86EC}", "MIRULOGS", "MIRUDATA", "logs"),
@@ -268,7 +280,12 @@ Export-ModuleMember -Function @(
     "MsiProductName",
     "MsiManufacturer",
     "MsiUpgradeCode",
+    "MsiServiceAccount",
+    "MsiServiceSid",
+    "MsiServiceSettings",
     "MsiExpectedSddl",
+    "MsiServiceDirectoryRights",
+    "MsiTrustedSids",
     "MsiExpectedDirectories",
     "MsiFixtureProductCodes"
 )

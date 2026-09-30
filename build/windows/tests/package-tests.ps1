@@ -224,8 +224,7 @@ function Assert-ServiceTables {
     Assert-ServiceRecoveryTable $Database
 }
 
-# The MSI registers miru-agent as an own-process, auto-start, vital LocalSystem
-# service with no arguments and the authored display name and description.
+# Own-process, auto-start, vital service running as NT SERVICE\miru-agent.
 function Assert-ServiceInstallRow {
     param([Parameter(Mandatory = $true)]$Database)
     Assert-True (Test-MsiTable $Database "ServiceInstall") "service install table present"
@@ -239,7 +238,7 @@ function Assert-ServiceInstallRow {
     Assert-Equal "Miru Agent" $row[2] "service display name"
     Assert-Equal "Miru Config Agent" $row[9] "service description"
     Assert-Equal "MiruAgentExe" $row[8] "service owning component"
-    Assert-Equal "LocalSystem" $row[6] "service runs as LocalSystem"
+    Assert-Equal $MsiServiceAccount $row[6] "service runs as NT SERVICE\miru-agent"
     Assert-True ([string]::IsNullOrEmpty($row[7])) "service takes no arguments"
     Assert-True (([int]$row[3] -band 16) -ne 0) "service is own-process"
     Assert-Equal 2 ([int]$row[4]) "service start type is automatic"
