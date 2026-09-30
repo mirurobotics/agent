@@ -498,8 +498,7 @@ async fn start_tcp_server(
     server_state: Arc<server::State>,
     shutdown_tx: &broadcast::Sender<()>,
 ) -> Result<(JoinHandle<Result<(), ServerErr>>, filesys::File), ServerErr> {
-    let listener = tcp::bind(options.server.tcp_port).await?;
-    let port = tcp::local_port(&listener)?;
+    let (listener, port) = tcp::bind(options.server.tcp_port).await?;
     let token = BearerToken::generate()?;
     let discovery_file = options.storage.layout.device_api();
     disk::device_api::write(&discovery_file, port, token.secret()).await?;

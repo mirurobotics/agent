@@ -137,7 +137,7 @@ async fn tcp_port_in_use_does_not_abort_startup() {
     prepare_valid_server_storage(dir.to_dir()).await;
     let layout = Layout::new(dir.to_dir());
     write_stale_discovery_file(&layout).await;
-    let taken = tcp::bind(0).await.unwrap();
+    let (_taken, port) = tcp::bind(0).await.unwrap();
     let options = AppOptions {
         storage: StorageOptions {
             layout: layout.clone(),
@@ -153,7 +153,7 @@ async fn tcp_port_in_use_does_not_abort_startup() {
         enable_tcp_server: true,
         server: Options {
             socket_file: filesys::File::new(PathBuf::from("/tmp").join("miru.sock")),
-            tcp_port: taken.local_addr().unwrap().port(),
+            tcp_port: port,
         },
         ..Default::default()
     };

@@ -73,10 +73,8 @@ fn no_proxy_client() -> reqwest::Client {
 
 /// Bind an OS-assigned loopback port and serve until `stop`.
 async fn start(fixture: &Fixture) -> (SocketAddr, JoinHandle<Result<(), ServerErr>>) {
-    let listener = tcp::bind(0).await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let port = tcp::local_port(&listener).unwrap();
-    assert_eq!(port, addr.port());
+    let (listener, port) = tcp::bind(0).await.unwrap();
+    let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
     let mut shutdown_rx = fixture.shutdown_tx.subscribe();
     let handle = tcp::serve(
         listener,
@@ -108,23 +106,24 @@ pub mod bind {
 
     #[tokio::test]
     async fn binds_ipv4_loopback_with_os_assigned_port() {
-        let listener = tcp::bind(0).await.unwrap();
+        let (listener, port) = tcp::bind(0).await.unwrap();
         let addr = listener.local_addr().unwrap();
         assert_eq!(addr.ip(), Ipv4Addr::LOCALHOST);
-        assert_ne!(addr.port(), 0);
+        assert_eq!(addr.port(), port);
+        assert_ne!(port, 0);
     }
 
     #[tokio::test]
     async fn binds_requested_port() {
         // Another parallel test can bind the released port before we do.
         for _ in 0..8 {
-            let probe = tcp::bind(0).await.unwrap();
-            let port = probe.local_addr().unwrap().port();
+            let (probe, port) = tcp::bind(0).await.unwrap();
             drop(probe);
 
-            let Ok(listener) = tcp::bind(port).await else {
+            let Ok((listener, bound)) = tcp::bind(port).await else {
                 continue;
             };
+            assert_eq!(bound, port);
             assert_eq!(listener.local_addr().unwrap().port(), port);
             return;
         }
@@ -133,8 +132,7 @@ pub mod bind {
 
     #[tokio::test]
     async fn errors_when_port_in_use() {
-        let taken = tcp::bind(0).await.unwrap();
-        let port = taken.local_addr().unwrap().port();
+        let (_taken, port) = tcp::bind(0).await.unwrap();
 
         let err = tcp::bind(port).await.expect_err("port is already bound");
         assert!(matches!(err, ServerErr::BindTcpListenerErr(_)));

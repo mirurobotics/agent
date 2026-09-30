@@ -25,8 +25,8 @@ use tracing::{info, warn};
 
 /// Bind a listener on the IPv4 loopback interface only, so the local device
 /// API is never reachable from the network. Port `0` lets the OS pick a free
-/// port; read the bound port back with `TcpListener::local_addr`.
-pub async fn bind(port: u16) -> Result<TcpListener, ServerErr> {
+/// port; the returned port is the one actually bound.
+pub async fn bind(port: u16) -> Result<(TcpListener, u16), ServerErr> {
     let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
     let listener = TcpListener::bind(addr).await.map_err(|e| {
         ServerErr::BindTcpListenerErr(BindTcpListenerErr {
@@ -35,26 +35,20 @@ pub async fn bind(port: u16) -> Result<TcpListener, ServerErr> {
             trace: trace!(),
         })
     })?;
-    let bound = listener.local_addr().unwrap_or(addr);
-    info!("Local device API listening on http://{bound}");
-    Ok(listener)
-}
-
-/// The port `listener` is bound to, which resolves port `0` to the one the OS
-/// assigned.
-pub fn local_port(listener: &TcpListener) -> Result<u16, ServerErr> {
-    let addr = listener.local_addr().map_err(|e| {
-        ServerErr::RunAxumServerErr(RunAxumServerErr {
+    let bound = listener.local_addr().map_err(|e| {
+        ServerErr::BindTcpListenerErr(BindTcpListenerErr {
+            addr,
             source: e,
             trace: trace!(),
         })
     })?;
-    Ok(addr.port())
+    info!("Local device API listening on http://{bound}");
+    Ok((listener, bound.port()))
 }
 
-/// Serve the local device API on `listener`, which is bound to `port` (see
-/// [`local_port`]). Every request must pass the loopback check (403) and then
-/// carry `token` as a bearer token (401).
+/// Serve the local device API on `listener`. `port` is the port [`bind`]
+/// returned for that listener. Every request must pass the loopback check
+/// (403) and then carry `token` as a bearer token (401).
 pub fn serve(
     listener: TcpListener,
     port: u16,
