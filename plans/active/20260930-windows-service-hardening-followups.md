@@ -24,12 +24,12 @@ PR #263 made the Windows service run as the low-privilege virtual account `NT SE
 - [x] Milestone 2: provisioning deletes only its key files in `tmp\`.
 - [x] Milestone 3: installer sentinels and harness checks.
 - [x] Milestone 4: customer-grant retention check.
-- [ ] Milestone 5: documentation.
+- [x] Milestone 5: documentation.
 - [ ] Milestone 6: push, draft PR, preflight `CLEAN`.
 
 ## Surprises & Discoveries
 
-(Add entries as work proceeds.)
+- 2026-09-30: `cargo clippy --package miru-agent --all-features -- -D warnings` fails on generated `libs/backend-api` code (`manual_map`), unrelated to this change. Validated with the repo's lint command instead, `cargo clippy --package miru-agent --no-deps --all-targets --all-features -- -D warnings` (`scripts/lib/lint.sh`), which passes. Milestone 2 also drops the now-unused `PathExt` import from `agent/tests/provisioning/reprovision.rs`.
 
 ## Decision Log
 

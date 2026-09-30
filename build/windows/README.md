@@ -33,9 +33,16 @@ The MSI:
   DACL that gives Local System and built-in Administrators inheritable full
   control, and gives the `miru-agent` service SID read, write, and traverse
   access to each directory (but not delete or permission changes) plus full
-  control of the files and folders created inside it; and
+  control of the files and folders created inside it;
+- creates an `installer-sentinel` folder in each of `logs`, `auth`, and `tmp`,
+  owned by Local System and accessible only to Local System and Administrators,
+  so the service can never empty those folders. The MSI reapplies the
+  sentinels' permissions on repair and upgrade and never removes them, even on
+  uninstall; do not delete them while the agent is installed; and
 - leaves populated customer state under `%ProgramData%\Miru` in place during
-  maintenance, upgrades, rollback, and ordinary uninstall.
+  maintenance, upgrades, rollback, and ordinary uninstall. Uninstall always
+  leaves the `%ProgramData%\Miru` folder tree; after uninstalling, an
+  administrator can delete `%ProgramData%\Miru` to remove all remaining state.
 
 The UpgradeCode is part of the product's permanent identity and must never be
 changed after publication. Each package version receives a different ProductCode.
@@ -43,6 +50,10 @@ changed after publication. Each package version receives a different ProductCode
 If an uninstall or major upgrade fails and rolls back, the installer reapplies
 the restored service's restart-on-failure actions, SID type, and privilege
 restriction before it starts the service again.
+
+If the service cannot open its log file, it stops with service-specific error 1
+(System event 7024) instead of crashing, so the restart-on-failure actions do
+not apply.
 
 ## Build
 
@@ -220,6 +231,14 @@ including when those directories existed with hostile ownership and protected
 permissions before installation or maintenance.
 Non-administrators must not read sensitive files created in those directories
 after installation, create children, or change the directory permissions.
+After every stage, including uninstall, each of `logs`, `auth`, and `tmp` must
+contain an `installer-sentinel` folder that is not a reparse point, is owned by
+Local System, and has a protected DACL permitting full control only for Local
+System and built-in Administrators, including when the sentinels existed with
+hostile ownership and permissions before installation, maintenance, or upgrade.
+A folder outside `%ProgramData%\Miru` granted Modify to the service must keep
+that grant, keyed to the service SID, through maintenance, upgrade, rollback,
+and uninstall.
 
 Integration runs write verbose MSI logs directly beneath
 `build\windows\artifacts\package-tests\logs\<unique-run-id>`. Each operation
