@@ -2,7 +2,7 @@
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::filesys::{self, files, PathExt, WriteOptions};
 use miru_agent::server::{
-    auth::Token,
+    auth::BearerToken,
     discovery::{self, SCHEMA_VERSION},
     ServerErr,
 };
@@ -21,7 +21,7 @@ pub mod write {
     async fn write_then_remove() {
         let dir = test_dirs::temp("discovery_write_then_remove").unwrap();
         let file = discovery_file(&dir);
-        let token = Token::generate().unwrap();
+        let token = BearerToken::generate().unwrap();
 
         discovery::write(&file, 6478, &token).await.unwrap();
         let value: Value = files::read_json(&file).await.unwrap();
@@ -41,7 +41,7 @@ pub mod write {
         files::write_string(&file, "junk", WriteOptions::default())
             .await
             .unwrap();
-        let token = Token::generate().unwrap();
+        let token = BearerToken::generate().unwrap();
 
         discovery::write(&file, 1234, &token).await.unwrap();
         let value: Value = files::read_json(&file).await.unwrap();
@@ -65,7 +65,7 @@ pub mod write {
 
         let dir = test_dirs::temp("discovery_sets_mode_0640").unwrap();
         let file = discovery_file(&dir);
-        let token = Token::generate().unwrap();
+        let token = BearerToken::generate().unwrap();
 
         discovery::write(&file, 6478, &token).await.unwrap();
         let mode = std::fs::metadata(file.path()).unwrap().permissions().mode();
@@ -77,7 +77,7 @@ pub mod write {
         let dir = test_dirs::temp("discovery_fails_when_parent_is_a_file").unwrap();
         let file = discovery_file(&dir);
         std::fs::write(file.parent().unwrap().path(), b"x").unwrap();
-        let token = Token::generate().unwrap();
+        let token = BearerToken::generate().unwrap();
 
         let result = discovery::write(&file, 6478, &token).await;
         assert!(

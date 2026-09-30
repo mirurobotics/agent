@@ -6,7 +6,7 @@ use std::sync::Arc;
 // internal crates
 use crate::filesys;
 use crate::server::{
-    auth::{check_bearer, Token},
+    auth::{check_bearer, BearerToken},
     discovery,
     errors::{BindTcpListenerErr, RunAxumServerErr, ServerErr},
     routes, State,
@@ -62,7 +62,7 @@ pub async fn serve(
             })
         })?
         .port();
-    let token = Token::generate()?;
+    let token = BearerToken::generate()?;
     discovery::write(&discovery_file, port, &token).await?;
     let app = app(state, port, Arc::new(token));
     Ok(tokio::task::spawn(run(
@@ -74,7 +74,7 @@ pub async fn serve(
 }
 
 /// The shared router behind the bearer check, behind the loopback check.
-fn app(state: Arc<State>, port: u16, token: Arc<Token>) -> Router {
+fn app(state: Arc<State>, port: u16, token: Arc<BearerToken>) -> Router {
     routes::router(state)
         .layer(middleware::from_fn(move |req, next| {
             check_bearer(token.clone(), req, next)

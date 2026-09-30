@@ -14,7 +14,7 @@ use device_api::models::ApiVersion;
 use miru_agent::activity;
 use miru_agent::events::hub::{EventHub, SpawnOptions};
 use miru_agent::filesys::{self, files, PathExt};
-use miru_agent::server::{auth::Token, discovery, routes, tcp, ServerErr, State};
+use miru_agent::server::{auth::BearerToken, discovery, routes, tcp, ServerErr, State};
 use miru_agent::sync::Syncer;
 
 // external crates
@@ -212,7 +212,7 @@ pub mod serve {
 
         let response = no_proxy_client()
             .get(health_url(addr))
-            .bearer_auth(Token::generate().unwrap().expose())
+            .bearer_auth(BearerToken::generate().unwrap().expose())
             .send()
             .await
             .unwrap();

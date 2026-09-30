@@ -181,7 +181,7 @@ Administrators, SYSTEM, and the service account can read the file on Windows.
   still gate any default-on port.
 - 2026-09-30: The TCP bearer token is 32 bytes from `aws_lc_rs::rand::fill`,
   base64url without padding (43 characters), regenerated every start, and held
-  only in an `Arc<Token>`, never in `AppOptions` or `server::State`. Rationale:
+  only in an `Arc<BearerToken>`, never in `AppOptions` or `server::State`. Rationale:
   the token is header-safe, rotates on restart, and stays out of the structs
   the agent logs with `Debug`.
 - 2026-09-30: Tokens compare with `aws_lc_rs::constant_time::verify_slices_are_equal`,

@@ -1,6 +1,6 @@
 // internal crates
 use crate::filesys::{self, files, Atomic, Overwrite, WriteOptions};
-use crate::server::{auth::Token, errors::ServerErr};
+use crate::server::{auth::BearerToken, errors::ServerErr};
 
 // external crates
 use serde::Serialize;
@@ -19,7 +19,7 @@ struct Discovery<'a> {
 /// Atomically write the TCP port and bearer token for local device API
 /// clients. On Unix the file mode is 0640 (owner read-write, group read); on
 /// Windows the file inherits the `device-api` directory ACL.
-pub async fn write(file: &filesys::File, port: u16, token: &Token) -> Result<(), ServerErr> {
+pub async fn write(file: &filesys::File, port: u16, token: &BearerToken) -> Result<(), ServerErr> {
     let discovery = Discovery {
         schema_version: SCHEMA_VERSION,
         port,

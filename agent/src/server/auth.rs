@@ -24,16 +24,16 @@ const TOKEN_BYTES: usize = 32;
 /// Bearer token that TCP clients of the local device API must present. Debug
 /// output redacts the secret.
 #[derive(Debug)]
-pub struct Token(SecretString);
+pub struct BearerToken(SecretString);
 
-impl Token {
+impl BearerToken {
     /// Generate a token from 32 bytes of the system CSPRNG.
-    pub fn generate() -> Result<Token, ServerErr> {
+    pub fn generate() -> Result<BearerToken, ServerErr> {
         let mut bytes = [0u8; TOKEN_BYTES];
         aws_lc_rs::rand::fill(&mut bytes)
             .map_err(|_| ServerErr::GenerateTokenErr(GenerateTokenErr { trace: trace!() }))?;
         let encoded = base64::encode_bytes_url_safe_no_pad(&bytes);
-        Ok(Token(SecretString::from(encoded)))
+        Ok(BearerToken(SecretString::from(encoded)))
     }
 
     /// The raw token string.
@@ -44,7 +44,7 @@ impl Token {
 
 /// Reject requests without `Authorization: Bearer <token>` with 401 and
 /// `WWW-Authenticate: Bearer`. Logs never include the presented credential.
-pub async fn check_bearer(token: Arc<Token>, req: Request, next: Next) -> Response {
+pub async fn check_bearer(token: Arc<BearerToken>, req: Request, next: Next) -> Response {
     if !authorized(&req, &token) {
         warn!("Rejected local device API request without a valid bearer token");
         return (
@@ -58,7 +58,7 @@ pub async fn check_bearer(token: Arc<Token>, req: Request, next: Next) -> Respon
 
 /// The scheme matches case-insensitively; the credentials compare in constant
 /// time.
-fn authorized(req: &Request, token: &Token) -> bool {
+fn authorized(req: &Request, token: &BearerToken) -> bool {
     let Some(value) = req.headers().get(header::AUTHORIZATION) else {
         return false;
     };
@@ -85,7 +85,7 @@ mod tests {
     use axum::Router;
     use tower::ServiceExt;
 
-    async fn call(token: Arc<Token>, auth: Option<HeaderValue>) -> Response {
+    async fn call(token: Arc<BearerToken>, auth: Option<HeaderValue>) -> Response {
         let app = Router::new()
             .route("/health", get(|| async { StatusCode::OK }))
             .layer(from_fn(move |req, next| {
@@ -100,18 +100,18 @@ mod tests {
             .unwrap()
     }
 
-    async fn status_for(token: Arc<Token>, auth: &str) -> StatusCode {
+    async fn status_for(token: Arc<BearerToken>, auth: &str) -> StatusCode {
         let auth = HeaderValue::from_str(auth).unwrap();
         call(token, Some(auth)).await.status()
     }
 
-    fn token() -> Arc<Token> {
-        Arc::new(Token::generate().unwrap())
+    fn token() -> Arc<BearerToken> {
+        Arc::new(BearerToken::generate().unwrap())
     }
 
     #[test]
     fn generate_yields_43_char_base64url() {
-        let token = Token::generate().unwrap();
+        let token = BearerToken::generate().unwrap();
         let raw = token.expose();
         assert_eq!(raw.len(), 43);
         assert!(
@@ -123,14 +123,14 @@ mod tests {
 
     #[test]
     fn generate_is_unique() {
-        let a = Token::generate().unwrap();
-        let b = Token::generate().unwrap();
+        let a = BearerToken::generate().unwrap();
+        let b = BearerToken::generate().unwrap();
         assert_ne!(a.expose(), b.expose());
     }
 
     #[test]
     fn debug_redacts_secret() {
-        let token = Token::generate().unwrap();
+        let token = BearerToken::generate().unwrap();
         let debug = format!("{token:?}");
         assert!(
             !debug.contains(token.expose()),
@@ -157,7 +157,7 @@ mod tests {
 
     #[tokio::test]
     async fn wrong_token_is_401() {
-        let other = Token::generate().unwrap();
+        let other = BearerToken::generate().unwrap();
         let auth = format!("Bearer {}", other.expose());
         assert_eq!(status_for(token(), &auth).await, StatusCode::UNAUTHORIZED);
     }
