@@ -17,8 +17,8 @@ struct Discovery<'a> {
 }
 
 /// Atomically write the TCP port and bearer token for local device API
-/// clients. The file is readable by its owner and group only (mode 0640 on
-/// Unix; on Windows it inherits the directory ACL).
+/// clients. On Unix the file mode is 0640 (owner read-write, group read); on
+/// Windows the file inherits the `device-api` directory ACL.
 pub async fn write(file: &filesys::File, port: u16, token: &Token) -> Result<(), ServerErr> {
     let discovery = Discovery {
         schema_version: SCHEMA_VERSION,

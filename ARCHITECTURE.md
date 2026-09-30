@@ -73,7 +73,7 @@ All source lives under `agent/src/`. The binary entry point is `main.rs`.
 
 ### Persistence
 
-`storage` — on-disk state management. `disk::Layout` defines the directory structure. `storage::Storage` wraps per-entity stores with capacity limits. Key files on disk: `settings.json`, `device.json`, `auth/` (private key and token), `device-api/device-api.json` (TCP port and bearer token for local device API clients).
+`disk` — on-disk state management. `disk::Layout` defines the directory structure. `disk::Storage` wraps per-entity stores with capacity limits. Key files on disk: `settings.json`, `device.json`, `auth/` (private key and token), `device-api/device-api.json` (TCP port and bearer token for local device API clients).
 
 ### Background workers
 
@@ -110,4 +110,4 @@ All workers receive a broadcast shutdown signal and clean up gracefully.
 
 **Authentication.** JWT-based. The `TokenManager` runs as a background task, refreshing the token before expiry using the device's RSA private key. `http::Client` reads the current token from `TokenManager` for every request. Token persistence is via `TokenFile` (atomic writes to disk).
 
-**Storage.** `disk::Layout` defines where everything lives on disk (default: `/var/lib/miru/`; the TCP discovery file lives at `device-api/device-api.json`). `storage::Storage` provides typed stores for devices, deployments, releases, and settings, each with configurable capacity limits.
+**Storage.** `disk::Layout` defines where everything lives on disk (default: `/var/lib/miru/`; the TCP discovery file lives at `device-api/device-api.json`). `disk::Storage` provides typed stores for devices, deployments, releases, and settings, each with configurable capacity limits.
