@@ -193,7 +193,12 @@ jobs:
       # Artifact Signing certificates expire within days, so require a timestamp too.
       - name: Verify signatures
         run: |
-          Get-ChildItem build\prebuilt\windows_amd64\* -Include *.exe, *.msi | ForEach-Object {
+          $files = @(Get-ChildItem build\prebuilt\windows_amd64\* -Include *.exe, *.msi)
+          if (@($files | Where-Object Extension -eq '.exe').Count -ne 1 -or
+              @($files | Where-Object Extension -eq '.msi').Count -ne 1) {
+            throw "Expected one .exe and one .msi, found: $($files.Name -join ', ')"
+          }
+          $files | ForEach-Object {
             $sig = Get-AuthenticodeSignature -LiteralPath $_.FullName
             if ($sig.Status -ne 'Valid' -or -not $sig.TimeStamperCertificate) {
               throw "$($_.Name): signature $($sig.Status), timestamped: $([bool]$sig.TimeStamperCertificate)"
