@@ -2,7 +2,7 @@ pub mod agent_version;
 pub mod caches;
 pub mod deployments;
 pub mod device;
-pub mod discovery;
+pub mod device_api;
 pub mod errors;
 pub mod file_rules;
 pub mod init;

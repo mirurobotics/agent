@@ -152,7 +152,7 @@ and the agent keeps running without the listener. Both transports serve the
 same `routes::router()` with the same middleware, and the TCP transport
 rejects requests whose Host or Origin isn't its loopback address.
 
-**PR 12 — token auth + discovery file** (done — `server/auth.rs`, `disk/discovery.rs`, `app/run.rs`)**.**
+**PR 12 — token auth + discovery file** (done — `server/auth.rs`, `disk/device_api.rs`, `app/run.rs`)**.**
 Every TCP request, including `/v0.2/health` and the `/v0.2/events` SSE stream,
 must carry `Authorization: Bearer <token>`; otherwise the agent returns 401 with
 `WWW-Authenticate: Bearer`. The check runs after the loopback check (403) and
@@ -211,7 +211,7 @@ Administrators, SYSTEM, and the service account can read the file on Windows.
   `tcp::serve` takes the token and only enforces it. Rationale: startup already
   removes stale discovery files in `app/run.rs`, so writing the file after bind
   and removing it after the TCP server stops (via the shutdown manager) keeps
-  the whole lifecycle in one place. The file I/O lives in `disk::discovery`,
+  the whole lifecycle in one place. The file I/O lives in `disk::device_api`,
   which takes the token as a plain string so `disk` does not depend on
   `server`.
 - 2026-09-30: The discovery file mode is `0o640`. Rationale: it matches the

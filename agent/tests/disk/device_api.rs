@@ -1,6 +1,6 @@
 // internal crates
 use crate::test_utils::filesys::dirs as test_dirs;
-use miru_agent::disk::{discovery, DiskErr};
+use miru_agent::disk::{device_api, DiskErr};
 use miru_agent::filesys::{self, files, PathExt, WriteOptions};
 
 // external crates
@@ -19,11 +19,11 @@ pub mod write {
         let file = discovery_file(&dir);
         let token = "test-token";
 
-        discovery::write(&file, 6478, token).await.unwrap();
+        device_api::write(&file, 6478, token).await.unwrap();
         let value: Value = files::read_json(&file).await.unwrap();
         assert_eq!(value, json!({"port": 6478, "token": token}));
 
-        discovery::remove(&file).await.unwrap();
+        device_api::remove(&file).await.unwrap();
         assert!(!file.exists());
     }
 
@@ -36,7 +36,7 @@ pub mod write {
             .unwrap();
         let token = "test-token";
 
-        discovery::write(&file, 1234, token).await.unwrap();
+        device_api::write(&file, 1234, token).await.unwrap();
         let value: Value = files::read_json(&file).await.unwrap();
         assert_eq!(value, json!({"port": 1234, "token": token}));
 
@@ -57,7 +57,7 @@ pub mod write {
         let file = discovery_file(&dir);
         let token = "test-token";
 
-        discovery::write(&file, 6478, token).await.unwrap();
+        device_api::write(&file, 6478, token).await.unwrap();
         let mode = std::fs::metadata(file.path()).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o640);
     }
@@ -69,7 +69,7 @@ pub mod write {
         std::fs::write(file.parent().unwrap().path(), b"x").unwrap();
         let token = "test-token";
 
-        let result = discovery::write(&file, 6478, token).await;
+        let result = device_api::write(&file, 6478, token).await;
         assert!(
             matches!(result, Err(DiskErr::FileSysErr(_))),
             "expected FileSysErr, got {result:?}"
@@ -85,7 +85,7 @@ pub mod remove {
         let dir = test_dirs::temp("discovery_remove_missing_is_ok").unwrap();
         let file = discovery_file(&dir);
 
-        discovery::remove(&file).await.unwrap();
+        device_api::remove(&file).await.unwrap();
         assert!(!file.exists());
     }
 
@@ -95,7 +95,7 @@ pub mod remove {
         let file = discovery_file(&dir);
         std::fs::create_dir_all(file.path()).unwrap();
 
-        let result = discovery::remove(&file).await;
+        let result = device_api::remove(&file).await;
         assert!(
             matches!(result, Err(DiskErr::FileSysErr(_))),
             "expected FileSysErr, got {result:?}"
@@ -132,11 +132,11 @@ pub mod windows_sharing {
         let dir = test_dirs::temp("discovery_write_waits_out_reader").unwrap();
         let file = discovery_file(&dir);
         let old = "old-token";
-        discovery::write(&file, 1234, old).await.unwrap();
+        device_api::write(&file, 1234, old).await.unwrap();
 
         let reader = hold_open(&file, Duration::from_millis(150));
         let token = "test-token";
-        discovery::write(&file, 6478, token).await.unwrap();
+        device_api::write(&file, 6478, token).await.unwrap();
         reader.join().unwrap();
 
         let value: Value = files::read_json(&file).await.unwrap();
@@ -148,10 +148,10 @@ pub mod windows_sharing {
         let dir = test_dirs::temp("discovery_remove_waits_out_reader").unwrap();
         let file = discovery_file(&dir);
         let token = "test-token";
-        discovery::write(&file, 6478, token).await.unwrap();
+        device_api::write(&file, 6478, token).await.unwrap();
 
         let reader = hold_open(&file, Duration::from_millis(150));
-        discovery::remove(&file).await.unwrap();
+        device_api::remove(&file).await.unwrap();
         reader.join().unwrap();
 
         assert!(!file.exists());

@@ -38,13 +38,9 @@ fn no_proxy_client() -> reqwest::Client {
 }
 
 async fn write_stale_discovery_file(layout: &Layout) {
-    files::write_string(
-        &layout.device_api_discovery(),
-        "stale",
-        WriteOptions::default(),
-    )
-    .await
-    .unwrap();
+    files::write_string(&layout.device_api(), "stale", WriteOptions::default())
+        .await
+        .unwrap();
 }
 
 async fn prepare_valid_server_storage(dir: filesys::Dir) {
@@ -93,7 +89,7 @@ async fn invalid_app_state_initialization() {
     .unwrap();
 
     // the stale file goes before the failing init step
-    assert!(!layout.device_api_discovery().exists());
+    assert!(!layout.device_api().exists());
 }
 
 #[serial]
@@ -175,7 +171,7 @@ async fn tcp_port_in_use_does_not_abort_startup() {
     .unwrap();
 
     // no server wrote a fresh file, so the stale one stays removed
-    assert!(!layout.device_api_discovery().exists());
+    assert!(!layout.device_api().exists());
 }
 
 #[serial]
@@ -185,7 +181,7 @@ async fn discovery_write_failure_does_not_abort_startup() {
     prepare_valid_server_storage(dir.to_dir()).await;
     let layout = Layout::new(dir.to_dir());
     // a file where the discovery directory should be makes the write fail
-    let parent = layout.device_api_discovery().parent().unwrap();
+    let parent = layout.device_api().parent().unwrap();
     files::write_string(
         &filesys::File::new(parent.path().clone()),
         "x",
@@ -232,7 +228,7 @@ async fn tcp_requires_bearer_and_cleans_up_discovery_file() {
     let dir = test_dirs::temp("testing").unwrap();
     prepare_valid_server_storage(dir.to_dir()).await;
     let layout = Layout::new(dir.to_dir());
-    let discovery_file = layout.device_api_discovery();
+    let discovery_file = layout.device_api();
     let options = AppOptions {
         storage: StorageOptions {
             layout,
@@ -328,7 +324,7 @@ async fn stale_discovery_file_removed_when_tcp_disabled() {
     .await
     .unwrap();
 
-    assert!(!layout.device_api_discovery().exists());
+    assert!(!layout.device_api().exists());
 }
 
 #[serial]

@@ -98,7 +98,7 @@ impl Layout {
     /// clients read it without a grant on the private data root. On Windows
     /// it is `device-api/device-api.json` under the data root, the directory
     /// the installer ACLs for Miru Clients.
-    pub fn device_api_discovery(&self) -> filesys::File {
+    pub fn device_api(&self) -> filesys::File {
         #[cfg(unix)]
         {
             self.filesystem_root

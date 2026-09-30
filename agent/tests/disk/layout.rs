@@ -174,9 +174,9 @@ pub mod storage_layout {
     }
 
     #[test]
-    fn device_api_discovery() {
+    fn device_api() {
         let layout = Layout::default();
-        let file = layout.device_api_discovery();
+        let file = layout.device_api();
         #[cfg(unix)]
         let expected = PathBuf::from("/run/miru/device-api.json");
         #[cfg(windows)]

@@ -171,7 +171,7 @@ async fn init_optional_services(
 // a discovery file left by a crash or a forced exit would point clients at a
 // dead port with a stale token; the tcp server writes a fresh one when it starts
 async fn remove_stale_discovery_file(layout: &Layout) {
-    if let Err(e) = disk::discovery::remove(&layout.device_api_discovery()).await {
+    if let Err(e) = disk::device_api::remove(&layout.device_api()).await {
         tracing::warn!("Failed to remove stale discovery file: {e}");
     }
 }
@@ -501,8 +501,8 @@ async fn start_tcp_server(
     let listener = tcp::bind(options.server.tcp_port).await?;
     let port = tcp::local_port(&listener)?;
     let token = BearerToken::generate()?;
-    let discovery_file = options.storage.layout.device_api_discovery();
-    disk::discovery::write(&discovery_file, port, token.expose()).await?;
+    let discovery_file = options.storage.layout.device_api();
+    disk::device_api::write(&discovery_file, port, token.expose()).await?;
 
     let mut shutdown_rx = shutdown_tx.subscribe();
     let handle = tcp::serve(listener, port, server_state, Arc::new(token), async move {
@@ -680,7 +680,7 @@ impl ShutdownManager {
         let tcp_handle = self.tcp_server_handle.take();
         shutdown_server(tcp_handle, "tcp", &mut first_err).await;
         if let Some(file) = self.tcp_discovery_file.take() {
-            if let Err(e) = disk::discovery::remove(&file).await {
+            if let Err(e) = disk::device_api::remove(&file).await {
                 tracing::warn!("Failed to remove discovery file: {e}");
             }
         }
