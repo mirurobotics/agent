@@ -43,6 +43,7 @@ function Initialize-IntegrationPaths {
         $script:authRoot,
         $script:tmpRoot
     )
+    $script:installerSentinelDirs = @($script:logsRoot, $script:authRoot, $script:tmpRoot | ForEach-Object { Join-Path $_ $MsiSentinelName })
     $script:markerPath = Join-Path $script:programDataRoot "rollback-payload.txt"
     $script:customerOwnedFiles = @(
         (New-CustomerOwnedFile (Join-Path $script:programDataRoot `

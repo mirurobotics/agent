@@ -25,6 +25,9 @@ $MsiExpectedDirectories = @(
     @("MiruAuthDir", "{A2AE361A-41E6-427A-AF4C-ACCEE7F451F9}", "MIRUAUTH", "MIRUDATA", "auth"),
     @("MiruTmpDir", "{D654A9BF-2860-44FA-8FFB-A8E36986197B}", "MIRUTMP", "MIRUDATA", "tmp")
 )
+$MsiSentinelName = "installer-sentinel"
+$MsiSentinelSddl = "O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)"
+$MsiSentinelDirectoryIds = @("MIRULOGSSENTINEL", "MIRUAUTHSENTINEL", "MIRUTMPSENTINEL")
 $MsiFixtureProductCodes = @(
     "{B7AFDD4E-E6DB-4ED9-8C34-F318A04486B1}",
     "{3CE73709-ECE4-48A5-B7E7-1AC13C5EF30A}",
@@ -288,5 +291,8 @@ Export-ModuleMember -Function @(
     "MsiServiceDirectoryRights",
     "MsiTrustedSids",
     "MsiExpectedDirectories",
+    "MsiSentinelName",
+    "MsiSentinelSddl",
+    "MsiSentinelDirectoryIds",
     "MsiFixtureProductCodes"
 )
