@@ -186,7 +186,9 @@ fn launch_agent(console: bool) {
         return;
     }
     let _ = console; // unix: the flag is a no-op (keeps clippy -D warnings quiet)
-    runtime().block_on(run_agent_in_foreground());
+    if runtime().block_on(run_agent_in_foreground()) == RunOutcome::Failed {
+        std::process::exit(1);
+    }
 }
 
 /// Foreground path: trip a shared [`Latch`] from OS signals so every startup
