@@ -1,9 +1,10 @@
 // internal crates
 use super::shared::{
-    mock_failing_reprovision, mock_ok_reprovision, validate_storage, Env, StorageSnapshot,
+    assert_temp_dir_cleaned, mock_failing_reprovision, mock_ok_reprovision, validate_storage, Env,
+    StorageSnapshot,
 };
 use crate::mocks::http_client as mock;
-use miru_agent::filesys::{files, PathExt};
+use miru_agent::filesys::files;
 use miru_agent::provisioning::{errors::*, reprovision};
 
 pub mod reprovision_fn {
@@ -37,7 +38,7 @@ pub mod reprovision_fn {
 
         assert!(matches!(result, Err(ProvisionErr::HTTPErr(_))));
         snapshot.assert_unchanged(&env.layout).await;
-        assert!(!env.layout.temp_dir().exists(), "temp dir not cleaned");
+        assert_temp_dir_cleaned(&env.layout);
 
         env.cleanup().await;
     }
