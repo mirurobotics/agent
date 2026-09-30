@@ -111,4 +111,61 @@ pub mod serve {
         let _ = fixture.shutdown_tx.send(());
         handle.await.unwrap().unwrap();
     }
+
+    async fn health_status_with_host(name: &str, host: impl FnOnce(u16) -> String) -> u16 {
+        let fixture = Fixture::new(name).await;
+        let listener = tcp::bind(0).await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let mut shutdown_rx = fixture.shutdown_tx.subscribe();
+        let handle = tcp::serve(listener, fixture.state.clone(), async move {
+            let _ = shutdown_rx.recv().await;
+        });
+
+        let url = format!("http://{addr}/{}/health", ApiVersion::API_VERSION);
+        let response = no_proxy_client()
+            .get(&url)
+            .header(reqwest::header::HOST, host(addr.port()))
+            .send()
+            .await
+            .unwrap();
+
+        let _ = fixture.shutdown_tx.send(());
+        handle.await.unwrap().unwrap();
+        response.status().as_u16()
+    }
+
+    #[tokio::test]
+    async fn accepts_localhost_host() {
+        let status = health_status_with_host("tcp_accepts_localhost_host", |port| {
+            format!("localhost:{port}")
+        })
+        .await;
+        assert_eq!(status, 200);
+    }
+
+    #[tokio::test]
+    async fn rejects_foreign_host() {
+        let status = health_status_with_host("tcp_rejects_foreign_host", |port| {
+            format!("attacker.example:{port}")
+        })
+        .await;
+        assert_eq!(status, 403);
+    }
+
+    #[tokio::test]
+    async fn rejects_loopback_host_on_another_port() {
+        let status = health_status_with_host("tcp_rejects_loopback_host_on_another_port", |port| {
+            format!("127.0.0.1:{}", port.wrapping_add(1))
+        })
+        .await;
+        assert_eq!(status, 403);
+    }
+
+    #[tokio::test]
+    async fn rejects_host_without_port() {
+        let status =
+            health_status_with_host("tcp_rejects_host_without_port", |_| "localhost".to_string())
+                .await;
+        assert_eq!(status, 403);
+    }
 }

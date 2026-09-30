@@ -437,6 +437,12 @@ async fn init_local_api_servers(
         return Ok(());
     };
     info!("Initializing tcp server...");
+    if !options.lifecycle.is_persistent {
+        // socket activation restarts the agent only for unix socket clients
+        tracing::warn!(
+            "tcp clients get connection refused after an idle exit; set is_persistent to keep the tcp listener available"
+        );
+    }
     let listener = tcp::bind(port).await?;
     let mut shutdown_rx = shutdown_tx.subscribe();
     let handle = tcp::serve(listener, server_state, async move {

@@ -43,7 +43,7 @@ All source lives under `agent/src/`. The binary entry point is `main.rs`.
 
 `mqtt` — rumqttc-based MQTT subscriber. Listens for real-time events from the backend (e.g., new deployment available) so the agent can react immediately instead of waiting for the next poll.
 
-`server` — axum HTTP server exposing device state, health, and action endpoints for on-device applications, the CLI, and the frontend. One router (`server/routes.rs`) is served over two transports: a Unix socket (`/run/miru/miru.sock`, `server/unix.rs`, unix only) and, when `settings.socket_server_tcp_port` is set, IPv4 loopback TCP (`127.0.0.1:<port>`, `server/tcp.rs`, all platforms; port `0` is OS-assigned). Nothing is ever bound on a non-loopback interface. Route handlers live in `server/handlers.rs`.
+`server` — axum HTTP server exposing device state, health, and action endpoints for on-device applications, the CLI, and the frontend. One router (`server/routes.rs`) is served over two transports: a Unix socket (`/run/miru/miru.sock`, `server/unix.rs`, unix only) and, when `settings.socket_server_tcp_port` is set, IPv4 loopback TCP (`127.0.0.1:<port>`, `server/tcp.rs`, all platforms; port `0` is OS-assigned). Nothing is ever bound on a non-loopback interface. The TCP transport returns 403 unless the request host is `127.0.0.1:<port>` or `localhost:<port>`, which blocks DNS rebinding from browsers on the device. Only the Unix socket is socket-activated, so in non-persistent mode TCP clients get connection refused after an idle exit (the agent warns at startup). Route handlers live in `server/handlers.rs`.
 
 ### Security
 
