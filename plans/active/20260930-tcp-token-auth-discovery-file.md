@@ -21,11 +21,11 @@ Out of scope (follow-ups): `python-device-sdk` (TCP transport, discovery-file re
 
 ## Progress
 
-- [ ] M0 Activate plan (move to `plans/active/`; `docs(plans):` commit)
-- [ ] M1 `server/auth.rs` (Token, `check_bearer`), `GenerateTokenErr`, Authorization redaction in `routes.rs` and its log-capture test, unit tests
-- [ ] M2 `server/discovery.rs`, `Layout::device_api_dir`/`device_api_discovery`, `tcp::serve` wiring and its `init_tcp_server` call site, integration tests
-- [ ] M3 `app/run.rs` stale-file removal and run-level tests
-- [ ] M4 Docs: `ARCHITECTURE.md`, doc comments, roadmap PR 12 marking + decision log
+- [x] M0 Activate plan (move to `plans/active/`; `docs(plans):` commit)
+- [x] M1 `server/auth.rs` (Token, `check_bearer`), `GenerateTokenErr`, Authorization redaction in `routes.rs` and its log-capture test, unit tests
+- [x] M2 `server/discovery.rs`, `Layout::device_api_dir`/`device_api_discovery`, `tcp::serve` wiring and its `init_tcp_server` call site, integration tests
+- [x] M3 `app/run.rs` stale-file removal and run-level tests
+- [x] M4 Docs: `ARCHITECTURE.md`, doc comments, roadmap PR 12 marking + decision log
 - [ ] M5 Preflight CLEAN (draft PR open, CI green incl. `windows-check`); then plan moved to `plans/completed/` with this box ticked (green SHA) and Outcomes filled, and CI re-confirmed green on that commit
 
 ## Surprises & Discoveries
@@ -101,7 +101,7 @@ M1 (after edits):
     ./scripts/lint.sh
     git add -A && git commit -m "feat(server): add bearer token auth middleware"
 
-Expected: `server::auth` reports `test result: ok. 11 passed` (the tests listed under Validation); `server::tcp::redaction` reports `test result: ok. 1 passed`. Run `./scripts/lint.sh` before every milestone commit and re-stage what it reformats; every milestone commit must be lint-clean.
+Expected: `server::auth` reports `test result: ok. 12 passed` (the tests listed under Validation); `server::tcp::redaction` reports `test result: ok. 1 passed`. Run `./scripts/lint.sh` before every milestone commit and re-stage what it reformats; every milestone commit must be lint-clean.
 
 M2:
 
@@ -111,7 +111,7 @@ M2:
     ./scripts/lint.sh
     git add -A && git commit -m "feat(server): require bearer token and write discovery file on tcp"
 
-Expected: each reports `test result: ok.`; `server::tcp` includes the new `serve::*` tests listed under Validation (e.g. `serve::rejects_missing_token`, `serve::discovery_write_failure_errors`); `server::discovery` reports `2 passed`; `disk::layout` includes `device_api_dir` and `device_api_discovery`.
+Expected: each reports `test result: ok.`; `server::tcp` includes the new `serve::*` tests listed under Validation (e.g. `serve::rejects_missing_token`, `serve::discovery_write_failure_errors`); `server::discovery` reports `6 passed` (5 on Windows); `disk::layout` includes `device_api_dir` and `device_api_discovery`.
 
 M3:
 
