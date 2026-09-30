@@ -14,6 +14,11 @@ pub mod unix;
 pub use self::errors::ServerErr;
 pub use self::state::State;
 
+/// Whether the TCP server is on when settings don't say. It is on for Windows,
+/// where it is the only transport, and off elsewhere, where the Unix socket
+/// restricts access to the `miru` group and the TCP listener has no auth yet.
+pub const DEFAULT_ENABLE_TCP_SERVER: bool = cfg!(windows);
+
 /// Loopback port used when the TCP server is enabled and no other port is set.
 /// 6478 is "MIRU" on a phone keypad (M=6, I=4, R=7, U=8).
 pub const DEFAULT_TCP_PORT: u16 = 6478;

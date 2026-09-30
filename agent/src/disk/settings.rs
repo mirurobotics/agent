@@ -2,7 +2,7 @@
 use crate::deserialize_warn;
 use crate::logs::LogLevel;
 use crate::network::{BackendHost, MqttHost};
-use crate::server::DEFAULT_TCP_PORT;
+use crate::server::{DEFAULT_ENABLE_TCP_SERVER, DEFAULT_TCP_PORT};
 
 // external crates
 use serde::{Deserialize, Serialize};
@@ -31,7 +31,7 @@ impl Default for Settings {
             mqtt_broker: MQTTBroker::default(),
             is_persistent: true,
             enable_socket_server: true,
-            enable_tcp_server: true,
+            enable_tcp_server: DEFAULT_ENABLE_TCP_SERVER,
             tcp_server: TCPServer::default(),
             enable_mqtt_worker: true,
             enable_poller: true,

@@ -139,12 +139,15 @@ maintain its WinGet manifest.
 ### Phase 2 — local device API (gated on customer need)
 
 **PR 11 — TCP listener** (done — `server/tcp.rs`)**.** Loopback TCP transport that
-binds `127.0.0.1:<port>` when `settings.socket_server_tcp_port` is set (`0` =
-OS-assigned, logged at startup). Shipped for all platforms rather than
-`cfg(windows)` only: on Linux it runs alongside the Unix socket + `LISTEN_FDS`
-path, which is unchanged; on Windows it is the only transport, and the
-warn-and-skip branch remains only when no port is configured. Both transports
-serve the same `routes::app()` router with the same middleware.
+binds `127.0.0.1:<port>` when `settings.enable_tcp_server` is set. The port is
+`settings.tcp_server.port` (default 6478; `0` = OS-assigned, logged at startup).
+`enable_tcp_server` defaults to on for Windows and off elsewhere. Shipped for
+all platforms rather than `cfg(windows)` only: on Linux it runs alongside the
+Unix socket + `LISTEN_FDS` path, which is unchanged; on Windows it is the only
+transport, and startup warns when it is turned off. A failed bind logs an error
+and the agent keeps running without the listener. Both transports serve the
+same `routes::router()` with the same middleware, and the TCP transport
+rejects requests whose Host or Origin isn't its loopback address.
 
 **PR 12 — token auth + discovery file.** Token generation at startup, atomic
 `device-api.json` write into the ACL'd dir, Bearer middleware (constant-time compare)
@@ -153,8 +156,8 @@ on all routes, SSE verified over TCP. Python SDK work happens in
 
 ## Decision log
 
-- 2026-09-21: PR 11's TCP transport is cross-platform and opt-in via
-  `socket_server_tcp_port` (default `None`), not a `cfg(windows)` replacement
+- 2026-09-21: PR 11's TCP transport is cross-platform and opt-in on Linux via
+  `enable_tcp_server` (default off except on Windows), not a `cfg(windows)` replacement
   for the Unix socket. Rationale: Linux users get the same loopback HTTP
   transport for tooling that cannot speak Unix sockets, the transport gets
   exercised by the Linux test suite and coverage gate rather than only on the

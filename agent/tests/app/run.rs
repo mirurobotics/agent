@@ -8,7 +8,7 @@ use miru_agent::app::run::run;
 use miru_agent::disk::Layout;
 use miru_agent::filesys::{self, files, WriteOptions};
 use miru_agent::models::Device;
-use miru_agent::server::Options;
+use miru_agent::server::{tcp, Options};
 
 // external crates
 use serial_test::serial;
@@ -102,6 +102,45 @@ async fn max_runtime_reached() {
 
     // the run self-terminates via max_runtime (~100ms); the outer
     // timeout is only hang protection
+    tokio::time::timeout(HANG_GUARD, async move {
+        run(options, async {
+            let _ = tokio::signal::ctrl_c().await;
+        })
+        .await
+        .unwrap();
+    })
+    .await
+    .unwrap();
+}
+
+#[serial]
+#[tokio::test]
+async fn tcp_port_in_use_does_not_abort_startup() {
+    let dir = test_dirs::temp("testing").unwrap();
+    prepare_valid_server_storage(dir.to_dir()).await;
+    let taken = tcp::bind(0).await.unwrap();
+    let options = AppOptions {
+        storage: StorageOptions {
+            layout: Layout::new(dir.to_dir()),
+            ..Default::default()
+        },
+        lifecycle: LifecycleOptions {
+            is_persistent: false,
+            max_runtime: Duration::from_millis(100),
+            idle_timeout: NEVER,
+            max_shutdown_delay: SHUTDOWN_WATCHDOG,
+            ..Default::default()
+        },
+        enable_tcp_server: true,
+        server: Options {
+            socket_file: filesys::File::new(PathBuf::from("/tmp").join("miru.sock")),
+            tcp_port: taken.local_addr().unwrap().port(),
+        },
+        ..Default::default()
+    };
+
+    // the bind fails, the agent keeps running, and max_runtime (~100ms)
+    // ends the run cleanly
     tokio::time::timeout(HANG_GUARD, async move {
         run(options, async {
             let _ = tokio::signal::ctrl_c().await;

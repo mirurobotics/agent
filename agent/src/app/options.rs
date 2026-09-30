@@ -86,7 +86,7 @@ impl Default for AppOptions {
             backend_host: BackendHost::default(),
 
             enable_socket_server: true,
-            enable_tcp_server: true,
+            enable_tcp_server: server::DEFAULT_ENABLE_TCP_SERVER,
             server: server::Options::default(),
 
             enable_mqtt_worker: true,

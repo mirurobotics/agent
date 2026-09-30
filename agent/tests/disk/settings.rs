@@ -2,6 +2,7 @@
 use miru_agent::disk::{Backend, MQTTBroker, Settings, TCPServer};
 use miru_agent::logs::LogLevel;
 use miru_agent::network::{BackendHost, MqttHost};
+use miru_agent::server::DEFAULT_TCP_PORT;
 
 // external crates
 use serde_json::json;
@@ -70,6 +71,13 @@ fn deserialize_settings() {
 
     // invalid JSON
     assert!(serde_json::from_str::<Settings>("invalid-json").is_err());
+}
+
+#[test]
+fn tcp_server_enabled_by_default_only_on_windows() {
+    let settings = Settings::default();
+    assert_eq!(settings.enable_tcp_server, cfg!(windows));
+    assert_eq!(settings.tcp_server.port, DEFAULT_TCP_PORT);
 }
 
 #[test]

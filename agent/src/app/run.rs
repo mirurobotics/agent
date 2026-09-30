@@ -466,7 +466,14 @@ async fn init_tcp_server(
             "tcp clients get connection refused after an idle exit; set is_persistent to keep the tcp listener available"
         );
     }
-    let listener = tcp::bind(options.server.tcp_port).await?;
+    // the tcp listener is optional, so a taken port leaves the agent running
+    let listener = match tcp::bind(options.server.tcp_port).await {
+        Ok(listener) => listener,
+        Err(e) => {
+            error!("Failed to start tcp server, continuing without it: {e}");
+            return Ok(());
+        }
+    };
     let mut shutdown_rx = shutdown_tx.subscribe();
     let handle = tcp::serve(listener, server_state, async move {
         let _ = shutdown_rx.recv().await;
