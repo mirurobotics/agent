@@ -163,9 +163,13 @@ compares in constant time. The agent generates a fresh 32-byte token
 root on Windows (the file inherits the `device-api` directory ACL). The file
 is removed after graceful shutdown and any stale copy is removed at startup. A token or discovery-file failure is logged and the agent runs
 without TCP. Authorization headers are marked sensitive before request tracing,
-so tokens never reach logs. The Unix socket stays unauthenticated. Python SDK
-work happens in `python-device-sdk` (transport + discovery file +
-re-read-on-401). The MSI follow-up (PR 9) adds the `Miru Clients` group and an
+so tokens never reach logs. The Unix socket stays unauthenticated. On Windows
+the discovery write and removal retry for up to ~0.5s, because a reader holding
+the file open without delete sharing (Python's `open`) blocks both. Python SDK
+work happens in `python-device-sdk` (transport + discovery file). The SDK must
+close the file right after reading, treat a missing file or a refused
+connection as "not serving" and retry by re-reading the file, and re-read the
+file on a 401. The MSI follow-up (PR 9) adds the `Miru Clients` group and an
 inheritable read ACE on `ProgramData\Miru\device-api`; until then only
 Administrators, SYSTEM, and the service account can read the file on Windows.
 
@@ -227,6 +231,17 @@ Administrators, SYSTEM, and the service account can read the file on Windows.
   a customer needs it).
 - **rumqttc upstream stall**: no current exposure (native-tls), monitored; triggers in
   Decisions.
+- **Local API port squatting after a crash**: a crash leaves a stale discovery
+  file until the next start. In that gap another local process can bind the
+  port; a client using the stale file sends an already-rotated token (useless)
+  but trusts the squatter's responses. Accepted for now, since squatting needs
+  local code execution. Stronger options if needed: clients reject a file
+  older than the agent's start, or the file carries a second secret the server
+  proves it knows.
+- **Windows port hijacking while the agent holds the port**: Windows blocks
+  cross-account `SO_REUSEADDR` binds by default, but the agent does not set
+  `SO_EXCLUSIVEADDRUSE`. Confirm the default protection (or set the option)
+  before the first Windows release.
 
 ## Non-goals
 

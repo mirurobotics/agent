@@ -112,3 +112,61 @@ pub mod remove {
         );
     }
 }
+
+#[cfg(windows)]
+pub mod windows_sharing {
+    use super::*;
+
+    use std::os::windows::fs::OpenOptionsExt;
+    use std::time::Duration;
+
+    // FILE_SHARE_READ without FILE_SHARE_DELETE, as Python's `open` does
+    const FILE_SHARE_READ: u32 = 0x1;
+
+    /// Open the file the way a reader without delete sharing does, and close
+    /// it after `hold` on another thread.
+    fn hold_open(file: &filesys::File, hold: Duration) -> std::thread::JoinHandle<()> {
+        let handle = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ)
+            .open(file.path())
+            .unwrap();
+        std::thread::spawn(move || {
+            std::thread::sleep(hold);
+            drop(handle);
+        })
+    }
+
+    #[tokio::test]
+    async fn write_waits_out_a_reader_without_delete_sharing() {
+        let dir = test_dirs::temp("discovery_write_waits_out_reader").unwrap();
+        let file = discovery_file(&dir);
+        let old = BearerToken::generate().unwrap();
+        discovery::write(&file, 1234, &old).await.unwrap();
+
+        let reader = hold_open(&file, Duration::from_millis(150));
+        let token = BearerToken::generate().unwrap();
+        discovery::write(&file, 6478, &token).await.unwrap();
+        reader.join().unwrap();
+
+        let value: Value = files::read_json(&file).await.unwrap();
+        assert_eq!(
+            value,
+            json!({"schema_version": SCHEMA_VERSION, "port": 6478, "token": token.expose()})
+        );
+    }
+
+    #[tokio::test]
+    async fn remove_waits_out_a_reader_without_delete_sharing() {
+        let dir = test_dirs::temp("discovery_remove_waits_out_reader").unwrap();
+        let file = discovery_file(&dir);
+        let token = BearerToken::generate().unwrap();
+        discovery::write(&file, 6478, &token).await.unwrap();
+
+        let reader = hold_open(&file, Duration::from_millis(150));
+        discovery::remove(&file).await.unwrap();
+        reader.join().unwrap();
+
+        assert!(!file.exists());
+    }
+}
