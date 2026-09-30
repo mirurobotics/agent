@@ -40,6 +40,11 @@ impl BearerToken {
     pub fn expose(&self) -> &str {
         self.0.expose_secret()
     }
+
+    /// The token still wrapped, for code that stores it without reading it.
+    pub fn secret(&self) -> &SecretString {
+        &self.0
+    }
 }
 
 /// Reject requests without `Authorization: Bearer <token>` with 401 and

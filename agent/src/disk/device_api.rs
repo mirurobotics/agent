@@ -18,6 +18,7 @@ use crate::disk::errors::DiskErr;
 use crate::filesys::{self, files, Atomic, FileSysErr, Overwrite, WriteOptions};
 
 // external crates
+use secrecy::{ExposeSecret, SecretString};
 use serde::Serialize;
 use tracing::debug;
 
@@ -38,8 +39,11 @@ struct Discovery<'a> {
 /// Atomically write the TCP port and bearer token for local device API
 /// clients. On Unix the file mode is 0640 (owner read-write, group read); on
 /// Windows the file inherits the `device-api` directory ACL.
-pub async fn write(file: &filesys::File, port: u16, token: &str) -> Result<(), DiskErr> {
-    let discovery = Discovery { port, token };
+pub async fn write(file: &filesys::File, port: u16, token: &SecretString) -> Result<(), DiskErr> {
+    let discovery = Discovery {
+        port,
+        token: token.expose_secret(),
+    };
     let opts = WriteOptions {
         overwrite: Overwrite::Allow,
         atomic: Atomic::Yes,

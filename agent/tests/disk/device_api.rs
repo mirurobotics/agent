@@ -4,6 +4,7 @@ use miru_agent::disk::{device_api, DiskErr};
 use miru_agent::filesys::{self, files, PathExt, WriteOptions};
 
 // external crates
+use secrecy::{ExposeSecret, SecretString};
 use serde_json::{json, Value};
 
 fn discovery_file(dir: &test_dirs::TempDir) -> filesys::File {
@@ -17,11 +18,11 @@ pub mod write {
     async fn write_then_remove() {
         let dir = test_dirs::temp("discovery_write_then_remove").unwrap();
         let file = discovery_file(&dir);
-        let token = "test-token";
+        let token = SecretString::from("test-token");
 
-        device_api::write(&file, 6478, token).await.unwrap();
+        device_api::write(&file, 6478, &token).await.unwrap();
         let value: Value = files::read_json(&file).await.unwrap();
-        assert_eq!(value, json!({"port": 6478, "token": token}));
+        assert_eq!(value, json!({"port": 6478, "token": token.expose_secret()}));
 
         device_api::remove(&file).await.unwrap();
         assert!(!file.exists());
@@ -34,11 +35,11 @@ pub mod write {
         files::write_string(&file, "junk", WriteOptions::default())
             .await
             .unwrap();
-        let token = "test-token";
+        let token = SecretString::from("test-token");
 
-        device_api::write(&file, 1234, token).await.unwrap();
+        device_api::write(&file, 1234, &token).await.unwrap();
         let value: Value = files::read_json(&file).await.unwrap();
-        assert_eq!(value, json!({"port": 1234, "token": token}));
+        assert_eq!(value, json!({"port": 1234, "token": token.expose_secret()}));
 
         // the atomic write leaves no temp files behind
         let names: Vec<String> = std::fs::read_dir(file.parent().unwrap().path())
@@ -55,9 +56,9 @@ pub mod write {
 
         let dir = test_dirs::temp("discovery_sets_mode_0640").unwrap();
         let file = discovery_file(&dir);
-        let token = "test-token";
+        let token = SecretString::from("test-token");
 
-        device_api::write(&file, 6478, token).await.unwrap();
+        device_api::write(&file, 6478, &token).await.unwrap();
         let mode = std::fs::metadata(file.path()).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o640);
     }
@@ -67,9 +68,9 @@ pub mod write {
         let dir = test_dirs::temp("discovery_fails_when_parent_is_a_file").unwrap();
         let file = discovery_file(&dir);
         std::fs::write(file.parent().unwrap().path(), b"x").unwrap();
-        let token = "test-token";
+        let token = SecretString::from("test-token");
 
-        let result = device_api::write(&file, 6478, token).await;
+        let result = device_api::write(&file, 6478, &token).await;
         assert!(
             matches!(result, Err(DiskErr::FileSysErr(_))),
             "expected FileSysErr, got {result:?}"
@@ -131,24 +132,24 @@ pub mod windows_sharing {
     async fn write_waits_out_a_reader_without_delete_sharing() {
         let dir = test_dirs::temp("discovery_write_waits_out_reader").unwrap();
         let file = discovery_file(&dir);
-        let old = "old-token";
-        device_api::write(&file, 1234, old).await.unwrap();
+        let old = SecretString::from("old-token");
+        device_api::write(&file, 1234, &old).await.unwrap();
 
         let reader = hold_open(&file, Duration::from_millis(150));
-        let token = "test-token";
-        device_api::write(&file, 6478, token).await.unwrap();
+        let token = SecretString::from("test-token");
+        device_api::write(&file, 6478, &token).await.unwrap();
         reader.join().unwrap();
 
         let value: Value = files::read_json(&file).await.unwrap();
-        assert_eq!(value, json!({"port": 6478, "token": token}));
+        assert_eq!(value, json!({"port": 6478, "token": token.expose_secret()}));
     }
 
     #[tokio::test]
     async fn remove_waits_out_a_reader_without_delete_sharing() {
         let dir = test_dirs::temp("discovery_remove_waits_out_reader").unwrap();
         let file = discovery_file(&dir);
-        let token = "test-token";
-        device_api::write(&file, 6478, token).await.unwrap();
+        let token = SecretString::from("test-token");
+        device_api::write(&file, 6478, &token).await.unwrap();
 
         let reader = hold_open(&file, Duration::from_millis(150));
         device_api::remove(&file).await.unwrap();

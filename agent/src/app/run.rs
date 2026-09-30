@@ -502,7 +502,7 @@ async fn start_tcp_server(
     let port = tcp::local_port(&listener)?;
     let token = BearerToken::generate()?;
     let discovery_file = options.storage.layout.device_api();
-    disk::device_api::write(&discovery_file, port, token.expose()).await?;
+    disk::device_api::write(&discovery_file, port, token.secret()).await?;
 
     let mut shutdown_rx = shutdown_tx.subscribe();
     let handle = tcp::serve(listener, port, server_state, Arc::new(token), async move {
