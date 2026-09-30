@@ -1,7 +1,8 @@
 // internal crates
-use miru_agent::disk::{Backend, MQTTBroker, Settings};
+use miru_agent::disk::{Backend, MQTTBroker, Settings, TCPServer};
 use miru_agent::logs::LogLevel;
 use miru_agent::network::{BackendHost, MqttHost};
+use miru_agent::server::DEFAULT_TCP_PORT;
 
 // external crates
 use serde_json::json;
@@ -12,7 +13,8 @@ fn serialize_deserialize_settings() {
         log_level: LogLevel::Debug,
         is_persistent: false,
         enable_socket_server: false,
-        socket_server_tcp_port: Some(51823),
+        enable_tcp_server: true,
+        tcp_server: TCPServer { port: 51823 },
         enable_mqtt_worker: false,
         enable_poller: false,
         backend: Backend {
@@ -40,7 +42,8 @@ fn deserialize_settings() {
         },
         is_persistent: false,
         enable_socket_server: false,
-        socket_server_tcp_port: Some(51823),
+        enable_tcp_server: true,
+        tcp_server: TCPServer { port: 51823 },
         enable_mqtt_worker: false,
         enable_poller: false,
     };
@@ -50,7 +53,8 @@ fn deserialize_settings() {
         "mqtt_broker": settings.mqtt_broker,
         "is_persistent": settings.is_persistent,
         "enable_socket_server": settings.enable_socket_server,
-        "socket_server_tcp_port": settings.socket_server_tcp_port,
+        "enable_tcp_server": settings.enable_tcp_server,
+        "tcp_server": settings.tcp_server,
         "enable_mqtt_worker": settings.enable_mqtt_worker,
         "enable_poller": settings.enable_poller,
     });
@@ -65,12 +69,21 @@ fn deserialize_settings() {
     let deserialized = serde_json::from_value::<Settings>(valid_input).unwrap();
     assert_eq!(deserialized, settings);
 
-    // tcp port is opt-in: absent or null leaves it disabled
+    // a legacy port turns the tcp server on at that port
+    let deserialized = serde_json::from_value::<Settings>(json!({
+        "socket_server_tcp_port": 51823
+    }))
+    .unwrap();
+    assert!(deserialized.enable_tcp_server);
+    assert_eq!(deserialized.tcp_server.port, 51823);
+
+    // absent or null legacy port leaves the tcp server off at the default port
     let deserialized = serde_json::from_value::<Settings>(json!({
         "socket_server_tcp_port": null
     }))
     .unwrap();
-    assert_eq!(deserialized.socket_server_tcp_port, None);
+    assert!(!deserialized.enable_tcp_server);
+    assert_eq!(deserialized.tcp_server.port, DEFAULT_TCP_PORT);
 
     // invalid JSON
     assert!(serde_json::from_str::<Settings>("invalid-json").is_err());

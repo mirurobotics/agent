@@ -92,9 +92,10 @@ async fn max_runtime_reached() {
             max_shutdown_delay: SHUTDOWN_WATCHDOG,
             ..Default::default()
         },
+        enable_tcp_server: true,
         server: Options {
             socket_file: filesys::File::new(PathBuf::from("/tmp").join("miru.sock")),
-            tcp_port: Some(0),
+            tcp_port: 0,
         },
         ..Default::default()
     };

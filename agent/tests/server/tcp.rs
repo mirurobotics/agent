@@ -72,12 +72,19 @@ pub mod bind {
 
     #[tokio::test]
     async fn binds_requested_port() {
-        let probe = tcp::bind(0).await.unwrap();
-        let port = probe.local_addr().unwrap().port();
-        drop(probe);
+        // Another parallel test can bind the released port before we do.
+        for _ in 0..8 {
+            let probe = tcp::bind(0).await.unwrap();
+            let port = probe.local_addr().unwrap().port();
+            drop(probe);
 
-        let listener = tcp::bind(port).await.unwrap();
-        assert_eq!(listener.local_addr().unwrap().port(), port);
+            let Ok(listener) = tcp::bind(port).await else {
+                continue;
+            };
+            assert_eq!(listener.local_addr().unwrap().port(), port);
+            return;
+        }
+        panic!("could not rebind a port this process just released");
     }
 
     #[tokio::test]

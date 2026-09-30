@@ -2,6 +2,7 @@
 use crate::deserialize_warn;
 use crate::logs::LogLevel;
 use crate::network::{BackendHost, MqttHost};
+use crate::server::DEFAULT_TCP_PORT;
 
 // external crates
 use serde::{Deserialize, Serialize};
@@ -14,9 +15,11 @@ pub struct Settings {
     pub mqtt_broker: MQTTBroker,
     pub is_persistent: bool,
     pub enable_socket_server: bool,
-    /// Loopback TCP port for the local device API. `None` disables the TCP
-    /// transport (the unix socket is unaffected); `0` lets the OS assign a port.
-    pub socket_server_tcp_port: Option<u16>,
+    /// Loopback TCP listener for the local device API. Independent of the Unix
+    /// socket. Off unless set; a legacy `socket_server_tcp_port` value turns it
+    /// on at that port.
+    pub enable_tcp_server: bool,
+    pub tcp_server: TCPServer,
     pub enable_mqtt_worker: bool,
     pub enable_poller: bool,
 }
@@ -29,11 +32,26 @@ impl Default for Settings {
             mqtt_broker: MQTTBroker::default(),
             is_persistent: true,
             enable_socket_server: true,
-            socket_server_tcp_port: None,
+            enable_tcp_server: false,
+            tcp_server: TCPServer::default(),
             enable_mqtt_worker: true,
             enable_poller: true,
         }
     }
+}
+
+#[derive(Deserialize)]
+struct DeserializeSettings {
+    log_level: Option<LogLevel>,
+    backend: Option<Backend>,
+    mqtt_broker: Option<MQTTBroker>,
+    is_persistent: Option<bool>,
+    enable_socket_server: Option<bool>,
+    enable_tcp_server: Option<bool>,
+    tcp_server: Option<TCPServer>,
+    socket_server_tcp_port: Option<u16>,
+    enable_mqtt_worker: Option<bool>,
+    enable_poller: Option<bool>,
 }
 
 impl<'de> Deserialize<'de> for Settings {
@@ -41,18 +59,6 @@ impl<'de> Deserialize<'de> for Settings {
     where
         D: serde::Deserializer<'de>,
     {
-        #[derive(Deserialize)]
-        struct DeserializeSettings {
-            log_level: Option<LogLevel>,
-            backend: Option<Backend>,
-            mqtt_broker: Option<MQTTBroker>,
-            is_persistent: Option<bool>,
-            enable_socket_server: Option<bool>,
-            socket_server_tcp_port: Option<u16>,
-            enable_mqtt_worker: Option<bool>,
-            enable_poller: Option<bool>,
-        }
-
         let default = Settings::default();
 
         let result = match DeserializeSettings::deserialize(deserializer) {
@@ -83,14 +89,81 @@ impl<'de> Deserialize<'de> for Settings {
                     default.enable_socket_server
                 )
             }),
-            // absent means "no tcp transport", which is the default, so no warning
-            socket_server_tcp_port: result.socket_server_tcp_port,
+            enable_tcp_server: tcp_server_enabled(
+                result.enable_tcp_server,
+                result.tcp_server.is_some(),
+                result.socket_server_tcp_port,
+            ),
+            tcp_server: tcp_server_from(result.tcp_server, result.socket_server_tcp_port),
             enable_mqtt_worker: result.enable_mqtt_worker.unwrap_or_else(|| {
                 deserialize_warn!("settings", "enable_mqtt_worker", default.enable_mqtt_worker)
             }),
             enable_poller: result.enable_poller.unwrap_or_else(|| {
                 deserialize_warn!("settings", "enable_poller", default.enable_poller)
             }),
+        })
+    }
+}
+
+/// A missing `enable_tcp_server` stays off. A legacy `socket_server_tcp_port`
+/// with no `tcp_server` object is the old way to turn the listener on.
+fn tcp_server_enabled(
+    enable: Option<bool>,
+    tcp_server_present: bool,
+    legacy_port: Option<u16>,
+) -> bool {
+    match enable {
+        Some(enabled) => enabled,
+        None => !tcp_server_present && legacy_port.is_some(),
+    }
+}
+
+fn tcp_server_from(configured: Option<TCPServer>, legacy_port: Option<u16>) -> TCPServer {
+    if let Some(server) = configured {
+        return server;
+    }
+    match legacy_port {
+        Some(port) => TCPServer { port },
+        None => TCPServer::default(),
+    }
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+pub struct TCPServer {
+    /// Loopback TCP port. `0` lets the OS assign a port.
+    pub port: u16,
+}
+
+impl Default for TCPServer {
+    fn default() -> Self {
+        Self {
+            port: DEFAULT_TCP_PORT,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for TCPServer {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct DeserializeTCPServer {
+            port: Option<u16>,
+        }
+
+        let default = TCPServer::default();
+        let result = match DeserializeTCPServer::deserialize(deserializer) {
+            Ok(server) => server,
+            Err(e) => {
+                error!("Error deserializing tcp server: {}", e);
+                return Err(e);
+            }
+        };
+        Ok(TCPServer {
+            port: result
+                .port
+                .unwrap_or_else(|| deserialize_warn!("tcp_server", "port", default.port)),
         })
     }
 }

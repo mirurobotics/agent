@@ -14,20 +14,24 @@ pub mod unix;
 pub use self::errors::ServerErr;
 pub use self::state::State;
 
+/// Loopback port used when the TCP server is enabled and no other port is set.
+/// 6478 is "MIRU" on a phone keypad (M=6, I=4, R=7, U=8).
+pub const DEFAULT_TCP_PORT: u16 = 6478;
+
 #[derive(Debug)]
 pub struct Options {
     /// Unix socket path (unix only).
     pub socket_file: filesys::File,
-    /// Loopback TCP port; `None` disables the TCP transport, `Some(0)` lets
-    /// the OS assign a free port.
-    pub tcp_port: Option<u16>,
+    /// Loopback TCP port used when the TCP server is enabled. `0` lets the OS
+    /// assign a free port.
+    pub tcp_port: u16,
 }
 
 impl Default for Options {
     fn default() -> Self {
         Self {
             socket_file: filesys::File::new("/run/miru/miru.sock"),
-            tcp_port: None,
+            tcp_port: DEFAULT_TCP_PORT,
         }
     }
 }

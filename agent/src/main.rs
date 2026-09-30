@@ -343,8 +343,9 @@ fn build_app_options(settings: disk::Settings) -> AppOptions {
         },
         backend_host: settings.backend.host,
         enable_socket_server: settings.enable_socket_server,
+        enable_tcp_server: settings.enable_tcp_server,
         server: server::Options {
-            tcp_port: settings.socket_server_tcp_port,
+            tcp_port: settings.tcp_server.port,
             ..Default::default()
         },
         enable_mqtt_worker: settings.enable_mqtt_worker,

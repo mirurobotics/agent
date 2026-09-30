@@ -54,7 +54,7 @@ pub fn serve(
             })?
             .port();
         let app = routes::router(state).layer(middleware::from_fn(move |req, next| {
-            check_host(port, req, next)
+            check_loopback(port, req, next)
         }));
         axum::serve(listener, app)
             .with_graceful_shutdown(shutdown_signal)
@@ -73,20 +73,21 @@ pub fn serve(
 /// or `localhost:<port>`, which stops DNS rebinding. An Origin header, when
 /// present, must be that same loopback URL, which stops a cross-site page
 /// from sending a request the browser would give a loopback Host.
-async fn check_host(port: u16, req: Request, next: Next) -> Response {
-    let host = request_host(&req);
-    let origin = req
-        .headers()
-        .get(header::ORIGIN)
-        .and_then(|value| value.to_str().ok());
-    if host.is_some_and(|host| is_loopback_host(host, port)) && origin_allowed(origin, port) {
-        return next.run(req).await;
+async fn check_loopback(port: u16, req: Request, next: Next) -> Response {
+    let host = extract_host(&req);
+    if !host_allowed(host, port) {
+        warn!("Rejected local device API request with host {host:?}");
+        return StatusCode::FORBIDDEN.into_response();
     }
-    warn!("Rejected local device API request with host {host:?} origin {origin:?}");
-    StatusCode::FORBIDDEN.into_response()
+    let origin = extract_origin(&req);
+    if !origin_allowed(origin, port) {
+        warn!("Rejected local device API request with origin {origin:?}");
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    next.run(req).await
 }
 
-fn request_host(req: &Request) -> Option<&str> {
+fn extract_host(req: &Request) -> Option<&str> {
     req.uri()
         .authority()
         .map(|authority| authority.as_str())
@@ -95,6 +96,16 @@ fn request_host(req: &Request) -> Option<&str> {
                 .get(header::HOST)
                 .and_then(|value| value.to_str().ok())
         })
+}
+
+fn host_allowed(host: Option<&str>, port: u16) -> bool {
+    host.is_some_and(|host| is_loopback_host(host, port))
+}
+
+fn extract_origin(req: &Request) -> Option<&str> {
+    req.headers()
+        .get(header::ORIGIN)
+        .and_then(|value| value.to_str().ok())
 }
 
 /// A missing Origin is allowed. A present Origin must be this listener's loopback URL.

@@ -131,14 +131,14 @@ async fn init(
     Ok(app_state)
 }
 
-// the socket server, poller, and mqtt worker are each opt-in via AppOptions
+// the socket server, tcp server, poller, and mqtt worker are each opt-in via AppOptions
 async fn init_optional_services(
     options: &AppOptions,
     app_state: &Arc<AppState>,
     shutdown_manager: &mut ShutdownManager,
     shutdown_tx: &broadcast::Sender<()>,
 ) -> Result<(), ServerErr> {
-    if options.enable_socket_server {
+    if options.enable_socket_server || options.enable_tcp_server {
         init_local_api_servers(options, app_state.clone(), shutdown_manager, shutdown_tx).await?;
     }
 
@@ -402,14 +402,20 @@ async fn init_delete_worker(
     Ok(())
 }
 
-// the local device API is served over a unix socket (unix only) and, when a
-// port is configured, over loopback tcp (all platforms)
+// the local device API is served over a unix socket (unix only) and, when
+// enabled, over loopback tcp (all platforms)
 async fn init_local_api_servers(
     options: &AppOptions,
     app_state: Arc<AppState>,
     shutdown_manager: &mut ShutdownManager,
     shutdown_tx: &broadcast::Sender<()>,
 ) -> Result<(), ServerErr> {
+    #[cfg(windows)]
+    if !options.enable_tcp_server {
+        tracing::warn!("tcp server is disabled; the local device API has no transport on windows");
+        return Ok(());
+    }
+
     let server_state = Arc::new(server::State::new(
         app_state.storage.clone(),
         app_state.http_client.clone(),
@@ -421,7 +427,7 @@ async fn init_local_api_servers(
     ));
 
     #[cfg(unix)]
-    {
+    if options.enable_socket_server {
         info!("Initializing socket server...");
         let mut shutdown_rx = shutdown_tx.subscribe();
         let handle = serve(&options.server, server_state.clone(), async move {
@@ -431,12 +437,11 @@ async fn init_local_api_servers(
         shutdown_manager.with_socket_server_handle(handle)?;
     }
 
-    let Some(port) = options.server.tcp_port else {
-        #[cfg(windows)]
-        tracing::warn!("no tcp port configured; the local device API has no transport on windows");
+    if !options.enable_tcp_server {
         return Ok(());
-    };
+    }
     info!("Initializing tcp server...");
+    let port = options.server.tcp_port;
     if !options.lifecycle.is_persistent {
         // socket activation restarts the agent only for unix socket clients
         tracing::warn!(
