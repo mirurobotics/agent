@@ -8,8 +8,7 @@ use std::sync::Arc;
 use crate::filesys::{self, files, PathExt};
 use crate::server::{
     errors::{BindUnixSocketErr, RunAxumServerErr, ServerErr},
-    routes::{self, Options},
-    State,
+    routes, Options, State,
 };
 use crate::trace;
 
@@ -22,7 +21,7 @@ pub(crate) async fn serve(
     state: Arc<State>,
     shutdown_signal: impl Future<Output = ()> + Send + 'static,
 ) -> Result<JoinHandle<Result<(), ServerErr>>, ServerErr> {
-    let app = routes::app(state);
+    let app = routes::router(state);
 
     // obtain the unix socket file listener
     let listener = acquire_unix_socket_listener(&options.socket_file, async move {

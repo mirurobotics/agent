@@ -53,7 +53,7 @@ pub fn serve(
                 })
             })?
             .port();
-        let app = routes::app(state).layer(middleware::from_fn(move |req, next| {
+        let app = routes::router(state).layer(middleware::from_fn(move |req, next| {
             check_host(port, req, next)
         }));
         axum::serve(listener, app)

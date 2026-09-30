@@ -123,7 +123,7 @@ pub mod routes {
                 shutdown_tx,
             ));
 
-            let app = routes::routes(state.clone());
+            let app = routes::router(state.clone());
 
             Self {
                 state,

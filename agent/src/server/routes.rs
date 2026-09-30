@@ -2,13 +2,12 @@
 use std::sync::Arc;
 
 // internal crates
-use crate::filesys;
 use crate::server::{handlers, state::State};
 
 // external crates
 use axum::{
     extract::Request,
-    middleware::{self, Next},
+    middleware::{from_fn, Next},
     routing::{get, post},
     Router,
 };
@@ -19,32 +18,17 @@ use tower_http::{
 };
 use tracing::Level;
 
-#[derive(Debug)]
-pub struct Options {
-    /// Unix socket path (unix only).
-    pub socket_file: filesys::File,
-    /// Loopback TCP port; `None` disables the TCP transport, `Some(0)` lets
-    /// the OS assign a free port.
-    pub tcp_port: Option<u16>,
+/// Build the router both transports serve, including shared middleware.
+pub fn router(state: Arc<State>) -> Router {
+    middleware(table(state.clone()), state)
 }
 
-impl Default for Options {
-    fn default() -> Self {
-        Self {
-            socket_file: filesys::File::new("/run/miru/miru.sock"),
-            tcp_port: None,
-        }
-    }
-}
-
-/// Build the application router with all routes, shared state, and middleware.
-/// Every transport serves this same app.
-pub fn app(state: Arc<State>) -> Router {
-    let activity_state = state.clone();
-    routes(state).layer(
+/// Activity tracking and request tracing applied to every transport.
+fn middleware(router: Router, state: Arc<State>) -> Router {
+    router.layer(
         ServiceBuilder::new()
-            .layer(middleware::from_fn(move |req: Request, next: Next| {
-                let state = activity_state.clone();
+            .layer(from_fn(move |req: Request, next: Next| {
+                let state = state.clone();
                 async move {
                     state.activity_tracker.touch();
                     next.run(req).await
@@ -63,8 +47,7 @@ pub fn app(state: Arc<State>) -> Router {
     )
 }
 
-/// Build the application router with all routes and shared state, without middleware.
-pub fn routes(state: Arc<State>) -> Router {
+fn table(state: Arc<State>) -> Router {
     let api_version = device_api::models::ApiVersion::API_VERSION.to_string();
     Router::new()
         // =============================== AGENT INFO ============================== //
