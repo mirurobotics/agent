@@ -428,31 +428,45 @@ async fn init_local_api_servers(
 
     #[cfg(unix)]
     if options.enable_socket_server {
-        info!("Initializing socket server...");
-        let mut shutdown_rx = shutdown_tx.subscribe();
-        let handle = serve(
-            &options.server.socket_file,
-            server_state.clone(),
-            async move {
-                let _ = shutdown_rx.recv().await;
-            },
-        )
-        .await?;
-        shutdown_manager.with_socket_server_handle(handle)?;
+        init_socket_server(options, server_state.clone(), shutdown_manager, shutdown_tx).await?;
     }
 
-    if !options.enable_tcp_server {
-        return Ok(());
+    if options.enable_tcp_server {
+        init_tcp_server(options, server_state, shutdown_manager, shutdown_tx).await?;
     }
+    Ok(())
+}
+
+#[cfg(unix)]
+async fn init_socket_server(
+    options: &AppOptions,
+    server_state: Arc<server::State>,
+    shutdown_manager: &mut ShutdownManager,
+    shutdown_tx: &broadcast::Sender<()>,
+) -> Result<(), ServerErr> {
+    info!("Initializing socket server...");
+    let mut shutdown_rx = shutdown_tx.subscribe();
+    let handle = serve(&options.server.socket_file, server_state, async move {
+        let _ = shutdown_rx.recv().await;
+    })
+    .await?;
+    shutdown_manager.with_socket_server_handle(handle)
+}
+
+async fn init_tcp_server(
+    options: &AppOptions,
+    server_state: Arc<server::State>,
+    shutdown_manager: &mut ShutdownManager,
+    shutdown_tx: &broadcast::Sender<()>,
+) -> Result<(), ServerErr> {
     info!("Initializing tcp server...");
-    let port = options.server.tcp_port;
     if !options.lifecycle.is_persistent {
         // socket activation restarts the agent only for unix socket clients
         tracing::warn!(
             "tcp clients get connection refused after an idle exit; set is_persistent to keep the tcp listener available"
         );
     }
-    let listener = tcp::bind(port).await?;
+    let listener = tcp::bind(options.server.tcp_port).await?;
     let mut shutdown_rx = shutdown_tx.subscribe();
     let handle = tcp::serve(listener, server_state, async move {
         let _ = shutdown_rx.recv().await;
