@@ -152,12 +152,22 @@ and the agent keeps running without the listener. Both transports serve the
 same `routes::router()` with the same middleware, and the TCP transport
 rejects requests whose Host or Origin isn't its loopback address.
 
-**PR 12 — token auth + discovery file.** Token generation at startup, atomic
-`device-api.json` write into the ACL'd dir, Bearer middleware (constant-time compare)
-on all routes, SSE verified over TCP. Python SDK work happens in
-`python-device-sdk` (transport + discovery file + re-read-on-401). Must land
-before the first Windows release: the TCP listener is on by default there, and
-until this PR any local user or process can call every device API route.
+**PR 12 — token auth + discovery file** (done — `server/auth.rs`, `server/discovery.rs`)**.**
+Every TCP request, including `/v0.2/health` and the `/v0.2/events` SSE stream,
+must carry `Authorization: Bearer <token>`; otherwise the agent returns 401 with
+`WWW-Authenticate: Bearer`. The check runs after the loopback check (403) and
+compares in constant time. The agent generates a fresh 32-byte token
+(43 base64url characters) at every start and atomically writes
+`{schema_version, port, token}` to `device-api/device-api.json` under the data
+root (mode 0640 on Unix; on Windows the file inherits the `device-api` directory
+ACL). The file is removed after graceful shutdown and any stale copy is removed
+at startup. A token or discovery-file failure is logged and the agent runs
+without TCP. Authorization headers are marked sensitive before request tracing,
+so tokens never reach logs. The Unix socket stays unauthenticated. Python SDK
+work happens in `python-device-sdk` (transport + discovery file +
+re-read-on-401). The MSI follow-up (PR 9) adds the `Miru Clients` group and an
+inheritable read ACE on `ProgramData\Miru\device-api`; until then only
+Administrators, SYSTEM, and the service account can read the file on Windows.
 
 ## Decision log
 
@@ -169,6 +179,33 @@ until this PR any local user or process can call every device API route.
   Windows runner, and keeping it opt-in means no Linux device starts listening
   on a TCP port through an upgrade. Token auth and the discovery file (PR 12)
   still gate any default-on port.
+- 2026-09-30: The TCP bearer token is 32 bytes from `aws_lc_rs::rand::fill`,
+  base64url without padding (43 characters), regenerated every start, and held
+  only in an `Arc<Token>`, never in `AppOptions` or `server::State`. Rationale:
+  the token is header-safe, rotates on restart, and stays out of the structs
+  the agent logs with `Debug`.
+- 2026-09-30: Tokens compare with `aws_lc_rs::constant_time::verify_slices_are_equal`,
+  not `tower_http`'s `ValidateRequestHeaderLayer::bearer`. Rationale: the
+  `tower_http` layer is not constant-time; the token length is public (always 43).
+- 2026-09-30: Auth covers every TCP route including `/v0.2/health` and
+  `/v0.2/events`; the Unix socket stays unauthenticated. Rationale: any local
+  process can reach the TCP port, while the socket is already restricted by
+  file mode 0660 and group `miru`.
+- 2026-09-30: The TCP middleware order is loopback (403), then bearer (401),
+  then the router. Rationale: unauthenticated requests never touch the idle
+  activity tracker.
+- 2026-09-30: The discovery file lives in a dedicated `device-api/` directory
+  under the data root. Rationale: the MSI can grant readers that directory
+  alone without exposing `settings.json` or `device.json`.
+- 2026-09-30: The discovery file mode is `0o640`. Rationale: it matches the
+  `miru`-group boundary of the Unix socket and the public-key precedent;
+  `0o600` would lock out `miru`-group SDK clients.
+- 2026-09-30: The discovery file is removed on graceful shutdown and any stale
+  file is removed at startup. Rationale: clients can tell "agent not serving
+  TCP" (no file) from "token rotated" (401, then re-read the file).
+- 2026-09-30: A `tcp::serve` failure (token generation or discovery write) is
+  logged and the agent continues without TCP. Rationale: it matches the
+  handling of a TCP bind failure; the TCP listener is optional.
 
 ## Risks
 

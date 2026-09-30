@@ -43,7 +43,7 @@ All source lives under `agent/src/`. The binary entry point is `main.rs`.
 
 `mqtt` — rumqttc-based MQTT subscriber. Listens for real-time events from the backend (e.g., new deployment available) so the agent can react immediately instead of waiting for the next poll.
 
-`server` — axum HTTP server exposing device state, health, and action endpoints for on-device applications, the CLI, and the frontend. One router (`server/routes.rs`) is served over two transports: a Unix socket (`/run/miru/miru.sock`, `server/unix.rs`, unix only) and, when `settings.enable_tcp_server` is set, IPv4 loopback TCP (`127.0.0.1:<port>`, `server/tcp.rs`, all platforms; on by default only on Windows; the default port is 6478, and port `0` is OS-assigned). A failed TCP bind is logged and the agent runs without the listener. Nothing is ever bound on a non-loopback interface. The TCP transport returns 403 unless the request host is `127.0.0.1:<port>` or `localhost:<port>`, and when an Origin header is present it must be that same loopback URL, which blocks DNS rebinding and cross-site requests from browsers on the device. Only the Unix socket is socket-activated, so in non-persistent mode TCP clients get connection refused after an idle exit (the agent warns at startup). Route handlers live in `server/handlers.rs`.
+`server` — axum HTTP server exposing device state, health, and action endpoints for on-device applications, the CLI, and the frontend. One router (`server/routes.rs`) is served over two transports: a Unix socket (`/run/miru/miru.sock`, `server/unix.rs`, unix only) and, when `settings.enable_tcp_server` is set, IPv4 loopback TCP (`127.0.0.1:<port>`, `server/tcp.rs`, all platforms; on by default only on Windows; the default port is 6478, and port `0` is OS-assigned). A failed TCP bind is logged and the agent runs without the listener. Nothing is ever bound on a non-loopback interface. The TCP transport returns 403 unless the request host is `127.0.0.1:<port>` or `localhost:<port>`, and when an Origin header is present it must be that same loopback URL, which blocks DNS rebinding and cross-site requests from browsers on the device. After the loopback check, every TCP request (including `/v0.2/health` and `/v0.2/events`) must carry `Authorization: Bearer <token>`, else the agent returns 401 with `WWW-Authenticate: Bearer` (`server/auth.rs`, constant-time compare). The token is 32 random bytes encoded as 43 base64url characters, regenerated at every start, and kept out of `Debug` output and logs (Authorization headers are marked sensitive before request tracing on both transports). The agent writes `{schema_version, port, token}` atomically to the discovery file `device-api/device-api.json` under the data root (`/var/lib/miru/device-api/device-api.json` on Linux, `C:\ProgramData\Miru\device-api\device-api.json` on Windows; mode 0640 on Unix, the directory ACL on Windows) before serving (`server/discovery.rs`), removes it after graceful shutdown, and removes any stale copy at startup, so no file means TCP is not being served. Clients read the port and token from the file and re-read it on a 401, since the token rotates on restart. A token or discovery-file failure is logged and the agent runs without the TCP listener. The Unix socket stays unauthenticated (file mode 0660, group `miru`). Only the Unix socket is socket-activated, so in non-persistent mode TCP clients get connection refused after an idle exit (the agent warns at startup). Route handlers live in `server/handlers.rs`.
 
 ### Security
 
@@ -73,7 +73,7 @@ All source lives under `agent/src/`. The binary entry point is `main.rs`.
 
 ### Persistence
 
-`storage` — on-disk state management. `storage::Layout` defines the directory structure. `storage::Storage` wraps per-entity stores with capacity limits. Key files on disk: `settings.json`, `device.json`, `auth/` (private key and token).
+`storage` — on-disk state management. `disk::Layout` defines the directory structure. `storage::Storage` wraps per-entity stores with capacity limits. Key files on disk: `settings.json`, `device.json`, `auth/` (private key and token), `device-api/device-api.json` (TCP port and bearer token for local device API clients).
 
 ### Background workers
 
@@ -99,7 +99,7 @@ All workers receive a broadcast shutdown signal and clean up gracefully.
 - **Shutdown ordering matters.** Syncer shuts down before storage (it writes during sync). Token manager shuts down last. This is enforced in `AppState::shutdown()`.
 - **Generated code is never hand-edited.** `libs/backend-api` and `libs/device-api` are overwritten on regeneration.
 - **Tests exercise ordinary production behavior.** `cargo test` needs no custom feature or logging environment; production algorithms and client construction are identical in normal and test builds, and tests control dependencies and time. Test layout conventions live in `AGENTS.md` § Testing.
-- **The agent has no direct database.** All persistence is file-based via `storage::Layout`. The backend owns the database.
+- **The agent has no direct database.** All persistence is file-based via `disk::Layout`. The backend owns the database.
 - **Windows is persistent-only.** `settings.is_persistent = false` is ignored on Windows with a startup warning (`platform::supports_idle_exit`). Socket activation and idle exit are Linux-only. The Unix socket transport is unix-only, so on Windows the local device API is the TCP listener, which is on by default (`enable_tcp_server`). Startup warns and nothing listens when that flag is turned off.
 
 ## Cross-Cutting Concerns
@@ -110,4 +110,4 @@ All workers receive a broadcast shutdown signal and clean up gracefully.
 
 **Authentication.** JWT-based. The `TokenManager` runs as a background task, refreshing the token before expiry using the device's RSA private key. `http::Client` reads the current token from `TokenManager` for every request. Token persistence is via `TokenFile` (atomic writes to disk).
 
-**Storage.** `storage::Layout` defines where everything lives on disk (default: `/var/lib/miru/`). `storage::Storage` provides typed stores for devices, deployments, releases, and settings, each with configurable capacity limits.
+**Storage.** `disk::Layout` defines where everything lives on disk (default: `/var/lib/miru/`; the TCP discovery file lives at `device-api/device-api.json`). `storage::Storage` provides typed stores for devices, deployments, releases, and settings, each with configurable capacity limits.
