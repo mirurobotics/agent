@@ -60,11 +60,8 @@
                               ThirdFailureActionType="restart"
                               RestartServiceDelayInSeconds="10"
                               ResetPeriodInDays="1" />
-          <!-- Core ServiceConfig (MsiServiceConfig), applied on install and
-               repair: add the service SID to the process token and remove every
-               privilege except SeChangeNotifyPrivilege, so the service cannot
-               impersonate. util:ServiceConfig supports neither setting; WIX1149
-               is suppressed in miru-agent.wixproj for this element. -->
+          <!-- Service SID in the token; no privileges but SeChangeNotify (so no
+               impersonation). util:ServiceConfig can't set these (WIX1149). -->
           <ServiceConfig ServiceSid="unrestricted" OnInstall="yes" OnReinstall="yes">
             <RequiredPrivilege Name="SeChangeNotifyPrivilege" />
           </ServiceConfig>
@@ -82,15 +79,10 @@
          registry resource. Windows Installer reapplies the protected descriptor
          during repair and upgrade, while populated customer state survives an
          ordinary uninstall.
-         The last two ACEs are for the miru-agent service SID (NT SERVICE\miru-agent;
-         equals `sc.exe showsid miru-agent`). On each directory it may list,
-         traverse, and add children but not delete, re-permission, or take
-         ownership of the directory itself; it gets full control of everything
-         created inside. The SID is hardcoded because CreateFolders applies these
-         descriptors before InstallServices creates the service. All four
-         directories carry the ACEs because their DACLs are protected and
-         provisioning renames keys from tmp to auth. Recompute the SID in every
-         Sddl if the ServiceInstall Name changes. -->
+         The last two ACEs let the service SID (`sc.exe showsid miru-agent`) use
+         each directory but not delete or re-permission it, with full control of
+         its contents. Hardcoded because CreateFolders runs before the service
+         exists; recompute if the service Name changes. -->
     <ComponentGroup Id="DataDirs">
       <Component Id="MiruDataDir" Directory="MIRUDATA" Guid="D0542DF7-5B61-4F09-938B-57F05C1B5458" Bitness="always64" KeyPath="yes">
         <CreateFolder>
@@ -114,23 +106,17 @@
       </Component>
     </ComponentGroup>
 
-    <!-- A failed major upgrade rolls back the old version's uninstall, and
-         Windows Installer recreates its service from the ServiceInstall row
-         alone, without the failure actions, SID type, and required privileges
-         above. So when a major upgrade removes this version, its uninstall
-         schedules a rollback-only action between StopServices and
-         DeleteServices; rollback replays the script in reverse, so the action
-         reapplies them after the service is recreated and before it is
-         restarted. Failures are ignored so the rest of the rollback runs. This
-         protects only upgrades from versions that contain the action. -->
+    <!-- If removing this version fails (uninstall or upgrade), rollback recreates
+         the service without the settings above. This rollback-only action, between
+         StopServices and DeleteServices, reapplies them before it restarts. -->
     <CustomAction Id="MiruRollbackServiceConfig" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec64"
                   Execute="rollback" Impersonate="no" Return="ignore" />
     <SetProperty Id="MiruRollbackServiceConfig" Before="MiruRollbackServiceConfig" Sequence="execute"
-                 Condition='UPGRADINGPRODUCTCODE AND REMOVE~="ALL"'
+                 Condition='REMOVE~="ALL"'
                  Value='"[System64Folder]cmd.exe" /d /s /c "cd /d "[System64Folder]" &amp; sc.exe failure miru-agent reset= 86400 actions= restart/10000/restart/10000/restart/10000 &amp; sc.exe sidtype miru-agent unrestricted &amp; sc.exe privs miru-agent SeChangeNotifyPrivilege"' />
     <InstallExecuteSequence>
       <Custom Action="MiruRollbackServiceConfig" Before="DeleteServices"
-              Condition='UPGRADINGPRODUCTCODE AND REMOVE~="ALL"' />
+              Condition='REMOVE~="ALL"' />
     </InstallExecuteSequence>
 
     <Feature Id="Main" Title="$(ProductName)" Level="1">

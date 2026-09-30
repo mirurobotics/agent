@@ -75,9 +75,10 @@ function Uninstall-Msi {
     param(
         [Parameter(Mandatory = $true)][string]$ProductCode,
         [Parameter(Mandatory = $true)][string]$Name,
-        [int[]]$AllowedExitCodes = @(0, 3010)
+        [int[]]$AllowedExitCodes = @(0, 3010),
+        [string[]]$Properties = @()
     )
-    Invoke-Msi @("/x", $ProductCode) $Name $AllowedExitCodes | Out-Null
+    Invoke-Msi (@("/x", $ProductCode) + $Properties) $Name $AllowedExitCodes | Out-Null
 }
 
 function Invoke-Msi {
@@ -308,9 +309,8 @@ function Assert-ProtectedAcl {
     Assert-Equal 0 $LASTEXITCODE "icacls can inspect $LiteralPath"
 }
 
-# The service SID may list, traverse, and add children of a protected
-# directory but not delete, re-permission, or take ownership of it; an
-# inherit-only ACE gives it full control of everything created inside.
+# The service may use but not delete or re-permission the directory, and has
+# full control of its contents.
 function Assert-ServiceDirectoryAces {
     param(
         [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Rules,
@@ -447,9 +447,7 @@ function Assert-ProbeDenied {
     }
 }
 
-# Install success with Start="install" Wait="yes" proves only that the SCM saw
-# Running, which the agent reports before its body runs, so this asserts SCM
-# configuration; Assert-ServiceRuntimeIdentity checks the running agent.
+# SCM configuration only; Assert-ServiceRuntimeIdentity checks the running agent.
 function Assert-ServiceInstalled {
     param([Parameter(Mandatory = $true)][string]$Stage)
     $service = Get-AgentService
@@ -472,8 +470,7 @@ function Get-AgentService {
         -ErrorAction SilentlyContinue
 }
 
-# sc.exe reports the reset period in seconds and each action's delay in
-# milliseconds; the spec is in days and seconds.
+# sc.exe reports seconds and milliseconds; the spec uses days and seconds.
 function Assert-ServiceRecovery {
     param([Parameter(Mandatory = $true)][string]$Stage)
     $out = & sc.exe qfailure miru-agent 2>&1 | Out-String
@@ -491,9 +488,7 @@ function Assert-ServiceRecovery {
     Assert-Equal $expected $actual "$Stage service failure actions`n$out"
 }
 
-# The SCM adds the service SID to the token, Windows derives the same SID from
-# the service name, and the virtual account name resolves to it, so the SID
-# hardcoded in the installer's descriptors is the one the service runs as.
+# The SID hardcoded in the installer's descriptors is the one the service runs as.
 function Assert-ServiceSidIdentity {
     param([Parameter(Mandatory = $true)][string]$Stage)
     $q = & sc.exe qsidtype miru-agent 2>&1 | Out-String
@@ -508,8 +503,6 @@ function Assert-ServiceSidIdentity {
     Assert-Equal $MsiServiceSid $accountSid "$Stage virtual account resolves to the hardcoded SID"
 }
 
-# The SCM gives the service token only these privileges, so the service
-# cannot use SeImpersonatePrivilege to reach Local System.
 function Assert-ServicePrivileges {
     param([Parameter(Mandatory = $true)][string]$Stage)
     $out = & sc.exe qprivs miru-agent 2>&1 | Out-String
@@ -518,9 +511,8 @@ function Assert-ServicePrivileges {
     Assert-Equal (($MsiServiceSettings.RequiredPrivileges | Sort-Object) -join ",") ($privileges -join ",") "$Stage service required privileges`n$out"
 }
 
-# The SCM builds a started service's token from its required privileges, so
-# the token holds none outside that list. After a rollback this also proves the
-# rollback reapplied the configuration before starting the service.
+# Checks the live token, not just the configuration (after rollback, this proves
+# the settings were reapplied before the service started).
 function Assert-ServiceProcessPrivileges {
     param(
         [Parameter(Mandatory = $true)][string]$Stage,
@@ -631,10 +623,8 @@ function Get-ActivationWaitCount {
     return [int]$count
 }
 
-# The unprovisioned agent logs one "waiting for provisioning" line per start and
-# keeps running. A new line proves the service could write logs\ through the
-# installer's ACE; the process token proves it runs as the virtual account with
-# only its required privileges.
+# The unprovisioned agent logs "waiting for provisioning" once per start, so a new
+# line proves it can write logs\ through the installer's ACE.
 function Assert-ServiceRuntimeIdentity {
     param(
         [Parameter(Mandatory = $true)][string]$Stage,
@@ -708,8 +698,7 @@ function Invoke-DowngradeStage {
     Write-Host "PASS downgrade rejected with v2 intact"
 }
 
-# v2's uninstall, started by v3's RemoveExistingProducts, schedules the rollback
-# action that reapplies the service settings, so this stage tests v2's action.
+# Exercises v2's rollback action, scheduled by v2's uninstall.
 function Invoke-RollbackStage {
     param([Parameter(Mandatory = $true)]$Packages)
     $v2Hash = Get-AgentHash
@@ -724,6 +713,13 @@ function Invoke-RollbackStage {
 }
 
 function Invoke-UninstallStage {
+    # The fixture's failing action also runs during uninstall, after DeleteServices.
+    $baseline = Get-ActivationWaitCount
+    Uninstall-Msi $fixtureProducts[1] "fixture-v2-failed-uninstall" -AllowedExitCodes @(1603) `
+        -Properties @("FAIL_UPGRADE_FOR_TEST=1")
+    Assert-InstalledVersion $fixtureProducts[1] "fixture-v2" "failed uninstall"
+    Assert-ServiceInstalled "failed uninstall"
+    Assert-ServiceRuntimeIdentity "failed uninstall" $baseline
     Uninstall-Msi $fixtureProducts[1] "fixture-v2-uninstall"
     Assert-Equal 0 (@(Get-RelatedProducts)).Count "product registration removed"
     Assert-True (-not (Test-ArpProductCode $fixtureProducts[1])) "installer-owned registry metadata removed"
@@ -732,7 +728,7 @@ function Invoke-UninstallStage {
     Assert-True (Test-Path -LiteralPath $programDataRoot -PathType Container) "ProgramData retained"
     Assert-ProtectedState "uninstall"
     Assert-ServiceAbsent
-    Write-Host "PASS uninstall removes package state, service, and retains protected customer state"
+    Write-Host "PASS failed uninstall restores the full service config; uninstall removes package state, service, and retains protected customer state"
 }
 
 function Write-FailureEvidence {

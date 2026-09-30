@@ -9,10 +9,7 @@ $MsiUpgradeCode = "{B5ED0336-5F14-4308-A667-3CE8CDEF7D48}"
 $MsiServiceName = "miru-agent"
 $MsiServiceAccount = "NT SERVICE\miru-agent"
 $MsiServiceSid = "S-1-5-80-1251439239-454917380-1008020685-2030257057-91624695"
-# The one expected spec for the service settings the MSI applies on install and
-# reapplies with sc.exe if a failed upgrade rolls back. Units match
-# util:ServiceConfig (seconds, days); the tests derive the MSI table values, the
-# rollback command line, and the sc.exe query output from it.
+# Single source for every service-settings assertion (units as in util:ServiceConfig).
 $MsiServiceSettings = [pscustomobject]@{
     FailureActions = @("restart", "restart", "restart")
     RestartDelaySeconds = 10

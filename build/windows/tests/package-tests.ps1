@@ -226,9 +226,7 @@ function Assert-ServiceTables {
     Assert-RollbackServiceConfig $Database
 }
 
-# The MSI registers miru-agent as an own-process, auto-start, vital service that
-# runs as its virtual account NT SERVICE\miru-agent, with no arguments and the
-# authored display name and description.
+# Own-process, auto-start, vital service running as NT SERVICE\miru-agent.
 function Assert-ServiceInstallRow {
     param([Parameter(Mandatory = $true)]$Database)
     Assert-True (Test-MsiTable $Database "ServiceInstall") "service install table present"
@@ -250,10 +248,8 @@ function Assert-ServiceInstallRow {
     Assert-True (([int]$row[5] -band 0x8000) -ne 0) "service is vital"
 }
 
-# The core ServiceConfig element compiles to two MsiServiceConfig rows, applied
-# on install and repair: the unrestricted SID type and a required-privileges
-# list. The rows are inert unless MsiConfigureServices runs between
-# InstallServices and StartServices.
+# Two MsiServiceConfig rows (SID type, required privileges), applied by
+# MsiConfigureServices between InstallServices and StartServices.
 function Assert-MsiServiceConfig {
     param([Parameter(Mandatory = $true)]$Database)
     Assert-True (Test-MsiTable $Database "MsiServiceConfig") "MsiServiceConfig table present"
@@ -312,9 +308,7 @@ function Assert-ServiceControlRow {
     Assert-True (($serviceEvent -band 0x80) -ne 0) "service deletes on uninstall"
 }
 
-# The Util extension emits its own failure-actions table, Wix4ServiceConfig,
-# rather than the standard MSI ServiceConfig table. Its units are the spec's:
-# seconds for the restart delay and days for the reset period.
+# The Util extension's own failure-actions table (not the MSI ServiceConfig table).
 function Assert-ServiceRecoveryTable {
     param([Parameter(Mandatory = $true)]$Database)
     Assert-True (Test-MsiTable $Database "Wix4ServiceConfig") `
@@ -340,14 +334,8 @@ function Assert-ServiceRecoveryTable {
         "service recovery runs no command and shows no reboot message"
 }
 
-# If a failed major upgrade rolls back, Windows Installer recreates the old
-# service without its failure actions, SID type, or required privileges, so
-# miru-agent.wxs reapplies them with one rollback-only, no-impersonation
-# WixQuietExec64 action that ignores failure; a type-51 setter passes it the
-# sc.exe command line, which must encode the spec above. Both run only in the
-# uninstall a major upgrade starts, between StopServices and DeleteServices, so
-# rollback reapplies the settings after recreating the service and before
-# restarting it.
+# The rollback action (see miru-agent.wxs) and its setter: types, scheduling, and a
+# command line that matches the spec.
 function Assert-RollbackServiceConfig {
     param([Parameter(Mandatory = $true)]$Database)
     $name = "MiruRollbackServiceConfig"
@@ -377,8 +365,8 @@ function Assert-RollbackServiceConfig {
     foreach ($scheduledName in "Set$name", $name) {
         $scheduled = @($sequence | Where-Object { $_[0] -eq $scheduledName })
         Assert-Equal 1 $scheduled.Count "$scheduledName is scheduled once"
-        Assert-Equal 'UPGRADINGPRODUCTCODE AND REMOVE~="ALL"' $scheduled[0][1] `
-            "$scheduledName is scheduled only when a major upgrade removes this version"
+        Assert-Equal 'REMOVE~="ALL"' $scheduled[0][1] `
+            "$scheduledName is scheduled only when this version is removed"
     }
     $order = @("StopServices", "Set$name", $name, "DeleteServices")
     for ($i = 1; $i -lt $order.Count; $i++) {
@@ -389,14 +377,12 @@ function Assert-RollbackServiceConfig {
     }
 }
 
-# The rollback command line rendered from the service spec: sc.exe takes the
-# reset period in seconds and the restart delay in milliseconds.
+# The rollback command line rendered from the spec (sc.exe uses seconds and ms).
 function Get-RollbackServiceCommand {
     $settings = $MsiServiceSettings
     $delayMilliseconds = $settings.RestartDelaySeconds * 1000
     $actions = @($settings.FailureActions | ForEach-Object { "$_/$delayMilliseconds" }) -join "/"
-    # CustomAction.Target holds at most 255 characters, so the command changes
-    # to System64Folder once instead of repeating sc.exe's full path.
+    # cd once instead of repeating sc.exe's full path: Target holds 255 characters.
     $sc = "sc.exe"
     $commands = @(
         'cd /d "[System64Folder]"',

@@ -8,7 +8,7 @@
     <InstallerPlatform>x64</InstallerPlatform>
     <SuppressValidation>false</SuppressValidation>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <!-- WIX1149: the core ServiceConfig element is required for the service SID type and required privileges (see miru-agent.wxs). -->
+    <!-- WIX1149: core ServiceConfig is the only way to set SID type and privileges. -->
     <SuppressSpecificWarnings>1149</SuppressSpecificWarnings>
     <DefineConstants>Version=$(Version);BinDir=$(BinDir)</DefineConstants>
     <DefineConstants Condition="'$(ProductCode)' != ''">$(DefineConstants);ProductCode=$(ProductCode)</DefineConstants>
