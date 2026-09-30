@@ -26,7 +26,7 @@ Out of scope (follow-ups): `python-device-sdk` (TCP transport, discovery-file re
 - [x] M2 `server/discovery.rs`, `Layout::device_api_dir`/`device_api_discovery`, `tcp::serve` wiring and its `init_tcp_server` call site, integration tests
 - [x] M3 `app/run.rs` stale-file removal and run-level tests
 - [x] M4 Docs: `ARCHITECTURE.md`, doc comments, roadmap PR 12 marking + decision log
-- [ ] M5 Preflight CLEAN (draft PR open, CI green incl. `windows-check`); then plan moved to `plans/completed/` with this box ticked (green SHA) and Outcomes filled, and CI re-confirmed green on that commit
+- [x] M5 Preflight CLEAN (CI green on `1c1636de` in one round; re-confirmed green on `4d9d4ef8` after the move to `plans/completed/`; PR #273 marked ready) (draft PR open, CI green incl. `windows-check`); then plan moved to `plans/completed/` with this box ticked (green SHA) and Outcomes filled, and CI re-confirmed green on that commit
 
 ## Surprises & Discoveries
 
@@ -46,7 +46,11 @@ Out of scope (follow-ups): `python-device-sdk` (TCP transport, discovery-file re
 
 ## Outcomes & Retrospective
 
-(Fill in at completion.)
+Delivered in PR #273. TCP requests to the local device API now need a per-start Bearer token, which clients read from `<data root>/device-api/device-api.json` (mode 0640 on unix). The Unix socket is unchanged. Preflight was CLEAN on the first CI round with no CI fixes needed: lint, test (coverage gates), tools, windows-check and windows-package-scope all passed. The required `ai-review` job skips draft PRs, so it first ran when the PR was marked ready.
+
+One change from the original plan: stale discovery-file removal moved from `init_optional_services` to the first line of `init`, so an early init failure can't leave an old port and token on disk through a restart loop (see Surprises and Decision Log).
+
+Remaining work, all in other repos or PRs: python-device-sdk (TCP transport, discovery file, re-read on 401); the MSI `Miru Clients` group and read ACE on `ProgramData\Miru\device-api` (until then only admins and SYSTEM can read the file on Windows); and a security scheme in the upstream device openapi spec.
 
 ## Context and Orientation
 
