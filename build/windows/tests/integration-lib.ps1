@@ -105,8 +105,6 @@ function Build-LifecyclePackages {
         V1 = Build-IntegrationPackage "1.0.0" $fixtureProducts[0] "fixture-v1"
         V2 = Build-IntegrationPackage "1.1.0" $fixtureProducts[1] "fixture-v2"
         V3 = Build-IntegrationPackage "1.2.0" $fixtureProducts[2] "fixture-v3"
-        # Prerelease of V2 (v1.1.0-beta.1), four-field like release builds.
-        V2Beta = Build-IntegrationPackage "1.1.0.201" $fixtureProducts[3] "fixture-v2-beta"
     }
     Assert-FailingFixtureContract $packages.V3
     return $packages
@@ -672,14 +670,6 @@ function Get-AgentHash {
 function Invoke-UpgradeStage {
     param([Parameter(Mandatory = $true)]$Packages)
     Add-PermissiveAces -OwnerSid $testUserSid
-    Install-Msi $Packages.V2Beta "fixture-v2-beta-upgrade"
-    Assert-InstalledVersion $fixtureProducts[3] "fixture-v2-beta" "v2 beta"
-    Assert-ProtectedState "beta upgrade"
-    # 1.1.0 and 1.1.0.201 compare equal, so this is a same-version upgrade; the
-    # one-registration check proves it replaced the beta rather than installing
-    # alongside it. Loosen the ACLs again so the check below proves this
-    # upgrade repairs them too.
-    Add-PermissiveAces -OwnerSid $testUserSid
     $baseline = Get-ActivationWaitCount
     Install-Msi $Packages.V2 "fixture-v2-upgrade"
     Assert-InstalledVersion $fixtureProducts[1] "fixture-v2" "v2"
@@ -687,7 +677,7 @@ function Invoke-UpgradeStage {
     Invoke-NonAdminProbe -Stage "upgrade"
     Assert-ServiceInstalled "upgrade"
     Assert-ServiceRuntimeIdentity "upgrade" $baseline
-    Write-Host "PASS v1-to-beta-to-v2 upgrades each repair ACL and register one product"
+    Write-Host "PASS v1-to-v2 upgrade repairs ACL and registers one product"
 }
 
 function Invoke-DowngradeStage {

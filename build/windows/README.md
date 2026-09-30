@@ -25,9 +25,6 @@ The MSI:
 - uses the permanent UpgradeCode `B5ED0336-5F14-4308-A667-3CE8CDEF7D48`;
 - rejects downgrades and schedules major upgrades transactionally so a failed
   replacement can restore the previously installed package;
-- allows same-version upgrades, so a stable release replaces a prerelease of
-  the same `MAJOR.MINOR.PATCH` in place (see [Code signing](#code-signing) for
-  prerelease versions);
 - protects `%ProgramData%\Miru` and its authored `logs`, `auth`, and `tmp`
   children by setting their owner to Local System and applying a non-inherited
   DACL that gives Local System and built-in Administrators inheritable full
@@ -67,10 +64,9 @@ The produced `miru-agent.exe` statically links the MSVC C runtime (via
 and needs no Visual C++ Redistributable prerequisite on the target machine for
 the service to start.
 
-`Version` is deliberately stricter than general SemVer. It must contain three
-numeric fields, with `MAJOR` and `MINOR` from 0 through 255 and `PATCH` from 0
-through 65535, plus an optional fourth `BUILD` field from 0 through 65535 that
-release builds use for prereleases. Leading `v` and prerelease/build labels are
+`Version` is deliberately stricter than general SemVer. It must contain exactly
+three numeric fields, with `MAJOR` and `MINOR` from 0 through 255 and `PATCH`
+from 0 through 65535. Leading `v`, prerelease/build labels, and fourth fields are
 not accepted at the MSI build boundary. `BinDir` must contain
 `miru-agent.exe`. WiX is restored through the pinned `WixToolset.Sdk` 7.0.0
 project; package validation is enabled and warnings fail the build. CI and
@@ -84,10 +80,9 @@ not purchase a subscription.
 
 ## Install and provision
 
-Run installation from an elevated 64-bit Windows PowerShell 5.1 session. Every
-release, including prereleases, attaches a signed `miru-agent-<version>.msi` to
-the GitHub release (see [Code signing](#code-signing)); a WinGet manifest
-remains follow-up work.
+Run installation from an elevated 64-bit Windows PowerShell 5.1 session. Stable
+releases attach a signed `miru-agent-<version>.msi` to the GitHub release (see
+[Code signing](#code-signing)); a WinGet manifest remains follow-up work.
 Install a trusted MSI directly with Windows Installer:
 
 ```powershell
@@ -234,23 +229,20 @@ discovery-directory permissions remain deferred.
 
 The `windows-sign` job in `.github/workflows/release.yml` signs
 `miru-agent.exe` with
-[Azure Artifact Signing](https://learn.microsoft.com/azure/artifact-signing/),
-builds the MSI around it, signs the MSI, and checks that both signatures are
-valid and timestamped. The release publishes only these signed files; if the
-job fails, nothing is released.
+[Azure Artifact Signing](https://learn.microsoft.com/azure/artifact-signing/)
+on every tag. For stable tags (`v0.10.4`) it also builds the MSI around the
+signed executable and signs it as `miru-agent-0.10.4.msi`, with MSI version
+`0.10.4`. It checks that every signature is valid and timestamped; the release
+publishes only these signed files, and if the job fails, nothing is released.
 
-MSI versions follow the tag. Prereleases add a fourth field (`alpha.N` → `1NN`,
-`beta.N` → `2NN`, `rc.N` → `3NN`); other tag shapes fail the release:
-
-| Tag | MSI version | File |
-| --- | --- | --- |
-| `v0.10.4-beta.1` | `0.10.4.201` | `miru-agent-0.10.4-beta.1.msi` |
-| `v0.10.4` | `0.10.4` | `miru-agent-0.10.4.msi` |
-
-Windows Installer ignores the fourth field, so the MSI allows same-version
-upgrades: betas and the stable release of `0.10.4` replace each other in place,
-and anything below `0.10.4` is rejected as a downgrade. Ordering within one
-version is not enforced, so an older beta can be installed over a newer build.
+Prerelease tags (`v0.10.4-beta.2`) publish the signed executable but no MSI:
+alphas and betas are tested in-house. For that, CI's `windows-package` job
+uploads an unsigned `miru-agent-msi-unsigned` artifact on every run, including
+the CI run a release tag triggers, so each tag's workflow run has an installer
+built from the tagged commit. It is not published and shows an unknown-publisher
+prompt. Its MSI version drops the prerelease suffix (`0.10.4`), and same-version
+packages do not upgrade each other, so uninstall a test build before installing
+another build, or the release, of the same version.
 
 The job logs in with GitHub OIDC, so no Azure secret is stored in GitHub. The
 setup is Terraform in the infra repository: `cicd/azure` creates the

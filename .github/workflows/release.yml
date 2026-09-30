@@ -106,7 +106,7 @@ jobs:
           path: build/prebuilt/windows_amd64/
           if-no-files-found: error
 
-  # Sign miru-agent.exe, build the MSI around it, and sign the MSI. Kept apart
+  # Sign miru-agent.exe; for stable tags, build the MSI around it and sign it. Kept apart
   # from windows-release-build so crate build scripts never run with the Azure
   # OIDC token. Setup: build/windows/README.md, "Code signing".
   windows-sign:
@@ -129,29 +129,31 @@ jobs:
           name: agent-windows-amd64-msvc-unsigned
           path: build/prebuilt/windows_amd64
 
-      # v0.10.4 -> 0.10.4; v0.10.4-beta.1 -> 0.10.4.201 (alpha 1NN, beta 2NN, rc 3NN).
-      # See build/windows/README.md, "Code signing", for why.
+      # Stable tags ship a signed MSI whose version is the tag's (v0.10.4 ->
+      # 0.10.4). Prereleases ship only the signed exe: they are tested in-house
+      # with the unsigned MSI that CI's windows-package job uploads for the
+      # tagged commit (build/windows/README.md, "Code signing").
       - name: Resolve MSI version
         id: msi
         shell: pwsh
         env:
           REF_NAME: ${{ github.ref_name }}
         run: |
-          $release = $env:REF_NAME -replace '^v', ''
-          $stages = @{ alpha = 100; beta = 200; rc = 300 }
-          if ($release -match '^[0-9]+\.[0-9]+\.[0-9]+$') {
-            $version = $release
-          } elseif ($release -match '^([0-9]+\.[0-9]+\.[0-9]+)-(alpha|beta|rc)\.([1-9][0-9]?)$') {
-            $version = '{0}.{1}' -f $Matches[1], ($stages[$Matches[2]] + [int]$Matches[3])
+          $version = $env:REF_NAME -replace '^v', ''
+          if ($version -match '^[0-9]+\.[0-9]+\.[0-9]+$') {
+            "build=true" >> $env:GITHUB_OUTPUT
+            "version=$version" >> $env:GITHUB_OUTPUT
+            "name=miru-agent-$version" >> $env:GITHUB_OUTPUT
+          } elseif ($version -match '^[0-9]+\.[0-9]+\.[0-9]+-') {
+            "build=false" >> $env:GITHUB_OUTPUT
           } else {
-            throw "No MSI version mapping for tag '$env:REF_NAME'"
+            throw "Cannot derive an MSI version from tag '$env:REF_NAME'"
           }
-          "version=$version" >> $env:GITHUB_OUTPUT
-          "name=miru-agent-$release" >> $env:GITHUB_OUTPUT
 
       # Before Azure login: WiX packages are fetched and hash-checked against the
       # pins in restore-pinned.ps1, and are the only NuGet source afterwards.
       - name: Restore pinned WiX SDK
+        if: steps.msi.outputs.build == 'true'
         run: build\windows\restore-pinned.ps1 -ProjectPath build\windows\miru-agent.wixproj
 
       # The identity holds only the signer role on one certificate profile, so
@@ -174,6 +176,7 @@ jobs:
           description: Miru Agent
 
       - name: Build MSI
+        if: steps.msi.outputs.build == 'true'
         env:
           MSI_VERSION: ${{ steps.msi.outputs.version }}
           MSI_NAME: ${{ steps.msi.outputs.name }}
@@ -186,6 +189,7 @@ jobs:
           Copy-Item "build\windows\artifacts\msi\$env:MSI_NAME.msi" build\prebuilt\windows_amd64\
 
       - name: Sign MSI
+        if: steps.msi.outputs.build == 'true'
         uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
         with:
           endpoint: ${{ vars.AZURE_ARTIFACT_SIGNING_ENDPOINT }}
@@ -196,11 +200,13 @@ jobs:
 
       # Artifact Signing certificates expire within days, so require a timestamp too.
       - name: Verify signatures
+        env:
+          MSI_EXPECTED: ${{ steps.msi.outputs.build == 'true' && '1' || '0' }}
         run: |
           $files = @(Get-ChildItem build\prebuilt\windows_amd64\* -Include *.exe, *.msi)
           if (@($files | Where-Object Extension -eq '.exe').Count -ne 1 -or
-              @($files | Where-Object Extension -eq '.msi').Count -ne 1) {
-            throw "Expected one .exe and one .msi, found: $($files.Name -join ', ')"
+              @($files | Where-Object Extension -eq '.msi').Count -ne [int]$env:MSI_EXPECTED) {
+            throw "Expected one .exe and $env:MSI_EXPECTED .msi, found: $($files.Name -join ', ')"
           }
           $files | ForEach-Object {
             $sig = Get-AuthenticodeSignature -LiteralPath $_.FullName

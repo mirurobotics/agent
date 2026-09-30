@@ -15,13 +15,7 @@
            Compressed="yes">
     <!-- Never change UpgradeCode after publication: it is the permanent identity
          that relates every Miru Agent major-upgrade package. -->
-    <!-- Windows Installer ignores the fourth version field when comparing
-         products, so a prerelease MSI (0.10.4.201 for v0.10.4-beta.1) has the
-         same effective version as its stable release (0.10.4).
-         AllowSameVersionUpgrades lets later betas and the stable release
-         replace it in place; lower versions are still rejected as downgrades. -->
     <MajorUpgrade Schedule="afterInstallInitialize"
-                  AllowSameVersionUpgrades="yes"
                   DowngradeErrorMessage="A newer version of $(ProductName) is already installed." />
 
     <MediaTemplate EmbedCab="yes" />

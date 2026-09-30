@@ -8,15 +8,11 @@
     <InstallerPlatform>x64</InstallerPlatform>
     <SuppressValidation>false</SuppressValidation>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- WIX1149: core ServiceConfig is the only way to set SID type and privileges. -->
+    <SuppressSpecificWarnings>1149</SuppressSpecificWarnings>
     <!-- packages.lock.json pins the extension's content hash. CI and releases
          restore through restore-pinned.ps1, which also pins the SDK by hash. -->
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
-    <!-- WIX1149: core ServiceConfig is the only way to set SID type and privileges. -->
-    <SuppressSpecificWarnings>1149</SuppressSpecificWarnings>
-    <!-- ICE61 warns that MajorUpgrade AllowSameVersionUpgrades lets a package
-         replace one with the same ProductVersion. That is intended: prerelease
-         builds share their release's MAJOR.MINOR.PATCH (see miru-agent.wxs). -->
-    <SuppressIces>ICE61</SuppressIces>
     <DefineConstants>Version=$(Version);BinDir=$(BinDir)</DefineConstants>
     <DefineConstants Condition="'$(ProductCode)' != ''">$(DefineConstants);ProductCode=$(ProductCode)</DefineConstants>
     <DefineConstants Condition="'$(FixturePayloadPath)' != ''">$(DefineConstants);FixturePayloadPath=$(FixturePayloadPath)</DefineConstants>
@@ -35,21 +31,19 @@
   <Target Name="ValidatePackageInputs" BeforeTargets="BeforeBuild">
     <Error Condition="'$(Version)' == ''"
            Code="MIRUMSI1001"
-           Text="Version is required. Pass -p:Version=MAJOR.MINOR.PATCH[.BUILD]." />
-    <Error Condition="'$(Version)' != '' and !$([System.Text.RegularExpressions.Regex]::IsMatch('$(Version)', '^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$'))"
+           Text="Version is required. Pass -p:Version=MAJOR.MINOR.PATCH." />
+    <Error Condition="'$(Version)' != '' and !$([System.Text.RegularExpressions.Regex]::IsMatch('$(Version)', '^[0-9]+\.[0-9]+\.[0-9]+$'))"
            Code="MIRUMSI1002"
-           Text="Version must be three or four numeric fields: MAJOR.MINOR.PATCH[.BUILD]." />
+           Text="Version must be exactly three numeric fields: MAJOR.MINOR.PATCH." />
     <Error Condition="'$(BinDir)' == ''"
            Code="MIRUMSI1003"
            Text="BinDir is required. Pass -p:BinDir to the directory containing miru-agent.exe." />
 
-    <PropertyGroup Condition="$([System.Text.RegularExpressions.Regex]::IsMatch('$(Version)', '^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$'))">
+    <PropertyGroup Condition="$([System.Text.RegularExpressions.Regex]::IsMatch('$(Version)', '^[0-9]+\.[0-9]+\.[0-9]+$'))">
       <MsiVersion>$([System.Version]::Parse('$(Version)'))</MsiVersion>
       <MsiVersionMajor>$([System.Version]::Parse('$(Version)').Major)</MsiVersionMajor>
       <MsiVersionMinor>$([System.Version]::Parse('$(Version)').Minor)</MsiVersionMinor>
       <MsiVersionPatch>$([System.Version]::Parse('$(Version)').Build)</MsiVersionPatch>
-      <!-- Revision is -1 when the optional fourth field is omitted. -->
-      <MsiVersionBuild>$([System.Version]::Parse('$(Version)').Revision)</MsiVersionBuild>
     </PropertyGroup>
 
     <Error Condition="'$(MsiVersion)' != '' and $(MsiVersionMajor) &gt; 255"
@@ -61,9 +55,6 @@
     <Error Condition="'$(MsiVersion)' != '' and $(MsiVersionPatch) &gt; 65535"
            Code="MIRUMSI1006"
            Text="Version PATCH must be between 0 and 65535." />
-    <Error Condition="'$(MsiVersion)' != '' and $(MsiVersionBuild) &gt; 65535"
-           Code="MIRUMSI1010"
-           Text="Version BUILD must be between 0 and 65535." />
     <Error Condition="'$(BinDir)' != '' and !Exists('$(BinDir)')"
            Code="MIRUMSI1007"
            Text="BinDir does not exist: $(BinDir)" />

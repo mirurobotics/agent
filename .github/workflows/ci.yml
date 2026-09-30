@@ -126,6 +126,29 @@ jobs:
         shell: powershell
         run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File build\windows\tests\integration-tests.ps1 -Configuration Release -ConfirmDisposableTestMachine
 
+      # Unsigned test MSI for in-house testing, from every run of this job,
+      # including the CI run a release tag triggers. Prerelease tags publish no
+      # MSI, so this is how an alpha/beta installer is tested. MSI versions must
+      # be MAJOR.MINOR.PATCH, so the prerelease suffix is dropped
+      # (0.10.4-beta.2 -> 0.10.4): uninstall a test build before installing
+      # another build, or the release, of the same version.
+      - name: Build unsigned test MSI
+        run: |
+          $raw = (Select-String -Path Cargo.toml -Pattern '^version = "([^"]+)"' | Select-Object -First 1).Matches[0].Groups[1].Value
+          $version = ($raw -split '-')[0]
+          dotnet build build/windows/miru-agent.wixproj --no-restore --configuration Release `
+            -p:Platform=x64 "-p:Version=$version" "-p:OutputName=miru-agent-$raw-unsigned" `
+            "-p:BinDir=$env:GITHUB_WORKSPACE\target\x86_64-pc-windows-msvc\release" `
+            "-p:OutputPath=$env:GITHUB_WORKSPACE\build\windows\artifacts\test-msi\"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload unsigned test MSI
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: miru-agent-msi-unsigned
+          path: build/windows/artifacts/test-msi/*.msi
+          if-no-files-found: error
+
       - name: Upload Windows installer failure logs
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

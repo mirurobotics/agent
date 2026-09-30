@@ -172,9 +172,9 @@ release:
     # miru_agent.pdb) because debuggers look for exactly that name next
     # to the executable.
     - glob: ./prebuilt/windows_amd64/miru_agent.pdb
-    # Signed Windows installer (miru-agent-<tag version>.msi, for example
-    # miru-agent-0.10.4-beta.1.msi), built by the release workflow's
-    # windows-sign job, which fails before GoReleaser runs if it is missing.
+    # Signed Windows installer (miru-agent-<version>.msi), built by the release
+    # workflow's windows-sign job for stable tags only; prerelease tags have no
+    # MSI, so the glob matches nothing for them.
     - glob: ./prebuilt/windows_amd64/*.msi
   footer: >-
     ## Miru Agent {{.Tag}}
