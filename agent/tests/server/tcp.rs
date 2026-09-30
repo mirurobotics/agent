@@ -13,14 +13,12 @@ use crate::test_utils::{
 use device_api::models::ApiVersion;
 use miru_agent::activity;
 use miru_agent::events::hub::{EventHub, SpawnOptions};
-use miru_agent::filesys::{self, files, PathExt};
-use miru_agent::server::{auth::BearerToken, discovery, routes, tcp, ServerErr, State};
+use miru_agent::server::{auth::BearerToken, routes, tcp, ServerErr, State};
 use miru_agent::sync::Syncer;
 
 // external crates
 use axum::body::Body;
 use axum::http::{header::AUTHORIZATION, Request, StatusCode};
-use serde_json::{json, Value};
 use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinHandle;
 use tower::ServiceExt;
@@ -28,7 +26,7 @@ use tower::ServiceExt;
 struct Fixture {
     state: Arc<State>,
     shutdown_tx: broadcast::Sender<()>,
-    discovery_file: filesys::File,
+    token: Arc<BearerToken>,
     _dir: test_dirs::TempDir,
 }
 
@@ -46,7 +44,6 @@ impl Fixture {
             .await
             .unwrap();
         let (shutdown_tx, _) = broadcast::channel::<()>(1);
-        let discovery_file = dir.dir().subdir("device-api").file("device-api.json");
 
         let state = Arc::new(State::new(
             storage,
@@ -60,14 +57,13 @@ impl Fixture {
         Self {
             state,
             shutdown_tx,
-            discovery_file,
+            token: Arc::new(BearerToken::generate().unwrap()),
             _dir: dir,
         }
     }
 
-    async fn token(&self) -> String {
-        let discovery: serde_json::Value = files::read_json(&self.discovery_file).await.unwrap();
-        discovery["token"].as_str().unwrap().to_string()
+    fn token(&self) -> &str {
+        self.token.expose()
     }
 }
 
@@ -79,17 +75,18 @@ fn no_proxy_client() -> reqwest::Client {
 async fn start(fixture: &Fixture) -> (SocketAddr, JoinHandle<Result<(), ServerErr>>) {
     let listener = tcp::bind(0).await.unwrap();
     let addr = listener.local_addr().unwrap();
+    let port = tcp::local_port(&listener).unwrap();
+    assert_eq!(port, addr.port());
     let mut shutdown_rx = fixture.shutdown_tx.subscribe();
     let handle = tcp::serve(
         listener,
+        port,
         fixture.state.clone(),
-        fixture.discovery_file.clone(),
+        fixture.token.clone(),
         async move {
             let _ = shutdown_rx.recv().await;
         },
-    )
-    .await
-    .unwrap();
+    );
     (addr, handle)
 }
 
@@ -155,7 +152,7 @@ pub mod serve {
 
         let response = no_proxy_client()
             .get(health_url(addr))
-            .bearer_auth(fixture.token().await)
+            .bearer_auth(fixture.token())
             .send()
             .await
             .unwrap();
@@ -228,7 +225,7 @@ pub mod serve {
 
         let response = no_proxy_client()
             .get(health_url(addr))
-            .bearer_auth(fixture.token().await)
+            .bearer_auth(fixture.token())
             .header(
                 reqwest::header::HOST,
                 format!("attacker.example:{}", addr.port()),
@@ -249,7 +246,7 @@ pub mod serve {
         let url = format!("http://{addr}/{}/events", ApiVersion::API_VERSION);
         let mut response = no_proxy_client()
             .get(url)
-            .bearer_auth(fixture.token().await)
+            .bearer_auth(fixture.token())
             .send()
             .await
             .unwrap();
@@ -288,100 +285,6 @@ pub mod serve {
         assert_eq!(response.status(), reqwest::StatusCode::UNAUTHORIZED);
 
         stop(&fixture, handle).await;
-    }
-
-    #[tokio::test]
-    async fn discovery_file_matches_listener() {
-        let fixture = Fixture::new("tcp_discovery_file_matches_listener").await;
-        let (addr, handle) = start(&fixture).await;
-
-        let value: Value = files::read_json(&fixture.discovery_file).await.unwrap();
-        let token = value["token"].as_str().unwrap();
-        assert_eq!(token.len(), 43);
-        assert_eq!(
-            value,
-            json!({
-                "schema_version": discovery::SCHEMA_VERSION,
-                "port": addr.port(),
-                "token": token,
-            })
-        );
-
-        stop(&fixture, handle).await;
-    }
-
-    #[tokio::test]
-    async fn restart_rotates_token() {
-        let fixture = Fixture::new("tcp_restart_rotates_token").await;
-
-        let (_, handle) = start(&fixture).await;
-        let first = fixture.token().await;
-        stop(&fixture, handle).await;
-
-        let (_, handle) = start(&fixture).await;
-        let second = fixture.token().await;
-        stop(&fixture, handle).await;
-
-        assert_ne!(first, second);
-    }
-
-    #[tokio::test]
-    async fn discovery_file_removed_after_shutdown() {
-        let fixture = Fixture::new("tcp_discovery_file_removed_after_shutdown").await;
-        let (_, handle) = start(&fixture).await;
-        assert!(fixture.discovery_file.exists());
-
-        stop(&fixture, handle).await;
-        assert!(!fixture.discovery_file.exists());
-    }
-
-    #[tokio::test]
-    async fn discovery_remove_failure_keeps_serve_result() {
-        let fixture = Fixture::new("tcp_discovery_remove_failure").await;
-        let (_, handle) = start(&fixture).await;
-
-        // a directory at the discovery path makes the removal fail
-        let path = fixture.discovery_file.path();
-        std::fs::remove_file(path).unwrap();
-        std::fs::create_dir(path).unwrap();
-
-        // the removal failure is logged, not returned
-        stop(&fixture, handle).await;
-        assert!(path.is_dir());
-    }
-
-    #[tokio::test]
-    async fn discovery_write_failure_errors() {
-        let fixture = Fixture::new("tcp_discovery_write_failure_errors").await;
-        // a file at the discovery directory path makes the write fail
-        let parent = fixture.discovery_file.parent().unwrap();
-        std::fs::write(parent.path(), b"not a dir").unwrap();
-
-        let listener = tcp::bind(0).await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        let result = tcp::serve(
-            listener,
-            fixture.state.clone(),
-            fixture.discovery_file.clone(),
-            async {},
-        )
-        .await;
-        let Err(e) = result else {
-            panic!("serve started despite the discovery write failure");
-        };
-        assert!(
-            matches!(e, ServerErr::FileSysErr(_)),
-            "unexpected error: {e:?}"
-        );
-
-        // the listener is dropped, so connections are refused
-        let connect = tokio::time::timeout(
-            Duration::from_secs(10),
-            tokio::net::TcpStream::connect(addr),
-        )
-        .await
-        .expect("connect did not resolve within 10s");
-        assert!(connect.is_err(), "listener still accepts connections");
     }
 }
 

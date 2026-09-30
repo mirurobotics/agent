@@ -1,7 +1,9 @@
 //! Discovery file for TCP clients of the local device API.
 //!
-//! The file exists only while the TCP listener is serving, and it holds that
-//! listener's port and the bearer token for this agent run. Clients:
+//! The app writes the file once the TCP listener is bound and removes it after
+//! the listener stops, so the file exists only while TCP is being served. It
+//! holds that listener's port and the bearer token for this agent run.
+//! Clients:
 //! - read the file, then close it right away;
 //! - treat a missing file or a refused connection as "not serving" and retry
 //!   later by re-reading the file;
@@ -12,15 +14,12 @@ use std::future::Future;
 use std::time::Duration;
 
 // internal crates
+use crate::disk::errors::DiskErr;
 use crate::filesys::{self, files, Atomic, FileSysErr, Overwrite, WriteOptions};
-use crate::server::{auth::BearerToken, errors::ServerErr};
 
 // external crates
 use serde::Serialize;
 use tracing::debug;
-
-/// Version of the discovery file format that clients read.
-pub const SCHEMA_VERSION: u32 = 1;
 
 /// Windows refuses to replace or delete a file while another process has it
 /// open without delete sharing, which Python's `open` does. Readers close the
@@ -32,7 +31,6 @@ const RETRY_DELAY: Duration = Duration::from_millis(50);
 /// Discovery file contents. Not `Debug`, so the token cannot reach logs.
 #[derive(Serialize)]
 struct Discovery<'a> {
-    schema_version: u32,
     port: u16,
     token: &'a str,
 }
@@ -40,12 +38,8 @@ struct Discovery<'a> {
 /// Atomically write the TCP port and bearer token for local device API
 /// clients. On Unix the file mode is 0640 (owner read-write, group read); on
 /// Windows the file inherits the `device-api` directory ACL.
-pub async fn write(file: &filesys::File, port: u16, token: &BearerToken) -> Result<(), ServerErr> {
-    let discovery = Discovery {
-        schema_version: SCHEMA_VERSION,
-        port,
-        token: token.expose(),
-    };
+pub async fn write(file: &filesys::File, port: u16, token: &str) -> Result<(), DiskErr> {
+    let discovery = Discovery { port, token };
     let opts = WriteOptions {
         overwrite: Overwrite::Allow,
         atomic: Atomic::Yes,
@@ -56,7 +50,7 @@ pub async fn write(file: &filesys::File, port: u16, token: &BearerToken) -> Resu
 }
 
 /// Remove the discovery file; a missing file is not an error.
-pub async fn remove(file: &filesys::File) -> Result<(), ServerErr> {
+pub async fn remove(file: &filesys::File) -> Result<(), DiskErr> {
     retry(ATTEMPTS, || files::delete(file)).await?;
     Ok(())
 }

@@ -2,7 +2,6 @@
 use crate::filesys;
 
 pub mod auth;
-pub mod discovery;
 pub mod errors;
 pub mod handlers;
 pub mod response;

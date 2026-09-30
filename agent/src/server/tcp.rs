@@ -4,10 +4,8 @@ use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 
 // internal crates
-use crate::filesys;
 use crate::server::{
     auth::{check_bearer, BearerToken},
-    discovery,
     errors::{BindTcpListenerErr, RunAxumServerErr, ServerErr},
     routes, State,
 };
@@ -42,35 +40,30 @@ pub async fn bind(port: u16) -> Result<TcpListener, ServerErr> {
     Ok(listener)
 }
 
-/// Serve the local device API on `listener`. Every request must pass the
-/// loopback check (403) and then carry the bearer token (401). The port and a
-/// freshly generated token are written to `discovery_file` before serving, and
-/// the file is removed after graceful shutdown. A token or discovery failure
-/// returns an error without serving.
-pub async fn serve(
+/// The port `listener` is bound to, which resolves port `0` to the one the OS
+/// assigned.
+pub fn local_port(listener: &TcpListener) -> Result<u16, ServerErr> {
+    let addr = listener.local_addr().map_err(|e| {
+        ServerErr::RunAxumServerErr(RunAxumServerErr {
+            source: e,
+            trace: trace!(),
+        })
+    })?;
+    Ok(addr.port())
+}
+
+/// Serve the local device API on `listener`, which is bound to `port` (see
+/// [`local_port`]). Every request must pass the loopback check (403) and then
+/// carry `token` as a bearer token (401).
+pub fn serve(
     listener: TcpListener,
+    port: u16,
     state: Arc<State>,
-    discovery_file: filesys::File,
+    token: Arc<BearerToken>,
     shutdown_signal: impl Future<Output = ()> + Send + 'static,
-) -> Result<JoinHandle<Result<(), ServerErr>>, ServerErr> {
-    let port = listener
-        .local_addr()
-        .map_err(|e| {
-            ServerErr::RunAxumServerErr(RunAxumServerErr {
-                source: e,
-                trace: trace!(),
-            })
-        })?
-        .port();
-    let token = BearerToken::generate()?;
-    discovery::write(&discovery_file, port, &token).await?;
-    let router = router(state, port, Arc::new(token));
-    Ok(tokio::task::spawn(run(
-        listener,
-        router,
-        shutdown_signal,
-        discovery_file,
-    )))
+) -> JoinHandle<Result<(), ServerErr>> {
+    let router = router(state, port, token);
+    tokio::task::spawn(run(listener, router, shutdown_signal))
 }
 
 /// The shared router behind the bearer check, behind the loopback check.
@@ -88,9 +81,8 @@ async fn run(
     listener: TcpListener,
     router: Router,
     shutdown_signal: impl Future<Output = ()> + Send + 'static,
-    discovery_file: filesys::File,
 ) -> Result<(), ServerErr> {
-    let result = axum::serve(listener, router)
+    axum::serve(listener, router)
         .with_graceful_shutdown(shutdown_signal)
         .await
         .map_err(|e| {
@@ -98,11 +90,7 @@ async fn run(
                 source: e,
                 trace: trace!(),
             })
-        });
-    if let Err(e) = discovery::remove(&discovery_file).await {
-        warn!("Failed to remove discovery file: {e}");
-    }
-    result
+        })
 }
 
 /// Reject requests that aren't addressed to this listener's loopback URL.

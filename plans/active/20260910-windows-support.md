@@ -45,7 +45,7 @@ Unix usage in `deploy/filesys.rs` and `data_uploads/retention/deleter.rs` is
    `Cargo.toml` (rumqttc webpki pin) is unchanged by this plan.
 2. **Local API transport: localhost TCP + cookie-file token** (Phase 2). Agent mints a
    256-bit CSPRNG token at startup, writes an atomic discovery file
-   `device-api.json` (`{schema_version, port, token}`), and requires
+   `device-api.json` (`{port, token}`), and requires
    `Authorization: Bearer` (constant-time compare) on every route. Authorization =
    NTFS ACL on the discovery file (readable by the `Miru Clients` local group), set by
    the installer via inheritable ACEs — no security-descriptor FFI in agent code.
@@ -152,13 +152,13 @@ and the agent keeps running without the listener. Both transports serve the
 same `routes::router()` with the same middleware, and the TCP transport
 rejects requests whose Host or Origin isn't its loopback address.
 
-**PR 12 — token auth + discovery file** (done — `server/auth.rs`, `server/discovery.rs`)**.**
+**PR 12 — token auth + discovery file** (done — `server/auth.rs`, `disk/discovery.rs`, `app/run.rs`)**.**
 Every TCP request, including `/v0.2/health` and the `/v0.2/events` SSE stream,
 must carry `Authorization: Bearer <token>`; otherwise the agent returns 401 with
 `WWW-Authenticate: Bearer`. The check runs after the loopback check (403) and
 compares in constant time. The agent generates a fresh 32-byte token
 (43 base64url characters) at every start and atomically writes
-`{schema_version, port, token}` to `/run/miru/device-api.json` on Unix (mode
+`{port, token}` to `/run/miru/device-api.json` on Unix (mode
 0640, beside the socket) and to `device-api/device-api.json` under the data
 root on Windows (the file inherits the `device-api` directory ACL). The file
 is removed after graceful shutdown and any stale copy is removed at startup. A token or discovery-file failure is logged and the agent runs
@@ -207,6 +207,13 @@ Administrators, SYSTEM, and the service account can read the file on Windows.
   the directory as `miru:miru` mode `0750`, so an idle exit does not remove it
   and the `miru` group can read the file without a grant on the data root.
   Windows stays at `ProgramData\Miru\device-api\`.
+- 2026-09-30: The app layer owns the bearer token and the discovery file;
+  `tcp::serve` takes the token and only enforces it. Rationale: startup already
+  removes stale discovery files in `app/run.rs`, so writing the file after bind
+  and removing it after the TCP server stops (via the shutdown manager) keeps
+  the whole lifecycle in one place. The file I/O lives in `disk::discovery`,
+  which takes the token as a plain string so `disk` does not depend on
+  `server`.
 - 2026-09-30: The discovery file mode is `0o640`. Rationale: it matches the
   `miru`-group boundary of the Unix socket and the public-key precedent;
   `0o600` would lock out `miru`-group SDK clients.
