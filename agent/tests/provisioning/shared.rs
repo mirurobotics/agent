@@ -148,15 +148,21 @@ pub(super) async fn validate_storage(layout: &Layout, expected_name: &str) {
     assert!(auth.public_key().exists(), "public key missing");
     assert!(auth.token().exists(), "token missing");
 
-    assert_temp_dir_cleaned(layout);
+    assert_temp_dir_cleaned(layout).await;
 }
 
-pub(super) fn assert_temp_dir_cleaned(layout: &Layout) {
-    let names: Vec<String> = std::fs::read_dir(layout.temp_dir().path())
+pub(super) async fn assert_temp_dir_cleaned(layout: &Layout) {
+    let temp_dir = layout.temp_dir();
+    let files = dirs::files(&temp_dir).await.unwrap();
+    assert!(files.is_empty(), "temp dir still contains files: {files:?}");
+
+    let subdirs: Vec<String> = dirs::subdirs(&temp_dir)
+        .await
         .unwrap()
-        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .iter()
+        .map(|dir| dir.name().unwrap().to_string())
         .collect();
-    assert_eq!(names, vec![TEMP_SENTINEL.to_string()]);
+    assert_eq!(subdirs, vec![TEMP_SENTINEL.to_string()]);
 }
 
 /// Byte-exact snapshot of every persisted blob, used to verify a failing

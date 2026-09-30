@@ -38,7 +38,7 @@ pub mod reprovision_fn {
 
         assert!(matches!(result, Err(ProvisionErr::HTTPErr(_))));
         snapshot.assert_unchanged(&env.layout).await;
-        assert_temp_dir_cleaned(&env.layout);
+        assert_temp_dir_cleaned(&env.layout).await;
 
         env.cleanup().await;
     }

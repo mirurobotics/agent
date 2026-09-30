@@ -47,7 +47,7 @@ pub mod provision_fn {
             !env.layout.device().exists(),
             "device.json should not exist"
         );
-        assert_temp_dir_cleaned(&env.layout);
+        assert_temp_dir_cleaned(&env.layout).await;
 
         env.cleanup().await;
     }
@@ -169,7 +169,7 @@ pub mod provision_fn {
 
         assert_eq!(mock.call_count(mock::Call::ProvisionDevice), 1);
         snapshot.assert_unchanged(&env.layout).await;
-        assert_temp_dir_cleaned(&env.layout);
+        assert_temp_dir_cleaned(&env.layout).await;
 
         env.cleanup().await;
     }
