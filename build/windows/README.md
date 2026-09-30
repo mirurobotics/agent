@@ -249,12 +249,10 @@ upgrades: betas and the stable release of `0.10.4` replace each other in place,
 and anything below `0.10.4` is rejected as a downgrade. Ordering within one
 version is not enforced, so an older beta can be installed over a newer build.
 
-Setup (GitHub OIDC; no Azure secret is stored in GitHub):
-
-- An Entra app or managed identity with the **Artifact Signing Certificate
-  Profile Signer** role, and a federated credential for subject
-  `repo:mirurobotics/agent:environment:release`.
-- A GitHub environment `release`, limited to `v*` tags.
-- Secrets `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, and
-  variables `AZURE_ARTIFACT_SIGNING_ENDPOINT`, `AZURE_ARTIFACT_SIGNING_ACCOUNT`,
-  `AZURE_ARTIFACT_SIGNING_PROFILE`.
+The job logs in with GitHub OIDC, so no Azure secret is stored in GitHub. The
+setup is Terraform in the infra repository: `azure/terraform` creates the
+managed identity, its federated credential for
+`repo:mirurobotics/agent:environment:release`, and its **Artifact Signing
+Certificate Profile Signer** role on the certificate profile;
+`github/terraform` creates this repository's `release` environment (limited to
+`v*` tags) and its `AZURE_*` variables.
