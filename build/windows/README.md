@@ -250,7 +250,7 @@ and anything below `0.10.4` is rejected as a downgrade. Ordering within one
 version is not enforced, so an older beta can be installed over a newer build.
 
 The job logs in with GitHub OIDC, so no Azure secret is stored in GitHub. The
-setup is Terraform in the infra repository: `azure/terraform` creates the
+setup is Terraform in the infra repository: `cicd/azure` creates the
 managed identity, its federated credential for
 `repo:mirurobotics/agent:environment:release`, and its **Artifact Signing
 Certificate Profile Signer** role on the certificate profile;
