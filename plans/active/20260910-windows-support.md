@@ -152,7 +152,9 @@ rejects requests whose Host or Origin isn't its loopback address.
 **PR 12 — token auth + discovery file.** Token generation at startup, atomic
 `device-api.json` write into the ACL'd dir, Bearer middleware (constant-time compare)
 on all routes, SSE verified over TCP. Python SDK work happens in
-`python-device-sdk` (transport + discovery file + re-read-on-401).
+`python-device-sdk` (transport + discovery file + re-read-on-401). Must land
+before the first Windows release: the TCP listener is on by default there, and
+until this PR any local user or process can call every device API route.
 
 ## Decision log
 

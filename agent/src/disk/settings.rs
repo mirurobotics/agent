@@ -16,7 +16,7 @@ pub struct Settings {
     pub is_persistent: bool,
     pub enable_socket_server: bool,
     /// Loopback TCP listener for the local device API. Independent of the Unix
-    /// socket. On by default.
+    /// socket. On by default only on Windows (see `DEFAULT_ENABLE_TCP_SERVER`).
     pub enable_tcp_server: bool,
     pub tcp_server: TCPServer,
     pub enable_mqtt_worker: bool,
