@@ -61,6 +61,7 @@ pub struct AppOptions {
     pub backend_host: BackendHost,
 
     pub enable_socket_server: bool,
+    pub enable_tcp_server: bool,
     pub server: server::Options,
 
     pub enable_mqtt_worker: bool,
@@ -85,6 +86,7 @@ impl Default for AppOptions {
             backend_host: BackendHost::default(),
 
             enable_socket_server: true,
+            enable_tcp_server: server::DEFAULT_ENABLE_TCP_SERVER,
             server: server::Options::default(),
 
             enable_mqtt_worker: true,

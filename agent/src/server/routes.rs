@@ -2,30 +2,52 @@
 use std::sync::Arc;
 
 // internal crates
-use crate::filesys;
 use crate::server::{handlers, state::State};
 
 // external crates
 use axum::{
+    extract::Request,
+    middleware::{from_fn, Next},
     routing::{get, post},
     Router,
 };
+use tower::ServiceBuilder;
+use tower_http::{
+    trace::{DefaultMakeSpan, DefaultOnRequest, DefaultOnResponse, TraceLayer},
+    LatencyUnit,
+};
+use tracing::Level;
 
-#[derive(Debug)]
-pub struct Options {
-    pub socket_file: filesys::File,
+/// Build the router both transports serve, including shared middleware.
+pub fn router(state: Arc<State>) -> Router {
+    middleware(table(state.clone()), state)
 }
 
-impl Default for Options {
-    fn default() -> Self {
-        Self {
-            socket_file: filesys::File::new("/run/miru/miru.sock"),
-        }
-    }
+/// Activity tracking and request tracing applied to every transport.
+fn middleware(router: Router, state: Arc<State>) -> Router {
+    router.layer(
+        ServiceBuilder::new()
+            .layer(from_fn(move |req: Request, next: Next| {
+                let state = state.clone();
+                async move {
+                    state.activity_tracker.touch();
+                    next.run(req).await
+                }
+            }))
+            .layer(
+                TraceLayer::new_for_http()
+                    .make_span_with(DefaultMakeSpan::new().include_headers(true))
+                    .on_request(DefaultOnRequest::new().level(Level::INFO))
+                    .on_response(
+                        DefaultOnResponse::new()
+                            .level(Level::INFO)
+                            .latency_unit(LatencyUnit::Micros),
+                    ),
+            ),
+    )
 }
 
-/// Build the application router with all routes and shared state, without middleware.
-pub fn routes(state: Arc<State>) -> Router {
+fn table(state: Arc<State>) -> Router {
     let api_version = device_api::models::ApiVersion::API_VERSION.to_string();
     Router::new()
         // =============================== AGENT INFO ============================== //

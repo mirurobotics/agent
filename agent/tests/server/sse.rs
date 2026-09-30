@@ -62,7 +62,7 @@ impl Fixture {
             shutdown_tx.clone(),
         ));
 
-        let app = routes::routes(state.clone());
+        let app = routes::router(state.clone());
 
         Self {
             state,

@@ -86,6 +86,16 @@ pub mod app_options_default {
     }
 
     #[test]
+    fn tcp_server_enabled_only_on_windows() {
+        let options = AppOptions::default();
+        assert_eq!(options.enable_tcp_server, cfg!(windows));
+        assert_eq!(
+            options.server.tcp_port,
+            miru_agent::server::DEFAULT_TCP_PORT
+        );
+    }
+
+    #[test]
     fn mqtt_worker_enabled() {
         assert!(AppOptions::default().enable_mqtt_worker);
     }

@@ -138,14 +138,34 @@ maintain its WinGet manifest.
 
 ### Phase 2 — local device API (gated on customer need)
 
-**PR 11 — TCP listener.** `server/serve.rs` transport split: `cfg(windows)` path binds
-`127.0.0.1:<port>` (port in settings; `0` = OS-assigned). Unix socket + `LISTEN_FDS`
-path unchanged on Linux.
+**PR 11 — TCP listener** (done — `server/tcp.rs`)**.** Loopback TCP transport that
+binds `127.0.0.1:<port>` when `settings.enable_tcp_server` is set. The port is
+`settings.tcp_server.port` (default 6478; `0` = OS-assigned, logged at startup).
+`enable_tcp_server` defaults to on for Windows and off elsewhere. Shipped for
+all platforms rather than `cfg(windows)` only: on Linux it runs alongside the
+Unix socket + `LISTEN_FDS` path, which is unchanged; on Windows it is the only
+transport, and startup warns when it is turned off. A failed bind logs an error
+and the agent keeps running without the listener. Both transports serve the
+same `routes::router()` with the same middleware, and the TCP transport
+rejects requests whose Host or Origin isn't its loopback address.
 
 **PR 12 — token auth + discovery file.** Token generation at startup, atomic
 `device-api.json` write into the ACL'd dir, Bearer middleware (constant-time compare)
 on all routes, SSE verified over TCP. Python SDK work happens in
-`python-device-sdk` (transport + discovery file + re-read-on-401).
+`python-device-sdk` (transport + discovery file + re-read-on-401). Must land
+before the first Windows release: the TCP listener is on by default there, and
+until this PR any local user or process can call every device API route.
+
+## Decision log
+
+- 2026-09-21: PR 11's TCP transport is cross-platform and opt-in on Linux via
+  `enable_tcp_server` (default off except on Windows), not a `cfg(windows)` replacement
+  for the Unix socket. Rationale: Linux users get the same loopback HTTP
+  transport for tooling that cannot speak Unix sockets, the transport gets
+  exercised by the Linux test suite and coverage gate rather than only on the
+  Windows runner, and keeping it opt-in means no Linux device starts listening
+  on a TCP port through an upgrade. Token auth and the discovery file (PR 12)
+  still gate any default-on port.
 
 ## Risks
 

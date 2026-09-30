@@ -1,7 +1,8 @@
 // internal crates
-use miru_agent::disk::{Backend, MQTTBroker, Settings};
+use miru_agent::disk::{Backend, MQTTBroker, Settings, TCPServer};
 use miru_agent::logs::LogLevel;
 use miru_agent::network::{BackendHost, MqttHost};
+use miru_agent::server::DEFAULT_TCP_PORT;
 
 // external crates
 use serde_json::json;
@@ -12,6 +13,8 @@ fn serialize_deserialize_settings() {
         log_level: LogLevel::Debug,
         is_persistent: false,
         enable_socket_server: false,
+        enable_tcp_server: true,
+        tcp_server: TCPServer { port: 51823 },
         enable_mqtt_worker: false,
         enable_poller: false,
         backend: Backend {
@@ -39,6 +42,8 @@ fn deserialize_settings() {
         },
         is_persistent: false,
         enable_socket_server: false,
+        enable_tcp_server: true,
+        tcp_server: TCPServer { port: 51823 },
         enable_mqtt_worker: false,
         enable_poller: false,
     };
@@ -48,6 +53,8 @@ fn deserialize_settings() {
         "mqtt_broker": settings.mqtt_broker,
         "is_persistent": settings.is_persistent,
         "enable_socket_server": settings.enable_socket_server,
+        "enable_tcp_server": settings.enable_tcp_server,
+        "tcp_server": settings.tcp_server,
         "enable_mqtt_worker": settings.enable_mqtt_worker,
         "enable_poller": settings.enable_poller,
     });
@@ -64,6 +71,13 @@ fn deserialize_settings() {
 
     // invalid JSON
     assert!(serde_json::from_str::<Settings>("invalid-json").is_err());
+}
+
+#[test]
+fn tcp_server_enabled_by_default_only_on_windows() {
+    let settings = Settings::default();
+    assert_eq!(settings.enable_tcp_server, cfg!(windows));
+    assert_eq!(settings.tcp_server.port, DEFAULT_TCP_PORT);
 }
 
 #[test]

@@ -23,7 +23,7 @@ pub use self::file_rules::{file_rules_for_deployed, file_rules_for_deployment, F
 pub use self::git_commits::GitCommits;
 pub use self::layout::Layout;
 pub use self::releases::Releases;
-pub use self::settings::{Backend, MQTTBroker, Settings};
+pub use self::settings::{Backend, MQTTBroker, Settings, TCPServer};
 pub use crate::network::{BackendHost, MqttHost};
 
 use self::device::Device as DeviceStorage;
