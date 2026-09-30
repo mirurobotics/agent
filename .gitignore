@@ -47,3 +47,5 @@ target/coverage/
 build/windows/artifacts/
 build/windows/bin/
 build/windows/obj/
+# written by build/windows/restore-pinned.ps1
+build/windows/nuget.config

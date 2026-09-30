@@ -25,6 +25,9 @@ The MSI:
 - uses the permanent UpgradeCode `B5ED0336-5F14-4308-A667-3CE8CDEF7D48`;
 - rejects downgrades and schedules major upgrades transactionally so a failed
   replacement can restore the previously installed package;
+- allows same-version upgrades, so a stable release replaces a prerelease of
+  the same `MAJOR.MINOR.PATCH` in place (see [Code signing](#code-signing) for
+  prerelease versions);
 - protects `%ProgramData%\Miru` and its authored `logs`, `auth`, and `tmp`
   children by setting their owner to Local System and applying a non-inherited
   DACL that gives Local System and built-in Administrators inheritable full
@@ -55,7 +58,7 @@ package contract with explicit inputs:
 ```powershell
 Set-Location C:\src\agent
 cargo build --target x86_64-pc-windows-msvc --package miru-agent --locked --release
-dotnet restore build\windows\miru-agent.wixproj
+dotnet restore build\windows\miru-agent.wixproj --locked-mode
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File build\windows\tests\package-tests.ps1 -ProjectPath build\windows\miru-agent.wixproj -BinDir target\x86_64-pc-windows-msvc\release -ArtifactsDirectory build\windows\artifacts\package-tests
 ```
 
@@ -64,12 +67,15 @@ The produced `miru-agent.exe` statically links the MSVC C runtime (via
 and needs no Visual C++ Redistributable prerequisite on the target machine for
 the service to start.
 
-`Version` is deliberately stricter than general SemVer. It must contain exactly
-three numeric fields, with `MAJOR` and `MINOR` from 0 through 255 and `PATCH`
-from 0 through 65535. Leading `v`, prerelease/build labels, and fourth fields are
+`Version` is deliberately stricter than general SemVer. It must contain three
+numeric fields, with `MAJOR` and `MINOR` from 0 through 255 and `PATCH` from 0
+through 65535, plus an optional fourth `BUILD` field from 0 through 65535 that
+release builds use for prereleases. Leading `v` and prerelease/build labels are
 not accepted at the MSI build boundary. `BinDir` must contain
 `miru-agent.exe`. WiX is restored through the pinned `WixToolset.Sdk` 7.0.0
-project; package validation is enabled and warnings fail the build.
+project; package validation is enabled and warnings fail the build. CI and
+releases restore through `restore-pinned.ps1`, which accepts the WiX packages
+only if their SHA-512 hashes match the pinned values.
 
 The project sets `AcceptEula=wix7` for noninteractive builds under the
 [WiX maintenance-fee agreement](https://docs.firegiant.com/wix/osmf/).
@@ -78,10 +84,11 @@ not purchase a subscription.
 
 ## Install and provision
 
-Run installation from an elevated 64-bit Windows PowerShell 5.1 session. The
-current package is built and tested locally; publishing release artifacts and a
-WinGet manifest remains follow-up work. Install a trusted MSI directly with
-Windows Installer:
+Run installation from an elevated 64-bit Windows PowerShell 5.1 session. Every
+release, including prereleases, attaches a signed `miru-agent-<version>.msi` to
+the GitHub release (see [Code signing](#code-signing)); a WinGet manifest
+remains follow-up work.
+Install a trusted MSI directly with Windows Installer:
 
 ```powershell
 $msi = "C:\path\to\miru-agent-1.0.0.msi"
@@ -95,8 +102,8 @@ if (@(0, 3010) -notcontains $process.ExitCode) {
 
 An install exit code of 0 means success. Exit code 3010 also means success, but
 Windows must be restarted to complete the installation. Any other result is a
-failure; inspect the verbose log. Published packages must be Authenticode-signed
-before customer distribution.
+failure; inspect the verbose log. Check the signature before installing:
+`Get-AuthenticodeSignature` on the MSI must report `Valid`.
 
 Provision by placing the secret only in the process environment, then invoke the
 installed executable directly. Do not put the token on the command line:
@@ -219,7 +226,36 @@ Integration runs write verbose MSI logs directly beneath
 prints its log path before starting Windows Installer. These logs survive
 temporary build-output cleanup, including when only cleanup fails.
 
-Authenticode signing of the executable and MSI remains deferred, along with
 WinGet publication, full live-backend provisioning, Windows Server
 certification, and the Phase 2 `Miru Clients` local group and device-API
-discovery-directory permissions.
+discovery-directory permissions remain deferred.
+
+## Code signing
+
+The `windows-sign` job in `.github/workflows/release.yml` signs
+`miru-agent.exe` with
+[Azure Artifact Signing](https://learn.microsoft.com/azure/artifact-signing/),
+builds the MSI around it, signs the MSI, and checks that both signatures are
+valid and timestamped. The release publishes only these signed files; if the
+job fails, nothing is released.
+
+MSI versions follow the tag. Prereleases add a fourth field (`alpha.N` → `1NN`,
+`beta.N` → `2NN`, `rc.N` → `3NN`); other tag shapes fail the release:
+
+| Tag | MSI version | File |
+| --- | --- | --- |
+| `v0.10.4-beta.1` | `0.10.4.201` | `miru-agent-0.10.4-beta.1.msi` |
+| `v0.10.4` | `0.10.4` | `miru-agent-0.10.4.msi` |
+
+Windows Installer ignores the fourth field, so the MSI allows same-version
+upgrades: betas and the stable release of `0.10.4` replace each other in place,
+and anything below `0.10.4` is rejected as a downgrade. Ordering within one
+version is not enforced, so an older beta can be installed over a newer build.
+
+The job logs in with GitHub OIDC, so no Azure secret is stored in GitHub. The
+setup is Terraform in the infra repository: `cicd/azure` creates the
+managed identity, its federated credential for
+`repo:mirurobotics/agent:environment:release`, and its **Artifact Signing
+Certificate Profile Signer** role on the certificate profile;
+`github/terraform` creates this repository's `release` environment (limited to
+`v*` tags) and its `AZURE_*` variables.
