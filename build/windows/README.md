@@ -199,8 +199,7 @@ failed-upgrade rollback, uninstall, ACL repair, and state retention. It asserts
 the `miru-agent` service is installed (automatic start, `NT SERVICE\miru-agent`,
 the installed binary path, the restart failure actions and reset period, an
 unrestricted SID type, and only `SeChangeNotifyPrivilege`) after install,
-maintenance, upgrade, downgrade rejection, failed-upgrade rollback, and failed
-uninstall. It asserts the service runs as its service SID, holds no privilege
+maintenance, upgrade, failed-upgrade rollback, and failed uninstall. It asserts the service runs as its service SID, holds no privilege
 but `SeChangeNotifyPrivilege`, and writes its log after install, upgrade, and
 both rollbacks, and that it is removed after uninstall.
 Maintenance, upgrade, rollback, and ordinary uninstall must retain customer

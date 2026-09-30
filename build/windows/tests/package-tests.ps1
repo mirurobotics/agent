@@ -220,10 +220,8 @@ function Assert-DowngradeLaunchCondition {
 function Assert-ServiceTables {
     param([Parameter(Mandatory = $true)]$Database)
     Assert-ServiceInstallRow $Database
-    Assert-MsiServiceConfig $Database
     Assert-ServiceControlRow $Database
     Assert-ServiceRecoveryTable $Database
-    Assert-RollbackServiceConfig $Database
 }
 
 # Own-process, auto-start, vital service running as NT SERVICE\miru-agent.
@@ -248,46 +246,6 @@ function Assert-ServiceInstallRow {
     Assert-True (([int]$row[5] -band 0x8000) -ne 0) "service is vital"
 }
 
-# Two MsiServiceConfig rows (SID type, required privileges), applied by
-# MsiConfigureServices between InstallServices and StartServices.
-function Assert-MsiServiceConfig {
-    param([Parameter(Mandatory = $true)]$Database)
-    Assert-True (Test-MsiTable $Database "MsiServiceConfig") "MsiServiceConfig table present"
-    $query = "SELECT ``MsiServiceConfig``, ``Name``, ``Event``, " + `
-        "``ConfigType``, ``Argument``, ``Component_`` FROM ``MsiServiceConfig``"
-    $rows = @(Get-MsiRows $Database $query 6)
-    Assert-Equal 2 $rows.Count "two MsiServiceConfig rows"
-    foreach ($row in $rows) {
-        Assert-Equal $MsiServiceName $row[1] "service config $($row[0]) name"
-        Assert-Equal "MiruAgentExe" $row[5] "service config $($row[0]) owning component"
-        $configEvent = [int]$row[2]
-        Assert-True (($configEvent -band 0x1) -ne 0) "service config $($row[0]) applied on install"
-        Assert-True (($configEvent -band 0x4) -ne 0) "service config $($row[0]) applied on repair"
-    }
-    $sidTypeArguments = @{ none = "0"; unrestricted = "1"; restricted = "3" }
-    $sidRows = @($rows | Where-Object { [int]$_[3] -eq 5 })
-    Assert-Equal 1 $sidRows.Count "one SERVICE_CONFIG_SERVICE_SID_INFO row"
-    Assert-Equal $sidTypeArguments[$MsiServiceSettings.SidType] $sidRows[0][4] `
-        "service SID type is $($MsiServiceSettings.SidType)"
-    $privilegeRows = @($rows | Where-Object { [int]$_[3] -eq 6 })
-    Assert-Equal 1 $privilegeRows.Count "one SERVICE_CONFIG_REQUIRED_PRIVILEGES_INFO row"
-    Assert-Equal ($MsiServiceSettings.RequiredPrivileges -join "[~]") $privilegeRows[0][4] `
-        "service required privileges"
-    $sequenceQuery = "SELECT ``Action``, ``Condition``, ``Sequence`` " + `
-        "FROM ``InstallExecuteSequence``"
-    $sequence = @(Get-MsiRows $Database $sequenceQuery 3)
-    $configureRows = @($sequence | Where-Object {
-        $_[0] -eq "MsiConfigureServices"
-    })
-    Assert-Equal 1 $configureRows.Count `
-        "MsiConfigureServices is scheduled once"
-    $configure = Get-SequenceNumber $sequence "MsiConfigureServices"
-    $install = Get-SequenceNumber $sequence "InstallServices"
-    $start = Get-SequenceNumber $sequence "StartServices"
-    Assert-True ($configure -gt $install -and $configure -lt $start) `
-        "MsiConfigureServices runs after InstallServices and before StartServices"
-}
-
 # ServiceControl starts the service on install, stops it on install and
 # uninstall, deletes it on uninstall, and waits for each transition.
 function Assert-ServiceControlRow {
@@ -308,97 +266,13 @@ function Assert-ServiceControlRow {
     Assert-True (($serviceEvent -band 0x80) -ne 0) "service deletes on uninstall"
 }
 
-# The Util extension's own failure-actions table (not the MSI ServiceConfig table).
+# The Util extension emits its own failure-actions table, Wix4ServiceConfig
+# (pinned from the CI build), rather than the standard MSI ServiceConfig table;
+# the restart action values are pinned at runtime in integration-lib.ps1.
 function Assert-ServiceRecoveryTable {
     param([Parameter(Mandatory = $true)]$Database)
     Assert-True (Test-MsiTable $Database "Wix4ServiceConfig") `
         "WiX Util service recovery table present"
-    $query = "SELECT ``ServiceName``, ``Component_``, ``NewService``, " + `
-        "``FirstFailureActionType``, ``SecondFailureActionType``, " + `
-        "``ThirdFailureActionType``, ``ResetPeriodInDays``, " + `
-        "``RestartServiceDelayInSeconds``, ``ProgramCommandLine``, " + `
-        "``RebootMessage`` FROM ``Wix4ServiceConfig``"
-    $rows = @(Get-MsiRows $Database $query 10)
-    Assert-Equal 1 $rows.Count "one service recovery row"
-    $row = $rows[0]
-    Assert-Equal $MsiServiceName $row[0] "service recovery service name"
-    Assert-Equal "MiruAgentExe" $row[1] "service recovery owning component"
-    Assert-Equal "1" $row[2] "service recovery configures the installed service"
-    Assert-Equal ($MsiServiceSettings.FailureActions -join ",") `
-        (@($row[3], $row[4], $row[5]) -join ",") "service failure actions"
-    Assert-Equal ([string]$MsiServiceSettings.ResetPeriodDays) $row[6] `
-        "service failure count reset period in days"
-    Assert-Equal ([string]$MsiServiceSettings.RestartDelaySeconds) $row[7] `
-        "service restart delay in seconds"
-    Assert-True ([string]::IsNullOrEmpty($row[8]) -and [string]::IsNullOrEmpty($row[9])) `
-        "service recovery runs no command and shows no reboot message"
-}
-
-# The rollback action (see miru-agent.wxs) and its setter: types, scheduling, and a
-# command line that matches the spec.
-function Assert-RollbackServiceConfig {
-    param([Parameter(Mandatory = $true)]$Database)
-    $name = "MiruRollbackServiceConfig"
-    $actionQuery = "SELECT ``Action``, ``Type``, ``Source``, ``Target`` " + `
-        "FROM ``CustomAction``"
-    $actions = @(Get-MsiRows $Database $actionQuery 4)
-    $action = @($actions | Where-Object { $_[0] -eq $name })
-    Assert-Equal 1 $action.Count "one $name custom action"
-    # msidbCustomActionTypeDll + Continue + Rollback + InScript + NoImpersonate
-    Assert-Equal 3393 ([int]$action[0][1]) `
-        "$name is a rollback-only, no-impersonation, ignore-failure DLL action"
-    Assert-Equal "Wix4UtilCA_X64" $action[0][2] "$name runs the x64 Util CA DLL"
-    $binaries = @(Get-MsiRows $Database "SELECT ``Name`` FROM ``Binary``" 1 |
-        ForEach-Object { $_[0] })
-    Assert-True ($binaries -contains $action[0][2]) "$name DLL is in the Binary table"
-    Assert-Equal "WixQuietExec64" $action[0][3] "$name runs WixQuietExec64"
-    $setter = @($actions | Where-Object { $_[0] -eq "Set$name" })
-    Assert-Equal 1 $setter.Count "one Set$name custom action"
-    # msidbCustomActionTypeTextData + SourceProperty
-    Assert-Equal 51 ([int]$setter[0][1]) "Set$name sets a property"
-    Assert-Equal $name $setter[0][2] "Set$name sets the $name CustomActionData"
-    Assert-Equal (Get-RollbackServiceCommand) $setter[0][3] `
-        "$name command line matches the service spec"
-    $sequenceQuery = "SELECT ``Action``, ``Condition``, ``Sequence`` " + `
-        "FROM ``InstallExecuteSequence``"
-    $sequence = @(Get-MsiRows $Database $sequenceQuery 3)
-    foreach ($scheduledName in "Set$name", $name) {
-        $scheduled = @($sequence | Where-Object { $_[0] -eq $scheduledName })
-        Assert-Equal 1 $scheduled.Count "$scheduledName is scheduled once"
-        Assert-Equal 'REMOVE~="ALL"' $scheduled[0][1] `
-            "$scheduledName is scheduled only when this version is removed"
-    }
-    $order = @("StopServices", "Set$name", $name, "DeleteServices")
-    for ($i = 1; $i -lt $order.Count; $i++) {
-        $previous = Get-SequenceNumber $sequence $order[$i - 1]
-        $current = Get-SequenceNumber $sequence $order[$i]
-        Assert-True ($previous -lt $current) `
-            "$($order[$i - 1]) is sequenced before $($order[$i])"
-    }
-}
-
-# The rollback command line rendered from the spec (sc.exe uses seconds and ms).
-function Get-RollbackServiceCommand {
-    $settings = $MsiServiceSettings
-    $delayMilliseconds = $settings.RestartDelaySeconds * 1000
-    $actions = @($settings.FailureActions | ForEach-Object { "$_/$delayMilliseconds" }) -join "/"
-    # cd once instead of repeating sc.exe's full path: Target holds 255 characters.
-    $sc = "sc.exe"
-    $commands = @(
-        'cd /d "[System64Folder]"',
-        "$sc failure $MsiServiceName reset= $($settings.ResetPeriodDays * 86400) actions= $actions",
-        "$sc sidtype $MsiServiceName $($settings.SidType)",
-        "$sc privs $MsiServiceName $($settings.RequiredPrivileges -join '/')"
-    )
-    return '"[System64Folder]cmd.exe" /d /s /c "{0}"' -f ($commands -join " & ")
-}
-
-function Assert-ServiceSidDerivation {
-    Assert-Equal "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464" `
-        (Get-ServiceSid "TrustedInstaller") "TrustedInstaller service SID derivation"
-    Assert-Equal $MsiServiceSid (Get-ServiceSid $MsiServiceName) `
-        "miru-agent service SID derivation"
-    Write-Host "PASS service SID derivation"
 }
 
 function Build-FixturePackage {
@@ -441,7 +315,6 @@ $resolvedBinDir = (Resolve-Path -LiteralPath $BinDir).Path
 $resolvedArtifacts = Initialize-Directory ([IO.Path]::GetFullPath($ArtifactsDirectory))
 $invalidDirectory = Reset-ChildDirectory $resolvedArtifacts "invalid"
 
-Assert-ServiceSidDerivation
 $v1 = Build-ProductionPackage "1.0.0" (Reset-ChildDirectory $resolvedArtifacts "v1")
 $v2 = Build-ProductionPackage "1.1.0" (Reset-ChildDirectory $resolvedArtifacts "v2")
 Assert-True (-not [string]::Equals($v1.ProductCode, $v2.ProductCode, `

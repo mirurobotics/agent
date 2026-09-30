@@ -6,7 +6,6 @@ $ErrorActionPreference = "Stop"
 $MsiProductName = "Miru Agent"
 $MsiManufacturer = "Miru"
 $MsiUpgradeCode = "{B5ED0336-5F14-4308-A667-3CE8CDEF7D48}"
-$MsiServiceName = "miru-agent"
 $MsiServiceAccount = "NT SERVICE\miru-agent"
 $MsiServiceSid = "S-1-5-80-1251439239-454917380-1008020685-2030257057-91624695"
 # Single source for every service-settings assertion (units as in util:ServiceConfig).
@@ -60,15 +59,6 @@ function Initialize-Directory {
     param([Parameter(Mandatory = $true)][string]$Path)
     New-Item -ItemType Directory -Path $Path -Force | Out-Null
     return (Resolve-Path -LiteralPath $Path).Path
-}
-
-function Get-ServiceSid {
-    param([Parameter(Mandatory = $true)][string]$ServiceName)
-    $bytes = [Text.Encoding]::Unicode.GetBytes($ServiceName.ToUpperInvariant())
-    $sha1 = [Security.Cryptography.SHA1]::Create()
-    try { $hash = $sha1.ComputeHash($bytes) } finally { $sha1.Dispose() }
-    $parts = 0..4 | ForEach-Object { [BitConverter]::ToUInt32($hash, $_ * 4) }
-    return "S-1-5-80-" + ($parts -join "-")
 }
 
 function Open-MsiDatabase {
@@ -277,7 +267,6 @@ Export-ModuleMember -Function @(
     "Assert-Equal",
     "New-MsiSessionLogDirectory",
     "Initialize-Directory",
-    "Get-ServiceSid",
     "Open-MsiDatabase",
     "Close-MsiDatabase",
     "Get-MsiRows",
@@ -291,7 +280,6 @@ Export-ModuleMember -Function @(
     "MsiProductName",
     "MsiManufacturer",
     "MsiUpgradeCode",
-    "MsiServiceName",
     "MsiServiceAccount",
     "MsiServiceSid",
     "MsiServiceSettings",

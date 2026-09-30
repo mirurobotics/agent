@@ -66,6 +66,8 @@ Observable result: after installing the MSI, `Get-CimInstance Win32_Service -Fil
 
 - 2026-09-29 (review): the rollback action's condition is now `REMOVE~="ALL"` instead of `UPGRADINGPRODUCTCODE AND REMOVE~="ALL"`. A plain uninstall that fails after DeleteServices rolls back the same way, recreating the service without its settings, and the same action repairs it. The uninstall stage now first runs a failing uninstall (the fixture's `FAIL_UPGRADE_FOR_TEST` action also fires after DeleteServices) and asserts the full service config and live token. Code comments were trimmed to their essentials.
 
+- 2026-09-30 (review): trimmed tests that only restated what the integration matrix proves on a real install: the package-level MsiServiceConfig, rollback-action, and detailed Wix4ServiceConfig row checks, the SID-derivation self-test, the account-name lookup, the duplicate GetOwner check, the log-file ACL check, and the downgrade-stage service check. The runtime `qfailure`/`qsidtype`/`qprivs` checks against `$MsiServiceSettings` after install and after both rollbacks remain the drift guard, and the live-token check remains the proof that a rolled-back service runs without `SeImpersonatePrivilege`.
+
 ## Outcomes & Retrospective
 
 The MSI installs miru-agent as `NT SERVICE\miru-agent` with an unrestricted service SID. CI on f6da1f1 proved that the hardcoded SID matches Windows' derivation and lets the service create and write its log. The refine pass (Milestone 5) adds a `SeChangeNotifyPrivilege`-only token, non-destructive directory rights, rollback and downgrade service checks, and a stricter deploy recipe.

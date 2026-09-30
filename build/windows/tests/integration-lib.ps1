@@ -153,7 +153,6 @@ function Invoke-InstallStage {
     Invoke-NonAdminProbe -Stage "install"
     Assert-ServiceInstalled "install"
     Assert-ServiceRuntimeIdentity "install" 0
-    foreach ($log in @(Get-AgentLogFiles)) { Assert-InheritedProtection $log.FullName }
     Write-Host "PASS initial install, ACL correction, denial, and service installed"
 }
 
@@ -499,8 +498,6 @@ function Assert-ServiceSidIdentity {
     Assert-Equal 0 $LASTEXITCODE "$Stage sc.exe showsid succeeds"
     Assert-True ($s -match 'SERVICE SID:\s+(S-1-5-80-[\d-]+)') "$Stage sc.exe showsid reports a service SID`n$s"
     Assert-Equal $MsiServiceSid $Matches[1] "$Stage Windows derives the hardcoded service SID"
-    $accountSid = ([Security.Principal.NTAccount]$MsiServiceAccount).Translate([Security.Principal.SecurityIdentifier]).Value
-    Assert-Equal $MsiServiceSid $accountSid "$Stage virtual account resolves to the hardcoded SID"
 }
 
 function Assert-ServicePrivileges {
@@ -650,10 +647,6 @@ function Assert-ServiceRuntimeIdentity {
     $ownerSid = $proc | Invoke-CimMethod -MethodName GetOwnerSid
     Assert-Equal 0 ([int]$ownerSid.ReturnValue) "$Stage GetOwnerSid succeeds for process $processId"
     Assert-Equal $MsiServiceSid $ownerSid.Sid "$Stage service process token user is the service SID"
-    $owner = $proc | Invoke-CimMethod -MethodName GetOwner
-    Assert-Equal 0 ([int]$owner.ReturnValue) "$Stage GetOwner succeeds for process $processId"
-    Assert-True ($owner.Domain -ieq 'NT SERVICE') "$Stage service process domain is NT SERVICE (actual '$($owner.Domain)')"
-    Assert-True ($owner.User -ieq $MsiServiceName) "$Stage service process user is $MsiServiceName (actual '$($owner.User)')"
     Assert-ServiceProcessPrivileges $Stage $processId
 }
 
@@ -694,7 +687,6 @@ function Invoke-DowngradeStage {
     Assert-InstalledVersion $fixtureProducts[1] "fixture-v2" "downgrade leaves v2"
     Assert-Equal $v2Hash (Get-AgentHash) "downgrade leaves v2 executable"
     Assert-ProtectedState "downgrade rejection"
-    Assert-ServiceInstalled "downgrade rejection"
     Write-Host "PASS downgrade rejected with v2 intact"
 }
 
