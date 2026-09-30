@@ -8,8 +8,8 @@
     <InstallerPlatform>x64</InstallerPlatform>
     <SuppressValidation>false</SuppressValidation>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <!-- packages.lock.json pins the extension's content hash; CI and releases
-         restore with locked mode. -->
+    <!-- packages.lock.json pins the extension's content hash. CI and releases
+         restore through restore-pinned.ps1, which also pins the SDK by hash. -->
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <!-- WIX1149: core ServiceConfig is the only way to set SID type and privileges. -->
     <SuppressSpecificWarnings>1149</SuppressSpecificWarnings>

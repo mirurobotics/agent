@@ -116,7 +116,7 @@ jobs:
         run: cargo build --target x86_64-pc-windows-msvc --package miru-agent --locked --release
 
       - name: Restore pinned WiX SDK
-        run: dotnet restore build/windows/miru-agent.wixproj --locked-mode
+        run: build\windows\restore-pinned.ps1 -ProjectPath build\windows\miru-agent.wixproj
 
       - name: Run package tests
         shell: powershell

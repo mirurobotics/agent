@@ -73,7 +73,9 @@ through 65535, plus an optional fourth `BUILD` field from 0 through 65535 that
 release builds use for prereleases. Leading `v` and prerelease/build labels are
 not accepted at the MSI build boundary. `BinDir` must contain
 `miru-agent.exe`. WiX is restored through the pinned `WixToolset.Sdk` 7.0.0
-project; package validation is enabled and warnings fail the build.
+project; package validation is enabled and warnings fail the build. CI and
+releases restore through `restore-pinned.ps1`, which accepts the WiX packages
+only if their SHA-512 hashes match the pinned values.
 
 The project sets `AcceptEula=wix7` for noninteractive builds under the
 [WiX maintenance-fee agreement](https://docs.firegiant.com/wix/osmf/).

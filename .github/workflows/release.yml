@@ -149,6 +149,11 @@ jobs:
           "version=$version" >> $env:GITHUB_OUTPUT
           "name=miru-agent-$release" >> $env:GITHUB_OUTPUT
 
+      # Before Azure login: WiX packages are fetched and hash-checked against the
+      # pins in restore-pinned.ps1, and are the only NuGet source afterwards.
+      - name: Restore pinned WiX SDK
+        run: build\windows\restore-pinned.ps1 -ProjectPath build\windows\miru-agent.wixproj
+
       # The identity holds only the signer role on one certificate profile, so
       # it has no subscription to select.
       - name: Azure login
@@ -173,7 +178,6 @@ jobs:
           MSI_VERSION: ${{ steps.msi.outputs.version }}
           MSI_NAME: ${{ steps.msi.outputs.name }}
         run: |
-          dotnet restore build/windows/miru-agent.wixproj --locked-mode
           dotnet build build/windows/miru-agent.wixproj --no-restore --configuration Release `
             -p:Platform=x64 "-p:Version=$env:MSI_VERSION" "-p:OutputName=$env:MSI_NAME" `
             "-p:BinDir=$env:GITHUB_WORKSPACE\build\prebuilt\windows_amd64" `
