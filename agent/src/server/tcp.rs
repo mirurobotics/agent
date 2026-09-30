@@ -68,24 +68,43 @@ pub fn serve(
     })
 }
 
-/// Reject requests whose host isn't this listener's loopback address, so a web
-/// page served under another hostname can't reach the API through DNS
-/// rebinding.
+/// Reject requests that aren't addressed to this listener's loopback URL.
+/// The host (URI authority, else the Host header) must be `127.0.0.1:<port>`
+/// or `localhost:<port>`, which stops DNS rebinding. An Origin header, when
+/// present, must be that same loopback URL, which stops a cross-site page
+/// from sending a request the browser would give a loopback Host.
 async fn check_host(port: u16, req: Request, next: Next) -> Response {
-    let host = req
-        .uri()
+    let host = request_host(&req);
+    let origin = req
+        .headers()
+        .get(header::ORIGIN)
+        .and_then(|value| value.to_str().ok());
+    if host.is_some_and(|host| is_loopback_host(host, port)) && origin_allowed(origin, port) {
+        return next.run(req).await;
+    }
+    warn!("Rejected local device API request with host {host:?} origin {origin:?}");
+    StatusCode::FORBIDDEN.into_response()
+}
+
+fn request_host(req: &Request) -> Option<&str> {
+    req.uri()
         .authority()
         .map(|authority| authority.as_str())
         .or_else(|| {
             req.headers()
                 .get(header::HOST)
                 .and_then(|value| value.to_str().ok())
-        });
-    if host.is_some_and(|host| is_loopback_host(host, port)) {
-        return next.run(req).await;
+        })
+}
+
+/// A missing Origin is allowed. A present Origin must be this listener's loopback URL.
+fn origin_allowed(origin: Option<&str>, port: u16) -> bool {
+    match origin {
+        None => true,
+        Some(origin) => origin
+            .strip_prefix("http://")
+            .is_some_and(|host| is_loopback_host(host, port)),
     }
-    warn!("Rejected local device API request with host {host:?}");
-    StatusCode::FORBIDDEN.into_response()
 }
 
 fn is_loopback_host(host: &str, port: u16) -> bool {
