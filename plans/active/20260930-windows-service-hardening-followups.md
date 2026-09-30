@@ -20,7 +20,7 @@ PR #263 made the Windows service run as the low-privilege virtual account `NT SE
 
 ## Progress
 
-- [ ] Milestone 1: log-open failure returns an error instead of panicking.
+- [x] Milestone 1: log-open failure returns an error instead of panicking.
 - [ ] Milestone 2: provisioning deletes only its key files in `tmp\`.
 - [ ] Milestone 3: installer sentinels and harness checks.
 - [ ] Milestone 4: customer-grant retention check.

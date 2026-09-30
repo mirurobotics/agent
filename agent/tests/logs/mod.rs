@@ -223,7 +223,7 @@ async fn test_build_layers_stdout_debug() {
         log_level: LogLevel::Debug,
         log_dir,
     };
-    let (layer, _worker, handle, _locked) = logs::build_layers(options);
+    let (layer, _worker, handle, _locked) = logs::build_layers(options).unwrap();
 
     // Reload handle is well-formed: swapping the inner filter should succeed.
     handle
@@ -246,7 +246,7 @@ async fn test_build_layers_file_only_warn() {
         log_level: LogLevel::Warn,
         log_dir,
     };
-    let (layer, _worker, handle, _locked) = logs::build_layers(options);
+    let (layer, _worker, handle, _locked) = logs::build_layers(options).unwrap();
 
     handle
         .reload(EnvFilter::new("error"))
@@ -256,6 +256,22 @@ async fn test_build_layers_file_only_warn() {
     tracing::subscriber::with_default(subscriber, || {
         tracing::error!("hello from build_layers file-only test");
     });
+}
+
+#[tokio::test]
+async fn test_build_layers_returns_open_log_file_err_when_dir_is_a_file() {
+    let (_tmp, root) = build_layers_tempdir("miru_test_build_layers_bad_dir").await;
+    let log_dir = root.join("not-a-dir");
+    std::fs::write(&log_dir, b"").unwrap();
+    let options = Options {
+        stdout: false,
+        log_level: LogLevel::Info,
+        log_dir,
+    };
+    assert!(matches!(
+        logs::build_layers(options),
+        Err(LogsErr::OpenLogFile(_))
+    ));
 }
 
 #[tokio::test]
@@ -275,7 +291,7 @@ async fn test_build_layers_respects_rust_log_when_set() {
         log_level: LogLevel::Debug,
         log_dir,
     };
-    let (_layer, _worker, _handle, env_filter_locked) = logs::build_layers(options);
+    let (_layer, _worker, _handle, env_filter_locked) = logs::build_layers(options).unwrap();
     assert!(
         env_filter_locked,
         "build_layers should report env_filter_locked=true when RUST_LOG is set"
@@ -297,7 +313,7 @@ async fn test_build_layers_uses_options_when_rust_log_unset() {
         log_level: LogLevel::Debug,
         log_dir,
     };
-    let (_layer, _worker, _handle, env_filter_locked) = logs::build_layers(options);
+    let (_layer, _worker, _handle, env_filter_locked) = logs::build_layers(options).unwrap();
     assert!(
         !env_filter_locked,
         "build_layers should report env_filter_locked=false when RUST_LOG is unset"
@@ -327,7 +343,7 @@ async fn test_build_layers_reload_handle_changes_filter() {
         log_level: LogLevel::Warn,
         log_dir,
     };
-    let (layer, _worker, handle, env_filter_locked) = logs::build_layers(options);
+    let (layer, _worker, handle, env_filter_locked) = logs::build_layers(options).unwrap();
     assert!(
         !env_filter_locked,
         "RUST_LOG was cleared, env filter should not be locked"
