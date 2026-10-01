@@ -24,11 +24,6 @@ use tokio::time::Duration;
 // generous; on success it never elapses and costs nothing.
 const HANG_GUARD: Duration = Duration::from_secs(60);
 
-// Pins a competing lifecycle exit path so far away it cannot fire
-// within HANG_GUARD, making each test's intended exit path
-// unambiguous.
-const NEVER: Duration = Duration::from_secs(3600);
-
 // ShutdownManager::shutdown calls std::process::exit(1) if teardown
 // exceeds max_shutdown_delay, which would kill the whole test binary.
 // Keep it above HANG_GUARD so a hung shutdown fails only the
@@ -77,35 +72,10 @@ fn options(layout: &Layout, lifecycle: LifecycleOptions, tcp_port: Option<u16>) 
     }
 }
 
-/// Exits via max_runtime (~100ms).
-fn exits_after_max_runtime() -> LifecycleOptions {
+/// Lifecycle options whose shutdown watchdog outlasts HANG_GUARD.
+fn lifecycle() -> LifecycleOptions {
     LifecycleOptions {
-        is_persistent: false,
-        max_runtime: Duration::from_millis(100),
-        idle_timeout: NEVER,
         max_shutdown_delay: SHUTDOWN_WATCHDOG,
-        ..Default::default()
-    }
-}
-
-/// Exits via idle_timeout (~100ms).
-fn exits_when_idle() -> LifecycleOptions {
-    LifecycleOptions {
-        is_persistent: false,
-        idle_timeout: Duration::from_millis(100),
-        idle_timeout_poll_interval: Duration::from_millis(10),
-        max_runtime: NEVER,
-        max_shutdown_delay: SHUTDOWN_WATCHDOG,
-    }
-}
-
-/// Runs until shut down.
-fn persistent() -> LifecycleOptions {
-    LifecycleOptions {
-        is_persistent: true,
-        idle_timeout: NEVER,
-        max_shutdown_delay: SHUTDOWN_WATCHDOG,
-        ..Default::default()
     }
 }
 
@@ -136,8 +106,10 @@ fn spawn_run(options: AppOptions) -> RunningAgent {
 
 impl RunningAgent {
     /// Send the shutdown signal and wait for the run to finish.
+    /// run() polls the signal only after init() finishes and the oneshot
+    /// buffers it, so Ok means startup completed.
     async fn stop(self) -> Result<(), ServerErr> {
-        self.shutdown.send(()).unwrap();
+        let _ = self.shutdown.send(());
         tokio::time::timeout(HANG_GUARD, self.handle)
             .await
             .expect("run did not stop within HANG_GUARD")
@@ -189,24 +161,14 @@ async fn invalid_app_state_initialization() {
 
 #[serial]
 #[tokio::test]
-async fn max_runtime_reached() {
-    let (_dir, layout) = activated_layout().await;
-    run_to_exit(options(&layout, exits_after_max_runtime(), Some(0)))
-        .await
-        .unwrap();
-}
-
-#[serial]
-#[tokio::test]
 async fn tcp_port_in_use_does_not_abort_startup() {
     let (_dir, layout) = activated_layout().await;
     write_stale_discovery_file(&layout).await;
     let (_taken, port) = tcp::bind(0).await.unwrap();
 
-    // the bind fails, the agent keeps running, and max_runtime ends the run
-    run_to_exit(options(&layout, exits_after_max_runtime(), Some(port)))
-        .await
-        .unwrap();
+    // the bind fails and the agent keeps running
+    let agent = spawn_run(options(&layout, lifecycle(), Some(port)));
+    agent.stop().await.unwrap();
 
     // no server wrote a fresh file, so the stale one stays removed
     assert!(!layout.device_api().exists());
@@ -226,11 +188,9 @@ async fn discovery_write_failure_does_not_abort_startup() {
     .await
     .unwrap();
 
-    // the tcp server fails to start, the agent keeps running, and
-    // max_runtime ends the run
-    run_to_exit(options(&layout, exits_after_max_runtime(), Some(0)))
-        .await
-        .unwrap();
+    // the tcp server fails to start and the agent keeps running
+    let agent = spawn_run(options(&layout, lifecycle(), Some(0)));
+    agent.stop().await.unwrap();
 }
 
 #[serial]
@@ -238,7 +198,7 @@ async fn discovery_write_failure_does_not_abort_startup() {
 async fn tcp_requires_bearer_and_cleans_up_discovery_file() {
     let (_dir, layout) = activated_layout().await;
     let discovery_file = layout.device_api();
-    let agent = spawn_run(options(&layout, persistent(), Some(0)));
+    let agent = spawn_run(options(&layout, lifecycle(), Some(0)));
 
     // the discovery file appears once the tcp server is serving
     wait_for_file(&discovery_file).await;
@@ -264,51 +224,17 @@ async fn stale_discovery_file_removed_when_tcp_disabled() {
     let (_dir, layout) = activated_layout().await;
     write_stale_discovery_file(&layout).await;
 
-    run_to_exit(options(&layout, exits_after_max_runtime(), None))
-        .await
-        .unwrap();
+    let agent = spawn_run(options(&layout, lifecycle(), None));
+    agent.stop().await.unwrap();
 
     assert!(!layout.device_api().exists());
 }
 
 #[serial]
 #[tokio::test]
-async fn is_persistent() {
-    let (_dir, layout) = activated_layout().await;
-    let max_runtime = Duration::from_millis(100);
-    let lifecycle = LifecycleOptions {
-        max_runtime,
-        ..persistent()
-    };
-    let ctrl_c = async {
-        let _ = tokio::signal::ctrl_c().await;
-    };
-
-    // negative assertion: the timeout MUST elapse because persistent
-    // mode ignores max_runtime, so machine slowdown can only reinforce
-    // the expected outcome -- the short window is intentional
-    tokio::time::timeout(
-        2 * max_runtime,
-        run(options(&layout, lifecycle, None), ctrl_c),
-    )
-    .await
-    .unwrap_err();
-}
-
-#[serial]
-#[tokio::test]
-async fn idle_timeout_reached() {
-    let (_dir, layout) = activated_layout().await;
-    run_to_exit(options(&layout, exits_when_idle(), None))
-        .await
-        .unwrap();
-}
-
-#[serial]
-#[tokio::test]
 async fn shutdown_signal_received() {
     let (_dir, layout) = activated_layout().await;
-    let agent = spawn_run(options(&layout, persistent(), None));
+    let agent = spawn_run(options(&layout, lifecycle(), None));
 
     // Best-effort wait for the agent to start. The oneshot channel buffers
     // the signal, so the test stays correct even if startup takes longer.

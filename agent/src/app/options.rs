@@ -8,39 +8,16 @@ use crate::network::BackendHost;
 use crate::server;
 use crate::workers::{delete, mqtt, poller, scan, token_refresh::TokenRefreshWorkerOptions};
 
-// external crates
-use tracing::warn;
-
 #[derive(Debug, Clone, Copy)]
 pub struct LifecycleOptions {
-    pub is_persistent: bool,
-    pub max_runtime: Duration,
-    pub idle_timeout: Duration,
-    pub idle_timeout_poll_interval: Duration,
     pub max_shutdown_delay: Duration,
 }
 
 impl Default for LifecycleOptions {
     fn default() -> Self {
         Self {
-            is_persistent: true,
-            max_runtime: Duration::from_secs(60 * 15), // 15 minutes
-            idle_timeout: Duration::from_secs(60),
-            idle_timeout_poll_interval: Duration::from_secs(5),
             max_shutdown_delay: Duration::from_secs(15),
         }
-    }
-}
-
-impl LifecycleOptions {
-    pub fn resolve_persistence(requested: bool, supports_idle_exit: bool) -> bool {
-        if !requested && !supports_idle_exit {
-            warn!(
-                "non-persistent runtime is not supported on this platform; \
-                 running persistently"
-            );
-        }
-        requested || !supports_idle_exit
     }
 }
 

@@ -2,10 +2,8 @@
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
 
 // internal crates
-use crate::activity;
 use crate::app::{
     options::{AppOptions, LifecycleOptions},
     state::AppState,
@@ -41,74 +39,18 @@ pub async fn run(
     let mut shutdown_manager = ShutdownManager::new(shutdown_tx.clone(), options.lifecycle);
 
     // initialize the app (and shutdown if failures occur)
-    let app_state = match init(&options, shutdown_tx.clone(), &mut shutdown_manager).await {
-        Ok(state) => state,
-        Err(e) => {
-            error!("Failed to start server: {}", e);
-            shutdown_manager.shutdown().await?;
-            return Err(e);
-        }
-    };
+    if let Err(e) = init(&options, shutdown_tx.clone(), &mut shutdown_manager).await {
+        error!("Failed to start server: {}", e);
+        shutdown_manager.shutdown().await?;
+        return Err(e);
+    }
 
-    // if the app is not persistent, wait for ctrl-c, an idle timeout, or max runtime
-    // reached to trigger a shutdown
-    if !options.lifecycle.is_persistent {
-        tokio::select! {
-            _ = shutdown_signal => {
-                info!("Shutdown signal received, shutting down...");
-            }
-            _ = await_idle_timeout(
-                app_state.activity_tracker.clone(),
-                options.lifecycle.idle_timeout,
-                options.lifecycle.idle_timeout_poll_interval,
-            ) => {
-                info!("Idle timeout ({:?}) reached", options.lifecycle.idle_timeout);
-                info!("Shutting down...");
-            }
-            _ = await_max_runtime(options.lifecycle.max_runtime) => {
-                info!("Max runtime ({:?}) reached, shutting down...", options.lifecycle.max_runtime);
-            }
-        }
-    }
-    // if the app is persistent, wait for ctrl-c to trigger a shutdown
-    else {
-        tokio::select! {
-            _ = shutdown_signal => {
-                info!("Shutdown signal received, shutting down...");
-            }
-        }
-    }
+    shutdown_signal.await;
+    info!("Shutdown signal received, shutting down...");
 
     // shutdown the server
     drop(shutdown_tx);
     shutdown_manager.shutdown().await
-}
-
-async fn await_idle_timeout(
-    activity_tracker: Arc<activity::Tracker>,
-    idle_timeout: Duration,
-    poll_interval: Duration,
-) -> Result<(), ServerErr> {
-    loop {
-        tokio::time::sleep(poll_interval).await;
-        let last_activity =
-            SystemTime::UNIX_EPOCH + Duration::from_secs(activity_tracker.last_touched());
-        match SystemTime::now().duration_since(last_activity) {
-            Ok(duration) if duration > idle_timeout => {
-                info!("Server idle timeout reached, shutting down...");
-                return Ok(());
-            }
-            Err(_) => {
-                error!("Server idle timeout checker error, ignoring...");
-            }
-            _ => {}
-        }
-    }
-}
-
-async fn await_max_runtime(max_runtime: Duration) -> Result<(), ServerErr> {
-    tokio::time::sleep(max_runtime).await;
-    Ok(())
 }
 
 // =============================== INITIALIZATION ================================== //
@@ -116,7 +58,7 @@ async fn init(
     options: &AppOptions,
     shutdown_tx: broadcast::Sender<()>,
     shutdown_manager: &mut ShutdownManager,
-) -> Result<Arc<AppState>, ServerErr> {
+) -> Result<(), ServerErr> {
     remove_stale_discovery_file(&options.storage.layout).await;
     let app_state = init_app_state(options, shutdown_manager).await?;
 
@@ -131,7 +73,7 @@ async fn init(
     init_optional_services(options, &app_state, shutdown_manager, &shutdown_tx).await?;
     init_data_upload_workers(options, &app_state, shutdown_manager, &shutdown_tx).await?;
 
-    Ok(app_state)
+    Ok(())
 }
 
 // the socket server, tcp server, poller, and mqtt worker are each opt-in via AppOptions
@@ -471,12 +413,6 @@ async fn init_tcp_server(
     shutdown_tx: &broadcast::Sender<()>,
 ) -> Result<(), ServerErr> {
     info!("Initializing tcp server...");
-    if !options.lifecycle.is_persistent {
-        // socket activation restarts the agent only for unix socket clients
-        tracing::warn!(
-            "tcp clients get connection refused after an idle exit; set is_persistent to keep the tcp listener available"
-        );
-    }
     // the tcp listener is optional, so a failure to start it (e.g. a taken
     // port) leaves the agent running
     match start_tcp_server(options, server_state, shutdown_tx).await {

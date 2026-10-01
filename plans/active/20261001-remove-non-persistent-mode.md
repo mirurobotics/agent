@@ -18,8 +18,8 @@ Observable result: an existing `settings.json` containing `"is_persistent": fals
 
 ## Progress
 
-- [ ] M0 Activate plan (move to `plans/active/`; `docs(plans):` commit)
-- [ ] M1 Remove idle-exit runtime (options, `run.rs`, `platform::supports_idle_exit`, `main.rs`) and its tests
+- [x] M0 Activate plan (move to `plans/active/`; `docs(plans):` commit)
+- [x] M1 Remove idle-exit runtime (options, `run.rs`, `platform::supports_idle_exit`, `main.rs`) and its tests
 - [ ] M2 Remove the `activity` module, the request-touch middleware, and the `activity_tracker` fields
 - [ ] M3 Drop `Settings.is_persistent`; add the startup warning and its tests
 - [ ] M4 Docs: `ARCHITECTURE.md`, `plans/active/20260910-windows-support.md`
