@@ -21,7 +21,7 @@ Observable result: an existing `settings.json` containing `"is_persistent": fals
 - [x] M0 Activate plan (move to `plans/active/`; `docs(plans):` commit)
 - [x] M1 Remove idle-exit runtime (options, `run.rs`, `platform::supports_idle_exit`, `main.rs`) and its tests
 - [x] M2 Remove the `activity` module, the request-touch middleware, and the `activity_tracker` fields
-- [ ] M3 Drop `Settings.is_persistent`; add the startup warning and its tests
+- [x] M3 Drop `Settings.is_persistent`; add the startup warning and its tests
 - [ ] M4 Docs: `ARCHITECTURE.md`, `plans/active/20260910-windows-support.md`
 - [ ] M5 Preflight CLEAN (draft PR open, CI green incl. `windows-check`, `lint`, `test`); then plan moved to `plans/completed/` with Outcomes filled, and CI re-confirmed green on that commit
 
@@ -36,6 +36,8 @@ Observable result: an existing `settings.json` containing `"is_persistent": fals
 - 2026-10-01: Remove the `activity` module entirely. Rationale: `Tracker::touch()` is called only by the router middleware and `last_touched()` only by the idle-exit loop.
 - 2026-10-01: Old settings files load unchanged: `Settings` has no `deny_unknown_fields`, so the `is_persistent` key is ignored on read and dropped when the file is next rewritten.
 - 2026-10-01: The startup warning is a separate `disk::warn_if_persistence_disabled` that reads the raw JSON, called once in `main.rs::run_agent` after `await_activation` and before `reconcile_agent_version`. Rationale: settings are deserialized two or three times per start, and upgrade reconcile drops the key before `read_settings` runs.
+- 2026-10-01: `warn_if_persistence_disabled` checks `value.get("is_persistent") != Some(&Value::Bool(false))` instead of `.and_then(Value::as_bool) == Some(false)`. Rationale: same semantics; `cargo fmt` split the chained form over five lines.
+- 2026-10-01: Source and test work run as separate steps. The source step (M1-M4) made only the test edits the removed APIs force: in `agent/tests/app/run.rs` the three `exits_after_max_runtime` tests had no self-exit left, so they were converted to `spawn_run` + `stop()` as planned, along with the other planned `run.rs` edits; the new `shutdown_signal_received` `is_finished` assert and the M3 `persistence_warning` tests are left to the test step.
 
 ## Outcomes & Retrospective
 

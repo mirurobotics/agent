@@ -1,19 +1,19 @@
 // internal crates
 use crate::deserialize_warn;
+use crate::filesys::{self, files};
 use crate::logs::LogLevel;
 use crate::network::{BackendHost, MqttHost};
 use crate::server::{DEFAULT_ENABLE_TCP_SERVER, DEFAULT_TCP_PORT};
 
 // external crates
 use serde::{Deserialize, Serialize};
-use tracing::error;
+use tracing::{error, warn};
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
 pub struct Settings {
     pub log_level: LogLevel,
     pub backend: Backend,
     pub mqtt_broker: MQTTBroker,
-    pub is_persistent: bool,
     pub enable_socket_server: bool,
     /// Loopback TCP listener for the local device API. Independent of the Unix
     /// socket. On by default only on Windows (see `DEFAULT_ENABLE_TCP_SERVER`).
@@ -29,7 +29,6 @@ impl Default for Settings {
             log_level: LogLevel::Info,
             backend: Backend::default(),
             mqtt_broker: MQTTBroker::default(),
-            is_persistent: true,
             enable_socket_server: true,
             enable_tcp_server: DEFAULT_ENABLE_TCP_SERVER,
             tcp_server: TCPServer::default(),
@@ -44,7 +43,6 @@ struct DeserializeSettings {
     log_level: Option<LogLevel>,
     backend: Option<Backend>,
     mqtt_broker: Option<MQTTBroker>,
-    is_persistent: Option<bool>,
     enable_socket_server: Option<bool>,
     enable_tcp_server: Option<bool>,
     tcp_server: Option<TCPServer>,
@@ -77,9 +75,6 @@ impl<'de> Deserialize<'de> for Settings {
             mqtt_broker: result.mqtt_broker.unwrap_or_else(|| {
                 deserialize_warn!("settings", "mqtt_broker", default.mqtt_broker)
             }),
-            is_persistent: result.is_persistent.unwrap_or_else(|| {
-                deserialize_warn!("settings", "is_persistent", default.is_persistent)
-            }),
             enable_socket_server: result.enable_socket_server.unwrap_or_else(|| {
                 deserialize_warn!(
                     "settings",
@@ -101,6 +96,19 @@ impl<'de> Deserialize<'de> for Settings {
             }),
         })
     }
+}
+
+/// Logs a warning when `file` sets `is_persistent` to `false`, which the
+/// agent ignores. Returns whether it warned; never fails.
+pub async fn warn_if_persistence_disabled(file: &filesys::File) -> bool {
+    let Ok(value) = files::read_json::<serde_json::Value>(file).await else {
+        return false;
+    };
+    if value.get("is_persistent") != Some(&serde_json::Value::Bool(false)) {
+        return false;
+    }
+    warn!("settings.is_persistent is no longer supported; the agent always runs persistently");
+    true
 }
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
