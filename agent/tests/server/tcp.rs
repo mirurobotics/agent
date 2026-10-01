@@ -140,6 +140,44 @@ pub mod bind {
     }
 }
 
+#[cfg(windows)]
+pub mod windows_bind {
+    use super::*;
+    use tokio::net::{TcpListener, TcpSocket, TcpStream};
+
+    #[tokio::test]
+    async fn rejects_second_bind_to_same_address() {
+        let (_taken, port) = tcp::bind(0).await.unwrap();
+        let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
+
+        let reuse = TcpSocket::new_v4().unwrap();
+        reuse.set_reuseaddr(true).unwrap();
+        assert!(
+            reuse.bind(addr).is_err(),
+            "SO_REUSEADDR bind to {addr} must fail"
+        );
+
+        let plain = TcpSocket::new_v4().unwrap();
+        assert!(plain.bind(addr).is_err(), "plain bind to {addr} must fail");
+    }
+
+    #[tokio::test]
+    async fn wildcard_bind_does_not_take_loopback_connections() {
+        let (agent, port) = tcp::bind(0).await.unwrap();
+        let _wildcard = TcpListener::bind((Ipv4Addr::UNSPECIFIED, port))
+            .await
+            .expect("wildcard bind beside a specific bind must succeed");
+
+        let _client = TcpStream::connect((Ipv4Addr::LOCALHOST, port))
+            .await
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(5), agent.accept())
+            .await
+            .expect("loopback connection must reach the agent, not the wildcard listener")
+            .unwrap();
+    }
+}
+
 pub mod serve {
     use super::*;
 
