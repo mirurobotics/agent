@@ -159,8 +159,10 @@ function Assert-ProtectedPermissionRows {
 
 # The WiX Util extension creates the local group (Wix4Group, Wix6Group), and
 # keeps it on uninstall: Wix6Group attribute 0x100 is DontRemoveOnUninstall.
-# 0x10 FailIfExists, 0x200 DontCreateGroup, and 0x400 NonVital must be clear,
-# so an existing group is reused and a failed creation fails the install.
+# 0x20 UpdateIfExists must be set: without it WiX 7 fails the upgrade when the
+# group exists. 0x10 FailIfExists, 0x200 DontCreateGroup, and 0x400 NonVital
+# must be clear, so an existing group is reused and a failed creation fails
+# the install.
 function Assert-ClientsGroupRows {
     param([Parameter(Mandatory = $true)]$Database)
     Assert-True (Test-MsiTable $Database "Wix4Group") "WiX Util group table present"
@@ -177,6 +179,7 @@ function Assert-ClientsGroupRows {
     Assert-Equal $groups[0][0] $attributes[0][0] "group attributes key"
     $flags = [int]$attributes[0][1]
     Assert-True (($flags -band 0x100) -ne 0) "group is kept on uninstall"
+    Assert-True (($flags -band 0x20) -ne 0) "existing group is updated, not an error"
     Assert-Equal 0 ($flags -band 0x610) "group is created if missing, reused if present, and vital"
 }
 

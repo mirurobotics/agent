@@ -139,9 +139,12 @@
                              Read="yes" ReadAttributes="yes" ReadExtendedAttributes="yes"
                              ReadPermission="yes" Synchronize="yes" />
         </CreateFolder>
+        <!-- UpdateIfExists: without it, WiX 7's CreateGroup fails (1603) when
+             the group already exists, as on every major upgrade. -->
         <util:Group Id="MiruClientsGroup"
                     Name="Miru Clients"
                     Comment="Accounts that can read the Miru Agent local device API token"
+                    UpdateIfExists="yes"
                     RemoveOnUninstall="no" />
       </Component>
       <Component Id="MiruLogsSentinel" Directory="MIRULOGSSENTINEL" Guid="51B41B07-B719-4D73-BD1E-3675FC8E7CA8" Bitness="always64" KeyPath="yes" Permanent="yes">

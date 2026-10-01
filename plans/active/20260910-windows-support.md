@@ -252,7 +252,9 @@ check. Must land before the first Windows release.
   more code for the same result.
 - 2026-09-30: The group is created by WiX Util `util:Group` inside the
   `device-api` component (WiX 7 supports local group creation). It is created
-  if missing and reused if present (no `FailIfExists`), vital, and kept on
+  if missing and reused if present (`UpdateIfExists="yes"`, which only
+  rewrites the comment; without it WiX 7's `CreateGroup` returns the
+  "group exists" code and fails every major upgrade), vital, and kept on
   uninstall (`RemoveOnUninstall="no"`). Rationale: `device-api` and its ACE
   survive uninstall (the sentinel keeps the folder), so removing the group
   would orphan the ACE and drop administrator-chosen members on a reinstall;
