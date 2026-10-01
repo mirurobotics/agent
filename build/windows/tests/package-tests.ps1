@@ -108,8 +108,11 @@ function Assert-RetainedDirectoryComponent {
     Assert-True (([int]$retained[0][3] -band 256) -ne 0) "$name is 64-bit"
     Assert-True ([string]::IsNullOrEmpty($retained[0][4])) `
         "$name has a directory key path"
+    # DefaultDir is "short|long" when the name is not a valid 8.3 name
+    # (device-api); compare the long name.
     $hierarchy = @($Layout.Directories | Where-Object {
-        $_[0] -eq $directory -and $_[1] -eq $parent -and $_[2] -eq $leaf
+        $_[0] -eq $directory -and $_[1] -eq $parent -and
+        ($_[2] -split '\|')[-1] -eq $leaf
     })
     Assert-Equal 1 $hierarchy.Count "$name directory hierarchy"
     $created = @($Layout.Folders | Where-Object {
