@@ -59,7 +59,6 @@ pub mod routes {
     use tower::ServiceExt;
 
     use device_api::models as openapi;
-    use miru_agent::activity;
     use miru_agent::events::hub::{EventHub, SpawnOptions};
     use miru_agent::filesys::Overwrite;
     use miru_agent::models::{
@@ -94,7 +93,6 @@ pub mod routes {
             let (token_mngr, _handle) = create_token_manager(dir.dir(), http_client.clone()).await;
             let (sender, _receiver) = mpsc::channel(1);
             let syncer = Arc::new(Syncer::new(sender));
-            let activity_tracker = Arc::new(activity::Tracker::new());
 
             // Backend mock server. Handlers that reach the cache-miss fallback
             // hit this server; all routes respond with 404 so the raw
@@ -118,7 +116,6 @@ pub mod routes {
                 real_http_client,
                 syncer,
                 Arc::new(token_mngr),
-                activity_tracker,
                 event_hub,
                 shutdown_tx,
             ));

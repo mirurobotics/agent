@@ -8,7 +8,6 @@ use crate::test_utils::{
     filesys::dirs as test_dirs,
     sync::{create_storage, create_token_manager},
 };
-use miru_agent::activity;
 use miru_agent::events::hub::{EventHub, SpawnOptions};
 use miru_agent::events::model::EventArgs;
 use miru_agent::server::{routes, State};
@@ -42,7 +41,6 @@ impl Fixture {
         let (token_mngr, _handle) = create_token_manager(dir.dir(), http_client.clone()).await;
         let (sender, _receiver) = mpsc::channel(1);
         let syncer = Arc::new(Syncer::new(sender));
-        let activity_tracker = Arc::new(activity::Tracker::new());
 
         let real_http_client =
             Arc::new(miru_agent::http::Client::new("http://localhost:1").unwrap());
@@ -57,7 +55,6 @@ impl Fixture {
             real_http_client,
             syncer,
             Arc::new(token_mngr),
-            activity_tracker,
             event_hub,
             shutdown_tx.clone(),
         ));

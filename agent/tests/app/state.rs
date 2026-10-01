@@ -148,7 +148,6 @@ pub mod init {
 
     #[tokio::test]
     async fn success_missing_device_file_but_valid_token() {
-        let begin_test = Utc::now().timestamp();
         let env = TestEnv::new();
         env.write_keys().await;
 
@@ -162,11 +161,7 @@ pub mod init {
             .await
             .unwrap();
 
-        let (state, _) = env.init().await.unwrap();
-
-        // check last activity
-        assert!(state.activity_tracker.last_touched() <= Utc::now().timestamp() as u64);
-        assert!(state.activity_tracker.last_touched() >= begin_test as u64);
+        let (_state, _) = env.init().await.unwrap();
 
         // the device file should now exist with some reasonable defaults
         let device_file = env.layout.device();
@@ -182,19 +177,14 @@ pub mod init {
 
     #[tokio::test]
     async fn success_missing_token_file() {
-        let begin_test = Utc::now().timestamp();
         let env = TestEnv::valid().await;
 
-        let (state, _) = env.init().await.unwrap();
+        let (_state, _) = env.init().await.unwrap();
 
         // the token file should now have the default token
         let token_file = env.layout.auth().token();
         let token = files::read_json::<Token>(&token_file).await.unwrap();
         assert_eq!(token.token, Token::default().token);
-
-        // check last activity
-        assert!(state.activity_tracker.last_touched() <= Utc::now().timestamp() as u64);
-        assert!(state.activity_tracker.last_touched() >= begin_test as u64);
     }
 
     #[tokio::test]

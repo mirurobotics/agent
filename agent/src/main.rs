@@ -7,10 +7,7 @@ use std::ffi::OsString;
 use backend_api::models as backend_client;
 use miru_agent::app::await_activation::{await_activation, Outcome};
 use miru_agent::app::run::run;
-use miru_agent::app::{
-    options::{AppOptions, LifecycleOptions},
-    upgrade,
-};
+use miru_agent::app::{options::AppOptions, upgrade};
 use miru_agent::cli;
 use miru_agent::disk;
 use miru_agent::filesys::{dirs, files, path::PathExt};
@@ -18,7 +15,6 @@ use miru_agent::http;
 use miru_agent::logs;
 use miru_agent::mqtt::options::{ConnectAddress, Protocol};
 use miru_agent::network::BackendHost;
-use miru_agent::platform;
 use miru_agent::privilege;
 use miru_agent::provisioning::{self, check, display, errors::*, provision, reprovision};
 use miru_agent::server;
@@ -332,15 +328,7 @@ fn build_app_options(settings: disk::Settings) -> AppOptions {
         ConnectAddress::default(),
     );
 
-    let is_persistent = LifecycleOptions::resolve_persistence(
-        settings.is_persistent,
-        platform::supports_idle_exit(),
-    );
     AppOptions {
-        lifecycle: LifecycleOptions {
-            is_persistent,
-            ..Default::default()
-        },
         backend_host: settings.backend.host,
         enable_socket_server: settings.enable_socket_server,
         enable_tcp_server: settings.enable_tcp_server,

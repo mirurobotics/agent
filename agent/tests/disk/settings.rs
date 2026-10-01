@@ -11,7 +11,6 @@ use serde_json::json;
 fn serialize_deserialize_settings() {
     let settings = Settings {
         log_level: LogLevel::Debug,
-        is_persistent: false,
         enable_socket_server: false,
         enable_tcp_server: true,
         tcp_server: TCPServer { port: 51823 },
@@ -40,7 +39,6 @@ fn deserialize_settings() {
         mqtt_broker: MQTTBroker {
             host: MqttHost::new("mqtt.staging.mirurobotics.com").unwrap(),
         },
-        is_persistent: false,
         enable_socket_server: false,
         enable_tcp_server: true,
         tcp_server: TCPServer { port: 51823 },
@@ -51,7 +49,6 @@ fn deserialize_settings() {
         "log_level": settings.log_level,
         "backend": settings.backend,
         "mqtt_broker": settings.mqtt_broker,
-        "is_persistent": settings.is_persistent,
         "enable_socket_server": settings.enable_socket_server,
         "enable_tcp_server": settings.enable_tcp_server,
         "tcp_server": settings.tcp_server,
@@ -71,6 +68,13 @@ fn deserialize_settings() {
 
     // invalid JSON
     assert!(serde_json::from_str::<Settings>("invalid-json").is_err());
+}
+
+#[test]
+fn deserialize_ignores_legacy_is_persistent() {
+    // settings files from before the removal of non-persistent mode still load
+    let deserialized = serde_json::from_value::<Settings>(json!({"is_persistent": false})).unwrap();
+    assert_eq!(deserialized, Settings::default());
 }
 
 #[test]

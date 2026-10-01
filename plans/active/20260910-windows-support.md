@@ -23,7 +23,7 @@ glob, sysinfo, tracing-appender):
 
 | Location | Dependency | Windows replacement |
 |---|---|---|
-| `server/serve.rs` | `tokio::net::UnixListener` at `/run/miru/miru.sock`; systemd socket activation via `LISTEN_FDS`/`from_raw_fd(3)` | TCP `127.0.0.1:<port>` + token (Phase 2); no activation equivalent — persistent only |
+| `server/serve.rs` | `tokio::net::UnixListener` at `/run/miru/miru.sock`; systemd socket activation via `LISTEN_FDS`/`from_raw_fd(3)` | TCP `127.0.0.1:<port>` + token (Phase 2); no activation equivalent |
 | `main.rs` (`await_shutdown_signal`) | `tokio::signal::unix` SIGTERM/SIGINT | `tokio::signal::windows` ctrl handlers + service control (`SERVICE_CONTROL_STOP`) |
 | `privilege/` | `nix` geteuid/getegid + passwd lookup of the `miru` user | service-account check (warn-only initially) |
 | `filesys/files.rs` | `OpenOptionsExt::mode()` on created files | no-op; NTFS ACLs inherited from installer-created dirs |
@@ -52,8 +52,9 @@ Unix usage in `deploy/filesys.rs` and `data_uploads/retention/deleter.rs` is
    FFI in agent code.
    Named pipes rejected: instance-per-connection axum Listener, unsafe SDDL FFI, and a
    custom HTTP transport in every SDK, for marginal gain over an ACL'd token file.
-3. **Windows is persistent-only.** Socket activation and the `is_persistent: false`
-   idle-exit mode remain Linux-only; runtime mode on Windows forces persistence.
+3. **All platforms run persistently.** The agent has no idle-exit mode (see the
+   2026-10-01 decision). Socket activation stays Linux-only and covers only the
+   Unix socket.
 4. **Build lane: msvc on a native Windows runner**, artifacts ingested by GoReleaser
    Pro's `prebuilt` builder (PDBs for customer-facing debugging). zigbuild windows-gnu
    stays viable as a fallback once OpenSSL is out of the Windows build, but is not the
@@ -315,6 +316,13 @@ the workbench plan.
   prior connections become inactive). The `windows_bind` tests in
   `agent/tests/server/tcp.rs` check the behavior in the `windows-check`
   CI job.
+- 2026-10-01: Removed the non-persistent (idle-exit) mode and
+  `settings.is_persistent`; the agent always runs persistently, and the
+  idle activity tracker is gone. Rationale: no customer used it, and idle
+  exit stopped MQTT, polling, token refresh and upload workers, so cloud
+  deployments and uploads stalled until a local client woke the agent. A
+  settings file that still contains `is_persistent` loads; the key is
+  ignored.
 
 ## Risks
 
@@ -360,7 +368,7 @@ the workbench plan.
 ## Non-goals
 
 - Windows ARM64, Windows Server certification (until a customer requires them)
-- Named-pipe transport, socket activation, or idle-exit mode on Windows
+- Named-pipe transport or socket activation on Windows
 - Agent self-update (updates ship via MSI upgrades / customer MDM)
 - WSL2 productization (viable as a customer pilot; not a supported target)
 - macOS (nothing here should preclude it, but it is not in scope)

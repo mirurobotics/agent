@@ -8,64 +8,11 @@ pub mod lifecycle_options_default {
     use super::*;
 
     #[test]
-    fn is_persistent() {
-        assert!(LifecycleOptions::default().is_persistent);
-    }
-
-    #[test]
-    fn max_runtime_is_15_minutes() {
-        assert_eq!(
-            LifecycleOptions::default().max_runtime,
-            Duration::from_secs(60 * 15)
-        );
-    }
-
-    #[test]
-    fn idle_timeout_is_60_seconds() {
-        assert_eq!(
-            LifecycleOptions::default().idle_timeout,
-            Duration::from_secs(60)
-        );
-    }
-
-    #[test]
-    fn idle_timeout_poll_interval_is_5_seconds() {
-        assert_eq!(
-            LifecycleOptions::default().idle_timeout_poll_interval,
-            Duration::from_secs(5)
-        );
-    }
-
-    #[test]
     fn max_shutdown_delay_is_15_seconds() {
         assert_eq!(
             LifecycleOptions::default().max_shutdown_delay,
             Duration::from_secs(15)
         );
-    }
-}
-
-pub mod lifecycle_options_resolve_persistence {
-    use super::*;
-
-    #[test]
-    fn persistent_request_stays_persistent_when_idle_exit_supported() {
-        assert!(LifecycleOptions::resolve_persistence(true, true));
-    }
-
-    #[test]
-    fn non_persistent_request_is_honored_when_idle_exit_supported() {
-        assert!(!LifecycleOptions::resolve_persistence(false, true));
-    }
-
-    #[test]
-    fn persistent_request_stays_persistent_when_idle_exit_unsupported() {
-        assert!(LifecycleOptions::resolve_persistence(true, false));
-    }
-
-    #[test]
-    fn non_persistent_request_is_overridden_when_idle_exit_unsupported() {
-        assert!(LifecycleOptions::resolve_persistence(false, false));
     }
 }
 
