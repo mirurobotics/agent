@@ -790,7 +790,7 @@ mod tests {
     use super::*;
     use crate::deploy::fsm;
     use crate::disk::{Capacities, Layout};
-    use crate::filesys::{files, WriteOptions};
+    use crate::filesys::{dirs, files, PathExt, WriteOptions};
     use crate::models::Device;
     use crate::test_utils::filesys::dirs as test_dirs;
 
@@ -1167,33 +1167,41 @@ mod tests {
 
     #[tokio::test]
     async fn shutdown_impl_removes_tcp_discovery_file() {
-        let path =
-            std::env::temp_dir().join(format!("miru-discovery-{}.json", uuid::Uuid::new_v4()));
-        std::fs::write(&path, b"{}").unwrap();
+        let file = filesys::File::new(
+            std::env::temp_dir().join(format!("miru-discovery-{}.json", uuid::Uuid::new_v4())),
+        );
+        files::write_string(&file, "{}", WriteOptions::default())
+            .await
+            .unwrap();
         let mut mgr = new_shutdown_manager();
-        mgr.with_tcp_server_handle(tokio::spawn(async { Ok(()) }), filesys::File::new(&path))
+        mgr.with_tcp_server_handle(tokio::spawn(async { Ok(()) }), file.clone())
             .unwrap();
 
         mgr.shutdown_impl().await.unwrap();
 
-        assert!(!path.exists());
+        assert!(!file.exists());
         assert!(mgr.tcp_discovery_file.is_none());
     }
 
     #[tokio::test]
     async fn shutdown_impl_logs_discovery_removal_failure() {
         // a directory at the discovery path makes the removal fail
-        let path = std::env::temp_dir().join(format!("miru-discovery-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir(&path).unwrap();
+        let dir = filesys::Dir::new(
+            std::env::temp_dir().join(format!("miru-discovery-{}", uuid::Uuid::new_v4())),
+        );
+        dirs::create(&dir).await.unwrap();
         let mut mgr = new_shutdown_manager();
-        mgr.with_tcp_server_handle(tokio::spawn(async { Ok(()) }), filesys::File::new(&path))
-            .unwrap();
+        mgr.with_tcp_server_handle(
+            tokio::spawn(async { Ok(()) }),
+            filesys::File::new(dir.path()),
+        )
+        .unwrap();
 
         // the removal failure is logged, not returned
         mgr.shutdown_impl().await.unwrap();
 
-        assert!(path.is_dir());
-        std::fs::remove_dir(&path).unwrap();
+        assert!(dir.path().is_dir());
+        dirs::delete(&dir).await.unwrap();
     }
 
     #[tokio::test]
