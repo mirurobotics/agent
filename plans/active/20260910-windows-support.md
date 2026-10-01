@@ -203,9 +203,13 @@ Administrators, SYSTEM, and the service account can read the file on Windows.
   alone without exposing `settings.json` or `device.json`.
 - 2026-09-30: On Unix the discovery file moved to `/run/miru/device-api.json`.
   Rationale: SDK clients are the readers, and `/run/miru` is already their
-  contract (the socket). `/var/lib/miru` stays private. The socket unit owns
-  the directory as `miru:miru` mode `0750`, so an idle exit does not remove it
-  and the `miru` group can read the file without a grant on the data root.
+  contract (the socket). `/var/lib/miru` stays private. A tmpfiles.d entry
+  creates `/run/miru` as `miru:miru` mode `0750` at boot (and `postinst` applies
+  it on install), so the directory exists before the socket binds, survives
+  socket and service restarts, and the `miru` group can read the file without
+  a grant on the data root. `RuntimeDirectory=`/`User=`/`Group=` are not used
+  on the socket unit: with no `Exec*` commands, systemd never applies them on
+  start, and `RuntimeDirectory=` would delete the directory on stop.
   Windows stays at `ProgramData\Miru\device-api\`.
 - 2026-09-30: The app layer owns the bearer token and the discovery file;
   `tcp::serve` takes the token and only enforces it. Rationale: startup already

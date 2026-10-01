@@ -2,13 +2,9 @@
 Description=Miru Config Agent socket
 
 [Socket]
+# /run/miru comes from tmpfiles.d (miru:miru 0750), so it exists before the
+# socket binds and outlives socket and service restarts.
 ListenStream=/run/miru/miru.sock
-# The agent (User=miru) writes the TCP discovery file into this directory.
-# Owned by the socket unit so an idle exit of the service does not remove it.
-RuntimeDirectory=miru
-RuntimeDirectoryMode=0750
-User=miru
-Group=miru
 SocketMode=0660
 SocketGroup=miru
 RemoveOnStop=yes

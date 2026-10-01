@@ -49,6 +49,10 @@ post_install() {
     create_miru_user
     create_miru_directories
 
+    # create /run/miru now; tmpfiles.d recreates it at every boot
+    printf "\033[32m Creating the /run/miru directory\033[0m\n"
+    systemd-tmpfiles --create miru-agent.conf
+
     # reload the unit from disk 
     printf "\033[32m Reload the service unit from disk\033[0m\n"
     systemctl daemon-reload
