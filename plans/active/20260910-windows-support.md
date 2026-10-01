@@ -338,7 +338,7 @@ the workbench plan.
   older than the agent's start, or the file carries a second secret the server
   proves it knows.
 - **Linux configs were world-readable** (resolved by
-  `plans/active/20261001-linux-permission-hardening.md`): `/srv/miru/configs`
+  `plans/completed/20261001-linux-permission-hardening.md`): `/srv/miru/configs`
   is now `2750 miru:miru-users`, setgid, and `miru-users` is the Linux
   counterpart of `Miru Agent Users`; existing `miru` members are migrated on
   upgrade.

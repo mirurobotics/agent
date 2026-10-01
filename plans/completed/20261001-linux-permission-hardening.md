@@ -34,7 +34,7 @@ Out of scope: changing the service `UMask` (consumers of configs deployed outsid
 - [x] M2: Debian packaging (group, postinst, tmpfiles, socket, service) + container test + CI job, commit.
 - [x] M3: Install-script template + regenerated scripts, commit.
 - [x] M4: Docs and release note, commit.
-- [ ] M5: Push, open draft PR, preflight reports `CLEAN`; fill Outcomes, `git mv` the plan to `plans/completed/`, commit, and re-run preflight to `CLEAN`.
+- [x] M5: Push, open draft PR, preflight reports `CLEAN`; fill Outcomes, `git mv` the plan to `plans/completed/`, commit, and re-run preflight to `CLEAN`.
 
 ## Surprises & Discoveries
 
@@ -60,7 +60,7 @@ Out of scope: changing the service `UMask` (consumers of configs deployed outsid
 
 ## Outcomes & Retrospective
 
-(Summarize at completion.)
+Delivered in draft PR #281 (mirurobotics/agent). The agent writes all state under the data root `0600` (`auth/` `0700`); the Debian package adds `miru-users` for the socket, `/run/miru`, and the setgid `/srv/miru/configs`, makes `/var/lib/miru` private and `/var/log/miru` `0750`, migrates `/etc/group` members of `miru` once, and hardens the unit. A review pass added symlink-swap protection to `apply_permissions` and a service stop before it. CI (including the new `debian-package` container test and `windows-package`) passed on the first preflight round. Remaining before release: the docs-repo update for `miru-users`, and the manual on-device check in Validation.
 
 ## Context and Orientation
 
