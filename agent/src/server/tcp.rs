@@ -25,7 +25,9 @@ use tracing::{info, warn};
 
 /// Bind a listener on the IPv4 loopback interface only, so the local device
 /// API is never reachable from the network. Port `0` lets the OS pick a free
-/// port; the returned port is the one actually bound.
+/// port; the returned port is the one actually bound. On Windows the socket
+/// sets no reuse options, so Windows refuses a second bind to the same
+/// address, even one that sets `SO_REUSEADDR`.
 pub async fn bind(port: u16) -> Result<(TcpListener, u16), ServerErr> {
     let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
     let listener = TcpListener::bind(addr).await.map_err(|e| {
