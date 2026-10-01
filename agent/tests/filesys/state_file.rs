@@ -1,10 +1,4 @@
-// standard crates
-#[cfg(unix)]
-use std::{fs::Permissions, os::unix::fs::PermissionsExt};
-
 // internal crates
-#[cfg(unix)]
-use crate::test_utils::filesys::assert_file_mode;
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::authn::token::{Token, Updates};
 use miru_agent::filesys::{
@@ -178,36 +172,6 @@ pub mod create {
             .unwrap();
         assert_eq!(state_file.read().as_ref(), &Token::default());
     }
-
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn writes_0600() {
-        let dir = test_dirs::temp("testing").unwrap();
-        let file = dir.file("test-file");
-
-        SingleThreadTokenFile::create(file.clone(), &Token::default(), Overwrite::Deny)
-            .await
-            .unwrap();
-        assert_file_mode(&file, 0o600).await;
-    }
-
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn overwrite_tightens_existing_0644() {
-        let dir = test_dirs::temp("testing").unwrap();
-        let file = dir.file("test-file");
-        files::write_string(&file, "x", WriteOptions::default())
-            .await
-            .unwrap();
-        files::set_permissions(&file, Permissions::from_mode(0o644))
-            .await
-            .unwrap();
-
-        SingleThreadTokenFile::create(file.clone(), &Token::default(), Overwrite::Allow)
-            .await
-            .unwrap();
-        assert_file_mode(&file, 0o600).await;
-    }
 }
 
 pub mod read {
@@ -291,23 +255,6 @@ pub mod write {
         };
         state_file.write(token.clone()).await.unwrap();
         assert_eq!(state_file.read().as_ref(), &token);
-    }
-
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn tightens_existing_file_to_0600() {
-        let dir = test_dirs::temp("testing").unwrap();
-        let file = dir.file("test-file");
-        let mut state_file =
-            SingleThreadTokenFile::create(file.clone(), &Token::default(), Overwrite::Deny)
-                .await
-                .unwrap();
-        files::set_permissions(&file, Permissions::from_mode(0o644))
-            .await
-            .unwrap();
-
-        state_file.write(Token::default()).await.unwrap();
-        assert_file_mode(&file, 0o600).await;
     }
 }
 

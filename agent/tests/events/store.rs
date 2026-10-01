@@ -1,10 +1,4 @@
-// standard crates
-#[cfg(unix)]
-use std::{fs::Permissions, os::unix::fs::PermissionsExt};
-
 // internal crates
-#[cfg(unix)]
-use crate::test_utils::filesys::assert_file_mode;
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::events::errors::EventsErr;
 use miru_agent::events::model::{Event, EventArgs, DEPLOYMENT_DEPLOYED};
@@ -185,16 +179,6 @@ mod append {
         assert_eq!(event.data["deployment_id"], "dpl-1");
         assert_eq!(event.data["activity_status"], "deployed");
     }
-
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn creates_log_0600() {
-        let dir = test_dirs::temp("ev_append_mode").unwrap();
-        let mut store = make_store(&dir, DEFAULT_MAX_RETAINED).await;
-
-        store.append(make_event("test.a")).await.unwrap();
-        assert_file_mode(&dir.file("events.jsonl"), 0o600).await;
-    }
 }
 
 // ========================= REPLAY ========================= //
@@ -357,28 +341,5 @@ mod compaction {
             e6.id, 6,
             "IDs should continue monotonically after compaction"
         );
-    }
-
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn compaction_tightens_legacy_0644_log() {
-        let dir = test_dirs::temp("ev_compact_mode").unwrap();
-        let log_file = dir.file("events.jsonl");
-
-        // a log from before appends were private
-        let mut store = make_store(&dir, 4).await;
-        store.append(make_event("legacy")).await.unwrap();
-        files::set_permissions(&log_file, Permissions::from_mode(0o644))
-            .await
-            .unwrap();
-
-        let mut store = make_store(&dir, 4).await;
-        for i in 0..5 {
-            store.append(make_event(&format!("evt-{i}"))).await.unwrap();
-        }
-
-        // compaction ran and replaced the log
-        assert!(store.earliest_id() > Some(1));
-        assert_file_mode(&log_file, 0o600).await;
     }
 }

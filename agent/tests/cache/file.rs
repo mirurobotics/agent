@@ -1,13 +1,7 @@
-// standard crates
-#[cfg(unix)]
-use std::{fs::Permissions, os::unix::fs::PermissionsExt};
-
 // internal crates
 use crate::concurrent_cache_tests;
 use crate::single_thread_cache_tests;
 use crate::test_utils::filesys::dirs as test_dirs;
-#[cfg(unix)]
-use crate::test_utils::filesys::{assert_file_mode, files as test_files};
 use miru_agent::cache::{FileCache, SingleThreadFileCache};
 use miru_agent::filesys::PathExt;
 
@@ -81,40 +75,6 @@ pub mod single_thread {
             // create again should not fail
             TestCache::new(file.clone(), 1000).await.unwrap();
         }
-
-        #[cfg(unix)]
-        #[tokio::test]
-        async fn new_creates_file_0600() {
-            let tmp = test_dirs::temp("testing").unwrap();
-            let file = tmp.file("cache.json");
-            TestCache::new(file.clone(), 1000).await.unwrap();
-            assert_file_mode(&file, 0o600).await;
-        }
-    }
-
-    // a legacy cache file keeps its mode until the next write replaces it
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn write_tightens_existing_file_to_0600() {
-        // internal crates
-        use miru_agent::cache::single_thread::SingleThreadCache;
-        use miru_agent::filesys::{files, Overwrite};
-
-        let tmp = test_dirs::temp("testing").unwrap();
-        let file = tmp.file("cache.json");
-        test_files::seed(&file, "{}").await;
-        files::set_permissions(&file, Permissions::from_mode(0o644))
-            .await
-            .unwrap();
-
-        let mut cache = TestCache::new(file.clone(), 1000).await.unwrap();
-        assert_file_mode(&file, 0o644).await;
-
-        cache
-            .write("k".into(), "v".into(), |_, _| false, Overwrite::Allow)
-            .await
-            .unwrap();
-        assert_file_mode(&file, 0o600).await;
     }
 
     single_thread_cache_tests!(new_cache, new_cache_with_capacity);

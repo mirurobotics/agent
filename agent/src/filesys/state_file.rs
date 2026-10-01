@@ -2,9 +2,7 @@
 use std::sync::Arc;
 
 // internal crates
-use crate::filesys::{
-    errors::*, file::File, files, Atomic, Overwrite, WriteOptions, PRIVATE_FILE_MODE,
-};
+use crate::filesys::{errors::*, file::File, files, Atomic, Overwrite, WriteOptions};
 use crate::models::Patch;
 use crate::trace;
 
@@ -27,7 +25,6 @@ macro_rules! dispatch {
 }
 
 // ============================== SINGLE THREADED ================================== //
-/// State files are agent-private: every write is `0600` on Unix.
 #[derive(Debug)]
 pub struct SingleThreadStateFile<ContentT, PatchT>
 where
@@ -79,7 +76,7 @@ where
             WriteOptions {
                 overwrite,
                 atomic: Atomic::Yes,
-                mode: Some(PRIVATE_FILE_MODE),
+                mode: None,
             },
         )
         .await?;
@@ -91,7 +88,7 @@ where
     }
 
     pub async fn write(&mut self, data: ContentT) -> Result<(), FileSysErr> {
-        files::write_json(&self.file, &data, WriteOptions::OVERWRITE_ATOMIC_PRIVATE).await?;
+        files::write_json(&self.file, &data, WriteOptions::OVERWRITE_ATOMIC).await?;
         self.state = Arc::new(data);
         Ok(())
     }

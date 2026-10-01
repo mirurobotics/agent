@@ -4,8 +4,6 @@ use std::path::PathBuf;
 // internal crates
 use crate::concurrent_cache_tests;
 use crate::single_thread_cache_tests;
-#[cfg(unix)]
-use crate::test_utils::filesys::assert_file_mode;
 use crate::test_utils::filesys::{dirs as test_dirs, files as test_files};
 use miru_agent::cache::{DirCache, SingleThreadDirCache};
 use miru_agent::filesys::{files, Overwrite, PathExt, WriteOptions};
@@ -114,17 +112,6 @@ pub mod single_thread {
 
         // new should not fail
         let _ = TestCache::new(dir.clone(), 1000).await.unwrap();
-    }
-
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn write_entry_is_0600() {
-        let (tmp, mut cache) = new_cache().await;
-        cache
-            .write("k".into(), "v".into(), |_, _| false, Overwrite::Allow)
-            .await
-            .unwrap();
-        assert_file_mode(&tmp.subdir("cache").file("k.json"), 0o600).await;
     }
 
     single_thread_cache_tests!(new_cache, new_cache_with_capacity);

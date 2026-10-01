@@ -1,6 +1,4 @@
 // internal crates
-#[cfg(unix)]
-use crate::test_utils::filesys::assert_file_mode;
 use crate::test_utils::filesys::{dirs as test_dirs, files as test_files};
 use miru_agent::disk::agent_version;
 use miru_agent::filesys::files;
@@ -61,15 +59,5 @@ pub mod write {
 
         let read_back = agent_version::read(&file).await.unwrap();
         assert_eq!(read_back, Some("v0.0.2".to_string()));
-    }
-
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn writes_0600() {
-        let dir = test_dirs::temp("agent_version_write_mode").unwrap();
-        let file = dir.file("agent_version");
-
-        agent_version::write(&file, "v0.9.0").await.unwrap();
-        assert_file_mode(&file, 0o600).await;
     }
 }

@@ -118,10 +118,9 @@ pub async fn append_bytes(
     opts: crate::filesys::AppendOptions,
 ) -> Result<(), FileSysErr> {
     dirs::create_if_absent(&file.parent()?).await?;
-    let mut open_opts = tokio::fs::OpenOptions::new();
-    open_opts.create(true).append(true);
-    apply_mode(&mut open_opts, opts.mode);
-    let mut f = open_opts
+    let mut f = tokio::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
         .open(file.path())
         .await
         .map_err(|e| map_io_err_for_open(e, file))?;
@@ -168,7 +167,7 @@ fn mode_open_options(_mode: Option<u32>) -> Option<std::fs::OpenOptions> {
 }
 
 /// Apply creation-time `mode` bits to `open_opts`; a no-op on Windows. Used by
-/// the non-atomic write and append paths.
+/// the non-atomic write path.
 #[cfg(unix)]
 fn apply_mode(open_opts: &mut tokio::fs::OpenOptions, mode: Option<u32>) {
     // tokio's OpenOptions exposes `mode` as an inherent method under cfg(unix);

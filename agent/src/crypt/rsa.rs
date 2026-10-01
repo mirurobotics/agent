@@ -67,7 +67,7 @@ pub async fn gen_key_pair(
         WriteOptions {
             overwrite,
             atomic: Atomic::Yes,
-            mode: Some(filesys::PRIVATE_FILE_MODE),
+            mode: Some(0o600),
         },
     )
     .await?;

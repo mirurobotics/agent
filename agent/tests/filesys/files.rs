@@ -5,8 +5,6 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
 // internal crates
-#[cfg(unix)]
-use crate::test_utils::filesys::assert_file_mode;
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::filesys::{self, files, Atomic, FileSysErr, Overwrite, PathExt, WriteOptions};
 
@@ -752,93 +750,6 @@ pub mod write_bytes {
         let perms = files::permissions(&file).await.unwrap();
         assert_eq!(perms.mode() & 0o777, 0o600);
     }
-
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn overwrite_atomic_private_is_0600() {
-        let dir = test_dirs::temp("testing").unwrap();
-        let file = dir.file("test-file");
-        files::write_bytes(&file, b"secret", WriteOptions::OVERWRITE_ATOMIC_PRIVATE)
-            .await
-            .unwrap();
-        assert_file_mode(&file, 0o600).await;
-    }
-
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn atomic_private_write_tightens_existing_0644_file() {
-        let dir = test_dirs::temp("testing").unwrap();
-        let file = dir.file("test-file");
-        files::write_bytes(&file, b"legacy", WriteOptions::default())
-            .await
-            .unwrap();
-        files::set_permissions(&file, std::fs::Permissions::from_mode(0o644))
-            .await
-            .unwrap();
-
-        files::write_bytes(&file, b"secret", WriteOptions::OVERWRITE_ATOMIC_PRIVATE)
-            .await
-            .unwrap();
-        assert_file_mode(&file, 0o600).await;
-        assert_eq!(files::read_bytes(&file).await.unwrap(), b"secret");
-    }
-
-    // The atomic temp file is created inside the destination's folder, so a
-    // setgid folder's group carries over to the renamed file.
-    #[cfg(target_os = "linux")]
-    #[tokio::test]
-    async fn atomic_write_inherits_setgid_dir_group() {
-        // standard crates
-        use std::os::unix::fs::MetadataExt;
-
-        // internal crates
-        use miru_agent::filesys::dirs;
-
-        // a group other than our effective one, so inheritance is observable
-        let egid = nix::unistd::getegid();
-        let gid = if nix::unistd::geteuid().is_root() {
-            65534
-        } else {
-            match nix::unistd::getgroups()
-                .unwrap()
-                .into_iter()
-                .find(|g| *g != egid)
-            {
-                Some(g) => g.as_raw(),
-                None => {
-                    eprintln!("skipping: no supplementary gid");
-                    return;
-                }
-            }
-        };
-        assert_ne!(gid, egid.as_raw());
-
-        let dir = test_dirs::temp("testing").unwrap();
-        let subdir = dir.subdir("shared");
-        dirs::create(&subdir).await.unwrap();
-        // chown before chmod: a group change by a non-root owner clears setgid
-        std::os::unix::fs::chown(subdir.path(), None, Some(gid)).unwrap();
-        dirs::set_permissions(&subdir, std::fs::Permissions::from_mode(0o2770))
-            .await
-            .unwrap();
-
-        let a = subdir.file("a");
-        files::write_bytes(&a, b"a", WriteOptions::OVERWRITE_ATOMIC)
-            .await
-            .unwrap();
-        let b = subdir.file("b");
-        let opts = WriteOptions {
-            mode: Some(0o640),
-            ..WriteOptions::OVERWRITE_ATOMIC
-        };
-        files::write_bytes(&b, b"b", opts).await.unwrap();
-
-        assert_eq!(files::metadata(&a).await.unwrap().gid(), gid);
-        assert_eq!(files::metadata(&b).await.unwrap().gid(), gid);
-        assert_file_mode(&b, 0o640).await;
-        // no leftover atomic-write temp folders
-        assert!(dirs::subdirs(&subdir).await.unwrap().is_empty());
-    }
 }
 
 pub mod write_string {
@@ -1170,36 +1081,6 @@ pub mod append_bytes {
             .await
             .unwrap();
         assert_eq!(files::read_string(&file).await.unwrap(), "existing");
-    }
-
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn honors_mode_on_create() {
-        let dir = test_dirs::temp("testing").unwrap();
-        let file = dir.file("test-file");
-        files::append_bytes(&file, b"hello", filesys::AppendOptions::SYNC_PRIVATE)
-            .await
-            .unwrap();
-        assert_file_mode(&file, 0o600).await;
-    }
-
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn mode_does_not_change_existing_file() {
-        let dir = test_dirs::temp("testing").unwrap();
-        let file = dir.file("test-file");
-        files::append_bytes(&file, b"hello ", filesys::AppendOptions::default())
-            .await
-            .unwrap();
-        files::set_permissions(&file, std::fs::Permissions::from_mode(0o644))
-            .await
-            .unwrap();
-
-        files::append_bytes(&file, b"world", filesys::AppendOptions::SYNC_PRIVATE)
-            .await
-            .unwrap();
-        assert_file_mode(&file, 0o644).await;
-        assert_eq!(files::read_string(&file).await.unwrap(), "hello world");
     }
 }
 

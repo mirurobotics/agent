@@ -1,10 +1,4 @@
-// standard crates
-#[cfg(unix)]
-use std::{fs::Permissions, os::unix::fs::PermissionsExt};
-
 // internal crates
-#[cfg(unix)]
-use crate::test_utils::filesys::assert_file_mode;
 use crate::test_utils::filesys::{dirs as test_dirs, files as test_files};
 use backend_api::models as backend_client;
 use miru_agent::disk::{system_metadata, DiskErr};
@@ -144,33 +138,5 @@ pub mod write {
 
         let read_back = system_metadata::read(&file).await.unwrap();
         assert_eq!(read_back, Some(second));
-    }
-
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn writes_0600() {
-        let dir = test_dirs::temp("system_metadata_write_mode").unwrap();
-        let file = dir.file("system_metadata.json");
-
-        system_metadata::write(&file, &full_metadata())
-            .await
-            .unwrap();
-        assert_file_mode(&file, 0o600).await;
-    }
-
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn tightens_existing_0644() {
-        let dir = test_dirs::temp("system_metadata_tighten").unwrap();
-        let file = dir.file("system_metadata.json");
-        test_files::seed(&file, "{}").await;
-        files::set_permissions(&file, Permissions::from_mode(0o644))
-            .await
-            .unwrap();
-
-        system_metadata::write(&file, &full_metadata())
-            .await
-            .unwrap();
-        assert_file_mode(&file, 0o600).await;
     }
 }

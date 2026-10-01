@@ -12,6 +12,6 @@ pub async fn read(file: &filesys::File) -> Result<Option<String>, DiskErr> {
 
 pub async fn write(file: &filesys::File, version: &str) -> Result<(), DiskErr> {
     let body = format!("{}\n", version.trim());
-    files::write_string(file, &body, WriteOptions::OVERWRITE_ATOMIC_PRIVATE).await?;
+    files::write_string(file, &body, WriteOptions::OVERWRITE_ATOMIC).await?;
     Ok(())
 }
