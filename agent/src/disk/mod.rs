@@ -6,6 +6,7 @@ pub mod agent_version;
 pub mod config_instances;
 pub mod deployments;
 pub mod device;
+pub mod device_api;
 pub mod errors;
 pub mod file_rules;
 pub mod git_commits;

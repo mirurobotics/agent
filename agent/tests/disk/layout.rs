@@ -172,6 +172,22 @@ pub mod storage_layout {
             under_root(&["resources", "git_commits.json"])
         );
     }
+
+    #[test]
+    fn device_api() {
+        let layout = Layout::default();
+        let file = layout.device_api();
+        #[cfg(unix)]
+        let expected = PathBuf::from("/run/miru/device-api.json");
+        #[cfg(windows)]
+        let expected = {
+            let mut path = expected_root_under(&expected_default_base());
+            path.push("device-api");
+            path.push("device-api.json");
+            path
+        };
+        assert_eq!(file.to_string(), expected.display().to_string());
+    }
 }
 
 pub mod auth_layout {

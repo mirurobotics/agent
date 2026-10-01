@@ -95,7 +95,7 @@ fn test_log_level_variants() {
 // ========================= reload =============================== //
 
 #[derive(Clone, Default)]
-struct CapturingWriter(Arc<Mutex<Vec<u8>>>);
+pub(crate) struct CapturingWriter(pub(crate) Arc<Mutex<Vec<u8>>>);
 
 impl Write for CapturingWriter {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {

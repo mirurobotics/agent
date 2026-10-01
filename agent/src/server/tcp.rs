@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 // internal crates
 use crate::server::{
+    auth::{check_bearer, BearerToken},
     errors::{BindTcpListenerErr, RunAxumServerErr, ServerErr},
     routes, State,
 };
@@ -16,6 +17,7 @@ use axum::{
     http::{header, StatusCode},
     middleware::{self, Next},
     response::{IntoResponse, Response},
+    Router,
 };
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
@@ -23,8 +25,8 @@ use tracing::{info, warn};
 
 /// Bind a listener on the IPv4 loopback interface only, so the local device
 /// API is never reachable from the network. Port `0` lets the OS pick a free
-/// port; read the bound port back with `TcpListener::local_addr`.
-pub async fn bind(port: u16) -> Result<TcpListener, ServerErr> {
+/// port; the returned port is the one actually bound.
+pub async fn bind(port: u16) -> Result<(TcpListener, u16), ServerErr> {
     let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
     let listener = TcpListener::bind(addr).await.map_err(|e| {
         ServerErr::BindTcpListenerErr(BindTcpListenerErr {
@@ -33,39 +35,56 @@ pub async fn bind(port: u16) -> Result<TcpListener, ServerErr> {
             trace: trace!(),
         })
     })?;
-    let bound = listener.local_addr().unwrap_or(addr);
+    let bound = listener.local_addr().map_err(|e| {
+        ServerErr::BindTcpListenerErr(BindTcpListenerErr {
+            addr,
+            source: e,
+            trace: trace!(),
+        })
+    })?;
     info!("Local device API listening on http://{bound}");
-    Ok(listener)
+    Ok((listener, bound.port()))
 }
 
+/// Serve the local device API on `listener`. `port` is the port [`bind`]
+/// returned for that listener. Every request must pass the loopback check
+/// (403) and then carry `token` as a bearer token (401).
 pub fn serve(
     listener: TcpListener,
+    port: u16,
     state: Arc<State>,
+    token: Arc<BearerToken>,
     shutdown_signal: impl Future<Output = ()> + Send + 'static,
 ) -> JoinHandle<Result<(), ServerErr>> {
-    tokio::task::spawn(async move {
-        let port = listener
-            .local_addr()
-            .map_err(|e| {
-                ServerErr::RunAxumServerErr(RunAxumServerErr {
-                    source: e,
-                    trace: trace!(),
-                })
-            })?
-            .port();
-        let app = routes::router(state).layer(middleware::from_fn(move |req, next| {
+    let router = router(state, port, token);
+    tokio::task::spawn(run(listener, router, shutdown_signal))
+}
+
+/// The shared router behind the bearer check, behind the loopback check.
+fn router(state: Arc<State>, port: u16, token: Arc<BearerToken>) -> Router {
+    routes::router(state)
+        .layer(middleware::from_fn(move |req, next| {
+            check_bearer(token.clone(), req, next)
+        }))
+        .layer(middleware::from_fn(move |req, next| {
             check_loopback(port, req, next)
-        }));
-        axum::serve(listener, app)
-            .with_graceful_shutdown(shutdown_signal)
-            .await
-            .map_err(|e| {
-                ServerErr::RunAxumServerErr(RunAxumServerErr {
-                    source: e,
-                    trace: trace!(),
-                })
+        }))
+}
+
+async fn run(
+    listener: TcpListener,
+    router: Router,
+    shutdown_signal: impl Future<Output = ()> + Send + 'static,
+) -> Result<(), ServerErr> {
+    axum::serve(listener, router)
+        .with_graceful_shutdown(shutdown_signal)
+        .await
+        .map_err(|e| {
+            ServerErr::RunAxumServerErr(RunAxumServerErr {
+                source: e,
+                trace: trace!(),
             })
-    })
+        })
 }
 
 /// Reject requests that aren't addressed to this listener's loopback URL.

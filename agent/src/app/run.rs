@@ -12,10 +12,12 @@ use crate::app::{
 };
 use crate::authn::{self, TokenManagerExt};
 use crate::data_uploads::scan;
+use crate::disk::{self, Layout};
+use crate::filesys;
 use crate::http;
 #[cfg(unix)]
 use crate::server::unix::serve;
-use crate::server::{self, errors::*, tcp};
+use crate::server::{self, auth::BearerToken, errors::*, tcp};
 use crate::trace;
 use crate::workers::{
     mqtt, poller, sync_scan_bridge,
@@ -115,6 +117,7 @@ async fn init(
     shutdown_tx: broadcast::Sender<()>,
     shutdown_manager: &mut ShutdownManager,
 ) -> Result<Arc<AppState>, ServerErr> {
+    remove_stale_discovery_file(&options.storage.layout).await;
     let app_state = init_app_state(options, shutdown_manager).await?;
 
     init_token_refresh_worker(
@@ -163,6 +166,14 @@ async fn init_optional_services(
     }
 
     Ok(())
+}
+
+// a discovery file left by a crash or a forced exit would point clients at a
+// dead port with a stale token; the tcp server writes a fresh one when it starts
+async fn remove_stale_discovery_file(layout: &Layout) {
+    if let Err(e) = disk::device_api::remove(&layout.device_api()).await {
+        tracing::warn!("Failed to remove stale discovery file: {e}");
+    }
 }
 
 async fn init_data_upload_workers(
@@ -466,19 +477,37 @@ async fn init_tcp_server(
             "tcp clients get connection refused after an idle exit; set is_persistent to keep the tcp listener available"
         );
     }
-    // the tcp listener is optional, so a taken port leaves the agent running
-    let listener = match tcp::bind(options.server.tcp_port).await {
-        Ok(listener) => listener,
+    // the tcp listener is optional, so a failure to start it (e.g. a taken
+    // port) leaves the agent running
+    match start_tcp_server(options, server_state, shutdown_tx).await {
+        Ok((handle, discovery_file)) => {
+            shutdown_manager.with_tcp_server_handle(handle, discovery_file)
+        }
         Err(e) => {
             error!("Failed to start tcp server, continuing without it: {e}");
-            return Ok(());
+            Ok(())
         }
-    };
+    }
+}
+
+// bind, mint this run's bearer token, and publish the port and token in the
+// discovery file before serving, so clients never read a port that isn't
+// being served
+async fn start_tcp_server(
+    options: &AppOptions,
+    server_state: Arc<server::State>,
+    shutdown_tx: &broadcast::Sender<()>,
+) -> Result<(JoinHandle<Result<(), ServerErr>>, filesys::File), ServerErr> {
+    let (listener, port) = tcp::bind(options.server.tcp_port).await?;
+    let token = BearerToken::generate()?;
+    let discovery_file = options.storage.layout.device_api();
+    disk::device_api::write(&discovery_file, port, token.secret()).await?;
+
     let mut shutdown_rx = shutdown_tx.subscribe();
-    let handle = tcp::serve(listener, server_state, async move {
+    let handle = tcp::serve(listener, port, server_state, Arc::new(token), async move {
         let _ = shutdown_rx.recv().await;
     });
-    shutdown_manager.with_tcp_server_handle(handle)
+    Ok((handle, discovery_file))
 }
 
 // ================================= SHUTDOWN ===================================== //
@@ -496,6 +525,8 @@ struct ShutdownManager {
     app_state: Option<AppStateShutdownParams>,
     socket_server_handle: Option<JoinHandle<Result<(), ServerErr>>>,
     tcp_server_handle: Option<JoinHandle<Result<(), ServerErr>>>,
+    // removed once the tcp server stops, so clients see it is no longer served
+    tcp_discovery_file: Option<filesys::File>,
     poller_worker_handle: Option<JoinHandle<()>>,
     mqtt_worker_handle: Option<JoinHandle<()>>,
     token_refresh_worker_handle: Option<JoinHandle<()>>,
@@ -512,6 +543,7 @@ impl ShutdownManager {
             app_state: None,
             socket_server_handle: None,
             tcp_server_handle: None,
+            tcp_discovery_file: None,
             poller_worker_handle: None,
             mqtt_worker_handle: None,
             token_refresh_worker_handle: None,
@@ -574,8 +606,11 @@ impl ShutdownManager {
     pub fn with_tcp_server_handle(
         &mut self,
         handle: JoinHandle<Result<(), ServerErr>>,
+        discovery_file: filesys::File,
     ) -> Result<(), ServerErr> {
-        Self::set_server_handle(&mut self.tcp_server_handle, "tcp_server_handle", handle)
+        Self::set_server_handle(&mut self.tcp_server_handle, "tcp_server_handle", handle)?;
+        self.tcp_discovery_file = Some(discovery_file);
+        Ok(())
     }
 
     fn set_server_handle(
@@ -643,6 +678,11 @@ impl ShutdownManager {
         shutdown_server(socket_handle, "socket", &mut first_err).await;
         let tcp_handle = self.tcp_server_handle.take();
         shutdown_server(tcp_handle, "tcp", &mut first_err).await;
+        if let Some(file) = self.tcp_discovery_file.take() {
+            if let Err(e) = disk::device_api::remove(&file).await {
+                tracing::warn!("Failed to remove discovery file: {e}");
+            }
+        }
 
         // 5. scan driver worker
         join_worker(
@@ -750,7 +790,7 @@ mod tests {
     use super::*;
     use crate::deploy::fsm;
     use crate::disk::{Capacities, Layout};
-    use crate::filesys::{files, WriteOptions};
+    use crate::filesys::{dirs, files, PathExt, WriteOptions};
     use crate::models::Device;
     use crate::test_utils::filesys::dirs as test_dirs;
 
@@ -1081,7 +1121,7 @@ mod tests {
     #[tokio::test]
     async fn shutdown_impl_maps_tcp_server_join_error() {
         let mut mgr = new_shutdown_manager();
-        mgr.with_tcp_server_handle(tokio::spawn(async { panic!("boom") }))
+        mgr.with_tcp_server_handle(tokio::spawn(async { panic!("boom") }), missing_file())
             .unwrap();
 
         let err = mgr
@@ -1096,7 +1136,7 @@ mod tests {
     #[tokio::test]
     async fn shutdown_impl_returns_tcp_server_error() {
         let mut mgr = new_shutdown_manager();
-        mgr.with_tcp_server_handle(tokio::spawn(async { Err(sentinel_err()) }))
+        mgr.with_tcp_server_handle(tokio::spawn(async { Err(sentinel_err()) }), missing_file())
             .unwrap();
 
         let err = mgr.shutdown_impl().await.expect_err("tcp server error");
@@ -1108,14 +1148,60 @@ mod tests {
     #[tokio::test]
     async fn with_tcp_server_handle_rejects_duplicate() {
         let mut mgr = new_shutdown_manager();
-        mgr.with_tcp_server_handle(tokio::spawn(async { Ok(()) }))
+        mgr.with_tcp_server_handle(tokio::spawn(async { Ok(()) }), missing_file())
             .unwrap();
 
         let err = mgr
-            .with_tcp_server_handle(tokio::spawn(async { Ok(()) }))
+            .with_tcp_server_handle(tokio::spawn(async { Ok(()) }), missing_file())
             .expect_err("second handle is rejected");
 
         assert!(matches!(err, ServerErr::ShutdownMngrDuplicateArgErr(_)));
+    }
+
+    // a discovery path that doesn't exist, so its removal is a no-op
+    fn missing_file() -> filesys::File {
+        filesys::File::new(
+            std::env::temp_dir().join(format!("miru-missing-{}.json", uuid::Uuid::new_v4())),
+        )
+    }
+
+    #[tokio::test]
+    async fn shutdown_impl_removes_tcp_discovery_file() {
+        let file = filesys::File::new(
+            std::env::temp_dir().join(format!("miru-discovery-{}.json", uuid::Uuid::new_v4())),
+        );
+        files::write_string(&file, "{}", WriteOptions::default())
+            .await
+            .unwrap();
+        let mut mgr = new_shutdown_manager();
+        mgr.with_tcp_server_handle(tokio::spawn(async { Ok(()) }), file.clone())
+            .unwrap();
+
+        mgr.shutdown_impl().await.unwrap();
+
+        assert!(!file.exists());
+        assert!(mgr.tcp_discovery_file.is_none());
+    }
+
+    #[tokio::test]
+    async fn shutdown_impl_logs_discovery_removal_failure() {
+        // a directory at the discovery path makes the removal fail
+        let dir = filesys::Dir::new(
+            std::env::temp_dir().join(format!("miru-discovery-{}", uuid::Uuid::new_v4())),
+        );
+        dirs::create(&dir).await.unwrap();
+        let mut mgr = new_shutdown_manager();
+        mgr.with_tcp_server_handle(
+            tokio::spawn(async { Ok(()) }),
+            filesys::File::new(dir.path()),
+        )
+        .unwrap();
+
+        // the removal failure is logged, not returned
+        mgr.shutdown_impl().await.unwrap();
+
+        assert!(dir.path().is_dir());
+        dirs::delete(&dir).await.unwrap();
     }
 
     #[tokio::test]

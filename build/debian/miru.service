@@ -27,7 +27,7 @@ SyslogIdentifier=miru-agent
 # meaningful if a customer ships a hardening drop-in that enables
 # ProtectSystem=strict — the agent's own working directories are then
 # writable without the customer needing to remember to add them.
-ReadWritePaths=/var/lib/miru /var/log/miru /srv/miru
+ReadWritePaths=/var/lib/miru /var/log/miru /srv/miru /run/miru
 # Prevents the service and its children from gaining new privileges
 NoNewPrivileges=true
 # Gives the service a private /tmp and /var/tmp

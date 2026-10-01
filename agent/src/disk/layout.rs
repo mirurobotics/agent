@@ -91,6 +91,26 @@ impl Layout {
     pub fn events_log_file(&self) -> filesys::File {
         self.events_dir().file("events.jsonl")
     }
+
+    /// Port and bearer token for TCP clients of the local device API.
+    ///
+    /// On Unix this is `/run/miru/device-api.json`, beside the socket, so
+    /// clients read it without a grant on the private data root. On Windows
+    /// it is `device-api/device-api.json` under the data root, the directory
+    /// the installer ACLs for Miru Clients.
+    pub fn device_api(&self) -> filesys::File {
+        #[cfg(unix)]
+        {
+            self.filesystem_root
+                .subdir("run")
+                .subdir("miru")
+                .file("device-api.json")
+        }
+        #[cfg(windows)]
+        {
+            self.root().subdir("device-api").file("device-api.json")
+        }
+    }
 }
 
 impl Default for Layout {

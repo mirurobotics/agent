@@ -41,6 +41,14 @@ pub struct BindTcpListenerErr {
 impl crate::errors::Error for BindTcpListenerErr {}
 
 #[derive(Debug, thiserror::Error)]
+#[error("failed to generate local device API token")]
+pub struct GenerateTokenErr {
+    pub trace: Box<Trace>,
+}
+
+impl crate::errors::Error for GenerateTokenErr {}
+
+#[derive(Debug, thiserror::Error)]
 #[error("failed to run axum server: {source}")]
 pub struct RunAxumServerErr {
     pub source: std::io::Error,
@@ -75,6 +83,8 @@ pub enum ServerErr {
     TimestampConversionErr(TimestampConversionErr),
     #[error(transparent)]
     ShutdownMngrDuplicateArgErr(ShutdownMngrDuplicateArgErr),
+    #[error(transparent)]
+    GenerateTokenErr(GenerateTokenErr),
 
     // internal crate errors
     #[error(transparent)]
@@ -188,6 +198,7 @@ impl From<upload::UploadErr> for ServerErr {
 crate::impl_error!(ServerErr {
     TimestampConversionErr,
     ShutdownMngrDuplicateArgErr,
+    GenerateTokenErr,
     EventsErr,
     AuthnErr,
     CacheErr,
