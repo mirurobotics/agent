@@ -43,6 +43,9 @@
         <Directory Id="MIRUTMP" Name="tmp">
           <Directory Id="MIRUTMPSENTINEL" Name="installer-sentinel" />
         </Directory>
+        <Directory Id="MIRUDEVICEAPI" Name="device-api">
+          <Directory Id="MIRUDEVICEAPISENTINEL" Name="installer-sentinel" />
+        </Directory>
       </Directory>
     </StandardDirectory>
 
@@ -96,8 +99,18 @@
          its contents. Hardcoded because CreateFolders runs before the service
          exists; recompute if the service Name changes.
          The installer-sentinel folders, which the service cannot delete, keep
-         logs, auth, and tmp non-empty so that none can become a mount point that
-         a repair or upgrade follows; they are permanent. -->
+         logs, auth, tmp, and device-api non-empty so that none can become a
+         mount point that a repair or upgrade follows; they are permanent. -->
+    <!-- device-api holds the local device API discovery file (port and bearer
+         token). The Miru Agent Users local group gets inheritable read on
+         it, and nothing on ProgramData\Miru itself: bypass traverse checking
+         lets members open the file by full path. The group's SID is machine-specific,
+         so util:PermissionEx adds its ACE by name after CreateFolders applies
+         the protected descriptor; the ACE is reapplied on repair and upgrade and
+         restored by WiX's rollback of that action. The group is created if
+         missing and kept on uninstall with its members, because device-api and
+         its ACE survive uninstall too. Never grant Users or Authenticated Users
+         here: whoever can read the file can call every device API route. -->
     <ComponentGroup Id="DataDirs">
       <Component Id="MiruDataDir" Directory="MIRUDATA" Guid="D0542DF7-5B61-4F09-938B-57F05C1B5458" Bitness="always64" KeyPath="yes">
         <CreateFolder>
@@ -119,6 +132,21 @@
           <PermissionEx Sddl="O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;;FRFWFX;;;S-1-5-80-1251439239-454917380-1008020685-2030257057-91624695)(A;OICIIO;FA;;;S-1-5-80-1251439239-454917380-1008020685-2030257057-91624695)" />
         </CreateFolder>
       </Component>
+      <Component Id="MiruDeviceApiDir" Directory="MIRUDEVICEAPI" Guid="3CA14BB2-FB56-4907-93EF-45ED80886D9E" Bitness="always64" KeyPath="yes">
+        <CreateFolder>
+          <PermissionEx Sddl="O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;;FRFWFX;;;S-1-5-80-1251439239-454917380-1008020685-2030257057-91624695)(A;OICIIO;FA;;;S-1-5-80-1251439239-454917380-1008020685-2030257057-91624695)" />
+          <util:PermissionEx User="Miru Agent Users"
+                             Read="yes" ReadAttributes="yes" ReadExtendedAttributes="yes"
+                             ReadPermission="yes" Synchronize="yes" />
+        </CreateFolder>
+        <!-- UpdateIfExists: without it, WiX 7's CreateGroup fails (1603) when
+             the group already exists, as on every major upgrade. -->
+        <util:Group Id="MiruAgentUsersGroup"
+                    Name="Miru Agent Users"
+                    Comment="Local accounts whose applications use the Miru Agent"
+                    UpdateIfExists="yes"
+                    RemoveOnUninstall="no" />
+      </Component>
       <Component Id="MiruLogsSentinel" Directory="MIRULOGSSENTINEL" Guid="51B41B07-B719-4D73-BD1E-3675FC8E7CA8" Bitness="always64" KeyPath="yes" Permanent="yes">
         <CreateFolder>
           <PermissionEx Sddl="O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)" />
@@ -130,6 +158,11 @@
         </CreateFolder>
       </Component>
       <Component Id="MiruTmpSentinel" Directory="MIRUTMPSENTINEL" Guid="7AF370AB-A333-4D60-BC95-ACAB7306D1C6" Bitness="always64" KeyPath="yes" Permanent="yes">
+        <CreateFolder>
+          <PermissionEx Sddl="O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)" />
+        </CreateFolder>
+      </Component>
+      <Component Id="MiruDeviceApiSentinel" Directory="MIRUDEVICEAPISENTINEL" Guid="3E26D821-026B-49A2-964F-FEC9D3CFB2F6" Bitness="always64" KeyPath="yes" Permanent="yes">
         <CreateFolder>
           <PermissionEx Sddl="O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)" />
         </CreateFolder>

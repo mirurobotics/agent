@@ -37,13 +37,14 @@ function Initialize-IntegrationPaths {
     $script:logsRoot = Join-Path $script:programDataRoot "logs"
     $script:authRoot = Join-Path $script:programDataRoot "auth"
     $script:tmpRoot = Join-Path $script:programDataRoot "tmp"
+    $script:deviceApiRoot = Join-Path $script:programDataRoot "device-api"
     $script:protectedRoots = @(
         $script:programDataRoot,
         $script:logsRoot,
         $script:authRoot,
         $script:tmpRoot
     )
-    $script:installerSentinelDirs = @($script:logsRoot, $script:authRoot, $script:tmpRoot | ForEach-Object { Join-Path $_ $MsiSentinelName })
+    $script:installerSentinelDirs = @($script:logsRoot, $script:authRoot, $script:tmpRoot, $script:deviceApiRoot | ForEach-Object { Join-Path $_ $MsiSentinelName })
     $script:markerPath = Join-Path $script:programDataRoot "rollback-payload.txt"
     $script:customerOwnedFiles = @(
         (New-CustomerOwnedFile (Join-Path $script:programDataRoot `
@@ -73,6 +74,12 @@ function Initialize-IntegrationRuntime {
     $script:testUser = "MiruMsiTestUser"
     $script:testPassword = "M!ru-" + [Guid]::NewGuid().ToString("N") + "-9a"
     $script:createdUser = $false
+    # A second non-admin account, added to Miru Agent Users after install.
+    $script:memberUser = "MiruMsiTestMember"
+    $script:memberPassword = "M!ru-" + [Guid]::NewGuid().ToString("N") + "-9b"
+    $script:createdMember = $false
+    $script:memberAdded = $false
+    $script:ownsAgentUsersGroup = $false
     $script:failureEvidence = New-Object System.Collections.ArrayList
     $script:cleanupFailures = New-Object System.Collections.ArrayList
     $script:integrationFailure = $null
@@ -86,10 +93,22 @@ function Assert-TestUserAbsent {
     throw "Refusing mutation: the named integration account $Name already exists."
 }
 
+# The MSI keeps the group on uninstall, so the run removes it during cleanup;
+# refuse to start when it would remove a group this run did not create.
+function Assert-AgentUsersGroupAbsent {
+    $existing = Get-LocalGroup -Name $MsiAgentUsersGroup -ErrorAction SilentlyContinue
+    if ($null -ne $existing) {
+        throw "Refusing mutation: the local group $MsiAgentUsersGroup already exists."
+    }
+    $script:ownsAgentUsersGroup = $true
+}
+
 function Assert-IntegrationPreconditions {
     Assert-Elevated64BitWindows
     $script:initialRelated = @(Assert-InstalledAllowlistSafe)
     Assert-TestUserAbsent $script:testUser
+    Assert-TestUserAbsent $script:memberUser
+    Assert-AgentUsersGroupAbsent
 }
 
 Assert-DisposableTestMachine ([bool]$ConfirmDisposableTestMachine)
