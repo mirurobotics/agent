@@ -29,20 +29,33 @@ Out of scope: changing the service `UMask` (consumers of configs deployed outsid
 
 ## Progress
 
-- [ ] M0: `git mv plans/backlog/20261001-linux-permission-hardening.md plans/active/`, commit (`docs(plans): activate linux permission hardening plan`).
-- [ ] M1: Agent writes private state with explicit modes (code + tests), commit.
-- [ ] M2: Debian packaging (group, postinst, tmpfiles, socket, service) + container test + CI job, commit.
-- [ ] M3: Install-script template + regenerated scripts, commit.
-- [ ] M4: Docs and release note, commit.
+- [x] M0: `git mv plans/backlog/20261001-linux-permission-hardening.md plans/active/`, commit (`docs(plans): activate linux permission hardening plan`).
+- [x] M1: Agent writes private state with explicit modes (code + tests), commit.
+- [x] M2: Debian packaging (group, postinst, tmpfiles, socket, service) + container test + CI job, commit.
+- [x] M3: Install-script template + regenerated scripts, commit.
+- [x] M4: Docs and release note, commit.
 - [ ] M5: Push, open draft PR, preflight reports `CLEAN`; fill Outcomes, `git mv` the plan to `plans/completed/`, commit, and re-run preflight to `CLEAN`.
 
 ## Surprises & Discoveries
 
-(Add entries as work proceeds.)
+- Observation: on bookworm (systemd 252) `systemd-analyze verify` reports an unknown unit key as `Unknown key 'X' in section ...` and still exits 0, so grepping for `Unknown key name` alone misses it.
+  Evidence: container run; `postinst-test.sh` greps `Unknown (key|section)|Failed to parse` instead.
+- Observation: `systemd-tmpfiles` refuses a symlinked `/srv/miru/configs` ("already exists and is not a directory"), exits 0, and leaves the target alone.
+  Evidence: container test step 5.
+- Observation: the CI runner's spare supplementary gid is not guaranteed, so the setgid Rust test skips with a message rather than panicking in CI; container step 3 covers setgid inheritance with the real `miru` user.
+  Evidence: test plan review; the test ran (not skipped) locally.
+- Observation: a non-member owner's `chmod` clears `S_ISGID` on Linux, so the agent must never `chmod` folders under `/srv/miru/configs`; it does not today (`deploy/filesys.rs` only sets permissions in tests).
+  Evidence: code review.
+- Observation: `cargo clippy` without `--no-deps` fails locally on Rust 1.97 in generated `libs/backend-api` (`clippy::manual_map`), unrelated to this change.
+  Evidence: local clippy run.
 
 ## Decision Log
 
 - Decision: postinst takes each tree's top folder from `miru` (root-owned, no group or other write) before any chmod and hands it back with `chown -R` last, because GNU chmod follows command-line symlinks and `miru` can swap entries in folders it owns. A symlinked `/srv/miru/configs` is skipped with a warning rather than deleted, so an admin's deliberate symlink is not broken. A reconfigure runs postinst with the service up, and a miru process holding a folder open inside a tree could still swap entries after the handoff, so post_install stops miru.socket and miru.service first (both are restarted at its end).
+  Date: 2026-10-01
+- Decision: M2's container test and CI job were committed separately (`test(debian): ...`) from the packaging commit, and Rust tests separately from M1 code, following the implement workflow's source-then-tests order.
+  Date: 2026-10-01
+- Decision: the test plan was extended with preset/constant tests, append-on-existing-file, `create_private_if_absent` error path, tightening tests for each writer, and container checks for stop ordering (systemctl shim log), symlinks inside the trees, and re-migration on fresh install.
   Date: 2026-10-01
 
 ## Outcomes & Retrospective
