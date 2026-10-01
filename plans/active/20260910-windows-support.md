@@ -47,8 +47,9 @@ Unix usage in `deploy/filesys.rs` and `data_uploads/retention/deleter.rs` is
    256-bit CSPRNG token at startup, writes an atomic discovery file
    `device-api.json` (`{port, token}`), and requires
    `Authorization: Bearer` (constant-time compare) on every route. Authorization =
-   NTFS ACL on the discovery file (readable by the `Miru Clients` local group), set by
-   the installer via inheritable ACEs — no security-descriptor FFI in agent code.
+   NTFS ACL on the discovery file (readable by the `Miru Device API Users` local
+   group), set by the installer via inheritable ACEs — no security-descriptor
+   FFI in agent code.
    Named pipes rejected: instance-per-connection axum Listener, unsafe SDDL FFI, and a
    custom HTTP transport in every SDK, for marginal gain over an ACL'd token file.
 3. **Windows is persistent-only.** Socket activation and the `is_persistent: false`
@@ -127,8 +128,8 @@ than inside the zip.
 
 **PR 9 — service-aware MSI follow-up** (in progress — `plans/completed/20260916-windows-msi-service.md`)**.** After the executable implements Windows
 Service Control Manager integration, extend the MSI with service install/start/stop,
-account, and recovery behavior. The Phase 2 `Miru Clients` group and discovery
-directory permissions followed once the local device API existed (PR 13).
+account, and recovery behavior. The Phase 2 `Miru Device API Users` group and
+discovery directory permissions followed once the local device API existed (PR 13).
 
 **PR 10 — Authenticode signing.** Sign binary + MSI in the release pipeline
 (osslsigncode from the Linux pipeline, or signtool on the Windows runner), RFC 3161
@@ -169,21 +170,21 @@ the file open without delete sharing (Python's `open`) blocks both. Python SDK
 work happens in `python-device-sdk` (transport + discovery file). The SDK must
 close the file right after reading, treat a missing file or a refused
 connection as "not serving" and retry by re-reading the file, and re-read the
-file on a 401. On Windows, PR 13 lets members of the `Miru Clients` group read
-the file.
+file on a 401. On Windows, PR 13 lets members of the `Miru Device API Users`
+group read the file.
 
-**PR 13 — `Miru Clients` group + discovery directory ACL** (PR 9 follow-up;
-`build/windows/miru-agent.wxs`)**.** The MSI creates the local group
-`Miru Clients` (WiX Util `util:Group`) and `ProgramData\Miru\device-api` with
-the siblings' protected descriptor plus inheritable read for the group
-(`util:PermissionEx`), so the discovery file inherits it. Members get nothing
-on `ProgramData\Miru` itself; bypass traverse checking lets them open the file
-by full path. Administrators add members with `Add-LocalGroupMember` /
-`net localgroup`; membership applies at the account's next logon or service
-start. `device-api` gets an `installer-sentinel` like `logs`, `auth`, and
-`tmp`. The MSI side does not depend on PR 12: the integration tests use a
-stand-in file, and the real agent writing the real file is the end-to-end
-check. Must land before the first Windows release.
+**PR 13 — `Miru Device API Users` group + discovery directory ACL** (PR 9
+follow-up; `build/windows/miru-agent.wxs`)**.** The MSI creates the local group
+`Miru Device API Users` (WiX Util `util:Group`) and
+`ProgramData\Miru\device-api` with the siblings' protected descriptor plus
+inheritable read for the group (`util:PermissionEx`), so the discovery file
+inherits it. Members get nothing on `ProgramData\Miru` itself; bypass traverse
+checking lets them open the file by full path. Administrators add members with
+`Add-LocalGroupMember` / `net localgroup`; membership applies at the account's
+next logon or service start. `device-api` gets an `installer-sentinel` like
+`logs`, `auth`, and `tmp`. The MSI side does not depend on PR 12: the
+integration tests use a stand-in file, and the real agent writing the real file
+is the end-to-end check. Must land before the first Windows release.
 
 ## Decision log
 
@@ -239,17 +240,17 @@ check. Must land before the first Windows release.
 - 2026-09-30: A `tcp::serve` failure (token generation or discovery write) is
   logged and the agent continues without TCP. Rationale: it matches the
   handling of a TCP bind failure; the TCP listener is optional.
-- 2026-09-30: PR 13 adds the `Miru Clients` ACE with `util:PermissionEx`
-  (by account name) next to the core `PermissionEx` SDDL, not in the SDDL
-  string. Rationale: a local group's SID is machine-specific, so unlike the
-  service SID it cannot be hardcoded. The core descriptor still makes the
-  folder protected and owned by SYSTEM; `ExecSecureObjects` runs after
+- 2026-09-30: PR 13 adds the `Miru Device API Users` ACE with
+  `util:PermissionEx` (by account name) next to the core `PermissionEx` SDDL,
+  not in the SDDL string. Rationale: a local group's SID is machine-specific, so
+  unlike the service SID it cannot be hardcoded. The core descriptor still makes
+  the folder protected and owned by SYSTEM; `ExecSecureObjects` runs after
   `CreateFolders` (and after the group exists), merges the ACE with
-  `SetEntriesInAcl`, keeps the DACL protected, and reruns on repair and
-  upgrade. `SchedSecureObjectsRollback` snapshots the DACL before the
-  transaction, so a failed upgrade restores the ACE that the new package's
-  `CreateFolders` dropped. A deferred icacls custom action was rejected as
-  more code for the same result.
+  `SetEntriesInAcl`, keeps the DACL protected, and reruns on repair and upgrade.
+  `SchedSecureObjectsRollback` snapshots the DACL before the transaction, so a
+  failed upgrade restores the ACE that the new package's `CreateFolders`
+  dropped. A deferred icacls custom action was rejected as more code for the
+  same result.
 - 2026-09-30: The group is created by WiX Util `util:Group` inside the
   `device-api` component (WiX 7 supports local group creation). It is created
   if missing and reused if present (`UpdateIfExists="yes"`, which only
@@ -271,6 +272,12 @@ check. Must land before the first Windows release.
   stopped, so without a sentinel a compromised service could turn it into a
   mount point that an administrator-run repair would follow (the same
   exposure the `logs`, `auth`, and `tmp` sentinels close).
+- 2026-10-01: The group is named `Miru Device API Users`, not `Miru Clients` as
+  first drafted in Decision 2. Rationale: Windows names groups like this after
+  what membership grants (`Remote Desktop Users`, `Performance Monitor Users`),
+  and "clients" could be read as Miru customers or cloud clients. Renaming after
+  release would be costly (the group survives uninstall and customers script
+  its name), so it was settled before the first MSI shipped.
 
 ## Risks
 

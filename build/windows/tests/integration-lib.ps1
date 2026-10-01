@@ -47,7 +47,7 @@ function Invoke-IntegrationRun {
     finally {
         Remove-FixtureProducts
         Remove-TestUser
-        Remove-ClientsGroup
+        Remove-ApiUsersGroup
         Remove-TestFiles
     }
     Complete-IntegrationRun $integrationFailure
@@ -158,11 +158,11 @@ function Invoke-InstallStage {
     Assert-True (Test-Path -LiteralPath $agentPath -PathType Leaf) "v1 executable installed"
     Assert-InstalledVersion $fixtureProducts[0] "fixture-v1" "v1"
     Assert-ProtectedState "initial install"
-    Add-ClientsMember
+    Add-ApiUsersMember
     Invoke-NonAdminProbe -Stage "install"
     Assert-ServiceInstalled "install"
     Assert-ServiceRuntimeIdentity "install" 0
-    Write-Host "PASS initial install, ACL correction, $MsiClientsGroup read, denial, and service installed"
+    Write-Host "PASS initial install, ACL correction, $MsiApiUsersGroup read, denial, and service installed"
 }
 
 # Loosen every protected directory so the next installer operation must repair it.
@@ -266,7 +266,7 @@ function Assert-ProtectedState {
     param([Parameter(Mandatory = $true)][string]$Stage)
     Assert-CustomerStateRetained $Stage
     Assert-ProtectedAcls
-    Assert-ClientsGroup $Stage
+    Assert-ApiUsersGroup $Stage
 }
 
 function Assert-CustomerStateRetained {
@@ -320,31 +320,31 @@ function Assert-OwnedFilesRetained {
 
 function Assert-ProtectedAcls {
     foreach ($path in $protectedRoots) { Assert-ProtectedAcl $path }
-    Assert-ProtectedAcl $deviceApiRoot -ClientsCanRead
+    Assert-ProtectedAcl $deviceApiRoot -ApiUsersCanRead
     foreach ($path in $installerSentinelDirs) { Assert-InstallerSentinelAcl $path }
 }
 
-# -ClientsCanRead: device-api, which also has one inheritable read ACE for the
-# Miru Clients group.
+# -ApiUsersCanRead: device-api, which also has one inheritable read ACE for the
+# Miru Device API Users group.
 function Assert-ProtectedAcl {
     param(
         [Parameter(Mandatory = $true)][string]$LiteralPath,
-        [switch]$ClientsCanRead
+        [switch]$ApiUsersCanRead
     )
     $acl = Get-Acl -LiteralPath $LiteralPath
     Assert-Equal "S-1-5-18" $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value "$LiteralPath owner is SYSTEM"
     Assert-True $acl.AreAccessRulesProtected "$LiteralPath DACL inheritance is disabled"
     $rules = @($acl.Access)
-    $count = if ($ClientsCanRead) { 5 } else { 4 }
+    $count = if ($ApiUsersCanRead) { 5 } else { 4 }
     Assert-Equal $count $rules.Count "exactly $count total $LiteralPath ACEs"
     $explicit = @($rules | Where-Object { -not $_.IsInherited })
     Assert-Equal $count $explicit.Count "exactly $count explicit $LiteralPath ACEs"
     $clientsSid = $null
-    if ($ClientsCanRead) {
-        $clientsSid = Get-ClientsGroupSid
+    if ($ApiUsersCanRead) {
+        $clientsSid = Get-ApiUsersGroupSid
         $clients = @($explicit | Where-Object { (Get-RuleSid $_) -eq $clientsSid })
-        Assert-Equal 1 $clients.Count "$LiteralPath has one $MsiClientsGroup ACE"
-        Assert-ClientsReadAce $clients[0] $LiteralPath -Inheritable
+        Assert-Equal 1 $clients.Count "$LiteralPath has one $MsiApiUsersGroup ACE"
+        Assert-ApiUsersReadAce $clients[0] $LiteralPath -Inheritable
     }
     Assert-ServiceDirectoryAces @($explicit | Where-Object { (Get-RuleSid $_) -eq $MsiServiceSid }) $LiteralPath
     $adminSids = @($explicit | Where-Object { (Get-RuleSid $_) -notin @($MsiServiceSid, $clientsSid) } |
@@ -397,43 +397,43 @@ function Assert-ServiceDirectoryAces {
 
 # Read without write, delete, or permission changes. Directory ACEs must also
 # propagate to children; file ACEs carry no inheritance flags.
-function Assert-ClientsReadAce {
+function Assert-ApiUsersReadAce {
     param(
         [Parameter(Mandatory = $true)]$Rule,
         [Parameter(Mandatory = $true)][string]$Label,
         [switch]$Inheritable
     )
-    Assert-Equal "Allow" $Rule.AccessControlType.ToString() "$Label $MsiClientsGroup ACE type"
-    Assert-Equal $MsiClientsRights ([int]$Rule.FileSystemRights) "$Label $MsiClientsGroup ACE grants read only"
+    Assert-Equal "Allow" $Rule.AccessControlType.ToString() "$Label $MsiApiUsersGroup ACE type"
+    Assert-Equal $MsiApiUsersRights ([int]$Rule.FileSystemRights) "$Label $MsiApiUsersGroup ACE grants read only"
     if ($Inheritable) {
         $inherit = [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [Security.AccessControl.InheritanceFlags]::ObjectInherit
-        Assert-Equal ([int]$inherit) ([int]$Rule.InheritanceFlags) "$Label $MsiClientsGroup ACE inherits to containers and files"
-        Assert-Equal ([int][Security.AccessControl.PropagationFlags]::None) ([int]$Rule.PropagationFlags) "$Label $MsiClientsGroup ACE has no propagation restriction"
+        Assert-Equal ([int]$inherit) ([int]$Rule.InheritanceFlags) "$Label $MsiApiUsersGroup ACE inherits to containers and files"
+        Assert-Equal ([int][Security.AccessControl.PropagationFlags]::None) ([int]$Rule.PropagationFlags) "$Label $MsiApiUsersGroup ACE has no propagation restriction"
     }
 }
 
-function Get-ClientsGroupSid {
-    $group = Get-LocalGroup -Name $MsiClientsGroup -ErrorAction SilentlyContinue
-    Assert-True ($null -ne $group) "local group $MsiClientsGroup exists"
+function Get-ApiUsersGroupSid {
+    $group = Get-LocalGroup -Name $MsiApiUsersGroup -ErrorAction SilentlyContinue
+    Assert-True ($null -ne $group) "local group $MsiApiUsersGroup exists"
     return $group.SID.Value
 }
 
 # The administrator adds members; the installer never changes them.
-function Add-ClientsMember {
-    Add-LocalGroupMember -Group $MsiClientsGroup -Member $memberUser
+function Add-ApiUsersMember {
+    Add-LocalGroupMember -Group $MsiApiUsersGroup -Member $memberUser
     $script:memberAdded = $true
 }
 
 # Every stage, including uninstall, keeps the group and its members.
-function Assert-ClientsGroup {
+function Assert-ApiUsersGroup {
     param([Parameter(Mandatory = $true)][string]$Stage)
-    Get-ClientsGroupSid | Out-Null
-    $members = @(Get-LocalGroupMember -Group $MsiClientsGroup | ForEach-Object { $_.SID.Value })
+    Get-ApiUsersGroupSid | Out-Null
+    $members = @(Get-LocalGroupMember -Group $MsiApiUsersGroup | ForEach-Object { $_.SID.Value })
     if ($memberAdded) {
-        Assert-Equal $memberUserSid ($members -join ",") "$Stage $MsiClientsGroup keeps its member"
+        Assert-Equal $memberUserSid ($members -join ",") "$Stage $MsiApiUsersGroup keeps its member"
     }
     else {
-        Assert-Equal 0 $members.Count "$Stage $MsiClientsGroup starts empty"
+        Assert-Equal 0 $members.Count "$Stage $MsiApiUsersGroup starts empty"
     }
 }
 
@@ -450,7 +450,7 @@ function Assert-TrustedIdentities {
     Assert-Equal (($MsiTrustedSids | Sort-Object) -join ",") (($Sids | Sort-Object) -join ",") "$Label ACE identities"
 }
 
-# Probes as a non-member and as a Miru Clients member. Only the member may
+# Probes as a non-member and as a Miru Device API Users member. Only the member may
 # read, and only the file in device-api.
 function Invoke-NonAdminProbe {
     param([Parameter(Mandatory = $true)][string]$Stage)
@@ -486,12 +486,12 @@ function New-RepresentativeFile {
         Path = Join-Path $Parent ("representative-$Stage-" + [Guid]::NewGuid().ToString("N") + ".txt")
         Contents = "representative-$Stage-" + [Guid]::NewGuid().ToString("N")
         CreatePath = Join-Path $Parent ("non-admin-" + [Guid]::NewGuid().ToString("N") + ".txt")
-        ClientsCanRead = ($Parent -eq $deviceApiRoot)
+        ApiUsersCanRead = ($Parent -eq $deviceApiRoot)
     }
     [IO.File]::WriteAllText($file.Path, $file.Contents)
     Assert-True (Test-Path -LiteralPath $file.Path -PathType Leaf) "representative read target exists"
     Assert-True (-not (Test-Path -LiteralPath $file.CreatePath)) "representative create target is absent"
-    Assert-InheritedProtection $file.Path -ClientsCanRead:$file.ClientsCanRead
+    Assert-InheritedProtection $file.Path -ApiUsersCanRead:$file.ApiUsersCanRead
     [void]$representativeFiles.Add($file)
     return $file
 }
@@ -499,18 +499,18 @@ function New-RepresentativeFile {
 function Assert-InheritedProtection {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
-        [switch]$ClientsCanRead
+        [switch]$ApiUsersCanRead
     )
     $acl = Get-Acl -LiteralPath $Path
     Assert-True (-not $acl.AreAccessRulesProtected) "$Path inherits its DACL"
     $rules = @($acl.Access)
     foreach ($rule in $rules) { Assert-True $rule.IsInherited "$Path ACE is inherited" }
     $clientsSid = $null
-    if ($ClientsCanRead) {
-        $clientsSid = Get-ClientsGroupSid
+    if ($ApiUsersCanRead) {
+        $clientsSid = Get-ApiUsersGroupSid
         $clients = @($rules | Where-Object { (Get-RuleSid $_) -eq $clientsSid })
-        Assert-Equal 1 $clients.Count "$Path has one inherited $MsiClientsGroup ACE"
-        Assert-ClientsReadAce $clients[0] $Path
+        Assert-Equal 1 $clients.Count "$Path has one inherited $MsiApiUsersGroup ACE"
+        Assert-ApiUsersReadAce $clients[0] $Path
     }
     $trusted = @($rules | Where-Object { (Get-RuleSid $_) -ne $clientsSid })
     Assert-Equal $MsiTrustedSids.Count $trusted.Count "$Path has only trusted inherited ACEs"
@@ -576,7 +576,7 @@ function Assert-ProbeResults {
     foreach ($file in $Files) {
         $entry = @($Result.Results | Where-Object { $_.Path -eq $file.Path })
         Assert-Equal 1 $entry.Count "one result for $($file.Path)"
-        $read = if ($Member -and $file.ClientsCanRead) { "Allowed" } else { "AccessDenied" }
+        $read = if ($Member -and $file.ApiUsersCanRead) { "Allowed" } else { "AccessDenied" }
         Assert-Equal $read $entry[0].Read "$Label Read for $($file.Parent)"
         foreach ($operation in @("Create", "Regrant")) {
             Assert-Equal "AccessDenied" $entry[0].$operation "$Label $operation denied for $($file.Parent)"
@@ -867,7 +867,7 @@ function Invoke-UninstallStage {
     Assert-True (Test-Path -LiteralPath $programDataRoot -PathType Container) "ProgramData retained"
     Assert-ProtectedState "uninstall"
     Assert-ServiceAbsent
-    Write-Host "PASS failed uninstall restores the full service config; uninstall removes package state, service, and retains protected customer state and $MsiClientsGroup with its members"
+    Write-Host "PASS failed uninstall restores the full service config; uninstall removes package state, service, and retains protected customer state and $MsiApiUsersGroup with its members"
 }
 
 function Write-FailureEvidence {
@@ -922,14 +922,14 @@ function Remove-TemporaryUser {
 }
 
 # The MSI keeps the group on uninstall; remove the one this run's install created.
-function Remove-ClientsGroup {
-    if (-not $ownsClientsGroup) { return }
+function Remove-ApiUsersGroup {
+    if (-not $ownsApiUsersGroup) { return }
     try {
-        if ($null -ne (Get-LocalGroup -Name $MsiClientsGroup -ErrorAction SilentlyContinue)) {
-            Remove-LocalGroup -Name $MsiClientsGroup -ErrorAction Stop
+        if ($null -ne (Get-LocalGroup -Name $MsiApiUsersGroup -ErrorAction SilentlyContinue)) {
+            Remove-LocalGroup -Name $MsiApiUsersGroup -ErrorAction Stop
         }
     }
-    catch { Add-CleanupFailure "local group $MsiClientsGroup deletion failed: $($_.Exception.Message)" }
+    catch { Add-CleanupFailure "local group $MsiApiUsersGroup deletion failed: $($_.Exception.Message)" }
 }
 
 function Remove-TestFiles {
