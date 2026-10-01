@@ -19,7 +19,7 @@ The roadmap lists an open risk: on Windows, another local process might bind the
 - [x] (2026-10-01) M0 Activate plan (move to `plans/active/`; commit) — `29bf3e50`
 - [x] (2026-10-01) M1 Roadmap: replace the hijacking risk, add the 2026-10-01 decision log entry (commit) — `4f5f18a6`, `5a71b5e7`
 - [x] (2026-10-01) M2 Windows-only `windows_bind` tests and `tcp::bind` doc comment; fmt, Linux tests, lint (commit) — `2b13d728`, `36158195`
-- [ ] M3 Preflight CLEAN (CI green on the pushed head incl. `windows-check`, new tests `ok` in its log); PR ready; plan moved to `plans/completed/` with Outcomes filled
+- [x] M3 Preflight CLEAN (CI green on `d35486f7` in one round; `windows_bind::rejects_second_bind_to_same_address` and `windows_bind::wildcard_bind_does_not_take_loopback_connections` `ok` in the `windows-check` log; PR #277 marked ready); plan moved to `plans/completed/` with Outcomes filled
 
 ## Surprises & Discoveries
 
@@ -31,7 +31,7 @@ The roadmap lists an open risk: on Windows, another local process might bind the
 
 ## Outcomes & Retrospective
 
-(Fill in at completion.)
+Delivered in PR #277 with no production behavior change. The roadmap's Windows port-hijacking risk is resolved: the agent binds `127.0.0.1:<port>` with no socket options, Windows refuses a second bind to that address with or without `SO_REUSEADDR`, and a wildcard bind on the same port does not take loopback connections. Both properties are now locked in by Windows-only tests that ran and passed in CI's `windows-check` on the first round. `SO_EXCLUSIVEADDRUSE` is not set, since it adds no protection for a specific-address listener and brings an unsafe `setsockopt` call plus a rebind delay after restarts. The port-squatting-after-a-crash risk is unchanged; no socket option addresses it.
 
 ## Context and Orientation
 
