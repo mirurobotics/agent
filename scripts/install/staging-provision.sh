@@ -3,7 +3,7 @@ set -e
 
 # Script: staging-provision.sh
 # Jinja Template: provision.j2
-# Build Timestamp: 2026-05-09T19:53:58.827613
+# Build Timestamp: 2026-10-01T11:23:52.649353
 # Description: Provision a device & install the Miru Agent in the staging environment
 
 # DISPLAY #
@@ -381,8 +381,9 @@ if [ -z "$MIRU_ACTIVATION_TOKEN" ]; then
     fatal "The MIRU_ACTIVATION_TOKEN environment variable is not set"
 fi
 
-# Reset the /srv/miru directory to be owned by the miru user and group
-sudo chown -R miru:miru /srv/miru
+# Reset /srv/miru ownership to the miru user. Groups are left alone so
+# /srv/miru/configs keeps the miru-users group set by the package.
+sudo chown -R miru /srv/miru
 
 # Execute the installer
 sudo -u miru -E env MIRU_ACTIVATION_TOKEN="$MIRU_ACTIVATION_TOKEN" /usr/sbin/miru-agent --install $args

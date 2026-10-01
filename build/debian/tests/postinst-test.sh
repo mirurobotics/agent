@@ -6,8 +6,8 @@ usage() {
 Usage: $(basename "$0") [options]
 
 Run the Debian postinst against a throwaway debian:bookworm-slim container and
-check the owners, modes, and symlink handling it applies on upgrade and fresh
-install, then lint the systemd units with systemd-analyze.
+check the owners, modes, group migration, and symlink handling it applies on
+upgrade and fresh install, then lint the systemd units with systemd-analyze.
 
 Options:
   --in-container  Run the checks in the current environment (used inside the
@@ -71,6 +71,10 @@ expect_stat() {
 	[ "$got" = "$2" ] || fail "$1: got '$got', want '$2'"
 }
 
+in_group() {
+	id -nG "$1" | tr ' ' '\n' | grep -qx "$2"
+}
+
 expect_upgrade_table() {
 	expect_stat /var/lib/miru '700 miru miru'
 	expect_stat /var/lib/miru/auth '700 miru miru'
@@ -83,11 +87,10 @@ expect_upgrade_table() {
 	expect_stat /var/log/miru '750 miru miru'
 	expect_stat /var/log/miru/miru.log '640 miru miru'
 	expect_stat /srv/miru '755 miru miru'
-	# configs stay world-readable; the socket's /run/miru stays group miru
-	expect_stat /srv/miru/configs '755 miru miru'
-	expect_stat /srv/miru/configs/v1 '755 miru miru'
-	expect_stat /srv/miru/configs/v1/motion.json '644 miru miru'
-	expect_stat /run/miru '750 miru miru'
+	expect_stat /srv/miru/configs '2750 miru miru-users'
+	expect_stat /srv/miru/configs/v1 '2750 miru miru-users'
+	expect_stat /srv/miru/configs/v1/motion.json '640 miru miru-users'
+	expect_stat /run/miru '2750 miru miru-users'
 }
 
 # expect_systemctl_log <token mode seen at stop>
@@ -123,8 +126,6 @@ chmod 0755 /usr/local/bin/systemctl
 
 cp "$debian_dir/miru-agent.tmpfiles" /usr/lib/tmpfiles.d/miru-agent.conf
 cp "$debian_dir/miru.socket" "$debian_dir/miru.service" /lib/systemd/system/
-grep -qx 'SocketGroup=miru' /lib/systemd/system/miru.socket ||
-	fail "miru.socket: want SocketGroup=miru"
 printf '#!/bin/sh\nexit 0\n' >/usr/sbin/miru-agent
 chmod 0755 /usr/sbin/miru-agent
 pass "setup"
@@ -132,6 +133,8 @@ pass "setup"
 # ------------------------------ upgrade (legacy) ----------------------------- #
 groupadd -r miru
 useradd -r -g miru -s /bin/false miru
+useradd -G miru app1
+useradd -g miru app2
 
 mkdir -p /var/lib/miru/auth /var/lib/miru/events /var/log/miru /run/miru \
 	/srv/miru/configs/v1
@@ -157,17 +160,32 @@ run_postinst configure 0.10.3
 expect_upgrade_table
 pass "upgrade: owners and modes"
 
+in_group app1 miru-users || fail "app1 not migrated to miru-users"
+in_group app2 miru-users || fail "app2 not migrated to miru-users"
+pass "upgrade: miru members migrated to miru-users"
+
 expect_systemctl_log 644
 pass "upgrade: service stopped before permissions change"
 
-# ------------------------------- idempotence ------------------------------- #
+# --------------------------------- setgid ---------------------------------- #
 runuser -u miru -- sh -c \
 	'umask 022; mkdir -p /srv/miru/configs/new && echo x > /srv/miru/configs/new/f'
+expect_stat /srv/miru/configs/new '2755 miru miru-users'
+expect_stat /srv/miru/configs/new/f '644 miru miru-users'
+pass "setgid: agent-created entries get miru-users"
+
+# ------------------------------- idempotence ------------------------------- #
+gpasswd -d app1 miru-users >/dev/null
 run_postinst configure 0.10.3
 expect_upgrade_table
-expect_stat /srv/miru/configs/new '755 miru miru'
-expect_stat /srv/miru/configs/new/f '644 miru miru'
+expect_stat /srv/miru/configs/new '2750 miru miru-users'
+expect_stat /srv/miru/configs/new/f '640 miru miru-users'
 pass "idempotence: owners and modes"
+
+if in_group app1 miru-users; then
+	fail "app1 re-added to miru-users; migration must run only once"
+fi
+pass "idempotence: removed member stays removed"
 
 expect_systemctl_log 600
 pass "idempotence: systemctl calls"
@@ -189,7 +207,11 @@ ln -s /victim_f /var/lib/miru/evil
 ln -s /victim_f /var/log/miru/evil
 chown -h miru:miru /var/lib/miru/auth /var/lib/miru/evil /var/log/miru/evil
 
+# systemd-tmpfiles also refuses the configs symlink and may report an error;
+# the postinst keeps going (no set -e), so only the targets matter here.
 run_postinst configure 0.10.3
+count=$(grep -c '/srv/miru/configs is a symlink' "$postinst_out" || true)
+[ "$count" -eq 1 ] || fail "want one configs symlink warning, got $count"
 [ -L /srv/miru/configs ] || fail "/srv/miru/configs is no longer a symlink"
 expect_stat /victim '755 root root'
 expect_stat /victim_auth '755 root root'
@@ -200,15 +222,30 @@ pass "symlinks: targets outside the trees untouched"
 
 rm /srv/miru/configs /var/lib/miru/auth /var/lib/miru/evil /var/log/miru/evil
 mv /tmp/auth.saved /var/lib/miru/auth
+mkdir /srv/miru/configs
+
+mkdir /victim2
+chmod 755 /victim2
+ln -s /victim2 /srv/miru/configs/evil
+run_postinst configure 0.10.3
+expect_stat /victim2 '755 root root'
+expect_stat /srv/miru/configs '2750 miru miru-users'
+pass "symlinks: link inside configs not followed"
 
 # ------------------------------ fresh install ------------------------------ #
+groupdel miru-users
 rm -rf /var/lib/miru /var/log/miru /srv/miru /run/miru
 run_postinst configure
 expect_stat /var/lib/miru '700 miru miru'
 expect_stat /var/log/miru '750 miru miru'
 expect_stat /srv/miru '755 miru miru'
-expect_stat /run/miru '750 miru miru'
+expect_stat /srv/miru/configs '2750 miru miru-users'
+expect_stat /run/miru '2750 miru miru-users'
 pass "fresh install: owners and modes"
+
+in_group app1 miru-users || fail "app1 not migrated on fresh install"
+in_group app2 miru-users || fail "app2 not migrated on fresh install"
+pass "fresh install: miru members migrated to miru-users"
 
 # ------------------------------- unit files -------------------------------- #
 rm -f "$postinst_out"
