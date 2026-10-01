@@ -71,6 +71,13 @@ fn deserialize_settings() {
 }
 
 #[test]
+fn deserialize_ignores_legacy_is_persistent() {
+    // settings files from before the removal of non-persistent mode still load
+    let deserialized = serde_json::from_value::<Settings>(json!({"is_persistent": false})).unwrap();
+    assert_eq!(deserialized, Settings::default());
+}
+
+#[test]
 fn tcp_server_enabled_by_default_only_on_windows() {
     let settings = Settings::default();
     assert_eq!(settings.enable_tcp_server, cfg!(windows));

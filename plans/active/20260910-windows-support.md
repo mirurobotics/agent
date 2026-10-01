@@ -321,7 +321,8 @@ the workbench plan.
   idle activity tracker is gone. Rationale: no customer used it, and idle
   exit stopped MQTT, polling, token refresh and upload workers, so cloud
   deployments and uploads stalled until a local client woke the agent. A
-  settings file with `is_persistent: false` loads with a startup warning.
+  settings file that still contains `is_persistent` loads; the key is
+  ignored.
 
 ## Risks
 

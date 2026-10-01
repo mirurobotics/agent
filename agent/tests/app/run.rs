@@ -109,6 +109,7 @@ impl RunningAgent {
     /// run() polls the signal only after init() finishes and the oneshot
     /// buffers it, so Ok means startup completed.
     async fn stop(self) -> Result<(), ServerErr> {
+        // the send fails only when run already returned an init error
         let _ = self.shutdown.send(());
         tokio::time::timeout(HANG_GUARD, self.handle)
             .await

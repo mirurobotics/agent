@@ -98,7 +98,7 @@ All workers receive a broadcast shutdown signal and clean up gracefully.
 - **Generated code is never hand-edited.** `libs/backend-api` and `libs/device-api` are overwritten on regeneration.
 - **Tests exercise ordinary production behavior.** `cargo test` needs no custom feature or logging environment; production algorithms and client construction are identical in normal and test builds, and tests control dependencies and time. Test layout conventions live in `AGENTS.md` § Testing.
 - **The agent has no direct database.** All persistence is file-based via `disk::Layout`. The backend owns the database.
-- **The agent always runs persistently.** It exits only on a shutdown signal or a fatal startup error. A `settings.json` with `is_persistent: false` loads and logs a startup warning.
+- **The agent always runs persistently.** It exits only on a shutdown signal or a fatal startup error. A `settings.json` that still contains `is_persistent` loads normally; the key is ignored.
 - **Windows has no Unix socket.** On Windows the local device API is the TCP listener, which is on by default (`enable_tcp_server`). Startup warns and nothing listens when that flag is turned off.
 
 ## Cross-Cutting Concerns

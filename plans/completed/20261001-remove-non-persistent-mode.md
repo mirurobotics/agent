@@ -21,7 +21,7 @@ Observable result: an existing `settings.json` containing `"is_persistent": fals
 - [x] M0 Activate plan (move to `plans/active/`; `docs(plans):` commit)
 - [x] M1 Remove idle-exit runtime (options, `run.rs`, `platform::supports_idle_exit`, `main.rs`) and its tests
 - [x] M2 Remove the `activity` module, the request-touch middleware, and the `activity_tracker` fields
-- [x] M3 Drop `Settings.is_persistent`; add the startup warning and its tests
+- [x] M3 Drop `Settings.is_persistent`; the startup warning and its tests were later removed (see Decision Log)
 - [x] M4 Docs: `ARCHITECTURE.md`, `plans/active/20260910-windows-support.md`
 - [x] M5 Preflight CLEAN (CI green on `8570a2a2` in one round: `lint`, `test`, `tools`, `windows-check`, `windows-package-scope`; PR #280); then plan moved to `plans/completed/` with Outcomes filled, and CI re-confirmed green on that commit
 
@@ -38,10 +38,11 @@ Observable result: an existing `settings.json` containing `"is_persistent": fals
 - 2026-10-01: The startup warning is a separate `disk::warn_if_persistence_disabled` that reads the raw JSON, called once in `main.rs::run_agent` after `await_activation` and before `reconcile_agent_version`. Rationale: settings are deserialized two or three times per start, and upgrade reconcile drops the key before `read_settings` runs.
 - 2026-10-01: `warn_if_persistence_disabled` checks `value.get("is_persistent") != Some(&Value::Bool(false))` instead of `.and_then(Value::as_bool) == Some(false)`. Rationale: same semantics; `cargo fmt` split the chained form over five lines.
 - 2026-10-01: Source and test work run as separate steps. The source step (M1-M4) made only the test edits the removed APIs force: in `agent/tests/app/run.rs` the three `exits_after_max_runtime` tests had no self-exit left, so they were converted to `spawn_run` + `stop()` as planned, along with the other planned `run.rs` edits; the new `shutdown_signal_received` `is_finished` assert and the M3 `persistence_warning` tests are left to the test step.
+- 2026-10-01, after implementation: the `is_persistent: false` startup warning (`disk::warn_if_persistence_disabled`, its `run_agent` call and its tests) was removed. Rationale: the setting was never used, so a warning protects no one; a leftover key is ignored like any unknown key. `deserialize_ignores_legacy_is_persistent` in `agent/tests/disk/settings.rs` keeps the guarantee that old settings files load. Plan sections above that describe the warning record the original implementation.
 
 ## Outcomes & Retrospective
 
-Delivered in PR #280. The agent always runs until it receives a shutdown signal: `LifecycleOptions` keeps only `max_shutdown_delay`, and the idle and max-runtime timers, the Windows persistence override, the TCP idle warning, and the `activity` tracker with its request middleware are gone. `Settings` no longer has `is_persistent`; old `settings.json` files still load, and a file with `is_persistent: false` logs one warning per start through `disk::warn_if_persistence_disabled`. Systemd socket activation and the shutdown watchdog are unchanged. The app run tests stop the agent with the shutdown signal instead of `max_runtime`, and coverage gates passed without lowering any threshold. Preflight was CLEAN on the first CI round.
+Delivered in PR #280. The agent always runs until it receives a shutdown signal: `LifecycleOptions` keeps only `max_shutdown_delay`, and the idle and max-runtime timers, the Windows persistence override, the TCP idle warning, and the `activity` tracker with its request middleware are gone. `Settings` no longer has `is_persistent`; old `settings.json` files that still contain it load, and the key is ignored. Systemd socket activation and the shutdown watchdog are unchanged. The app run tests stop the agent with the shutdown signal instead of `max_runtime`, and coverage gates passed without lowering any threshold. Preflight was CLEAN on the first CI round.
 
 ## Context and Orientation
 
