@@ -338,8 +338,8 @@ the workbench plan.
   older than the agent's start, or the file carries a second secret the server
   proves it knows.
 - **Linux configs are world-readable** (partly addressed by
-  `plans/completed/20261001-linux-permission-hardening.md`): agent-private
-  state under `/var/lib/miru` is now owner-only, but `postinst` still makes
+  `plans/completed/20261001-linux-permission-hardening.md`): the data root
+  `/var/lib/miru` is now owner-only, but `postinst` still makes
   `/srv/miru` mode 0755, so any local account can read deployed configs,
   unlike Windows (PR 14). Restricting configs, and moving socket access off the
   agent's own `miru` group to a dedicated client group, breaks applications

@@ -7,16 +7,15 @@ package runs `/usr/sbin/miru-agent` as the system user `miru` (primary group
 
 ## Paths, owners, and modes
 
-`postinst` applies these on every install and upgrade; systemd
-(`StateDirectoryMode`, `LogsDirectoryMode`, tmpfiles.d) keeps the folder modes
-at boot and service start.
+`postinst` applies the folder modes on every install and upgrade; systemd
+(`StateDirectoryMode`, `LogsDirectoryMode`, tmpfiles.d) keeps them at boot and
+service start. Each folder is the access boundary for its contents, as the
+installer's folder ACLs are on Windows, so the agent and `postinst` leave the
+modes of files inside alone (the private key is still written `0600`).
 
 | Path | Mode | Owner | Group |
 | --- | --- | --- | --- |
 | `/var/lib/miru` (data root) | `0700` | `miru` | `miru` |
-| `/var/lib/miru/auth` | `0700` | `miru` | `miru` |
-| Files under `/var/lib/miru` (state, token, private key) | `0600` | `miru` | `miru` |
-| `/var/lib/miru/auth/public_key.pem` | `0640` | `miru` | `miru` |
 | `/var/log/miru` | `0750` | `miru` | `miru` |
 | `/srv/miru` | `0755` | `miru` | `miru` |
 | Configs deployed under `/srv/miru` and their folders | umask (normally `0644` / `0755`) | `miru` | `miru` |
@@ -50,9 +49,9 @@ other accounts can read neither. The same logs are in `journalctl -u miru`.
 ## Upgrading
 
 Upgrades apply the table above. Compared with earlier releases, the data root
-(including `auth/token.json`), `auth/`, and the agent's files become owner-only,
-and `/var/log/miru` and its log files lose access by others. The socket, the
-discovery file, and configs in `/srv/miru` are unchanged.
+(and so `auth/token.json`) becomes owner-only, and `/var/log/miru` loses access
+by others. The socket, the discovery file, and configs in `/srv/miru` are
+unchanged.
 
 ## Uninstall
 

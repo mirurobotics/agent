@@ -19,29 +19,14 @@ create_miru_user() {
   fi
 }
 
-# Runs as root on every configure, after post_install stops the service. miru
-# owns /var/lib/miru and /var/log/miru and could swap an entry for a symlink,
-# which chmod follows, so each tree's top folder is taken from miru before any
-# chmod and handed back last. That only blocks new path lookups; the stop also
-# ends any miru process holding a folder open inside. chown -R never follows
-# symlinks. Only /srv/miru itself is set; deployed configs keep their modes.
+# Runs on every configure. Each top folder is the access boundary for its
+# contents, so nothing inside is touched. Their parents are root-owned, so miru
+# cannot swap these paths for symlinks.
 apply_permissions() {
   mkdir -p /var/lib/miru /var/log/miru /srv/miru
-  chown root:root /var/lib/miru /var/log/miru
-  chmod 0700 /var/lib/miru /var/log/miru
-
-  chmod -R u=rwX,go= /var/lib/miru
-  pub=/var/lib/miru/auth/public_key.pem
-  if [ ! -L /var/lib/miru/auth ] && [ -f "$pub" ] && [ ! -L "$pub" ]; then
-    chmod 0640 "$pub"
-  fi
-  chown -R miru:miru /var/lib/miru
-
-  chmod -R o-rwx /var/log/miru
+  chown miru:miru /var/lib/miru /var/log/miru /srv/miru
+  chmod 0700 /var/lib/miru
   chmod 0750 /var/log/miru
-  chown -R miru:miru /var/log/miru
-
-  chown miru:miru /srv/miru
   chmod 0755 /srv/miru
 }
 
@@ -52,10 +37,6 @@ post_install() {
     # create the miru user and group, then apply ownership and modes
     create_miru_group
     create_miru_user
-
-    # apply_permissions needs no miru process running; both restart below
-    printf "\033[32m Stop the socket and service\033[0m\n"
-    systemctl stop "${socket_name}" "${service_name}" 2>/dev/null || true
     apply_permissions
 
     # create /run/miru now; tmpfiles.d recreates it at every boot
