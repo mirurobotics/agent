@@ -102,9 +102,9 @@
          logs, auth, tmp, and device-api non-empty so that none can become a
          mount point that a repair or upgrade follows; they are permanent. -->
     <!-- device-api holds the local device API discovery file (port and bearer
-         token). The Miru Device API Users local group gets inheritable read
-         on it, and nothing on ProgramData\Miru itself: bypass traverse
-         checking lets members open the file by full path. The group's SID is machine-specific,
+         token). The Miru Agent Users local group gets inheritable read on
+         it, and nothing on ProgramData\Miru itself: bypass traverse checking
+         lets members open the file by full path. The group's SID is machine-specific,
          so util:PermissionEx adds its ACE by name after CreateFolders applies
          the protected descriptor; the ACE is reapplied on repair and upgrade and
          restored by WiX's rollback of that action. The group is created if
@@ -135,15 +135,15 @@
       <Component Id="MiruDeviceApiDir" Directory="MIRUDEVICEAPI" Guid="3CA14BB2-FB56-4907-93EF-45ED80886D9E" Bitness="always64" KeyPath="yes">
         <CreateFolder>
           <PermissionEx Sddl="O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;;FRFWFX;;;S-1-5-80-1251439239-454917380-1008020685-2030257057-91624695)(A;OICIIO;FA;;;S-1-5-80-1251439239-454917380-1008020685-2030257057-91624695)" />
-          <util:PermissionEx User="Miru Device API Users"
+          <util:PermissionEx User="Miru Agent Users"
                              Read="yes" ReadAttributes="yes" ReadExtendedAttributes="yes"
                              ReadPermission="yes" Synchronize="yes" />
         </CreateFolder>
         <!-- UpdateIfExists: without it, WiX 7's CreateGroup fails (1603) when
              the group already exists, as on every major upgrade. -->
-        <util:Group Id="MiruDeviceApiUsersGroup"
-                    Name="Miru Device API Users"
-                    Comment="Accounts that can read the Miru Agent local device API token"
+        <util:Group Id="MiruAgentUsersGroup"
+                    Name="Miru Agent Users"
+                    Comment="Local accounts whose applications use the Miru Agent"
                     UpdateIfExists="yes"
                     RemoveOnUninstall="no" />
       </Component>

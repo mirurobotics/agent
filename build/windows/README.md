@@ -34,9 +34,9 @@ The MSI:
   control, and gives the `miru-agent` service SID read, write, and traverse
   access to each directory (but not delete or permission changes) plus full
   control of the files and folders created inside it;
-- creates the local group `Miru Device API Users` if it does not exist, and
+- creates the local group `Miru Agent Users` if it does not exist, and
   `%ProgramData%\Miru\device-api` with the same protected DACL as the other data
-  folders plus inheritable read access for `Miru Device API Users`, so the
+  folders plus inheritable read access for `Miru Agent Users`, so the
   group's members can read the local device API discovery file (see [Local
   device API access](#local-device-api-access));
 - creates an `installer-sentinel` folder in each of `logs`, `auth`, `tmp`, and
@@ -46,10 +46,10 @@ The MSI:
   them, even on uninstall; do not delete them while the agent is installed; and
 - leaves populated customer state under `%ProgramData%\Miru` in place during
   maintenance, upgrades, rollback, and ordinary uninstall, and keeps the
-  `Miru Device API Users` group and its members. Uninstall always leaves the
+  `Miru Agent Users` group and its members. Uninstall always leaves the
   `%ProgramData%\Miru` folder tree; after uninstalling, an administrator can
   delete `%ProgramData%\Miru` and run
-  `Remove-LocalGroup "Miru Device API Users"` to remove all remaining state.
+  `Remove-LocalGroup "Miru Agent Users"` to remove all remaining state.
 
 The UpgradeCode is part of the product's permanent identity and must never be
 changed after publication. Each package version receives a different ProductCode.
@@ -203,7 +203,7 @@ On Windows the agent serves the local device API on loopback TCP and requires a
 bearer token that changes at every start. It writes the port and token to
 `%ProgramData%\Miru\device-api\device-api.json` while the API is being served.
 Only Local System, Administrators, the service, and members of the local group
-`Miru Device API Users` can read that file, so membership is what grants access
+`Miru Agent Users` can read that file, so membership is what grants access
 to the API. Members get read access to `device-api` only, not to the rest of
 `%ProgramData%\Miru` (such as `settings.json` or `auth`); Windows lets them open
 the file by its full path without access to the parent folders.
@@ -212,17 +212,17 @@ The MSI creates the group empty. From an elevated PowerShell session, add each
 local user or service account whose applications call the API, for example:
 
 ```powershell
-Add-LocalGroupMember -Group "Miru Device API Users" -Member "robot-operator"
-Add-LocalGroupMember -Group "Miru Device API Users" -Member "NT SERVICE\RobotApp"
+Add-LocalGroupMember -Group "Miru Agent Users" -Member "robot-operator"
+Add-LocalGroupMember -Group "Miru Agent Users" -Member "NT SERVICE\RobotApp"
 ```
 
-`net localgroup "Miru Device API Users" <account> /add` works as well.
+`net localgroup "Miru Agent Users" <account> /add` works as well.
 Membership takes effect at the account's next sign-in, or when a service
 account's service next starts; restart the application's service (or sign out
 and back in) after adding it. Remove access with `Remove-LocalGroupMember`.
 
 Do not grant `Users`, `Authenticated Users`, or `Everyone` access to
-`device-api`, and do not add those groups to `Miru Device API Users`: any
+`device-api`, and do not add those groups to `Miru Agent Users`: any
 account that can read the discovery file can call every device API route. Repair
 and upgrade reapply the folder's permissions and keep the group's members.
 
@@ -242,7 +242,7 @@ pull-request CI runs are cancelled.
 From an elevated 64-bit Windows PowerShell 5.1 session, run the native package
 integration matrix only on a disposable test machine. Normal integration removes
 allowlisted fixture products, changes `%ProgramData%\Miru`, and creates and
-deletes two temporary local users and the `Miru Device API Users` group, so the
+deletes two temporary local users and the `Miru Agent Users` group, so the
 explicit confirmation is required (it refuses to start if that group already
 exists):
 
@@ -270,9 +270,9 @@ permissions before installation or maintenance.
 Non-administrators must not read sensitive files created in those directories
 after installation, create children, or change the directory permissions.
 `device-api` must have the same descriptor plus one inheritable read-only ACE
-for `Miru Device API Users`, including when it existed with hostile ownership
+for `Miru Agent Users`, including when it existed with hostile ownership
 and permissions before installation, maintenance, or upgrade. A
-non-administrator member of `Miru Device API Users` must be able to read a file
+non-administrator member of `Miru Agent Users` must be able to read a file
 created in `device-api` but not create children there or change its permissions,
 and must not read files in the root, `logs`, `auth`, or `tmp`; a non-member must
 not read any of them. The group must exist after install, keep its member

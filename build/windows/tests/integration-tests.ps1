@@ -74,12 +74,12 @@ function Initialize-IntegrationRuntime {
     $script:testUser = "MiruMsiTestUser"
     $script:testPassword = "M!ru-" + [Guid]::NewGuid().ToString("N") + "-9a"
     $script:createdUser = $false
-    # A second non-admin account, added to Miru Device API Users after install.
+    # A second non-admin account, added to Miru Agent Users after install.
     $script:memberUser = "MiruMsiTestMember"
     $script:memberPassword = "M!ru-" + [Guid]::NewGuid().ToString("N") + "-9b"
     $script:createdMember = $false
     $script:memberAdded = $false
-    $script:ownsApiUsersGroup = $false
+    $script:ownsAgentUsersGroup = $false
     $script:failureEvidence = New-Object System.Collections.ArrayList
     $script:cleanupFailures = New-Object System.Collections.ArrayList
     $script:integrationFailure = $null
@@ -95,12 +95,12 @@ function Assert-TestUserAbsent {
 
 # The MSI keeps the group on uninstall, so the run removes it during cleanup;
 # refuse to start when it would remove a group this run did not create.
-function Assert-ApiUsersGroupAbsent {
-    $existing = Get-LocalGroup -Name $MsiApiUsersGroup -ErrorAction SilentlyContinue
+function Assert-AgentUsersGroupAbsent {
+    $existing = Get-LocalGroup -Name $MsiAgentUsersGroup -ErrorAction SilentlyContinue
     if ($null -ne $existing) {
-        throw "Refusing mutation: the local group $MsiApiUsersGroup already exists."
+        throw "Refusing mutation: the local group $MsiAgentUsersGroup already exists."
     }
-    $script:ownsApiUsersGroup = $true
+    $script:ownsAgentUsersGroup = $true
 }
 
 function Assert-IntegrationPreconditions {
@@ -108,7 +108,7 @@ function Assert-IntegrationPreconditions {
     $script:initialRelated = @(Assert-InstalledAllowlistSafe)
     Assert-TestUserAbsent $script:testUser
     Assert-TestUserAbsent $script:memberUser
-    Assert-ApiUsersGroupAbsent
+    Assert-AgentUsersGroupAbsent
 }
 
 Assert-DisposableTestMachine ([bool]$ConfirmDisposableTestMachine)
