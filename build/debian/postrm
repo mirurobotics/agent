@@ -35,6 +35,9 @@ purge() {
     rm -rf /var/log/miru
     printf "\033[32m Removing /srv/miru \033[0m\n"
     rm -rf /srv/miru
+
+    # the miru-users group (like the miru user and group) is intentionally
+    # kept so memberships survive a reinstall; remove with: groupdel miru-users
 }
 
 echo "$@"

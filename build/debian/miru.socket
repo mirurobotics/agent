@@ -2,11 +2,11 @@
 Description=Miru Config Agent socket
 
 [Socket]
-# /run/miru comes from tmpfiles.d (miru:miru 0750), so it exists before the
-# socket binds and outlives socket and service restarts.
+# /run/miru comes from tmpfiles.d (miru:miru-users 2750), so it exists
+# before the socket binds and outlives socket and service restarts.
 ListenStream=/run/miru/miru.sock
 SocketMode=0660
-SocketGroup=miru
+SocketGroup=miru-users
 RemoveOnStop=yes
 
 [Install]
