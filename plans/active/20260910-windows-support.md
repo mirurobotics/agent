@@ -307,6 +307,14 @@ the workbench plan.
   party services). Applications that read configs usually also use the device
   API, so one group means one setup step. The folder gets an
   `installer-sentinel` because the service can write it and it can be empty.
+- 2026-10-01: The loopback TCP listener does not set `SO_EXCLUSIVEADDRUSE`
+  on Windows. Rationale: for a socket bound to a specific address, the
+  option changes no bind outcome (see the resolved "Windows port
+  hijacking" risk), and it would add an unsafe `windows-sys` `setsockopt`
+  call plus a restart caveat (an exclusive socket cannot rebind until
+  prior connections become inactive). The `windows_bind` tests in
+  `agent/tests/server/tcp.rs` check the behavior in the `windows-check`
+  CI job.
 
 ## Risks
 
@@ -334,10 +342,17 @@ the workbench plan.
   Tightening it to `0750 miru:miru` would match, but applications that read
   configs without being in the `miru` group would break, so it needs a
   migration note. Not yet scheduled.
-- **Windows port hijacking while the agent holds the port**: Windows blocks
-  cross-account `SO_REUSEADDR` binds by default, but the agent does not set
-  `SO_EXCLUSIVEADDRUSE`. Confirm the default protection (or set the option)
-  before the first Windows release.
+- **Windows port hijacking while the agent holds the port** (resolved
+  2026-10-01): tokio/mio set no socket options on Windows and the agent
+  binds the specific address `127.0.0.1:<port>`. Per Microsoft's
+  "Using SO_REUSEADDR and SO_EXCLUSIVEADDRUSE"
+  (https://learn.microsoft.com/en-us/windows/win32/winsock/using-so-reuseaddr-and-so-exclusiveaddruse),
+  on Windows 7+ the outcomes for such a socket are the same with or
+  without `SO_EXCLUSIVEADDRUSE`, for same- and different-account callers:
+  a second bind to `127.0.0.1:<port>` fails (`WSAEADDRINUSE`, or
+  `WSAEACCES` with `SO_REUSEADDR`), and a wildcard `0.0.0.0:<port>` bind
+  succeeds but loopback connections still reach the agent. The agent
+  therefore does not set the option; see the 2026-10-01 decision.
 
 ## Non-goals
 
