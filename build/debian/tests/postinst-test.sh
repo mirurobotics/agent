@@ -36,9 +36,11 @@ while [ $# -gt 0 ]; do
 done
 
 repo_root=$(cd "$(dirname "$0")/../../.." && pwd)
+# pinned by digest so upstream tag moves cannot change the test
+image=debian:bookworm-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251
 
 if [ "$in_container" -eq 0 ]; then
-	exec docker run --rm -v "$repo_root:/src:ro" debian:bookworm-slim \
+	exec docker run --rm -v "$repo_root:/src:ro" "$image" \
 		/src/build/debian/tests/postinst-test.sh --in-container
 fi
 
