@@ -23,7 +23,7 @@ Observable result: an existing `settings.json` containing `"is_persistent": fals
 - [x] M2 Remove the `activity` module, the request-touch middleware, and the `activity_tracker` fields
 - [x] M3 Drop `Settings.is_persistent`; add the startup warning and its tests
 - [x] M4 Docs: `ARCHITECTURE.md`, `plans/active/20260910-windows-support.md`
-- [ ] M5 Preflight CLEAN (draft PR open, CI green incl. `windows-check`, `lint`, `test`); then plan moved to `plans/completed/` with Outcomes filled, and CI re-confirmed green on that commit
+- [x] M5 Preflight CLEAN (CI green on `8570a2a2` in one round: `lint`, `test`, `tools`, `windows-check`, `windows-package-scope`; PR #280); then plan moved to `plans/completed/` with Outcomes filled, and CI re-confirmed green on that commit
 
 ## Surprises & Discoveries
 
@@ -41,7 +41,7 @@ Observable result: an existing `settings.json` containing `"is_persistent": fals
 
 ## Outcomes & Retrospective
 
-(Fill in at completion.)
+Delivered in PR #280. The agent always runs until it receives a shutdown signal: `LifecycleOptions` keeps only `max_shutdown_delay`, and the idle and max-runtime timers, the Windows persistence override, the TCP idle warning, and the `activity` tracker with its request middleware are gone. `Settings` no longer has `is_persistent`; old `settings.json` files still load, and a file with `is_persistent: false` logs one warning per start through `disk::warn_if_persistence_disabled`. Systemd socket activation and the shutdown watchdog are unchanged. The app run tests stop the agent with the shutdown signal instead of `max_runtime`, and coverage gates passed without lowering any threshold. Preflight was CLEAN on the first CI round.
 
 ## Context and Orientation
 
