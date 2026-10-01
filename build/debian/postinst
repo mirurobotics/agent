@@ -19,36 +19,16 @@ create_miru_user() {
   fi
 }
 
-create_miru_users_group() {
-  if getent group miru-users > /dev/null 2>&1; then return 0; fi
-  printf "\033[32m Creating the 'miru-users' group\033[0m\n"
-  groupadd -r miru-users
-  migrate_miru_members
-}
-
-# One-time copy of accounts that used the miru group for socket access:
-# supplementary members plus accounts whose primary group is miru.
-migrate_miru_members() {
-  miru_gid=$(getent group miru | cut -d: -f3)
-  members=$(getent group miru | cut -d: -f4 | tr ',' ' ')
-  primaries=$(getent passwd | awk -F: -v gid="$miru_gid" '$4 == gid { print $1 }')
-  for member in $members $primaries; do
-    [ "$member" = "miru" ] && continue
-    printf "\033[32m Adding '%s' to 'miru-users' (re-login or restart its services to apply)\033[0m\n" "$member"
-    usermod -a -G miru-users "$member"
-  done
-}
-
 # Runs as root on every configure, after post_install stops the service. miru
-# owns these trees and could swap an entry for a symlink, which chmod follows,
-# so each tree's top folder is taken from miru before any chmod and handed
-# back last. That only blocks new path lookups; the stop also ends any miru
-# process holding a folder open inside. chown -R never follows symlinks.
+# owns /var/lib/miru and /var/log/miru and could swap an entry for a symlink,
+# which chmod follows, so each tree's top folder is taken from miru before any
+# chmod and handed back last. That only blocks new path lookups; the stop also
+# ends any miru process holding a folder open inside. chown -R never follows
+# symlinks. Only /srv/miru itself is set; deployed configs keep their modes.
 apply_permissions() {
   mkdir -p /var/lib/miru /var/log/miru /srv/miru
-  chown root:root /var/lib/miru /var/log/miru /srv/miru
+  chown root:root /var/lib/miru /var/log/miru
   chmod 0700 /var/lib/miru /var/log/miru
-  chmod 0755 /srv/miru
 
   chmod -R u=rwX,go= /var/lib/miru
   pub=/var/lib/miru/auth/public_key.pem
@@ -61,27 +41,17 @@ apply_permissions() {
   chmod 0750 /var/log/miru
   chown -R miru:miru /var/log/miru
 
-  if [ -L /srv/miru/configs ]; then
-    printf "\033[33m /srv/miru/configs is a symlink; leaving its permissions unchanged\033[0m\n"
-  else
-    mkdir -p /srv/miru/configs
-    chown root:root /srv/miru/configs
-    chmod 0700 /srv/miru/configs
-    chmod -R g+rX,g-w,o-rwx /srv/miru/configs
-    find /srv/miru/configs -type d -exec chmod g+s {} +
-    chown -R miru:miru-users /srv/miru/configs
-  fi
   chown miru:miru /srv/miru
+  chmod 0755 /srv/miru
 }
 
 post_install() {
     socket_name="$1"
     printf "\033[32m Post Install of an upgrade\033[0m\n"
 
-    # create the miru user and groups, then apply ownership and modes
+    # create the miru user and group, then apply ownership and modes
     create_miru_group
     create_miru_user
-    create_miru_users_group
 
     # apply_permissions needs no miru process running; both restart below
     printf "\033[32m Stop the socket and service\033[0m\n"
