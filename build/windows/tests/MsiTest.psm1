@@ -24,15 +24,20 @@ $MsiExpectedDirectories = @(
     @("MiruLogsDir", "{C3AF8332-28E8-4707-8430-780C553D86EC}", "MIRULOGS", "MIRUDATA", "logs"),
     @("MiruAuthDir", "{A2AE361A-41E6-427A-AF4C-ACCEE7F451F9}", "MIRUAUTH", "MIRUDATA", "auth"),
     @("MiruTmpDir", "{D654A9BF-2860-44FA-8FFB-A8E36986197B}", "MIRUTMP", "MIRUDATA", "tmp"),
-    @("MiruDeviceApiDir", "{3CA14BB2-FB56-4907-93EF-45ED80886D9E}", "MIRUDEVICEAPI", "MIRUDATA", "device-api")
+    @("MiruDeviceApiDir", "{3CA14BB2-FB56-4907-93EF-45ED80886D9E}", "MIRUDEVICEAPI", "MIRUDATA", "device-api"),
+    @("MiruConfigsDir", "{8491B347-8F1B-45B1-9F15-B3EE02A99885}", "MIRUCONFIGS", "MIRUDATA", "configs")
 )
 $MsiSentinelName = "installer-sentinel"
 $MsiSentinelSddl = "O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)"
-$MsiSentinelDirectoryIds = @("MIRULOGSSENTINEL", "MIRUAUTHSENTINEL", "MIRUTMPSENTINEL", "MIRUDEVICEAPISENTINEL")
-# Local group whose members can read the device API discovery file in device-api.
+$MsiSentinelDirectoryIds = @("MIRULOGSSENTINEL", "MIRUAUTHSENTINEL", "MIRUTMPSENTINEL", "MIRUDEVICEAPISENTINEL", "MIRUCONFIGSSENTINEL")
+# Local group for applications that use the agent, and the folders (directory
+# Id, component) it can read: the device API discovery file and deployed configs.
 $MsiAgentUsersGroup = "Miru Agent Users"
-$MsiAgentUsersDirectoryId = "MIRUDEVICEAPI"
-$MsiAgentUsersComponent = "MiruDeviceApiDir"
+$MsiAgentUsersGroupComponent = "MiruDeviceApiDir"
+$MsiAgentUsersFolders = @(
+    @("MIRUDEVICEAPI", "MiruDeviceApiDir"),
+    @("MIRUCONFIGS", "MiruConfigsDir")
+)
 $MsiAgentUsersRights = 0x120089   # Read, ReadAttributes, ReadExtendedAttributes, ReadPermission, Synchronize: .NET reports Read
 $MsiFixtureProductCodes = @(
     "{B7AFDD4E-E6DB-4ED9-8C34-F318A04486B1}",
@@ -301,8 +306,8 @@ Export-ModuleMember -Function @(
     "MsiSentinelSddl",
     "MsiSentinelDirectoryIds",
     "MsiAgentUsersGroup",
-    "MsiAgentUsersDirectoryId",
-    "MsiAgentUsersComponent",
+    "MsiAgentUsersGroupComponent",
+    "MsiAgentUsersFolders",
     "MsiAgentUsersRights",
     "MsiFixtureProductCodes"
 )

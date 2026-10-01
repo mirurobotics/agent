@@ -35,15 +35,17 @@ The MSI:
   access to each directory (but not delete or permission changes) plus full
   control of the files and folders created inside it;
 - creates the local group `Miru Agent Users` if it does not exist, and
-  `%ProgramData%\Miru\device-api` with the same protected DACL as the other data
-  folders plus inheritable read access for `Miru Agent Users`, so the
-  group's members can read the local device API discovery file (see [Local
-  device API access](#local-device-api-access));
-- creates an `installer-sentinel` folder in each of `logs`, `auth`, `tmp`, and
-  `device-api`, owned by Local System and accessible only to Local System and
-  Administrators, so the service can never empty those folders. The MSI
-  reapplies the sentinels' permissions on repair and upgrade and never removes
-  them, even on uninstall; do not delete them while the agent is installed; and
+  `%ProgramData%\Miru\device-api` and `%ProgramData%\Miru\configs` with the
+  same protected DACL as the other data folders plus inheritable read access
+  for `Miru Agent Users`, so the group's members can read the local device API
+  discovery file and deployed configs (see
+  [Access for local applications](#access-for-local-applications));
+- creates an `installer-sentinel` folder in each of `logs`, `auth`, `tmp`,
+  `device-api`, and `configs`, owned by Local System and accessible only to
+  Local System and Administrators, so the service can never empty those
+  folders. The MSI reapplies the sentinels' permissions on repair and upgrade
+  and never removes them, even on uninstall; do not delete them while the agent
+  is installed; and
 - leaves populated customer state under `%ProgramData%\Miru` in place during
   maintenance, upgrades, rollback, and ordinary uninstall, and keeps the
   `Miru Agent Users` group and its members. Uninstall always leaves the
@@ -163,19 +165,28 @@ installed, because the account name resolves only once the service exists. At
 any time, including before installation, you can use the service SID instead:
 `sc.exe showsid miru-agent` prints it, and `icacls` accepts it as `*<SID>`.
 
-Config deploy target folders (the Windows counterpart of `/srv/miru` on Linux)
-need Modify access, because a deploy creates a temporary subfolder and a
-`miru.backup.*` file next to the target. A new folder under `C:\` inherits
-Modify access for every signed-in user, so replace the inherited permissions on
-the target and its parent. Only Local System and Administrators can then change
-them, local users can read them, and the service can modify the target:
+Deploy configs to `%ProgramData%\Miru\configs` (for example
+`C:\ProgramData\Miru\configs\motion-control.json`), the Windows counterpart
+of `/srv/miru/configs` on Linux. The installer creates it ready to use: the
+service can create and replace configs in it, members of `Miru Agent Users`
+can read them, and nobody else can (see
+[Access for local applications](#access-for-local-applications)). Config file
+paths on Windows must be absolute with a drive letter; `/srv/miru/...` is
+rejected as not absolute.
+
+Any other deploy target folder needs Modify access for the service, because a
+deploy creates a temporary subfolder and a `miru.backup.*` file next to the
+target. A new folder under `C:\` inherits Modify access for every signed-in
+user, so replace the inherited permissions on the target and its parent. Only
+Local System and Administrators can then change them, members of
+`Miru Agent Users` can read them, and the service can modify the target:
 
 ```powershell
-foreach ($dir in "C:\srv", "C:\srv\miru") {
+foreach ($dir in "C:\robot", "C:\robot\configs") {
     New-Item -ItemType Directory -Force $dir | Out-Null
-    icacls $dir /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-32-545:(OI)(CI)RX"
+    icacls $dir /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" "Miru Agent Users:(OI)(CI)RX"
 }
-icacls "C:\srv\miru" /grant "NT SERVICE\miru-agent:(OI)(CI)M"
+icacls "C:\robot\configs" /grant "NT SERVICE\miru-agent:(OI)(CI)M"
 ```
 
 If either folder already existed, first check with `icacls` that Administrators
@@ -194,22 +205,26 @@ for folders created at the root of `C:\`, and none under `C:\Windows` or
 folder the service cannot write fails with an access-denied deployment error
 and leaves the target unchanged.
 
-Applications that read deployed configs and do not run as a member of the
-local `Users` group need their own read grant on the target folder.
+## Access for local applications
 
-## Local device API access
+Applications on the device get access through the local group
+`Miru Agent Users`, the Windows counterpart of the Linux `miru` group. Members
+can read two folders:
 
-On Windows the agent serves the local device API on loopback TCP and requires a
-bearer token that changes at every start. It writes the port and token to
-`%ProgramData%\Miru\device-api\device-api.json` while the API is being served.
-Only Local System, Administrators, the service, and members of the local group
-`Miru Agent Users` can read that file, so membership is what grants access
-to the API. Members get read access to `device-api` only, not to the rest of
-`%ProgramData%\Miru` (such as `settings.json` or `auth`); Windows lets them open
-the file by its full path without access to the parent folders.
+- `%ProgramData%\Miru\device-api`: the agent serves the local device API on
+  loopback TCP and requires a bearer token that changes at every start. It
+  writes the port and token to `device-api.json` here while the API is being
+  served, so membership is what grants access to the API.
+- `%ProgramData%\Miru\configs`: the default config deployment target.
+
+Only Local System, Administrators, the service, and members can read them.
+Members get nothing on the rest of `%ProgramData%\Miru` (such as
+`settings.json` or `auth`); Windows lets them open files by full path without
+access to the parent folders.
 
 The MSI creates the group empty. From an elevated PowerShell session, add each
-local user or service account whose applications call the API, for example:
+local user or service account whose applications call the API or read configs,
+for example:
 
 ```powershell
 Add-LocalGroupMember -Group "Miru Agent Users" -Member "robot-operator"
@@ -221,10 +236,11 @@ Membership takes effect at the account's next sign-in, or when a service
 account's service next starts; restart the application's service (or sign out
 and back in) after adding it. Remove access with `Remove-LocalGroupMember`.
 
-Do not grant `Users`, `Authenticated Users`, or `Everyone` access to
-`device-api`, and do not add those groups to `Miru Agent Users`: any
-account that can read the discovery file can call every device API route. Repair
-and upgrade reapply the folder's permissions and keep the group's members.
+Do not grant `Users`, `Authenticated Users`, or `Everyone` access to these
+folders, and do not add those groups to `Miru Agent Users`: any account that can
+read the discovery file can call every device API route, and configs may hold
+secrets. Repair and upgrade reapply the folders' permissions and keep the
+group's members.
 
 ## Validation
 
@@ -269,20 +285,21 @@ including when those directories existed with hostile ownership and protected
 permissions before installation or maintenance.
 Non-administrators must not read sensitive files created in those directories
 after installation, create children, or change the directory permissions.
-`device-api` must have the same descriptor plus one inheritable read-only ACE
-for `Miru Agent Users`, including when it existed with hostile ownership
-and permissions before installation, maintenance, or upgrade. A
-non-administrator member of `Miru Agent Users` must be able to read a file
-created in `device-api` but not create children there or change its permissions,
-and must not read files in the root, `logs`, `auth`, or `tmp`; a non-member must
-not read any of them. The group must exist after install, keep its member
-through maintenance, upgrade, rollback, and uninstall, and keep the ACE
-throughout.
-After every stage, including uninstall, each of `logs`, `auth`, `tmp`, and
-`device-api` must contain an `installer-sentinel` folder that is not a reparse point, is owned by
-Local System, and has a protected DACL permitting full control only for Local
-System and built-in Administrators, including when the sentinels existed with
-hostile ownership and permissions before installation, maintenance, or upgrade.
+`device-api` and `configs` must have the same descriptor plus one inheritable
+read-only ACE for `Miru Agent Users`, including when they existed with hostile
+ownership and permissions before installation, maintenance, or upgrade. A
+non-administrator member of `Miru Agent Users` must be able to read files
+created in `device-api` and `configs` but not create children there or change
+their permissions, and must not read files in the root, `logs`, `auth`, or
+`tmp`; a non-member must not read any of them. The group must exist after
+install, keep its member through maintenance, upgrade, rollback, and
+uninstall, and keep the ACEs throughout.
+After every stage, including uninstall, each of `logs`, `auth`, `tmp`,
+`device-api`, and `configs` must contain an `installer-sentinel` folder that is
+not a reparse point, is owned by Local System, and has a protected DACL
+permitting full control only for Local System and built-in Administrators,
+including when the sentinels existed with hostile ownership and permissions
+before installation, maintenance, or upgrade.
 A folder outside `%ProgramData%\Miru` granted Modify to the service must keep
 that grant, keyed to the service SID, through maintenance, upgrade, rollback,
 and uninstall.

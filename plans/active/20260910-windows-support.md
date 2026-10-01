@@ -186,6 +186,16 @@ next logon or service start. `device-api` gets an `installer-sentinel` like
 integration tests use a stand-in file, and the real agent writing the real file
 is the end-to-end check. Must land before the first Windows release.
 
+**PR 14 — default config folder** (follow-up to PR 13;
+`build/windows/miru-agent.wxs`)**.** The MSI creates `ProgramData\Miru\configs`,
+the Windows counterpart of Linux `/srv/miru/configs`, with the data folders'
+protected descriptor (the service can create and replace configs inside but
+cannot delete or re-permission the folder) plus inheritable read for
+`Miru Agent Users`, and an `installer-sentinel`. Config paths on Windows must
+be absolute with a drive letter (`C:\ProgramData\Miru\configs\...`); the
+backend's path validation and the frontend's suggested paths are tracked in
+the workbench plan.
+
 ## Decision log
 
 - 2026-09-21: PR 11's TCP transport is cross-platform and opt-in on Linux via
@@ -283,6 +293,20 @@ is the end-to-end check. Must land before the first Windows release.
   or cloud clients. Renaming after release would be costly (the group survives
   uninstall and customers script its name), so it was settled before the
   first MSI shipped.
+- 2026-10-01: PR 14 puts the default config folder at
+  `ProgramData\Miru\configs`, not `C:\srv\miru`. Rationale: machine-wide app
+  data belongs under `ProgramData\<vendor>`; a folder at the root of `C:\`
+  inherits Modify for every signed-in user and would need its parent locked
+  down too; and Linux paths do not carry over anyway, because the agent
+  rejects `/srv/miru/...` on Windows as not absolute. Non-admins cannot list
+  `ProgramData\Miru`, but members open configs by full path.
+- 2026-10-01: Deployed configs are readable by `Miru Agent Users` only, not by
+  `Users` as Linux's world-readable `/srv/miru` (0755) would suggest.
+  Rationale: configs are customer-defined and may hold secrets, and Windows
+  robots tend to have more local accounts (operators, remote support, third-
+  party services). Applications that read configs usually also use the device
+  API, so one group means one setup step. The folder gets an
+  `installer-sentinel` because the service can write it and it can be empty.
 
 ## Risks
 
@@ -305,6 +329,11 @@ is the end-to-end check. Must land before the first Windows release.
   local code execution. Stronger options if needed: clients reject a file
   older than the agent's start, or the file carries a second secret the server
   proves it knows.
+- **Linux configs are world-readable**: `postinst` makes `/srv/miru` mode 0755,
+  so any local account can read deployed configs, unlike Windows (PR 14).
+  Tightening it to `0750 miru:miru` would match, but applications that read
+  configs without being in the `miru` group would break, so it needs a
+  migration note. Not yet scheduled.
 - **Windows port hijacking while the agent holds the port**: Windows blocks
   cross-account `SO_REUSEADDR` binds by default, but the agent does not set
   `SO_EXCLUSIVEADDRUSE`. Confirm the default protection (or set the option)
