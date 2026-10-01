@@ -43,6 +43,9 @@
         <Directory Id="MIRUTMP" Name="tmp">
           <Directory Id="MIRUTMPSENTINEL" Name="installer-sentinel" />
         </Directory>
+        <Directory Id="MIRUDEVICEAPI" Name="device-api">
+          <Directory Id="MIRUDEVICEAPISENTINEL" Name="installer-sentinel" />
+        </Directory>
       </Directory>
     </StandardDirectory>
 
@@ -96,8 +99,8 @@
          its contents. Hardcoded because CreateFolders runs before the service
          exists; recompute if the service Name changes.
          The installer-sentinel folders, which the service cannot delete, keep
-         logs, auth, and tmp non-empty so that none can become a mount point that
-         a repair or upgrade follows; they are permanent. -->
+         logs, auth, tmp, and device-api non-empty so that none can become a
+         mount point that a repair or upgrade follows; they are permanent. -->
     <ComponentGroup Id="DataDirs">
       <Component Id="MiruDataDir" Directory="MIRUDATA" Guid="D0542DF7-5B61-4F09-938B-57F05C1B5458" Bitness="always64" KeyPath="yes">
         <CreateFolder>
@@ -119,6 +122,26 @@
           <PermissionEx Sddl="O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;;FRFWFX;;;S-1-5-80-1251439239-454917380-1008020685-2030257057-91624695)(A;OICIIO;FA;;;S-1-5-80-1251439239-454917380-1008020685-2030257057-91624695)" />
         </CreateFolder>
       </Component>
+      <!-- device-api holds the local device API discovery file (TCP port and
+           bearer token). Besides the ACEs above, members of the local
+           "Miru Clients" group get inheritable read access, so their SDK
+           clients can authenticate. The group's SID is machine-specific and the
+           group only exists once ConfigureGroups runs, so the grant uses
+           util:PermissionEx, which resolves the name at install time and runs
+           after CreateFolders, adding to the protected descriptor above rather
+           than replacing it. The group is kept on uninstall: a major upgrade
+           uninstalls the previous version, and removing the group would drop its
+           members and change its SID. -->
+      <Component Id="MiruDeviceApiDir" Directory="MIRUDEVICEAPI" Guid="516954BC-B555-4767-8D2E-74DC59EB31AE" Bitness="always64" KeyPath="yes">
+        <CreateFolder>
+          <PermissionEx Sddl="O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;;FRFWFX;;;S-1-5-80-1251439239-454917380-1008020685-2030257057-91624695)(A;OICIIO;FA;;;S-1-5-80-1251439239-454917380-1008020685-2030257057-91624695)" />
+          <util:PermissionEx User="Miru Clients" GenericRead="yes" />
+        </CreateFolder>
+        <util:Group Id="MiruClientsGroup"
+                    Name="Miru Clients"
+                    Comment="Local accounts allowed to use the Miru Agent device API"
+                    RemoveOnUninstall="no" />
+      </Component>
       <Component Id="MiruLogsSentinel" Directory="MIRULOGSSENTINEL" Guid="51B41B07-B719-4D73-BD1E-3675FC8E7CA8" Bitness="always64" KeyPath="yes" Permanent="yes">
         <CreateFolder>
           <PermissionEx Sddl="O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)" />
@@ -130,6 +153,11 @@
         </CreateFolder>
       </Component>
       <Component Id="MiruTmpSentinel" Directory="MIRUTMPSENTINEL" Guid="7AF370AB-A333-4D60-BC95-ACAB7306D1C6" Bitness="always64" KeyPath="yes" Permanent="yes">
+        <CreateFolder>
+          <PermissionEx Sddl="O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)" />
+        </CreateFolder>
+      </Component>
+      <Component Id="MiruDeviceApiSentinel" Directory="MIRUDEVICEAPISENTINEL" Guid="F3588780-D460-4BF8-8522-773DF7B5799D" Bitness="always64" KeyPath="yes" Permanent="yes">
         <CreateFolder>
           <PermissionEx Sddl="O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)" />
         </CreateFolder>

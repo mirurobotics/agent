@@ -60,6 +60,7 @@ function Assert-ProductionTables {
     try {
         Assert-DirectoryComponents $handle.Database
         Assert-ProtectedPermissionRows $handle.Database
+        Assert-ClientsGroupTables $handle.Database
         Assert-FixtureIsolation $handle.Database
         Assert-TransactionalMajorUpgrade $handle.Database
         Assert-DowngradeLaunchCondition $handle.Database
@@ -150,6 +151,58 @@ function Assert-ProtectedPermissionRows {
     } | Sort-Object)
     Assert-Equal ($expected -join "`n") ($actual -join "`n") `
         "exact protected permission rows"
+}
+
+# The Miru Clients local group is created (an existing one is reused), kept on
+# uninstall and upgrade, and granted inheritable read on device-api by name.
+# The grant must run after the group exists and after CreateFolders applies the
+# protected descriptor, which it extends rather than replaces.
+function Assert-ClientsGroupTables {
+    param([Parameter(Mandatory = $true)]$Database)
+    Assert-True (Test-MsiTable $Database "Wix4Group") "Util group table present"
+    $groups = @(Get-MsiRows $Database ("SELECT ``Group``, ``Component_``, ``Name``, ``Domain`` " + `
+        "FROM ``Wix4Group``") 4)
+    Assert-Equal 1 $groups.Count "one group row"
+    Assert-Equal "MiruDeviceApiDir" $groups[0][1] "group component"
+    Assert-Equal $MsiClientsGroup $groups[0][2] "group name"
+    Assert-True ([string]::IsNullOrEmpty($groups[0][3])) "group is local"
+    $options = @(Get-MsiRows $Database "SELECT ``Group_``, ``Attributes`` FROM ``Wix6Group``" 2)
+    Assert-Equal 1 $options.Count "one group options row"
+    $attributes = [int]$options[0][1]
+    Assert-True (($attributes -band 0x100) -ne 0) "group is kept on uninstall"
+    Assert-Equal 0 ($attributes -band 0x210) "group is created, and an existing group is reused"
+    Assert-True (Test-MsiTable $Database "Wix4SecureObject") "Util permission table present"
+    $grants = @(Get-MsiRows $Database ("SELECT ``SecureObject``, ``Table``, ``Domain``, ``User``, " + `
+        "``Attributes``, ``Permission``, ``Component_`` FROM ``Wix4SecureObject``") 7)
+    Assert-Equal 1 $grants.Count "one Util permission row"
+    Assert-Equal "MIRUDEVICEAPI|CreateFolder|$MsiClientsGroup|MiruDeviceApiDir" `
+        ("{0}|{1}|{2}|{3}" -f $grants[0][0], $grants[0][1], $grants[0][3], $grants[0][6]) `
+        "$MsiClientsGroup grant target"
+    Assert-True ([string]::IsNullOrEmpty($grants[0][2])) "$MsiClientsGroup grant uses the local group"
+    Assert-True (([int]$grants[0][4] -band 1) -ne 0) "$MsiClientsGroup grant is inheritable"
+    # Decimal: PowerShell reads 0x80000000 and 0xFFFFFFFF as negative Int32 values.
+    $genericRead = [int64]2147483648
+    Assert-Equal $genericRead ([int64][int]$grants[0][5] -band [int64]4294967295) "$MsiClientsGroup grant is generic read only"
+    $sequence = @(Get-MsiRows $Database ("SELECT ``Action``, ``Condition``, ``Sequence`` " + `
+        "FROM ``InstallExecuteSequence``") 3)
+    $groups = Get-SequenceNumber $sequence (Get-SequenceAction $sequence "*ConfigureGroups*")
+    $folders = Get-SequenceNumber $sequence "CreateFolders"
+    $grant = Get-SequenceNumber $sequence (Get-SequenceAction $sequence "*SchedSecureObjects*" -Exclude "*Rollback*")
+    Assert-True ($groups -lt $folders -and $folders -lt $grant) `
+        "ConfigureGroups, then CreateFolders, then SchedSecureObjects"
+}
+
+function Get-SequenceAction {
+    param(
+        [Parameter(Mandatory = $true)][object[]]$Sequence,
+        [Parameter(Mandatory = $true)][string]$Like,
+        [string]$Exclude = ""
+    )
+    $matched = @($Sequence | Where-Object {
+        $_[0] -like $Like -and (-not $Exclude -or $_[0] -notlike $Exclude)
+    })
+    Assert-Equal 1 $matched.Count "one $Like action"
+    return $matched[0][0]
 }
 
 function Assert-FixtureIsolation {

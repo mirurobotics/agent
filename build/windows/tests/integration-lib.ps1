@@ -47,6 +47,7 @@ function Invoke-IntegrationRun {
     finally {
         Remove-FixtureProducts
         Remove-TestUser
+        Remove-ClientsGroup
         Remove-TestFiles
     }
     Complete-IntegrationRun $integrationFailure
@@ -149,20 +150,23 @@ function Invoke-InstallStage {
     Add-PermissiveAces -OwnerSid $testUserSid
     # The service must create the first log file through its own ACE.
     Assert-Equal 0 (@(Get-AgentLogFiles)).Count "no agent log file exists before install"
+    Assert-True ($null -eq (Get-LocalGroup -Name $MsiClientsGroup -ErrorAction SilentlyContinue)) `
+        "no $MsiClientsGroup group exists before install"
     Install-Msi $Packages.V1 "fixture-v1"
     Assert-True (Test-Path -LiteralPath $agentPath -PathType Leaf) "v1 executable installed"
     Assert-InstalledVersion $fixtureProducts[0] "fixture-v1" "v1"
     Assert-ProtectedState "initial install"
     Invoke-NonAdminProbe -Stage "install"
+    Invoke-DeviceApiProbe -Stage "install"
     Assert-ServiceInstalled "install"
     Assert-ServiceRuntimeIdentity "install" 0
-    Write-Host "PASS initial install, ACL correction, denial, and service installed"
+    Write-Host "PASS initial install, ACL correction, denial, Miru Clients read access, and service installed"
 }
 
 # Loosen every protected directory so the next installer operation must repair it.
 function Add-PermissiveAces {
     param([string]$OwnerSid = "")
-    foreach ($path in @($protectedRoots) + @($installerSentinelDirs)) {
+    foreach ($path in @($protectedRoots) + @($deviceApiRoot) + @($installerSentinelDirs)) {
         Set-PermissiveAcl $path $OwnerSid
         Assert-PermissiveAcl $path $OwnerSid
     }
@@ -259,6 +263,7 @@ function Get-Marker {
 function Assert-ProtectedState {
     param([Parameter(Mandatory = $true)][string]$Stage)
     Assert-CustomerStateRetained $Stage
+    Assert-ClientsGroup $Stage
     Assert-ProtectedAcls
 }
 
@@ -313,7 +318,62 @@ function Assert-OwnedFilesRetained {
 
 function Assert-ProtectedAcls {
     foreach ($path in $protectedRoots) { Assert-ProtectedAcl $path }
+    Assert-DeviceApiAcl $deviceApiRoot
     foreach ($path in $installerSentinelDirs) { Assert-InstallerSentinelAcl $path }
+}
+
+# The installer creates the group once and keeps it, with the same SID, through
+# maintenance, upgrade, rollback, and uninstall.
+function Assert-ClientsGroup {
+    param([Parameter(Mandatory = $true)][string]$Stage)
+    $group = Get-LocalGroup -Name $MsiClientsGroup -ErrorAction SilentlyContinue
+    Assert-True ($null -ne $group) "$Stage keeps the $MsiClientsGroup local group"
+    if ($null -eq $clientsGroupSid) { $script:clientsGroupSid = $group.SID.Value }
+    Assert-Equal $clientsGroupSid $group.SID.Value "$Stage keeps the $MsiClientsGroup SID"
+}
+
+# The protected-directory ACEs plus one inheritable read ACE for Miru Clients.
+function Assert-DeviceApiAcl {
+    param([Parameter(Mandatory = $true)][string]$LiteralPath)
+    $acl = Get-Acl -LiteralPath $LiteralPath
+    Assert-Equal "S-1-5-18" $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value "$LiteralPath owner is SYSTEM"
+    Assert-True $acl.AreAccessRulesProtected "$LiteralPath DACL inheritance is disabled"
+    $rules = @($acl.Access)
+    Assert-Equal 5 $rules.Count "exactly 5 total $LiteralPath ACEs"
+    Assert-Equal 0 @($rules | Where-Object { $_.IsInherited }).Count "$LiteralPath ACEs are explicit"
+    Assert-ServiceDirectoryAces @($rules | Where-Object { (Get-RuleSid $_) -eq $MsiServiceSid }) $LiteralPath
+    $clients = @($rules | Where-Object { (Get-RuleSid $_) -eq $clientsGroupSid })
+    Assert-Equal 1 $clients.Count "$LiteralPath has one $MsiClientsGroup ACE"
+    Assert-ClientsReadAce $clients[0] $LiteralPath
+    $adminSids = @($rules | Where-Object {
+        $sid = Get-RuleSid $_
+        $sid -ne $MsiServiceSid -and $sid -ne $clientsGroupSid
+    } | ForEach-Object { Assert-FullControlAce $_ $LiteralPath -Inheritable })
+    Assert-Equal "S-1-5-18,S-1-5-32-544" (($adminSids | Sort-Object) -join ",") "$LiteralPath administrator ACE identities"
+}
+
+# Read access for files and the directory listing, inherited by both, and
+# nothing that writes, deletes, or changes permissions or ownership.
+function Assert-ClientsReadAce {
+    param(
+        [Parameter(Mandatory = $true)]$Rule,
+        [Parameter(Mandatory = $true)][string]$Label
+    )
+    Assert-Equal "Allow" $Rule.AccessControlType.ToString() "$Label $MsiClientsGroup ACE type"
+    $inherit = [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [Security.AccessControl.InheritanceFlags]::ObjectInherit
+    Assert-Equal ([int]$inherit) ([int]$Rule.InheritanceFlags) "$Label $MsiClientsGroup ACE inherits to containers and files"
+    Assert-Equal ([int][Security.AccessControl.PropagationFlags]::None) ([int]$Rule.PropagationFlags) "$Label $MsiClientsGroup ACE has no propagation restriction"
+    # Decimal: PowerShell reads 0x80000000 and 0xFFFFFFFF as negative Int32 values.
+    $rights = [int64]([int]$Rule.FileSystemRights) -band [int64]4294967295
+    $genericRead = [int64]2147483648
+    $read = [int64][Security.AccessControl.FileSystemRights]::Read
+    $forbidden = 0x40000000 -bor 0x10000000 -bor [int64]([Security.AccessControl.FileSystemRights]::Write -bor
+        [Security.AccessControl.FileSystemRights]::Delete -bor
+        [Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor
+        [Security.AccessControl.FileSystemRights]::ChangePermissions -bor
+        [Security.AccessControl.FileSystemRights]::TakeOwnership)
+    Assert-True ((($rights -band $genericRead) -ne 0) -or (($rights -band $read) -eq $read)) "$Label $MsiClientsGroup ACE grants read"
+    Assert-Equal 0 ($rights -band $forbidden) "$Label $MsiClientsGroup ACE grants no write, delete, or permission rights"
 }
 
 function Assert-ProtectedAcl {
@@ -395,6 +455,47 @@ function Invoke-NonAdminProbe {
     Assert-ProbeIdentity $result
     Assert-ProbeDenied $result $files $Stage
     Assert-ProtectedState "$Stage after non-admin probes"
+}
+
+# A fresh device-api file (as the agent writes the discovery file) is readable
+# by Miru Clients members only; neither members nor other non-administrators can
+# create files there or re-permission the directory. Group membership changes
+# take effect because each probe is a new logon.
+function Invoke-DeviceApiProbe {
+    param([Parameter(Mandatory = $true)][string]$Stage)
+    $file = [pscustomobject]@{
+        Parent = $deviceApiRoot
+        Path = Join-Path $deviceApiRoot ("probe-$Stage-" + [Guid]::NewGuid().ToString("N") + ".json")
+        Contents = "device-api-$Stage-" + [Guid]::NewGuid().ToString("N")
+        CreatePath = Join-Path $deviceApiRoot ("non-admin-" + [Guid]::NewGuid().ToString("N") + ".json")
+    }
+    [IO.File]::WriteAllText($file.Path, $file.Contents)
+    [void]$representativeFiles.Add($file)
+    $outsider = Invoke-ProbeAsTestUser (New-ProbeWorkspace @($file))
+    Assert-ProbeIdentity $outsider
+    Assert-DeviceApiProbe $outsider $file "$Stage non-member" "AccessDenied"
+    Add-LocalGroupMember -Group $MsiClientsGroup -Member $testUser
+    try {
+        $member = Invoke-ProbeAsTestUser (New-ProbeWorkspace @($file))
+        Assert-ProbeIdentity $member
+        Assert-DeviceApiProbe $member $file "$Stage member" "Allowed"
+    }
+    finally { Remove-LocalGroupMember -Group $MsiClientsGroup -Member $testUser }
+}
+
+function Assert-DeviceApiProbe {
+    param(
+        [Parameter(Mandatory = $true)]$Result,
+        [Parameter(Mandatory = $true)]$File,
+        [Parameter(Mandatory = $true)][string]$Label,
+        [Parameter(Mandatory = $true)][string]$ExpectedRead
+    )
+    $entry = @($Result.Results | Where-Object { $_.Path -eq $File.Path })
+    Assert-Equal 1 $entry.Count "one device-api result for $Label"
+    Assert-Equal $ExpectedRead $entry[0].Read "$Label device-api read"
+    Assert-Equal "AccessDenied" $entry[0].Create "$Label device-api create"
+    Assert-Equal "AccessDenied" $entry[0].Regrant "$Label device-api regrant"
+    Assert-True (-not (Test-Path -LiteralPath $File.CreatePath)) "$Label created no device-api file"
 }
 
 # Fresh files in each protected directory prove inheritance without relying on
@@ -726,6 +827,7 @@ function Invoke-UpgradeStage {
     Assert-InstalledVersion $fixtureProducts[1] "fixture-v2" "v2"
     Assert-ProtectedState "upgrade"
     Invoke-NonAdminProbe -Stage "upgrade"
+    Invoke-DeviceApiProbe -Stage "upgrade"
     Assert-ServiceInstalled "upgrade"
     Assert-ServiceRuntimeIdentity "upgrade" $baseline
     Write-Host "PASS v1-to-beta-to-v2 upgrades each repair ACL and register one product"
@@ -817,6 +919,17 @@ function Remove-TestUser {
         }
     }
     catch { Add-CleanupFailure "temporary user deletion verification failed: $($_.Exception.Message)" }
+}
+
+# The product keeps the group on uninstall; the test removes it so the next run
+# starts without one.
+function Remove-ClientsGroup {
+    try {
+        if ($null -ne (Get-LocalGroup -Name $MsiClientsGroup -ErrorAction SilentlyContinue)) {
+            Remove-LocalGroup -Name $MsiClientsGroup -ErrorAction Stop
+        }
+    }
+    catch { Add-CleanupFailure "$MsiClientsGroup group deletion failed: $($_.Exception.Message)" }
 }
 
 function Remove-TestFiles {

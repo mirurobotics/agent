@@ -28,13 +28,18 @@ The MSI:
 - allows same-version upgrades, so a stable release replaces a prerelease of
   the same `MAJOR.MINOR.PATCH` in place (see [Code signing](#code-signing) for
   prerelease versions);
-- protects `%ProgramData%\Miru` and its authored `logs`, `auth`, and `tmp`
-  children by setting their owner to Local System and applying a non-inherited
+- protects `%ProgramData%\Miru` and its authored `logs`, `auth`, `tmp`, and
+  `device-api` children by setting their owner to Local System and applying a non-inherited
   DACL that gives Local System and built-in Administrators inheritable full
   control, and gives the `miru-agent` service SID read, write, and traverse
   access to each directory (but not delete or permission changes) plus full
   control of the files and folders created inside it;
-- creates an `installer-sentinel` folder in each of `logs`, `auth`, and `tmp`,
+- creates the local group `Miru Clients` and gives it inheritable read access
+  to `device-api`, which holds the device API discovery file (see
+  [Device API access](#device-api-access)). The group is kept on uninstall and
+  upgrade;
+- creates an `installer-sentinel` folder in each of `logs`, `auth`, `tmp`, and
+  `device-api`,
   owned by Local System and accessible only to Local System and Administrators,
   so the service can never empty those folders. The MSI reapplies the
   sentinels' permissions on repair and upgrade and never removes them, even on
@@ -190,6 +195,27 @@ and leaves the target unchanged.
 Applications that read deployed configs and do not run as a member of the
 local `Users` group need their own read grant on the target folder.
 
+## Device API access
+
+The agent serves its local device API on a loopback TCP port and requires a
+bearer token that changes every time the agent starts. It publishes the port
+and token in `%ProgramData%\Miru\device-api\device-api.json`. Only Local
+System, Administrators, the service, and members of the local `Miru Clients`
+group can read that file, so an application that uses the device API must run
+as an administrator or as a member of `Miru Clients`:
+
+```powershell
+Add-LocalGroupMember -Group "Miru Clients" -Member "<account>"
+```
+
+The account must sign in again, or its service restart, before the membership
+takes effect. Members can read the file but cannot create files in `device-api`
+or change its permissions.
+
+The installer creates `Miru Clients` and keeps it on uninstall and upgrade, so
+its members and SID survive both. An administrator can delete it after
+uninstalling (`Remove-LocalGroup "Miru Clients"`).
+
 ## Validation
 
 Every pull request runs the agent test suite natively on Windows
@@ -231,8 +257,13 @@ including when those directories existed with hostile ownership and protected
 permissions before installation or maintenance.
 Non-administrators must not read sensitive files created in those directories
 after installation, create children, or change the directory permissions.
-After every stage, including uninstall, each of `logs`, `auth`, and `tmp` must
-contain an `installer-sentinel` folder that is not a reparse point, is owned by
+`device-api` must have the same protected owner and permissions plus one
+inheritable read ACE for `Miru Clients`: after install and upgrade, a probe
+account can read a new file there only while it is a member of the group, and
+can never create files or change the directory permissions. The group must keep
+its SID through every stage, including uninstall.
+After every stage, including uninstall, each of `logs`, `auth`, `tmp`, and
+`device-api` must contain an `installer-sentinel` folder that is not a reparse point, is owned by
 Local System, and has a protected DACL permitting full control only for Local
 System and built-in Administrators, including when the sentinels existed with
 hostile ownership and permissions before installation, maintenance, or upgrade.
@@ -245,9 +276,8 @@ Integration runs write verbose MSI logs directly beneath
 prints its log path before starting Windows Installer. These logs survive
 temporary build-output cleanup, including when only cleanup fails.
 
-WinGet publication, full live-backend provisioning, Windows Server
-certification, and the Phase 2 `Miru Clients` local group and device-API
-discovery-directory permissions remain deferred.
+WinGet publication, full live-backend provisioning, and Windows Server
+certification remain deferred.
 
 ## Code signing
 
