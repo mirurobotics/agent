@@ -1,5 +1,11 @@
+// standard crates
+use std::sync::{Arc, Mutex};
+
 // internal crates
-use miru_agent::disk::{Backend, MQTTBroker, Settings, TCPServer};
+use crate::logs::CapturingWriter;
+use crate::test_utils::filesys::{dirs as test_dirs, files as test_files};
+use miru_agent::disk::{warn_if_persistence_disabled, Backend, MQTTBroker, Settings, TCPServer};
+use miru_agent::filesys::File;
 use miru_agent::logs::LogLevel;
 use miru_agent::network::{BackendHost, MqttHost};
 use miru_agent::server::DEFAULT_TCP_PORT;
@@ -174,4 +180,101 @@ fn deserialize_backend_accepts_allowed_host() {
     let input = json!({"host": "api.mirurobotics.com"});
     let backend = serde_json::from_value::<Backend>(input).unwrap();
     assert_eq!(backend.host.as_str(), "api.mirurobotics.com");
+}
+
+pub mod persistence_warning {
+    use super::*;
+
+    async fn settings_file(dir: &test_dirs::TempDir, contents: &str) -> File {
+        let file = dir.file("settings.json");
+        test_files::seed(&file, contents).await;
+        file
+    }
+
+    #[test]
+    fn deserialize_ignores_is_persistent() {
+        let input = json!({"is_persistent": false, "enable_poller": false});
+        let settings = serde_json::from_value::<Settings>(input).unwrap();
+        let expected = Settings {
+            enable_poller: false,
+            ..Settings::default()
+        };
+        assert_eq!(settings, expected);
+    }
+
+    #[test]
+    fn serialize_omits_is_persistent() {
+        let value = serde_json::to_value(Settings::default()).unwrap();
+        assert!(value.get("is_persistent").is_none(), "{value}");
+    }
+
+    #[tokio::test]
+    async fn warns_when_disabled() {
+        let dir = test_dirs::temp("persistence_warns_when_disabled").unwrap();
+        let file = settings_file(&dir, r#"{"is_persistent": false}"#).await;
+        assert!(warn_if_persistence_disabled(&file).await);
+    }
+
+    #[tokio::test]
+    async fn silent_when_enabled() {
+        let dir = test_dirs::temp("persistence_silent_when_enabled").unwrap();
+        let file = settings_file(&dir, r#"{"is_persistent": true}"#).await;
+        assert!(!warn_if_persistence_disabled(&file).await);
+    }
+
+    #[tokio::test]
+    async fn silent_when_absent() {
+        let dir = test_dirs::temp("persistence_silent_when_absent").unwrap();
+        let file = settings_file(&dir, "{}").await;
+        assert!(!warn_if_persistence_disabled(&file).await);
+    }
+
+    #[tokio::test]
+    async fn silent_when_not_bool() {
+        let dir = test_dirs::temp("persistence_silent_when_not_bool").unwrap();
+        let file = settings_file(&dir, r#"{"is_persistent": "false"}"#).await;
+        assert!(!warn_if_persistence_disabled(&file).await);
+    }
+
+    #[tokio::test]
+    async fn silent_when_file_missing() {
+        let dir = test_dirs::temp("persistence_silent_when_file_missing").unwrap();
+        let file = dir.file("settings.json");
+        assert!(!warn_if_persistence_disabled(&file).await);
+    }
+
+    #[tokio::test]
+    async fn silent_when_invalid_json() {
+        let dir = test_dirs::temp("persistence_silent_when_invalid_json").unwrap();
+        let file = settings_file(&dir, "not json").await;
+        assert!(!warn_if_persistence_disabled(&file).await);
+    }
+
+    #[tokio::test]
+    async fn logs_warning_once() {
+        let buf: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
+        let subscriber = tracing_subscriber::fmt()
+            .with_ansi(false)
+            .with_writer(CapturingWriter(buf.clone()))
+            .finish();
+        // current-thread runtime, so the thread-local subscriber sees the event
+        let _guard = tracing::subscriber::set_default(subscriber);
+
+        let dir = test_dirs::temp("persistence_logs_warning_once").unwrap();
+        let disabled = settings_file(&dir, r#"{"is_persistent": false}"#).await;
+        assert!(warn_if_persistence_disabled(&disabled).await);
+        let absent = dir.file("absent.json");
+        test_files::seed(&absent, "{}").await;
+        assert!(!warn_if_persistence_disabled(&absent).await);
+        assert!(!warn_if_persistence_disabled(&dir.file("missing.json")).await);
+
+        let captured = String::from_utf8(buf.lock().unwrap().clone()).unwrap();
+        assert_eq!(
+            captured
+                .matches("settings.is_persistent is no longer supported")
+                .count(),
+            1,
+            "{captured}"
+        );
+    }
 }

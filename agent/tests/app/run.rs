@@ -239,6 +239,10 @@ async fn shutdown_signal_received() {
     // Best-effort wait for the agent to start. The oneshot channel buffers
     // the signal, so the test stays correct even if startup takes longer.
     tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(
+        !agent.handle.is_finished(),
+        "run exited before the shutdown signal"
+    );
 
     agent.stop().await.unwrap();
 }
