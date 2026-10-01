@@ -14,6 +14,8 @@ Branch: `feat/linux-permission-hardening` (already created from `main`). Command
 
 ## Purpose / Big Picture
 
+Split on 2026-10-01 (see Decision Log): PR #281 delivers only the non-breaking part; the `miru-users` group, `/srv/miru/configs` restriction, and member migration described below ship in a stacked breaking follow-up PR.
+
 On a Linux device today the backend token is world-readable (`/var/lib/miru/auth/token.json` is `644`), every state file and deployed config is readable by any local account, and the `miru` group is both the service's primary group and the group applications join for the device API socket. Windows already has the target model: the service account owns private data, and only the local `Miru Agent Users` group can read the device API discovery folder and the default configs folder.
 
 After this change a Linux device matches that model:
@@ -57,10 +59,12 @@ Out of scope: changing the service `UMask` (consumers of configs deployed outsid
   Date: 2026-10-01
 - Decision: the test plan was extended with preset/constant tests, append-on-existing-file, `create_private_if_absent` error path, tightening tests for each writer, and container checks for stop ordering (systemctl shim log), symlinks inside the trees, and re-migration on fresh install.
   Date: 2026-10-01
+- Decision: split the work. PR #281 ships only the non-breaking part: owner-only agent state (Rust writers, `/var/lib/miru` `0700`, `auth/` `0700`, files `0600`, public key `0640`), `/var/log/miru` `0750`, postinst re-applying those on every configure (service stop, symlink-safe takeover), and the unit hardening. The `miru-users` group (socket, `/run/miru`, setgid `/srv/miru/configs`, member migration, install-script group handling) moves to a stacked breaking PR (`feat/linux-miru-users-group`). Rationale: #281 must not break customers, and the compatibility contract is the public docs: socket and device-api access is membership in `miru`, reading `/srv/miru` needs no extra configuration, and `/var/lib/miru` and `/var/log/miru` are for the agent's internal use only. So the steps above for `miru-users`, configs modes, and migration describe the follow-up PR, not #281.
+  Date: 2026-10-01
 
 ## Outcomes & Retrospective
 
-Delivered in draft PR #281 (mirurobotics/agent). The agent writes all state under the data root `0600` (public key `0640`; `auth/` `0700`); the Debian package adds `miru-users` for the socket, `/run/miru`, and the setgid `/srv/miru/configs`, makes `/var/lib/miru` private and `/var/log/miru` `0750`, migrates `miru` members (supplementary in `/etc/group` and primary-group accounts) once, and hardens the unit. A review pass added symlink-swap protection to `apply_permissions` and a service stop before it. CI (including the new `debian-package` container test and `windows-package`) passed on the first preflight round. Remaining before release: the docs-repo update for `miru-users`, and the manual on-device check in Validation.
+Delivered in PR #281 (mirurobotics/agent), non-breaking after the split (see Decision Log). The agent writes all state under the data root `0600` (public key `0640`; `auth/` `0700`); the Debian package makes `/var/lib/miru` private and `/var/log/miru` `0750` on every configure (stopping the socket and service first, with symlink-swap protection) and hardens the unit. The socket, `/run/miru`, and the discovery file keep the `miru` group, and configs in `/srv/miru` keep their modes, so they stay world-readable. The `debian-package` CI job runs `shellcheck` and the postinst container test. The `miru-users` group, configs restriction, and member migration are in the stacked breaking follow-up PR. Remaining before release: the manual on-device check in Validation; the docs-repo `miru-users` update ships with the follow-up, not #281.
 
 ## Context and Orientation
 

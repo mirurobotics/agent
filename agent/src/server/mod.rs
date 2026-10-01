@@ -17,7 +17,7 @@ pub use self::state::State;
 
 /// Whether the TCP server is on when settings don't say. It is on for Windows,
 /// where it is the only transport, and off elsewhere, where the Unix socket
-/// restricts access to the `miru-users` group. TCP requests must carry the bearer
+/// restricts access to the `miru` group. TCP requests must carry the bearer
 /// token the agent writes to the discovery file.
 pub const DEFAULT_ENABLE_TCP_SERVER: bool = cfg!(windows);
 

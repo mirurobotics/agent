@@ -95,8 +95,7 @@ impl Layout {
     /// Port and bearer token for TCP clients of the local device API.
     ///
     /// On Unix this is `/run/miru/device-api.json`, beside the socket, so
-    /// clients read it without a grant on the private data root; its group is
-    /// `miru-users`, inherited from the setgid `/run/miru`. On Windows
+    /// clients read it without a grant on the private data root. On Windows
     /// it is `device-api/device-api.json` under the data root, the directory
     /// the installer ACLs for the `Miru Agent Users` group.
     pub fn device_api(&self) -> filesys::File {

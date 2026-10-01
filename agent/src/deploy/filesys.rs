@@ -183,8 +183,7 @@ async fn write_cfg_insts_impl(
             .map_err(|e| map_snapshot_err(cfg_inst, &dest, &backup, e))?;
         snapshots.push(snapshot);
 
-        // Keep umask-derived modes: consumers at custom paths rely on them, and
-        // /srv/miru/configs access is governed by its setgid miru-users folder.
+        // Keep umask-derived modes (unlike agent state): config consumers rely on them.
         files::write_string(&dest, &content, WriteOptions::OVERWRITE_ATOMIC)
             .await
             .map_err(|e| map_write_err(cfg_inst, e))?;
