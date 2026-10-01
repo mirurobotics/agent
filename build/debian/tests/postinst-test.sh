@@ -48,7 +48,9 @@ readonly debian_dir="$repo_root/build/debian"
 readonly postinst_out=/tmp/postinst.out
 readonly systemctl_log=/tmp/systemctl.log
 
-# Folders postinst owns, with the modes it must leave them in.
+# Folders postinst owns, with the modes it must leave them in. /run/miru comes
+# from the tmpfiles.d entry: only systemctl is mocked, so postinst's
+# `systemd-tmpfiles --create` runs for real.
 readonly folders=(
 	"/var/lib/miru 700"
 	"/var/log/miru 750"
