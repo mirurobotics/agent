@@ -16,9 +16,9 @@ The roadmap lists an open risk: on Windows, another local process might bind the
 
 ## Progress
 
-- [ ] M0 Activate plan (move to `plans/active/`; commit)
-- [ ] M1 Roadmap: replace the hijacking risk, add the 2026-10-01 decision log entry (commit)
-- [ ] M2 Windows-only `windows_bind` tests and `tcp::bind` doc comment; fmt, Linux tests, lint (commit)
+- [x] (2026-10-01) M0 Activate plan (move to `plans/active/`; commit) — `29bf3e50`
+- [x] (2026-10-01) M1 Roadmap: replace the hijacking risk, add the 2026-10-01 decision log entry (commit) — `4f5f18a6`, `5a71b5e7`
+- [x] (2026-10-01) M2 Windows-only `windows_bind` tests and `tcp::bind` doc comment; fmt, Linux tests, lint (commit) — `2b13d728`, `36158195`
 - [ ] M3 Preflight CLEAN (CI green on the pushed head incl. `windows-check`, new tests `ok` in its log); PR ready; plan moved to `plans/completed/` with Outcomes filled
 
 ## Surprises & Discoveries
