@@ -6,11 +6,11 @@ This ExecPlan is a living document. The sections Progress, Surprises & Discoveri
 
 | Repository | Access | Description |
 | --- | --- | --- |
-| `agent/` (`/home/ben/miru/workbench5/repos/agent`) | read-write | Rust agent code, Debian packaging (`build/debian/`), install-script template, CI workflow, docs. All edits and commits happen here. |
-| `docs/` (`/home/ben/miru/workbench5/repos/docs`) | read-only | Customer docs that tell apps to join the `miru` group (`docs/snippets/agent/permissions.mdx`) and describe `/var/lib/miru/auth` ownership (`docs/developers/agent/security.mdx:55`). Updating them is a follow-up PR in that repo, not part of this plan. |
+| `agent/` (`mirurobotics/agent`) | read-write | Rust agent code, Debian packaging (`build/debian/`), install-script template, CI workflow, docs. All edits and commits happen here. |
+| `docs/` (`mirurobotics/docs`) | read-only | Customer docs that tell apps to join the `miru` group (`docs/snippets/agent/permissions.mdx`) and describe `/var/lib/miru/auth` ownership (`docs/developers/agent/security.mdx:55`). Updating them is a follow-up PR in that repo, not part of this plan. |
 | `ansible-collection-agent/` | read-only | Reads `/var/lib/miru/auth` with `become: true`, so it is unaffected by the tighter modes. |
 
-Branch: `feat/linux-permission-hardening` (already created from `main`). Commands below run from the repo root `/home/ben/miru/workbench5/repos/agent` unless stated otherwise.
+Branch: `feat/linux-permission-hardening` (already created from `main`). Commands below run from the repo root unless stated otherwise.
 
 ## Purpose / Big Picture
 
@@ -269,7 +269,7 @@ M2:
 M3 (render from a scratch directory so the venv is not created in the repo):
 
     edit scripts/jinja/templates/partials/utils/activate.sh
-    (cd "$(mktemp -d)" && /home/ben/miru/workbench5/repos/agent/scripts/jinja/render.sh)
+    (repo=$(pwd) && cd "$(mktemp -d)" && "$repo/scripts/jinja/render.sh")
     git diff --stat scripts/install     # 6 files, ~3 lines each
     git diff scripts/install | grep '^[-+][^-+]'
     # expect only: Build Timestamp, the comment, and "chown -R miru /srv/miru" lines.
