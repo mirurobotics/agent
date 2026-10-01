@@ -13,7 +13,6 @@ pub struct Settings {
     pub log_level: LogLevel,
     pub backend: Backend,
     pub mqtt_broker: MQTTBroker,
-    pub is_persistent: bool,
     pub enable_socket_server: bool,
     /// Loopback TCP listener for the local device API. Independent of the Unix
     /// socket. On by default only on Windows (see `DEFAULT_ENABLE_TCP_SERVER`).
@@ -29,7 +28,6 @@ impl Default for Settings {
             log_level: LogLevel::Info,
             backend: Backend::default(),
             mqtt_broker: MQTTBroker::default(),
-            is_persistent: true,
             enable_socket_server: true,
             enable_tcp_server: DEFAULT_ENABLE_TCP_SERVER,
             tcp_server: TCPServer::default(),
@@ -44,7 +42,6 @@ struct DeserializeSettings {
     log_level: Option<LogLevel>,
     backend: Option<Backend>,
     mqtt_broker: Option<MQTTBroker>,
-    is_persistent: Option<bool>,
     enable_socket_server: Option<bool>,
     enable_tcp_server: Option<bool>,
     tcp_server: Option<TCPServer>,
@@ -76,9 +73,6 @@ impl<'de> Deserialize<'de> for Settings {
                 .unwrap_or_else(|| deserialize_warn!("settings", "backend", default.backend)),
             mqtt_broker: result.mqtt_broker.unwrap_or_else(|| {
                 deserialize_warn!("settings", "mqtt_broker", default.mqtt_broker)
-            }),
-            is_persistent: result.is_persistent.unwrap_or_else(|| {
-                deserialize_warn!("settings", "is_persistent", default.is_persistent)
             }),
             enable_socket_server: result.enable_socket_server.unwrap_or_else(|| {
                 deserialize_warn!(

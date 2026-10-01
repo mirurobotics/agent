@@ -11,7 +11,6 @@ use crate::test_utils::{
     sync::{create_storage, create_token_manager},
 };
 use device_api::models::ApiVersion;
-use miru_agent::activity;
 use miru_agent::events::hub::{EventHub, SpawnOptions};
 use miru_agent::server::{auth::BearerToken, routes, tcp, ServerErr, State};
 use miru_agent::sync::Syncer;
@@ -50,7 +49,6 @@ impl Fixture {
             http_client,
             syncer,
             Arc::new(token_mngr),
-            Arc::new(activity::Tracker::new()),
             event_hub,
             shutdown_tx.clone(),
         ));

@@ -3,7 +3,6 @@ use std::future::Future;
 use std::sync::Arc;
 
 // internal crates
-use crate::activity;
 use crate::authn::{self, token_mngr::TokenFile, TokenManagerExt};
 use crate::cooldown;
 use crate::data_uploads::{
@@ -35,7 +34,6 @@ pub struct AppState {
     pub deleter: Arc<retention::Deleter>,
     pub uploader: Arc<upload::Uploader>,
     pub token_mngr: Arc<authn::TokenManager>,
-    pub activity_tracker: Arc<activity::Tracker>,
     pub event_hub: events::EventHub,
 }
 
@@ -82,9 +80,6 @@ impl AppState {
         let (syncer, syncer_handle) = sync::Syncer::spawn(64, syncer_args)?;
         let syncer = Arc::new(syncer);
 
-        // initialize the activity tracker
-        let activity_tracker = Arc::new(activity::Tracker::new());
-
         // initialize the data upload pipeline (deleter, uploader, scanner)
         let (deleter, uploader, scanner, data_upload_handles) =
             Self::init_data_uploads(layout, http_client.clone(), token_mngr.clone()).await?;
@@ -105,7 +100,6 @@ impl AppState {
                 deleter,
                 uploader,
                 token_mngr,
-                activity_tracker,
                 event_hub,
             },
             shutdown_handle,
