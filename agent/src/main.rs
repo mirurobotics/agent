@@ -258,9 +258,6 @@ async fn run_agent(log_options: logs::Options, latch: Latch) -> RunOutcome {
         Outcome::ShutdownRequested => return RunOutcome::Completed,
     }
 
-    // warn before upgrade reconcile rewrites settings.json without the key
-    disk::warn_if_persistence_disabled(&layout.settings()).await;
-
     if let AfterReconcile::Exit(outcome) = reconcile_agent_version(&layout, &latch).await {
         return outcome;
     }

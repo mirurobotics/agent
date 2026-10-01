@@ -1,13 +1,12 @@
 // internal crates
 use crate::deserialize_warn;
-use crate::filesys::{self, files};
 use crate::logs::LogLevel;
 use crate::network::{BackendHost, MqttHost};
 use crate::server::{DEFAULT_ENABLE_TCP_SERVER, DEFAULT_TCP_PORT};
 
 // external crates
 use serde::{Deserialize, Serialize};
-use tracing::{error, warn};
+use tracing::error;
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
 pub struct Settings {
@@ -96,19 +95,6 @@ impl<'de> Deserialize<'de> for Settings {
             }),
         })
     }
-}
-
-/// Logs a warning when `file` sets `is_persistent` to `false`, which the
-/// agent ignores. Returns whether it warned; never fails.
-pub async fn warn_if_persistence_disabled(file: &filesys::File) -> bool {
-    let Ok(value) = files::read_json::<serde_json::Value>(file).await else {
-        return false;
-    };
-    if value.get("is_persistent") != Some(&serde_json::Value::Bool(false)) {
-        return false;
-    }
-    warn!("settings.is_persistent is no longer supported; the agent always runs persistently");
-    true
 }
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
