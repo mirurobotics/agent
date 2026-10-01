@@ -337,11 +337,11 @@ the workbench plan.
   local code execution. Stronger options if needed: clients reject a file
   older than the agent's start, or the file carries a second secret the server
   proves it knows.
-- **Linux configs are world-readable**: `postinst` makes `/srv/miru` mode 0755,
-  so any local account can read deployed configs, unlike Windows (PR 14).
-  Tightening it to `0750 miru:miru` would match, but applications that read
-  configs without being in the `miru` group would break, so it needs a
-  migration note. Not yet scheduled.
+- **Linux configs were world-readable** (resolved by
+  `plans/active/20261001-linux-permission-hardening.md`): `/srv/miru/configs`
+  is now `2750 miru:miru-users`, setgid, and `miru-users` is the Linux
+  counterpart of `Miru Agent Users`; existing `miru` members are migrated on
+  upgrade.
 - **Windows port hijacking while the agent holds the port** (resolved
   2026-10-01): tokio/mio set no socket options on Windows and the agent
   binds the specific address `127.0.0.1:<port>`. Per the bind tables in
