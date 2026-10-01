@@ -339,15 +339,15 @@ function Assert-ProtectedAcl {
     Assert-Equal $count $rules.Count "exactly $count total $LiteralPath ACEs"
     $explicit = @($rules | Where-Object { -not $_.IsInherited })
     Assert-Equal $count $explicit.Count "exactly $count explicit $LiteralPath ACEs"
-    $clientsSid = $null
+    $agentUsersSid = $null
     if ($AgentUsersCanRead) {
-        $clientsSid = Get-AgentUsersGroupSid
-        $clients = @($explicit | Where-Object { (Get-RuleSid $_) -eq $clientsSid })
-        Assert-Equal 1 $clients.Count "$LiteralPath has one $MsiAgentUsersGroup ACE"
-        Assert-AgentUsersReadAce $clients[0] $LiteralPath -Inheritable
+        $agentUsersSid = Get-AgentUsersGroupSid
+        $agentUsers = @($explicit | Where-Object { (Get-RuleSid $_) -eq $agentUsersSid })
+        Assert-Equal 1 $agentUsers.Count "$LiteralPath has one $MsiAgentUsersGroup ACE"
+        Assert-AgentUsersReadAce $agentUsers[0] $LiteralPath -Inheritable
     }
     Assert-ServiceDirectoryAces @($explicit | Where-Object { (Get-RuleSid $_) -eq $MsiServiceSid }) $LiteralPath
-    $adminSids = @($explicit | Where-Object { (Get-RuleSid $_) -notin @($MsiServiceSid, $clientsSid) } |
+    $adminSids = @($explicit | Where-Object { (Get-RuleSid $_) -notin @($MsiServiceSid, $agentUsersSid) } |
         ForEach-Object { Assert-FullControlAce $_ $LiteralPath -Inheritable })
     $expectedAdmins = @($MsiTrustedSids | Where-Object { $_ -ne $MsiServiceSid })
     Assert-Equal (($expectedAdmins | Sort-Object) -join ",") (($adminSids | Sort-Object) -join ",") "$LiteralPath administrator ACE identities"
@@ -505,14 +505,14 @@ function Assert-InheritedProtection {
     Assert-True (-not $acl.AreAccessRulesProtected) "$Path inherits its DACL"
     $rules = @($acl.Access)
     foreach ($rule in $rules) { Assert-True $rule.IsInherited "$Path ACE is inherited" }
-    $clientsSid = $null
+    $agentUsersSid = $null
     if ($AgentUsersCanRead) {
-        $clientsSid = Get-AgentUsersGroupSid
-        $clients = @($rules | Where-Object { (Get-RuleSid $_) -eq $clientsSid })
-        Assert-Equal 1 $clients.Count "$Path has one inherited $MsiAgentUsersGroup ACE"
-        Assert-AgentUsersReadAce $clients[0] $Path
+        $agentUsersSid = Get-AgentUsersGroupSid
+        $agentUsers = @($rules | Where-Object { (Get-RuleSid $_) -eq $agentUsersSid })
+        Assert-Equal 1 $agentUsers.Count "$Path has one inherited $MsiAgentUsersGroup ACE"
+        Assert-AgentUsersReadAce $agentUsers[0] $Path
     }
-    $trusted = @($rules | Where-Object { (Get-RuleSid $_) -ne $clientsSid })
+    $trusted = @($rules | Where-Object { (Get-RuleSid $_) -ne $agentUsersSid })
     Assert-Equal $MsiTrustedSids.Count $trusted.Count "$Path has only trusted inherited ACEs"
     $sids = @($trusted | ForEach-Object { Assert-FullControlAce $_ $Path })
     Assert-TrustedIdentities $sids $Path
