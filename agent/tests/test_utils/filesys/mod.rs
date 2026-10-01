@@ -2,10 +2,14 @@ pub mod dirs;
 pub mod files;
 
 // standard crates
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
 // internal crates
 use miru_agent::filesys::File;
+#[cfg(unix)]
+use miru_agent::filesys::{Dir, PathExt};
 
 /// Path rooted at the host separator (`/a/b` on Unix, `\a\b` on Windows),
 /// built from a `/`-separated string. A `/`-prefixed literal is a relative
@@ -25,4 +29,31 @@ pub fn abs_path(path: &str) -> PathBuf {
 /// A file that does not exist on any host.
 pub fn missing_file() -> File {
     File::new("/nonexistent/definitely/not/here.bin")
+}
+
+/// Assert `file`'s permission bits (including setuid/setgid/sticky) equal `expected`.
+#[cfg(unix)]
+pub async fn assert_file_mode(file: &File, expected: u32) {
+    // full path: the sibling `files` fixture module shadows the library's
+    let perms = miru_agent::filesys::files::permissions(file).await.unwrap();
+    let actual = perms.mode() & 0o7777;
+    assert_eq!(
+        actual,
+        expected,
+        "{:?}: mode {actual:o}, want {expected:o}",
+        file.path()
+    );
+}
+
+/// Assert `dir`'s permission bits (including setuid/setgid/sticky) equal `expected`.
+#[cfg(unix)]
+pub async fn assert_dir_mode(dir: &Dir, expected: u32) {
+    let perms = miru_agent::filesys::dirs::permissions(dir).await.unwrap();
+    let actual = perms.mode() & 0o7777;
+    assert_eq!(
+        actual,
+        expected,
+        "{:?}: mode {actual:o}, want {expected:o}",
+        dir.path()
+    );
 }

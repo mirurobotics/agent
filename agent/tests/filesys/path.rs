@@ -3,7 +3,9 @@ use std::path::{Path, PathBuf};
 
 // internal crates
 use crate::test_utils::filesys::{dirs as test_dirs, files as test_files};
-use miru_agent::filesys::{self, dirs, path, Atomic, FileSysErr, Overwrite, PathExt, WriteOptions};
+use miru_agent::filesys::{
+    self, dirs, path, AppendOptions, Atomic, FileSysErr, Overwrite, PathExt, WriteOptions,
+};
 
 pub mod exists {
     use super::*;
@@ -82,6 +84,43 @@ pub mod write_options {
             Overwrite::Allow
         );
         assert_eq!(WriteOptions::OVERWRITE_NONATOMIC.atomic, Atomic::No);
+    }
+
+    #[test]
+    fn overwrite_atomic_private() {
+        let opts = WriteOptions::OVERWRITE_ATOMIC_PRIVATE;
+        assert_eq!(opts.overwrite, Overwrite::Allow);
+        assert_eq!(opts.atomic, Atomic::Yes);
+        assert_eq!(opts.mode, Some(filesys::PRIVATE_FILE_MODE));
+    }
+
+    #[test]
+    fn private_modes() {
+        assert_eq!(filesys::PRIVATE_FILE_MODE, 0o600);
+        assert_eq!(filesys::PRIVATE_DIR_MODE, 0o700);
+    }
+}
+
+pub mod append_options {
+    use super::*;
+
+    #[test]
+    fn default_has_no_mode() {
+        assert_eq!(AppendOptions::default().mode, None);
+    }
+
+    #[test]
+    fn sync_has_no_mode() {
+        let opts = AppendOptions::SYNC;
+        assert_eq!(opts.sync, filesys::Sync::Yes);
+        assert_eq!(opts.mode, None);
+    }
+
+    #[test]
+    fn sync_private() {
+        let opts = AppendOptions::SYNC_PRIVATE;
+        assert_eq!(opts.sync, filesys::Sync::Yes);
+        assert_eq!(opts.mode, Some(filesys::PRIVATE_FILE_MODE));
     }
 }
 

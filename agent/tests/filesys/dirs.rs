@@ -4,6 +4,8 @@ use std::os::unix::fs::PermissionsExt;
 use std::{env, path::PathBuf};
 
 // internal crates
+#[cfg(unix)]
+use crate::test_utils::filesys::assert_dir_mode;
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::filesys::{self, dirs, files, FileSysErr, Overwrite, PathExt, WriteOptions};
 
@@ -163,6 +165,71 @@ mod create_if_absent {
         dirs::create_if_absent(&dir).await.unwrap();
         assert!(dir.exists());
         assert!(file.exists());
+    }
+}
+
+mod create_private_if_absent {
+    use super::*;
+
+    #[tokio::test]
+    async fn creates_missing_dir() {
+        let temp_dir = test_dirs::temp("testing").unwrap();
+
+        let subdir = temp_dir.subdir(PathBuf::from("a").join("b"));
+        dirs::create_private_if_absent(&subdir).await.unwrap();
+        assert!(subdir.exists());
+    }
+
+    #[tokio::test]
+    async fn existing_dir_keeps_contents() {
+        let dir = test_dirs::temp("testing").unwrap();
+        let file = dir.file("test-file");
+        files::write_string(&file, "arglebargle", WriteOptions::default())
+            .await
+            .unwrap();
+
+        dirs::create_private_if_absent(&dir).await.unwrap();
+        assert!(dir.exists());
+        assert_eq!(files::read_string(&file).await.unwrap(), "arglebargle");
+    }
+
+    #[tokio::test]
+    async fn parent_is_file_errors() {
+        let dir = test_dirs::temp("testing").unwrap();
+        let blocker = dir.file("blocker");
+        files::write_string(&blocker, "not a dir", WriteOptions::default())
+            .await
+            .unwrap();
+
+        let result = dirs::create_private_if_absent(&dir.subdir("blocker").subdir("child")).await;
+        assert!(
+            matches!(result, Err(FileSysErr::CreateDirErr(_))),
+            "expected CreateDirErr, got {result:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn creates_with_0700() {
+        let temp_dir = test_dirs::temp("testing").unwrap();
+
+        let subdir = temp_dir.subdir("private");
+        dirs::create_private_if_absent(&subdir).await.unwrap();
+        assert_dir_mode(&subdir, 0o700).await;
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn tightens_existing_0755() {
+        let temp_dir = test_dirs::temp("testing").unwrap();
+        let subdir = temp_dir.subdir("private");
+        dirs::create(&subdir).await.unwrap();
+        dirs::set_permissions(&subdir, std::fs::Permissions::from_mode(0o755))
+            .await
+            .unwrap();
+
+        dirs::create_private_if_absent(&subdir).await.unwrap();
+        assert_dir_mode(&subdir, 0o700).await;
     }
 }
 

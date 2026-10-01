@@ -1,4 +1,10 @@
+// standard crates
+#[cfg(unix)]
+use std::{fs::Permissions, os::unix::fs::PermissionsExt};
+
 // internal crates
+#[cfg(unix)]
+use crate::test_utils::filesys::{assert_dir_mode, assert_file_mode};
 use crate::test_utils::filesys::{dirs as test_dirs, files as test_files};
 use miru_agent::authn;
 use miru_agent::disk::{self, Layout, Settings};
@@ -132,6 +138,37 @@ pub mod bootstrap {
 
         // validate the storage
         validate_storage(&layout).await;
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn clean_install_sets_private_modes() {
+        let dir = test_dirs::temp("testing").unwrap();
+        let layout = Layout::new(dir.to_dir());
+        let (private_key_file, public_key_file) = create_temp_key_files(&layout).await;
+
+        disk::setup::bootstrap(
+            &layout,
+            &Device::default(),
+            &Settings::default(),
+            &private_key_file,
+            &public_key_file,
+            AGENT_VERSION,
+        )
+        .await
+        .unwrap();
+
+        // key modes are the provisioner's concern; bootstrap only moves them
+        let auth_dir = layout.auth();
+        assert_dir_mode(&auth_dir.root, 0o700).await;
+        for file in [
+            auth_dir.token(),
+            layout.device(),
+            layout.settings(),
+            layout.agent_version(),
+        ] {
+            assert_file_mode(&file, 0o600).await;
+        }
     }
 
     #[tokio::test]
@@ -471,5 +508,38 @@ pub mod reset {
             .unwrap();
 
         assert_marker(&layout, "v0.0.2").await;
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn tightens_existing_auth_dir() {
+        let dir = test_dirs::temp("testing").unwrap();
+        let layout = Layout::new(dir.to_dir());
+        write_existing_keys(&layout).await;
+
+        // legacy modes from before the data root was private
+        let auth_dir = layout.auth();
+        dirs::set_permissions(&auth_dir.root, Permissions::from_mode(0o755))
+            .await
+            .unwrap();
+        test_files::seed(&layout.device(), "{}").await;
+        files::set_permissions(&layout.device(), Permissions::from_mode(0o644))
+            .await
+            .unwrap();
+
+        disk::setup::reset(&layout, &Device::default(), &Settings::default(), "v1.0.0")
+            .await
+            .unwrap();
+
+        assert_dir_mode(&auth_dir.root, 0o700).await;
+        for file in [
+            layout.device(),
+            layout.settings(),
+            auth_dir.token(),
+            layout.agent_version(),
+        ] {
+            assert_file_mode(&file, 0o600).await;
+        }
+        assert_keys_preserved(&layout).await;
     }
 }
