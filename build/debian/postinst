@@ -19,65 +19,18 @@ create_miru_user() {
   fi
 }
 
-# The file systemd-tmpfiles uses for miru-agent.conf: an admin override in
-# /etc or /run takes precedence over the packaged one.
-tmpfiles_conf() {
-  for dir in /etc/tmpfiles.d /run/tmpfiles.d /usr/lib/tmpfiles.d; do
-    if [ -f "$dir/miru-agent.conf" ]; then
-      echo "$dir/miru-agent.conf"
-      return 0
-    fi
-  done
-  return 1
-}
-
-folder_error() {
-  printf "\033[31m %s\033[0m\n" "$*" >&2
-}
-
-# The tmpfiles.d entry owns the folder modes (also re-applied at every boot).
-# Each folder is the access boundary for its contents, so nothing inside is
-# touched. systemd-tmpfiles exits 0 when it cannot fix a path, so check every
-# `d` entry afterwards and fail the configure rather than leave the data root
-# readable by others.
-apply_folder_modes() {
-  conf=$(tmpfiles_conf) || { folder_error "miru-agent.conf not found in tmpfiles.d"; return 1; }
-  systemd-tmpfiles --create miru-agent.conf || return 1
-  while read -r type path mode user group _; do
-    [ "$type" = d ] || continue
-    # tmpfiles skips a folder an admin symlinked elsewhere (e.g. to another
-    # partition), so apply the entry to the target. Only root can create these
-    # paths, so following the link is safe.
-    if [ -L "$path" ] && [ -d "$path" ]; then
-      if ! chown "$user:$group" "$path/" || ! chmod "$mode" "$path/"; then
-        folder_error "$path: cannot set $user:$group $mode on the symlink target"
-        return 1
-      fi
-    fi
-    if [ ! -d "$path" ]; then
-      folder_error "$path: not a directory"
-      return 1
-    fi
-    got=$(stat -L -c '%a %U %G' "$path")
-    if [ "$got" != "${mode#0} $user $group" ]; then
-      folder_error "$path: is '$got', want '${mode#0} $user $group' (from $conf)"
-      return 1
-    fi
-  done < "$conf"
-}
-
 post_install() {
     socket_name="$1"
     printf "\033[32m Post Install of an upgrade\033[0m\n"
 
-    # create the miru user and group, then the miru directories
+    # create the miru user and group
     create_miru_group
     create_miru_user
-    printf "\033[32m Applying the miru directory modes\033[0m\n"
-    if ! apply_folder_modes; then
-      printf "\033[31m Failed to set ownership and modes of the miru directories\033[0m\n" >&2
-      exit 1
-    fi
+
+    # create the miru directories and apply their modes; tmpfiles.d re-applies
+    # them at every boot
+    printf "\033[32m Creating the miru directories\033[0m\n"
+    systemd-tmpfiles --create miru-agent.conf || exit 1
 
     # reload the unit from disk 
     printf "\033[32m Reload the service unit from disk\033[0m\n"

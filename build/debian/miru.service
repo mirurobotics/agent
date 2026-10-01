@@ -52,9 +52,6 @@ RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 RestrictRealtime=true
 # Prevents creating or executing set-user-ID or set-group-ID files
 RestrictSUIDSGID=true
-# Drops every capability from the bounding and ambient sets
-CapabilityBoundingSet=
-AmbientCapabilities=
 # Locks the execution domain (personality) so it cannot be changed
 LockPersonality=true
 # Prevents creating new namespaces
