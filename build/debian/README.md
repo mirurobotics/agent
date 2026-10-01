@@ -19,7 +19,8 @@ at boot and service start.
 | `/var/lib/miru/auth/public_key.pem` | `0640` | `miru` | `miru` |
 | `/var/log/miru` | `0750` | `miru` | `miru` |
 | `/srv/miru` | `0755` | `miru` | `miru` |
-| `/srv/miru/configs` and its subfolders | `2750` | `miru` | `miru-users` |
+| `/srv/miru/configs` | `2750` | `miru` | `miru-users` |
+| Folders under `/srv/miru/configs` | `2755` (umask; `2750` if present at install or upgrade) | `miru` | `miru-users` |
 | Configs deployed under `/srv/miru/configs` | `0644` (umask; `0640` after an upgrade until redeployed) | `miru` | `miru-users` |
 | `/run/miru` | `2750` | `miru` | `miru-users` |
 | `/run/miru/miru.sock` | `0660` | `root` | `miru-users` |
@@ -52,8 +53,9 @@ starts; log out and back in, or restart the application's service. For a
 systemd service, `SupplementaryGroups=miru-users` in its unit (or a drop-in)
 works as well.
 
-Never add accounts to the `miru` group: it is the agent's own primary group and
-grants nothing to applications.
+Never add accounts to the `miru` group: it is the agent's own primary group. It
+grants read access to the agent's logs in `/var/log/miru`, but not to the
+socket or configs. To read the logs, use `journalctl -u miru` or `sudo`.
 
 ## Upgrading (breaking)
 
@@ -64,6 +66,9 @@ Before this change, apps used the `miru` group for the socket, configs in
 - tightens the data root, `auth/`, and the agent's files to owner-only;
 - moves the socket, `/run/miru`, and `/srv/miru/configs` to the `miru-users`
   group and removes access by others from `/srv/miru/configs`;
+- removes access by others from `/var/log/miru` and its log files, which only
+  root and the `miru` user and group can now read (the same logs are in
+  `journalctl -u miru`);
 - creates `miru-users` and, once, copies into it every account listed as a
   `miru` member in `/etc/group` and every account whose primary group is
   `miru`. Those accounts must log in again, or their services must restart,

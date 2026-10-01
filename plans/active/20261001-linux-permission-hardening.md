@@ -42,7 +42,8 @@ Out of scope: changing the service `UMask` (consumers of configs deployed outsid
 
 ## Decision Log
 
-(Add entries as work proceeds.)
+- Decision: postinst takes each tree's top folder from `miru` (root-owned, no group or other write) before any chmod and hands it back with `chown -R` last, because GNU chmod follows command-line symlinks and `miru` can swap entries in folders it owns. A symlinked `/srv/miru/configs` is skipped with a warning rather than deleted, so an admin's deliberate symlink is not broken. A reconfigure runs postinst with the service up, and a miru process holding a folder open inside a tree could still swap entries after the handoff, so post_install stops miru.socket and miru.service first (both are restarted at its end).
+  Date: 2026-10-01
 
 ## Outcomes & Retrospective
 
@@ -135,28 +136,42 @@ Tests (all mode assertions `#[cfg(unix)]`). Add two `#[cfg(unix)]` helpers to `a
       done
     }
 
-    # Runs on every configure. The old postrm stops the service before this
-    # runs, so it cannot race these recursive changes; chown -R also never
-    # follows symlinks met during traversal.
+    # Runs as root on every configure, after post_install stops the service. miru
+    # owns these trees and could swap an entry for a symlink, which chmod follows,
+    # so each tree's top folder is taken from miru before any chmod and handed
+    # back last. That only blocks new path lookups; the stop also ends any miru
+    # process holding a folder open inside. chown -R never follows symlinks.
     apply_permissions() {
-      mkdir -p /var/lib/miru /var/log/miru /srv/miru/configs
-      chown -R miru:miru /var/lib/miru
+      mkdir -p /var/lib/miru /var/log/miru /srv/miru
+      chown root:root /var/lib/miru /var/log/miru /srv/miru
+      chmod 0700 /var/lib/miru /var/log/miru
+      chmod 0755 /srv/miru
+
       chmod -R u=rwX,go= /var/lib/miru
       pub=/var/lib/miru/auth/public_key.pem
-      if [ -f "$pub" ] && [ ! -L "$pub" ]; then chmod 0640 "$pub"; fi
+      if [ ! -L /var/lib/miru/auth ] && [ -f "$pub" ] && [ ! -L "$pub" ]; then
+        chmod 0640 "$pub"
+      fi
+      chown -R miru:miru /var/lib/miru
 
-      chown -R miru:miru /var/log/miru
       chmod -R o-rwx /var/log/miru
       chmod 0750 /var/log/miru
+      chown -R miru:miru /var/log/miru
 
+      if [ -L /srv/miru/configs ]; then
+        printf "\033[33m /srv/miru/configs is a symlink; leaving its permissions unchanged\033[0m\n"
+      else
+        mkdir -p /srv/miru/configs
+        chown root:root /srv/miru/configs
+        chmod 0700 /srv/miru/configs
+        chmod -R g+rX,g-w,o-rwx /srv/miru/configs
+        find /srv/miru/configs -type d -exec chmod g+s {} +
+        chown -R miru:miru-users /srv/miru/configs
+      fi
       chown miru:miru /srv/miru
-      chmod 0755 /srv/miru
-      chown -R miru:miru-users /srv/miru/configs
-      chmod -R g+rX,g-w,o-rwx /srv/miru/configs
-      find /srv/miru/configs -type d -exec chmod g+s {} +
     }
 
-`post_install` order: `create_miru_group`, `create_miru_user`, `create_miru_users_group`, `apply_permissions`, then the existing tmpfiles/daemon-reload/socket/service steps. Quote `"${socket_name}"` at the two call sites.
+`post_install` order: `create_miru_group`, `create_miru_user`, `create_miru_users_group`, `systemctl stop "${socket_name}" "${service_name}" 2>/dev/null || true`, `apply_permissions`, then the existing tmpfiles/daemon-reload/socket/service steps. Quote `"${socket_name}"` at the two call sites.
 
 `build/debian/miru-agent.tmpfiles`:
 
@@ -176,8 +191,9 @@ New `build/debian/tests/postinst-test.sh` (bash, `set -euo pipefail`, `usage()`,
 2. Upgrade scenario: recreates the verified legacy device state (group/user `miru`; user `app1` with supplementary group `miru`; user `app2` with primary group `miru`; `/var/lib/miru` `755`, `auth/` `775`, `token.json`/`device.json` `644`, `private_key.pem` `600`, `public_key.pem` `640`; `/var/log/miru` `755`; `/srv/miru/configs/v1/motion.json` `644`, folders `755`; all `miru:miru`), runs `sh /src/build/debian/postinst configure 0.10.3`, and asserts `stat -c '%a %U %G'` for every row of the table in Validation, plus `id -nG app1` and `id -nG app2` contain `miru-users`.
 3. Setgid check as the real service user (not a member): `runuser -u miru -- sh -c 'umask 022; mkdir -p /srv/miru/configs/new && echo x > /srv/miru/configs/new/f'`, expect `/srv/miru/configs/new` `2755 miru miru-users` and `f` `644 miru miru-users`.
 4. Idempotence: `gpasswd -d app1 miru-users`, run postinst again, expect the same table and `app1` NOT back in `miru-users`.
-5. Fresh install: `groupdel miru-users`, remove the folders, run `sh /src/build/debian/postinst configure` (empty `$2`), expect the table's rows for `/var/lib/miru`, `/var/log/miru`, `/srv/miru`, `/srv/miru/configs`, and `/run/miru`.
-6. `systemd-analyze verify /lib/systemd/system/miru.socket /lib/systemd/system/miru.service`; fail on a non-zero exit or output containing `Unknown key name` or `Failed to parse`.
+5. Symlink safety: `mkdir /victim && chmod 0755 /victim`, replace `/srv/miru/configs` with `ln -s /victim /srv/miru/configs` (owned by miru), run postinst, and expect `/victim` still `755 root root`, postinst output containing `is a symlink`, and `/srv/miru` `755 miru miru`. Then restore the folder.
+6. Fresh install: `groupdel miru-users`, remove the folders, run `sh /src/build/debian/postinst configure` (empty `$2`), expect the table's rows for `/var/lib/miru`, `/var/log/miru`, `/srv/miru`, `/srv/miru/configs`, and `/run/miru`.
+7. `systemd-analyze verify /lib/systemd/system/miru.socket /lib/systemd/system/miru.service`; fail on a non-zero exit or output containing `Unknown key name` or `Failed to parse`.
 
 Print `PASS <check>` per check, exit non-zero on the first failure, and end with `all postinst checks passed`.
 
