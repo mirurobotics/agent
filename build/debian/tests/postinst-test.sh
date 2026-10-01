@@ -48,8 +48,8 @@ readonly debian_dir="$repo_root/build/debian"
 readonly postinst_out=/tmp/postinst.out
 readonly systemctl_log=/tmp/systemctl.log
 
-# Folders postinst owns, with the modes it must leave them in. /run/miru comes
-# from the tmpfiles.d entry: only systemctl is mocked, so postinst's
+# Folders postinst owns, with the modes it must leave them in. All come from
+# the tmpfiles.d entry: only systemctl is mocked, so postinst's
 # `systemd-tmpfiles --create` runs for real.
 readonly folders=(
 	"/var/lib/miru 700"
@@ -223,6 +223,14 @@ test_fresh_install_creates_account_and_folders() {
 	expect_units_restarted
 }
 
+test_boot_restores_drifted_folder_modes() {
+	seed_legacy_install
+	expect_postinst_ok configure 0.10.3
+	chmod 755 /var/lib/miru /var/log/miru
+	systemd-tmpfiles --create miru-agent.conf || fail "systemd-tmpfiles failed"
+	expect_folder_modes
+}
+
 test_permission_failure_fails_configure() {
 	seed_legacy_install
 	rm -rf /srv/miru
@@ -234,6 +242,11 @@ test_units_are_valid() {
 	local verify_out
 	grep -qx 'SocketGroup=miru' "$debian_dir/miru.socket" ||
 		fail "miru.socket: want SocketGroup=miru"
+	# systemd applies these at service start, so they must match tmpfiles.d
+	grep -qx 'StateDirectoryMode=0700' "$debian_dir/miru.service" ||
+		fail "miru.service: want StateDirectoryMode=0700"
+	grep -qx 'LogsDirectoryMode=0750' "$debian_dir/miru.service" ||
+		fail "miru.service: want LogsDirectoryMode=0750"
 	verify_out=$(systemd-analyze verify /lib/systemd/system/miru.socket \
 		/lib/systemd/system/miru.service 2>&1) ||
 		fail "systemd-analyze verify failed:

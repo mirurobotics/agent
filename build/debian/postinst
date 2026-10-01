@@ -19,33 +19,34 @@ create_miru_user() {
   fi
 }
 
-# Runs on every configure. Each top folder is the access boundary for its
-# contents, so nothing inside is touched. Their parents are root-owned, so miru
-# cannot swap these paths for symlinks.
-apply_permissions() {
-  mkdir -p /var/lib/miru /var/log/miru /srv/miru &&
-    chown miru:miru /var/lib/miru /var/log/miru /srv/miru &&
-    chmod 0700 /var/lib/miru &&
-    chmod 0750 /var/log/miru &&
-    chmod 0755 /srv/miru
+tmpfiles_conf=/usr/lib/tmpfiles.d/miru-agent.conf
+
+# The tmpfiles.d entry owns the folder modes (also re-applied at every boot).
+# Each folder is the access boundary for its contents, so nothing inside is
+# touched. systemd-tmpfiles exits 0 when it cannot fix a path, so check every
+# `d` entry afterwards and fail the configure rather than leave the data root
+# readable by others.
+apply_folder_modes() {
+  systemd-tmpfiles --create miru-agent.conf || return 1
+  while read -r type path mode user group _; do
+    [ "$type" = d ] || continue
+    if [ ! -d "$path" ] || [ -L "$path" ]; then return 1; fi
+    [ "$(stat -c '%a %U %G' "$path")" = "${mode#0} $user $group" ] || return 1
+  done < "$tmpfiles_conf"
 }
 
 post_install() {
     socket_name="$1"
     printf "\033[32m Post Install of an upgrade\033[0m\n"
 
-    # create the miru user and group, then apply ownership and modes
+    # create the miru user and group, then the miru directories
     create_miru_group
     create_miru_user
-    # fail the configure rather than leave the data root readable by others
-    if ! apply_permissions; then
+    printf "\033[32m Applying the miru directory modes\033[0m\n"
+    if ! apply_folder_modes; then
       printf "\033[31m Failed to set ownership and modes of the miru directories\033[0m\n" >&2
       exit 1
     fi
-
-    # create /run/miru now; tmpfiles.d recreates it at every boot
-    printf "\033[32m Creating the /run/miru directory\033[0m\n"
-    systemd-tmpfiles --create miru-agent.conf
 
     # reload the unit from disk 
     printf "\033[32m Reload the service unit from disk\033[0m\n"

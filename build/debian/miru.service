@@ -11,6 +11,8 @@ Group=miru
 User=miru
 
 # runtime
+# The modes must match miru-agent.tmpfiles: without them systemd defaults to
+# 0755 and may apply that to the existing folders at start.
 StateDirectory=miru
 StateDirectoryMode=0700
 LogsDirectory=miru
