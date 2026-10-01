@@ -46,6 +46,9 @@
         <Directory Id="MIRUDEVICEAPI" Name="device-api">
           <Directory Id="MIRUDEVICEAPISENTINEL" Name="installer-sentinel" />
         </Directory>
+        <Directory Id="MIRUCONFIGS" Name="configs">
+          <Directory Id="MIRUCONFIGSSENTINEL" Name="installer-sentinel" />
+        </Directory>
       </Directory>
     </StandardDirectory>
 
@@ -99,18 +102,22 @@
          its contents. Hardcoded because CreateFolders runs before the service
          exists; recompute if the service Name changes.
          The installer-sentinel folders, which the service cannot delete, keep
-         logs, auth, tmp, and device-api non-empty so that none can become a
-         mount point that a repair or upgrade follows; they are permanent. -->
-    <!-- device-api holds the local device API discovery file (port and bearer
-         token). The Miru Agent Users local group gets inheritable read on
-         it, and nothing on ProgramData\Miru itself: bypass traverse checking
-         lets members open the file by full path. The group's SID is machine-specific,
-         so util:PermissionEx adds its ACE by name after CreateFolders applies
-         the protected descriptor; the ACE is reapplied on repair and upgrade and
-         restored by WiX's rollback of that action. The group is created if
-         missing and kept on uninstall with its members, because device-api and
-         its ACE survive uninstall too. Never grant Users or Authenticated Users
-         here: whoever can read the file can call every device API route. -->
+         logs, auth, tmp, device-api, and configs non-empty so that none can
+         become a mount point that a repair or upgrade follows; they are
+         permanent. -->
+    <!-- The Miru Agent Users local group, for applications that use the agent,
+         gets inheritable read on two folders and nothing on ProgramData\Miru
+         itself (bypass traverse checking lets members open files by full path):
+         device-api, which holds the local device API discovery file (port and
+         bearer token), and configs, the default config deployment target. The
+         group's SID is machine-specific, so util:PermissionEx adds its ACE by
+         name after CreateFolders applies the protected descriptor; the ACE is
+         reapplied on repair and upgrade and restored by WiX's rollback of that
+         action. The group is created if missing and kept on uninstall with its
+         members, because these folders and their ACEs survive uninstall too.
+         Never grant Users or Authenticated Users here: whoever can read the
+         discovery file can call every device API route, and configs may hold
+         secrets. -->
     <ComponentGroup Id="DataDirs">
       <Component Id="MiruDataDir" Directory="MIRUDATA" Guid="D0542DF7-5B61-4F09-938B-57F05C1B5458" Bitness="always64" KeyPath="yes">
         <CreateFolder>
@@ -147,6 +154,14 @@
                     UpdateIfExists="yes"
                     RemoveOnUninstall="no" />
       </Component>
+      <Component Id="MiruConfigsDir" Directory="MIRUCONFIGS" Guid="8491B347-8F1B-45B1-9F15-B3EE02A99885" Bitness="always64" KeyPath="yes">
+        <CreateFolder>
+          <PermissionEx Sddl="O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;;FRFWFX;;;S-1-5-80-1251439239-454917380-1008020685-2030257057-91624695)(A;OICIIO;FA;;;S-1-5-80-1251439239-454917380-1008020685-2030257057-91624695)" />
+          <util:PermissionEx User="Miru Agent Users"
+                             Read="yes" ReadAttributes="yes" ReadExtendedAttributes="yes"
+                             ReadPermission="yes" Synchronize="yes" />
+        </CreateFolder>
+      </Component>
       <Component Id="MiruLogsSentinel" Directory="MIRULOGSSENTINEL" Guid="51B41B07-B719-4D73-BD1E-3675FC8E7CA8" Bitness="always64" KeyPath="yes" Permanent="yes">
         <CreateFolder>
           <PermissionEx Sddl="O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)" />
@@ -163,6 +178,11 @@
         </CreateFolder>
       </Component>
       <Component Id="MiruDeviceApiSentinel" Directory="MIRUDEVICEAPISENTINEL" Guid="3E26D821-026B-49A2-964F-FEC9D3CFB2F6" Bitness="always64" KeyPath="yes" Permanent="yes">
+        <CreateFolder>
+          <PermissionEx Sddl="O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)" />
+        </CreateFolder>
+      </Component>
+      <Component Id="MiruConfigsSentinel" Directory="MIRUCONFIGSSENTINEL" Guid="91A81046-9E39-4AD5-836B-8F4884770163" Bitness="always64" KeyPath="yes" Permanent="yes">
         <CreateFolder>
           <PermissionEx Sddl="O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)" />
         </CreateFolder>

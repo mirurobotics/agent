@@ -38,13 +38,16 @@ function Initialize-IntegrationPaths {
     $script:authRoot = Join-Path $script:programDataRoot "auth"
     $script:tmpRoot = Join-Path $script:programDataRoot "tmp"
     $script:deviceApiRoot = Join-Path $script:programDataRoot "device-api"
+    $script:configsRoot = Join-Path $script:programDataRoot "configs"
+    # Protected like the roots above, plus read for Miru Agent Users.
+    $script:agentUsersRoots = @($script:deviceApiRoot, $script:configsRoot)
     $script:protectedRoots = @(
         $script:programDataRoot,
         $script:logsRoot,
         $script:authRoot,
         $script:tmpRoot
     )
-    $script:installerSentinelDirs = @($script:logsRoot, $script:authRoot, $script:tmpRoot, $script:deviceApiRoot | ForEach-Object { Join-Path $_ $MsiSentinelName })
+    $script:installerSentinelDirs = @($script:logsRoot, $script:authRoot, $script:tmpRoot, $script:deviceApiRoot, $script:configsRoot | ForEach-Object { Join-Path $_ $MsiSentinelName })
     $script:markerPath = Join-Path $script:programDataRoot "rollback-payload.txt"
     $script:customerOwnedFiles = @(
         (New-CustomerOwnedFile (Join-Path $script:programDataRoot `

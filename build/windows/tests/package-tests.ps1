@@ -170,7 +170,7 @@ function Assert-AgentUsersGroupRows {
         "FROM ``Wix4Group``"
     $groups = @(Get-MsiRows $Database $groupQuery 4)
     Assert-Equal 1 $groups.Count "one group row"
-    Assert-Equal $MsiAgentUsersComponent $groups[0][1] "group owning component"
+    Assert-Equal $MsiAgentUsersGroupComponent $groups[0][1] "group owning component"
     Assert-Equal $MsiAgentUsersGroup $groups[0][2] "group name"
     Assert-True ([string]::IsNullOrEmpty($groups[0][3])) "group is local"
     $attributeQuery = "SELECT ``Group_``, ``Attributes`` FROM ``Wix6Group``"
@@ -183,23 +183,22 @@ function Assert-AgentUsersGroupRows {
     Assert-Equal 0 ($flags -band 0x610) "group is created if missing, reused if present, and vital"
 }
 
-# Exactly one util:PermissionEx row: inheritable read on device-api for the
-# group. No other account (such as Users) gains access through the extension.
+# Exactly one util:PermissionEx row per group-readable folder: inheritable,
+# read-only, local group. No other account (such as Users) gains access
+# through the extension. Columns: object, table, domain, user, attributes
+# (1 = inheritable), permission, component.
 function Assert-AgentUsersPermissionRows {
     param([Parameter(Mandatory = $true)]$Database)
     Assert-True (Test-MsiTable $Database "Wix4SecureObject") "WiX Util permission table present"
     $query = "SELECT ``SecureObject``, ``Table``, ``Domain``, ``User``, " + `
         "``Attributes``, ``Permission``, ``Component_`` FROM ``Wix4SecureObject``"
-    $rows = @(Get-MsiRows $Database $query 7)
-    Assert-Equal 1 $rows.Count "one extension permission row"
-    $row = $rows[0]
-    Assert-Equal $MsiAgentUsersDirectoryId $row[0] "extension permission object"
-    Assert-Equal "CreateFolder" $row[1] "extension permission object table"
-    Assert-True ([string]::IsNullOrEmpty($row[2])) "extension permission account is local"
-    Assert-Equal $MsiAgentUsersGroup $row[3] "extension permission account"
-    Assert-Equal 1 ([int]$row[4]) "extension permission is inheritable"
-    Assert-Equal $MsiAgentUsersRights ([int]$row[5]) "extension permission grants read only"
-    Assert-Equal $MsiAgentUsersComponent $row[6] "extension permission owning component"
+    $actual = @(Get-MsiRows $Database $query 7 | ForEach-Object {
+        "{0}|{1}|{2}|{3}|{4}|{5}|{6}" -f $_[0], $_[1], $_[2], $_[3], [int]$_[4], [int]$_[5], $_[6]
+    } | Sort-Object)
+    $expected = @($MsiAgentUsersFolders | ForEach-Object {
+        "{0}|CreateFolder||{1}|1|{2}|{3}" -f $_[0], $MsiAgentUsersGroup, $MsiAgentUsersRights, $_[1]
+    } | Sort-Object)
+    Assert-Equal ($expected -join "`n") ($actual -join "`n") "exact extension permission rows"
 }
 
 function Assert-FixtureIsolation {

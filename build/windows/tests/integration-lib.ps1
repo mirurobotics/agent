@@ -168,7 +168,7 @@ function Invoke-InstallStage {
 # Loosen every protected directory so the next installer operation must repair it.
 function Add-PermissiveAces {
     param([string]$OwnerSid = "")
-    foreach ($path in @($protectedRoots) + @($deviceApiRoot) + @($installerSentinelDirs)) {
+    foreach ($path in @($protectedRoots) + @($agentUsersRoots) + @($installerSentinelDirs)) {
         Set-PermissiveAcl $path $OwnerSid
         Assert-PermissiveAcl $path $OwnerSid
     }
@@ -300,7 +300,7 @@ function Assert-CustomerGrant {
 
 function Assert-ProtectedRootsRetained {
     param([Parameter(Mandatory = $true)][string]$Stage)
-    foreach ($path in @($protectedRoots) + @($deviceApiRoot)) {
+    foreach ($path in @($protectedRoots) + @($agentUsersRoots)) {
         Assert-True (Test-Path -LiteralPath $path -PathType Container) `
             "$Stage keeps $path"
     }
@@ -320,12 +320,12 @@ function Assert-OwnedFilesRetained {
 
 function Assert-ProtectedAcls {
     foreach ($path in $protectedRoots) { Assert-ProtectedAcl $path }
-    Assert-ProtectedAcl $deviceApiRoot -AgentUsersCanRead
+    foreach ($path in $agentUsersRoots) { Assert-ProtectedAcl $path -AgentUsersCanRead }
     foreach ($path in $installerSentinelDirs) { Assert-InstallerSentinelAcl $path }
 }
 
-# -AgentUsersCanRead: device-api, which also has one inheritable read ACE for the
-# Miru Agent Users group.
+# -AgentUsersCanRead: device-api and configs, which also have one inheritable
+# read ACE for the Miru Agent Users group.
 function Assert-ProtectedAcl {
     param(
         [Parameter(Mandatory = $true)][string]$LiteralPath,
@@ -451,7 +451,7 @@ function Assert-TrustedIdentities {
 }
 
 # Probes as a non-member and as a Miru Agent Users member. Only the member may
-# read, and only the file in device-api.
+# read, and only the files in device-api and configs.
 function Invoke-NonAdminProbe {
     param([Parameter(Mandatory = $true)][string]$Stage)
     $files = @(New-RepresentativeFiles -Stage $Stage)
@@ -470,10 +470,11 @@ function Invoke-NonAdminProbe {
 
 # Fresh files in each protected directory prove inheritance without relying on
 # files secured by an earlier operation. The device-api file stands in for the
-# discovery file, which only the running agent writes.
+# discovery file, which only the running agent writes, and the configs file for
+# a deployed config.
 function New-RepresentativeFiles {
     param([Parameter(Mandatory = $true)][string]$Stage)
-    return @(@($protectedRoots) + @($deviceApiRoot) | ForEach-Object { New-RepresentativeFile $_ $Stage })
+    return @(@($protectedRoots) + @($agentUsersRoots) | ForEach-Object { New-RepresentativeFile $_ $Stage })
 }
 
 function New-RepresentativeFile {
@@ -486,7 +487,7 @@ function New-RepresentativeFile {
         Path = Join-Path $Parent ("representative-$Stage-" + [Guid]::NewGuid().ToString("N") + ".txt")
         Contents = "representative-$Stage-" + [Guid]::NewGuid().ToString("N")
         CreatePath = Join-Path $Parent ("non-admin-" + [Guid]::NewGuid().ToString("N") + ".txt")
-        AgentUsersCanRead = ($Parent -eq $deviceApiRoot)
+        AgentUsersCanRead = ($agentUsersRoots -contains $Parent)
     }
     [IO.File]::WriteAllText($file.Path, $file.Contents)
     Assert-True (Test-Path -LiteralPath $file.Path -PathType Leaf) "representative read target exists"
@@ -876,7 +877,9 @@ function Write-FailureEvidence {
     try {
         Write-Host "Related products: $(@(Get-RelatedProducts) -join ', ')"
         if (Test-Path -LiteralPath $programDataRoot) { & icacls.exe $programDataRoot }
-        if (Test-Path -LiteralPath $deviceApiRoot) { & icacls.exe $deviceApiRoot }
+        foreach ($path in $agentUsersRoots) {
+            if (Test-Path -LiteralPath $path) { & icacls.exe $path }
+        }
         if (Test-Path -LiteralPath $agentPath) { Get-FileHash -Algorithm SHA256 -LiteralPath $agentPath }
         if (Test-Path -LiteralPath $markerPath) { Write-Host "Marker: $(Get-Marker)" }
     }
