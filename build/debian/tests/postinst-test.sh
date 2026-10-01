@@ -44,61 +44,73 @@ if [ "$in_container" -eq 0 ]; then
 		/src/build/debian/tests/postinst-test.sh --in-container
 fi
 
-debian_dir="$repo_root/build/debian"
-postinst_out=/tmp/postinst.out
-systemctl_log=/tmp/systemctl.log
+readonly debian_dir="$repo_root/build/debian"
+readonly postinst_out=/tmp/postinst.out
+readonly systemctl_log=/tmp/systemctl.log
+
+# Folders postinst owns, with the modes it must leave them in.
+readonly folders=(
+	"/var/lib/miru 700"
+	"/var/log/miru 750"
+	"/srv/miru 755"
+	"/run/miru 750"
+)
+
+# What an older release left inside those folders ("<d|f> <path> <mode>").
+# postinst must not change any of it: the folders are the access boundary.
+readonly legacy_contents=(
+	"d /var/lib/miru/auth 775"
+	"f /var/lib/miru/auth/token.json 644"
+	"f /var/log/miru/miru.log 644"
+	"d /srv/miru/configs 755"
+	"d /srv/miru/configs/v1 755"
+	"f /srv/miru/configs/v1/motion.json 644"
+)
+
+# ================================ assertions ================================ #
 
 fail() {
 	echo "FAIL: $*" >&2
-	if [ -f "$postinst_out" ]; then
+	if [ -s "$postinst_out" ]; then
 		echo "--- last postinst output ---" >&2
 		cat "$postinst_out" >&2
 	fi
 	exit 1
 }
 
-pass() {
-	echo "PASS $*"
-}
-
-run_postinst() {
-	: >"$systemctl_log"
-	sh "$debian_dir/postinst" "$@" >"$postinst_out" 2>&1 || fail "postinst $* exited non-zero"
-}
-
-# expect_stat <path> '<mode> <owner> <group>'
+# expect_stat <path> <mode>: <path> has <mode> and is owned by miru:miru
 expect_stat() {
 	local got
 	got=$(stat -c '%a %U %G' "$1") || fail "stat $1"
-	[ "$got" = "$2" ] || fail "$1: got '$got', want '$2'"
+	[ "$got" = "$2 miru miru" ] || fail "$1: got '$got', want '$2 miru miru'"
 }
 
-expect_table() {
-	expect_stat /var/lib/miru '700 miru miru'
-	expect_stat /var/log/miru '750 miru miru'
-	expect_stat /srv/miru '755 miru miru'
-	expect_stat /run/miru '750 miru miru'
+expect_folder_modes() {
+	local entry
+	for entry in "${folders[@]}"; do
+		# shellcheck disable=SC2086 # split "<path> <mode>"
+		expect_stat $entry
+	done
 }
 
-# The folders are the boundary; postinst leaves everything inside them as is.
-expect_contents_unchanged() {
-	expect_stat /var/lib/miru/auth '775 miru miru'
-	expect_stat /var/lib/miru/auth/token.json '644 miru miru'
-	expect_stat /var/log/miru/miru.log '644 miru miru'
-	expect_stat /srv/miru/configs '755 miru miru'
-	expect_stat /srv/miru/configs/v1/motion.json '644 miru miru'
+expect_legacy_contents_unchanged() {
+	local entry type path mode
+	for entry in "${legacy_contents[@]}"; do
+		read -r type path mode <<<"$entry"
+		expect_stat "$path" "$mode"
+	done
 }
 
-# expect_access <path> <yes|no>: whether an unrelated account can read <path>
-expect_access() {
-	if runuser -u nobody -- cat "$1" >/dev/null 2>&1; then
-		[ "$2" = yes ] || fail "nobody can read $1"
-	else
-		[ "$2" = no ] || fail "nobody cannot read $1"
-	fi
+# An unrelated account stands in for "other" local users.
+expect_readable_by_others() {
+	runuser -u nobody -- cat "$1" >/dev/null 2>&1 || fail "others cannot read $1"
 }
 
-expect_systemctl_log() {
+expect_unreadable_by_others() {
+	! runuser -u nobody -- cat "$1" >/dev/null 2>&1 || fail "others can read $1"
+}
+
+expect_units_restarted() {
 	local want
 	want=$(printf '%s\n' \
 		'daemon-reload' \
@@ -110,93 +122,136 @@ expect_systemctl_log() {
 		fail "systemctl calls: got '$(cat "$systemctl_log")', want '$want'"
 }
 
-# ---------------------------------- setup ---------------------------------- #
-apt-get update -qq >/dev/null
-DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends systemd >/dev/null
+# ================================= fixtures ================================= #
 
-# Record systemctl calls instead of talking to a (missing) systemd manager.
-cat >/usr/local/bin/systemctl <<'MOCK'
+# One-time container setup: systemd tooling, a recording systemctl, the units,
+# and a stub agent binary.
+install_fakes() {
+	apt-get update -qq >/dev/null
+	DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends systemd >/dev/null
+
+	cat >/usr/local/bin/systemctl <<EOF
 #!/bin/sh
-echo "$*" >>/tmp/systemctl.log
-exit 0
-MOCK
-chmod 0755 /usr/local/bin/systemctl
+echo "\$*" >>$systemctl_log
+EOF
+	chmod 0755 /usr/local/bin/systemctl
 
-cp "$debian_dir/miru-agent.tmpfiles" /usr/lib/tmpfiles.d/miru-agent.conf
-cp "$debian_dir/miru.socket" "$debian_dir/miru.service" /lib/systemd/system/
-grep -qx 'SocketGroup=miru' /lib/systemd/system/miru.socket ||
-	fail "miru.socket: want SocketGroup=miru"
-printf '#!/bin/sh\nexit 0\n' >/usr/sbin/miru-agent
-chmod 0755 /usr/sbin/miru-agent
-pass "setup"
+	cp "$debian_dir/miru-agent.tmpfiles" /usr/lib/tmpfiles.d/miru-agent.conf
+	cp "$debian_dir/miru.socket" "$debian_dir/miru.service" /lib/systemd/system/
+	printf '#!/bin/sh\nexit 0\n' >/usr/sbin/miru-agent
+	chmod 0755 /usr/sbin/miru-agent
+}
 
-# ------------------------------ upgrade (legacy) ----------------------------- #
-groupadd -r miru
-useradd -r -g miru -s /bin/false miru
+# Return the container to a never-installed state.
+reset_system() {
+	local entry
+	for entry in "${folders[@]}"; do
+		rm -rf "${entry%% *}"
+	done
+	userdel miru 2>/dev/null || true
+	groupdel miru 2>/dev/null || true
+	rm -f "$postinst_out" "$systemctl_log"
+}
 
-mkdir -p /var/lib/miru/auth /var/log/miru /run/miru /srv/miru/configs/v1
-echo '{}' >/var/lib/miru/auth/token.json
-echo log >/var/log/miru/miru.log
-echo '{}' >/srv/miru/configs/v1/motion.json
-chown -R miru:miru /var/lib/miru /var/log/miru /run/miru /srv/miru
-chmod 755 /var/lib/miru /var/log/miru /srv/miru /srv/miru/configs \
-	/srv/miru/configs/v1
-chmod 775 /var/lib/miru/auth
-chmod 644 /var/lib/miru/auth/token.json /var/log/miru/miru.log \
-	/srv/miru/configs/v1/motion.json
-chmod 750 /run/miru
-expect_access /var/lib/miru/auth/token.json yes
+# Lay out an install from a release before the folders were tightened: every
+# folder world-readable, the token and logs 0644.
+seed_legacy_install() {
+	local entry type path mode
+	groupadd -r miru
+	useradd -r -g miru -s /bin/false miru
+	for entry in "${folders[@]}"; do
+		mkdir -p "${entry%% *}"
+		chmod 755 "${entry%% *}"
+	done
+	chmod 750 /run/miru
+	for entry in "${legacy_contents[@]}"; do
+		read -r type path mode <<<"$entry"
+		if [ "$type" = d ]; then mkdir -p "$path"; else echo '{}' >"$path"; fi
+		chmod "$mode" "$path"
+	done
+	chown -R miru:miru /var/lib/miru /var/log/miru /srv/miru /run/miru
+}
 
-run_postinst configure 0.10.3
-expect_table
-pass "upgrade: owners and modes"
+# run_postinst <args...>: run postinst, recording its output and systemctl calls
+run_postinst() {
+	: >"$systemctl_log"
+	sh "$debian_dir/postinst" "$@" >"$postinst_out" 2>&1
+}
 
-expect_contents_unchanged
-pass "upgrade: contents untouched"
+expect_postinst_ok() {
+	run_postinst "$@" || fail "postinst $* exited non-zero"
+}
 
-expect_access /var/lib/miru/auth/token.json no
-expect_access /var/log/miru/miru.log no
-expect_access /srv/miru/configs/v1/motion.json yes
-pass "upgrade: state and logs private, configs readable"
+expect_postinst_fails() {
+	! run_postinst "$@" || fail "postinst $* succeeded"
+}
 
-expect_systemctl_log
-pass "upgrade: systemctl calls"
+# ================================== tests =================================== #
 
-# ------------------------------- idempotence ------------------------------- #
-run_postinst configure 0.10.3
-expect_table
-expect_contents_unchanged
-expect_systemctl_log
-pass "idempotence"
+test_upgrade_sets_folder_modes() {
+	seed_legacy_install
+	expect_postinst_ok configure 0.10.3
+	expect_folder_modes
+	expect_legacy_contents_unchanged
+	expect_units_restarted
+}
 
-# ------------------------------ fresh install ------------------------------ #
-rm -rf /var/lib/miru /var/log/miru /srv/miru /run/miru
-run_postinst configure
-expect_table
-pass "fresh install: owners and modes"
+test_upgrade_makes_state_and_logs_private() {
+	seed_legacy_install
+	expect_readable_by_others /var/lib/miru/auth/token.json
+	expect_postinst_ok configure 0.10.3
+	expect_unreadable_by_others /var/lib/miru/auth/token.json
+	expect_unreadable_by_others /var/log/miru/miru.log
+	expect_readable_by_others /srv/miru/configs/v1/motion.json
+}
 
-# --------------------------- permission failure ---------------------------- #
-rm -rf /srv/miru
-touch /srv/miru
-if sh "$debian_dir/postinst" configure 0.10.3 >"$postinst_out" 2>&1; then
-	fail "postinst succeeded although /srv/miru is not a directory"
-fi
-rm /srv/miru
-pass "permission failure: postinst exits non-zero"
+test_reconfigure_is_idempotent() {
+	seed_legacy_install
+	expect_postinst_ok configure 0.10.3
+	expect_postinst_ok configure 0.10.3
+	expect_folder_modes
+	expect_legacy_contents_unchanged
+	expect_units_restarted
+}
 
-# ------------------------------- unit files -------------------------------- #
-rm -f "$postinst_out"
-if ! verify_out=$(systemd-analyze verify /lib/systemd/system/miru.socket \
-	/lib/systemd/system/miru.service 2>&1); then
-	fail "systemd-analyze verify failed:
+test_fresh_install_creates_account_and_folders() {
+	expect_postinst_ok configure
+	id miru >/dev/null 2>&1 || fail "postinst did not create the miru user"
+	expect_folder_modes
+	expect_units_restarted
+}
+
+test_permission_failure_fails_configure() {
+	seed_legacy_install
+	rm -rf /srv/miru
+	touch /srv/miru
+	expect_postinst_fails configure 0.10.3
+}
+
+test_units_are_valid() {
+	local verify_out
+	grep -qx 'SocketGroup=miru' "$debian_dir/miru.socket" ||
+		fail "miru.socket: want SocketGroup=miru"
+	verify_out=$(systemd-analyze verify /lib/systemd/system/miru.socket \
+		/lib/systemd/system/miru.service 2>&1) ||
+		fail "systemd-analyze verify failed:
 $verify_out"
-fi
-# verify exits 0 on ignored settings; systemd 252 (bookworm) says "Unknown key",
-# newer releases "Unknown key name"
-if grep -Eq 'Unknown (key|section)|Failed to parse' <<<"$verify_out"; then
-	fail "systemd-analyze verify reported unit errors:
+	# verify exits 0 on ignored settings; systemd 252 (bookworm) says "Unknown
+	# key", newer releases "Unknown key name"
+	! grep -Eq 'Unknown (key|section)|Failed to parse' <<<"$verify_out" ||
+		fail "systemd-analyze verify reported unit errors:
 $verify_out"
-fi
-pass "systemd-analyze verify"
+}
 
-echo "all postinst checks passed"
+main() {
+	local t
+	install_fakes
+	for t in $(declare -F | awk '$3 ~ /^test_/ { print $3 }'); do
+		reset_system
+		"$t"
+		echo "PASS ${t#test_}"
+	done
+	echo "all postinst checks passed"
+}
+
+main
