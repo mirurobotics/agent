@@ -175,6 +175,15 @@ run_postinst configure
 expect_table
 pass "fresh install: owners and modes"
 
+# --------------------------- permission failure ---------------------------- #
+rm -rf /srv/miru
+touch /srv/miru
+if sh "$debian_dir/postinst" configure 0.10.3 >"$postinst_out" 2>&1; then
+	fail "postinst succeeded although /srv/miru is not a directory"
+fi
+rm /srv/miru
+pass "permission failure: postinst exits non-zero"
+
 # ------------------------------- unit files -------------------------------- #
 rm -f "$postinst_out"
 if ! verify_out=$(systemd-analyze verify /lib/systemd/system/miru.socket \

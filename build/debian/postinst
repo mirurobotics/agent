@@ -23,11 +23,11 @@ create_miru_user() {
 # contents, so nothing inside is touched. Their parents are root-owned, so miru
 # cannot swap these paths for symlinks.
 apply_permissions() {
-  mkdir -p /var/lib/miru /var/log/miru /srv/miru
-  chown miru:miru /var/lib/miru /var/log/miru /srv/miru
-  chmod 0700 /var/lib/miru
-  chmod 0750 /var/log/miru
-  chmod 0755 /srv/miru
+  mkdir -p /var/lib/miru /var/log/miru /srv/miru &&
+    chown miru:miru /var/lib/miru /var/log/miru /srv/miru &&
+    chmod 0700 /var/lib/miru &&
+    chmod 0750 /var/log/miru &&
+    chmod 0755 /srv/miru
 }
 
 post_install() {
@@ -37,7 +37,11 @@ post_install() {
     # create the miru user and group, then apply ownership and modes
     create_miru_group
     create_miru_user
-    apply_permissions
+    # fail the configure rather than leave the data root readable by others
+    if ! apply_permissions; then
+      printf "\033[31m Failed to set ownership and modes of the miru directories\033[0m\n" >&2
+      exit 1
+    fi
 
     # create /run/miru now; tmpfiles.d recreates it at every boot
     printf "\033[32m Creating the /run/miru directory\033[0m\n"
