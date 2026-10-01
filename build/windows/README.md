@@ -208,8 +208,8 @@ and leaves the target unchanged.
 ## Access for local applications
 
 Applications on the device get access through the local group
-`Miru Agent Users`, the Windows counterpart of the Linux `miru` group. Members
-can read two folders:
+`Miru Agent Users`, the Windows counterpart of the Linux `miru-users` group.
+Members can read two folders:
 
 - `%ProgramData%\Miru\device-api`: the agent serves the local device API on
   loopback TCP and requires a bearer token that changes at every start. It

@@ -1,2 +1,3 @@
 d /srv/miru 0755 miru miru -
-d /run/miru 0750 miru miru -
+d /srv/miru/configs 2750 miru miru-users -
+d /run/miru 2750 miru miru-users -

@@ -66,6 +66,8 @@ Out of scope: changing the service `UMask` (consumers of configs deployed outsid
 
 Delivered in PR #281 (mirurobotics/agent), non-breaking after the split (see Decision Log). The agent writes all state under the data root `0600` (public key `0640`; `auth/` `0700`); the Debian package makes `/var/lib/miru` private and `/var/log/miru` `0750` on every configure (stopping the socket and service first, with symlink-swap protection) and hardens the unit. The socket, `/run/miru`, and the discovery file keep the `miru` group, and configs in `/srv/miru` keep their modes, so they stay world-readable. The `debian-package` CI job runs `shellcheck` and the postinst container test. The `miru-users` group, configs restriction, and member migration are in the stacked breaking follow-up PR. Remaining before release: the manual on-device check in Validation; the docs-repo `miru-users` update ships with the follow-up, not #281.
 
+Follow-up (branch `feat/linux-miru-users-group`, stacked on #281, breaking): restores the `miru-users` parts of this plan unchanged from #281's pre-split head `b87a2b0e`: `SocketGroup=miru-users`, tmpfiles `/run/miru` and `/srv/miru/configs` `2750 miru miru-users`, postinst group creation, one-time `miru` member migration, and the configs `o-rwx`/setgid/group pass, the install-script `chown -R miru`, the container test's migration and setgid checks, and the `miru-users` docs. It merges after #281, and the docs-repo update (`docs/snippets/agent/permissions.mdx`, `docs/snippets/agent/filesys/default-perms.mdx`) ships with its release.
+
 ## Context and Orientation
 
 Terms used below:
