@@ -1,3 +1,7 @@
+// standard crates
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+
 // internal crates
 use crate::filesys::{
     dir::Dir,
@@ -57,6 +61,21 @@ pub async fn create(dir: &Dir) -> Result<(), FileSysErr> {
 /// Alias for [`create`].
 pub async fn create_if_absent(dir: &Dir) -> Result<(), FileSysErr> {
     create(dir).await
+}
+
+/// Create `dir` if absent and, on Unix, restrict it to its owner
+/// (`PRIVATE_DIR_MODE`), tightening an existing folder too. Parents keep
+/// default modes. Windows: same as [`create_if_absent`] (installer ACLs apply).
+pub async fn create_private_if_absent(dir: &Dir) -> Result<(), FileSysErr> {
+    create(dir).await?;
+    // full path: a `use` of the const would be unused on Windows
+    #[cfg(unix)]
+    set_permissions(
+        dir,
+        std::fs::Permissions::from_mode(crate::filesys::PRIVATE_DIR_MODE),
+    )
+    .await?;
+    Ok(())
 }
 
 /// Delete a directory and all its contents

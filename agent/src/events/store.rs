@@ -50,7 +50,7 @@ impl EventStore {
         files::append_bytes(
             &self.log_file,
             format!("{json}\n").as_bytes(),
-            AppendOptions::SYNC,
+            AppendOptions::SYNC_PRIVATE,
         )
         .await?;
 
@@ -136,7 +136,7 @@ impl EventStore {
     async fn write_compacted_content(&self, content: &str) -> Result<(), EventsErr> {
         let tmp_file_path = self.log_file.path().with_extension("jsonl.tmp");
         let tmp_file = filesys::File::new(tmp_file_path);
-        files::write_string(&tmp_file, content, WriteOptions::OVERWRITE_ATOMIC).await?;
+        files::write_string(&tmp_file, content, WriteOptions::OVERWRITE_ATOMIC_PRIVATE).await?;
         files::move_to(&tmp_file, &self.log_file, Overwrite::Allow).await?;
         Ok(())
     }

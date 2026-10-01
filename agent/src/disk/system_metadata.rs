@@ -15,6 +15,6 @@ pub async fn read(file: &filesys::File) -> Result<Option<SystemMetadata>, DiskEr
 
 /// Atomically overwrite the cached device system metadata.
 pub async fn write(file: &filesys::File, meta: &SystemMetadata) -> Result<(), DiskErr> {
-    files::write_json(file, meta, WriteOptions::OVERWRITE_ATOMIC).await?;
+    files::write_json(file, meta, WriteOptions::OVERWRITE_ATOMIC_PRIVATE).await?;
     Ok(())
 }

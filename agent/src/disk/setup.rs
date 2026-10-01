@@ -16,19 +16,34 @@ pub async fn reset(
 ) -> Result<(), DiskErr> {
     // ensure auth dir exists (token.json lives there)
     let auth_dir = layout.auth();
-    dirs::create_if_absent(&auth_dir.root).await?;
+    dirs::create_private_if_absent(&auth_dir.root).await?;
 
     // overwrite the device file
     let device_file = layout.device();
-    files::write_json(&device_file, &device, WriteOptions::OVERWRITE_ATOMIC).await?;
+    files::write_json(
+        &device_file,
+        &device,
+        WriteOptions::OVERWRITE_ATOMIC_PRIVATE,
+    )
+    .await?;
 
     // overwrite the settings file
     let settings_file = layout.settings();
-    files::write_json(&settings_file, &settings, WriteOptions::OVERWRITE_ATOMIC).await?;
+    files::write_json(
+        &settings_file,
+        &settings,
+        WriteOptions::OVERWRITE_ATOMIC_PRIVATE,
+    )
+    .await?;
 
     // blank token.json
     let token = authn::Token::default();
-    files::write_json(&auth_dir.token(), &token, WriteOptions::OVERWRITE_ATOMIC).await?;
+    files::write_json(
+        &auth_dir.token(),
+        &token,
+        WriteOptions::OVERWRITE_ATOMIC_PRIVATE,
+    )
+    .await?;
 
     // wipe resources directory (also wipes config_instances/, deployments,
     // releases, git_commits — everything cached locally)
@@ -58,7 +73,7 @@ pub async fn bootstrap(
 ) -> Result<(), DiskErr> {
     // create the auth directory
     let auth_dir = layout.auth();
-    dirs::create_if_absent(&auth_dir.root).await?;
+    dirs::create_private_if_absent(&auth_dir.root).await?;
 
     // move the private and public keys to the auth directory
     files::move_to(private_key_file, &auth_dir.private_key(), Overwrite::Allow).await?;

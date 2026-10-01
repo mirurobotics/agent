@@ -11,6 +11,7 @@ use crate::cache::{
 };
 use crate::filesys::{
     dir::Dir, dirs, file, file::File, files, path::PathExt, Atomic, Overwrite, WriteOptions,
+    PRIVATE_FILE_MODE,
 };
 use crate::trace;
 
@@ -88,7 +89,7 @@ where
         let opts = WriteOptions {
             overwrite,
             atomic: Atomic::Yes,
-            mode: None,
+            mode: Some(PRIVATE_FILE_MODE),
         };
         files::write_json(&entry_file, &entry, opts).await?;
         Ok(())

@@ -12,6 +12,12 @@ pub use self::errors::FileSysErr;
 pub use self::file::File;
 pub use self::path::PathExt;
 
+/// Mode for agent-private files under the data root; ignored on Windows.
+pub const PRIVATE_FILE_MODE: u32 = 0o600;
+
+/// Mode for agent-private folders under the data root; ignored on Windows.
+pub const PRIVATE_DIR_MODE: u32 = 0o700;
+
 /// Whether an operation is allowed to overwrite an existing file or directory.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Overwrite {
@@ -69,15 +75,35 @@ impl WriteOptions {
         atomic: Atomic::Yes,
         mode: None,
     };
+
+    /// Overwrite existing files using atomic writes, owner-only
+    /// ([`PRIVATE_FILE_MODE`]).
+    pub const OVERWRITE_ATOMIC_PRIVATE: Self = Self {
+        overwrite: Overwrite::Allow,
+        atomic: Atomic::Yes,
+        mode: Some(PRIVATE_FILE_MODE),
+    };
 }
 
 /// Options for file append operations.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct AppendOptions {
     pub sync: Sync,
+    /// Unix permission bits applied when the append creates the file; ignored
+    /// on Windows.
+    pub mode: Option<u32>,
 }
 
 impl AppendOptions {
     /// Append with `fdatasync` for crash durability.
-    pub const SYNC: Self = Self { sync: Sync::Yes };
+    pub const SYNC: Self = Self {
+        sync: Sync::Yes,
+        mode: None,
+    };
+
+    /// [`Self::SYNC`], creating the file owner-only ([`PRIVATE_FILE_MODE`]).
+    pub const SYNC_PRIVATE: Self = Self {
+        sync: Sync::Yes,
+        mode: Some(PRIVATE_FILE_MODE),
+    };
 }
