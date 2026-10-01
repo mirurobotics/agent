@@ -27,7 +27,7 @@ The roadmap lists an open risk: on Windows, another local process might bind the
 
 ## Decision Log
 
-(Add entries as work proceeds.)
+- 2026-10-01: The roadmap's hijacking risk entry cites Microsoft's page only for bind outcomes, limits the wildcard-bind claim to binds without `SO_EXCLUSIVEADDRUSE`, and credits the loopback-routing claim to the `windows_bind` tests. Rationale: the page states wildcard-vs-specific routing only for an exclusive first socket, and its tables show a wildcard bind that sets `SO_EXCLUSIVEADDRUSE` fails with `WSAEADDRINUSE`.
 
 ## Outcomes & Retrospective
 
@@ -68,15 +68,18 @@ Replace the risk entry at L252-255 with:
 
     - **Windows port hijacking while the agent holds the port** (resolved
       2026-10-01): tokio/mio set no socket options on Windows and the agent
-      binds the specific address `127.0.0.1:<port>`. Per Microsoft's
-      "Using SO_REUSEADDR and SO_EXCLUSIVEADDRUSE"
+      binds the specific address `127.0.0.1:<port>`. Per the bind tables in
+      Microsoft's "Using SO_REUSEADDR and SO_EXCLUSIVEADDRUSE"
       (https://learn.microsoft.com/en-us/windows/win32/winsock/using-so-reuseaddr-and-so-exclusiveaddruse),
-      on Windows 7+ the outcomes for such a socket are the same with or
+      on Windows 7+ the bind outcomes for such a socket are the same with or
       without `SO_EXCLUSIVEADDRUSE`, for same- and different-account callers:
       a second bind to `127.0.0.1:<port>` fails (`WSAEADDRINUSE`, or
       `WSAEACCES` with `SO_REUSEADDR`), and a wildcard `0.0.0.0:<port>` bind
-      succeeds but loopback connections still reach the agent. The agent
-      therefore does not set the option; see the 2026-10-01 decision.
+      succeeds unless it sets `SO_EXCLUSIVEADDRUSE`. The page states routing
+      beside a wildcard listener only for an exclusive first socket, so the
+      `windows_bind` tests check that loopback connections still reach the
+      agent. The agent therefore does not set the option; see the 2026-10-01
+      decision.
 
 Leave the "Local API port squatting after a crash" entry untouched.
 
@@ -188,7 +191,7 @@ On Linux: `RUST_LOG=off cargo test --package miru-agent --test mod server::tcp` 
 
 On Windows (CI only): the `windows-check` log shows the two `... ok` lines expected under M3 in Concrete Steps. With the agent bound to `127.0.0.1:<port>` through `tcp::bind`, a second bind to that address returns `Err` with and without `SO_REUSEADDR`, a wildcard `0.0.0.0:<port>` bind succeeds, and the agent's listener accepts a loopback connection within 5 seconds.
 
-In `plans/active/20260910-windows-support.md`, the hijacking risk reads as resolved and points to the 2026-10-01 decision log entry, which carries the Microsoft link, and the port-squatting risk is byte-for-byte unchanged (`git diff` shows no change to L245-251).
+In `plans/active/20260910-windows-support.md`, the hijacking risk reads as resolved, cites Microsoft's bind tables, credits loopback routing to the `windows_bind` tests, and points to the 2026-10-01 decision log entry, and the port-squatting risk is byte-for-byte unchanged (`git diff` shows no change to L245-251).
 
 ## Idempotence and Recovery
 

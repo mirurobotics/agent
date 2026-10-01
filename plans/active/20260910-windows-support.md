@@ -344,15 +344,18 @@ the workbench plan.
   migration note. Not yet scheduled.
 - **Windows port hijacking while the agent holds the port** (resolved
   2026-10-01): tokio/mio set no socket options on Windows and the agent
-  binds the specific address `127.0.0.1:<port>`. Per Microsoft's
-  "Using SO_REUSEADDR and SO_EXCLUSIVEADDRUSE"
+  binds the specific address `127.0.0.1:<port>`. Per the bind tables in
+  Microsoft's "Using SO_REUSEADDR and SO_EXCLUSIVEADDRUSE"
   (https://learn.microsoft.com/en-us/windows/win32/winsock/using-so-reuseaddr-and-so-exclusiveaddruse),
-  on Windows 7+ the outcomes for such a socket are the same with or
+  on Windows 7+ the bind outcomes for such a socket are the same with or
   without `SO_EXCLUSIVEADDRUSE`, for same- and different-account callers:
   a second bind to `127.0.0.1:<port>` fails (`WSAEADDRINUSE`, or
   `WSAEACCES` with `SO_REUSEADDR`), and a wildcard `0.0.0.0:<port>` bind
-  succeeds but loopback connections still reach the agent. The agent
-  therefore does not set the option; see the 2026-10-01 decision.
+  succeeds unless it sets `SO_EXCLUSIVEADDRUSE`. The page states routing
+  beside a wildcard listener only for an exclusive first socket, so the
+  `windows_bind` tests check that loopback connections still reach the
+  agent. The agent therefore does not set the option; see the 2026-10-01
+  decision.
 
 ## Non-goals
 
