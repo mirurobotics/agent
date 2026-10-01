@@ -11,9 +11,12 @@ The folder modes are declared once, in the tmpfiles.d entry
 (`miru-agent.tmpfiles`). systemd applies them at every boot, and `postinst`
 applies them on every install and upgrade and fails if any folder does not
 match. `StateDirectoryMode` and `LogsDirectoryMode` in `miru.service` must stay
-equal to them: without them systemd defaults to `0755`. Each folder is the access boundary for its contents, as the
-installer's folder ACLs are on Windows, so the agent and `postinst` leave the
-modes of files inside alone (the private key is still written `0600`).
+equal to them: without them systemd defaults to `0755`. An override in
+`/etc/tmpfiles.d/miru-agent.conf` is honored, and a folder an admin symlinked
+elsewhere gets the mode on its target. Each folder is the access boundary for
+its contents, as the installer's folder ACLs are on Windows, so the agent and
+`postinst` leave the modes of files inside alone (the private key is still
+written `0600`).
 
 | Path | Mode | Owner | Group |
 | --- | --- | --- | --- |

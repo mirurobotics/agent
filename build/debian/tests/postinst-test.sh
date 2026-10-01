@@ -150,6 +150,8 @@ reset_system() {
 	for entry in "${folders[@]}"; do
 		rm -rf "${entry%% *}"
 	done
+	rm -rf /mnt/miru-data
+	rm -f /etc/tmpfiles.d/miru-agent.conf
 	userdel miru 2>/dev/null || true
 	groupdel miru 2>/dev/null || true
 	rm -f "$postinst_out" "$systemctl_log"
@@ -231,11 +233,33 @@ test_boot_restores_drifted_folder_modes() {
 	expect_folder_modes
 }
 
+test_upgrade_follows_admin_symlinked_folder() {
+	seed_legacy_install
+	mkdir -p /mnt/miru-data
+	mv /var/lib/miru /mnt/miru-data/lib
+	ln -s /mnt/miru-data/lib /var/lib/miru
+	expect_postinst_ok configure 0.10.3
+	[ -L /var/lib/miru ] || fail "/var/lib/miru is no longer a symlink"
+	expect_stat /mnt/miru-data/lib 700
+	expect_unreadable_by_others /var/lib/miru/auth/token.json
+}
+
+test_admin_tmpfiles_override_is_honored() {
+	seed_legacy_install
+	sed 's|^d /var/log/miru 0750|d /var/log/miru 0755|' \
+		/usr/lib/tmpfiles.d/miru-agent.conf >/etc/tmpfiles.d/miru-agent.conf
+	expect_postinst_ok configure 0.10.3
+	expect_stat /var/log/miru 755
+	expect_stat /var/lib/miru 700
+}
+
 test_permission_failure_fails_configure() {
 	seed_legacy_install
 	rm -rf /srv/miru
 	touch /srv/miru
 	expect_postinst_fails configure 0.10.3
+	grep -q '/srv/miru: not a directory' "$postinst_out" ||
+		fail "postinst did not name the failing path"
 }
 
 test_units_are_valid() {
