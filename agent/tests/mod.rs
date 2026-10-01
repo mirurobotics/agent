@@ -1,4 +1,3 @@
-pub mod activity;
 pub mod app;
 pub mod authn;
 pub mod cache;

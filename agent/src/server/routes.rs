@@ -22,22 +22,15 @@ use tracing::Level;
 
 /// Build the router both transports serve, including shared middleware.
 pub fn router(state: Arc<State>) -> Router {
-    middleware(table(state.clone()), state)
+    middleware(table(state))
 }
 
-/// Authorization redaction, activity tracking, and request tracing applied to
-/// every transport. Redaction runs outermost so trace spans never log a token.
-fn middleware(router: Router, state: Arc<State>) -> Router {
+/// Authorization redaction and request tracing applied to every transport.
+/// Redaction runs outermost so trace spans never log a token.
+fn middleware(router: Router) -> Router {
     router.layer(
         ServiceBuilder::new()
             .layer(from_fn(redact_authorization))
-            .layer(from_fn(move |req: Request, next: Next| {
-                let state = state.clone();
-                async move {
-                    state.activity_tracker.touch();
-                    next.run(req).await
-                }
-            }))
             .layer(
                 TraceLayer::new_for_http()
                     .make_span_with(DefaultMakeSpan::new().include_headers(true))
