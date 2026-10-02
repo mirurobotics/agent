@@ -2,7 +2,7 @@
 use std::path::{Path, PathBuf};
 
 // internal crates
-use miru_agent::disk::Layout;
+use miru_agent::disk::{layout::INSTALLER_SENTINEL, Layout};
 use miru_agent::filesys::{self, PathExt};
 
 /// Expected filesystem root of the default layout: `/` on Unix (pinned
@@ -76,6 +76,18 @@ pub mod storage_layout {
         let layout = Layout::default();
         let dir = layout.temp_dir();
         assert_eq!(dir.to_string(), under_root(&["tmp"]));
+    }
+
+    #[test]
+    fn installer_sentinels() {
+        let [auth, tmp] = Layout::default().installer_sentinels();
+        assert_eq!(
+            auth.to_string(),
+            under_root(&["auth", "installer-sentinel"])
+        );
+        assert_eq!(tmp.to_string(), under_root(&["tmp", "installer-sentinel"]));
+        // must match `MsiSentinelName` in build/windows/tests/MsiTest.psm1
+        assert_eq!(INSTALLER_SENTINEL, "installer-sentinel");
     }
 
     #[test]
