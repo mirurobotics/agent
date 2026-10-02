@@ -2,8 +2,8 @@
 use std::env;
 
 // internal crates
-use crate::disk::settings;
-use crate::filesys::{self, files};
+use crate::disk::{self, settings};
+use crate::filesys::{self, files, PathExt};
 use crate::network::{BackendHost, MqttHost};
 use crate::provisioning::errors::*;
 
@@ -24,6 +24,27 @@ pub fn read_token_from_env() -> Result<String, ProvisionErr> {
         name: TOKEN_ENV_VAR.to_string(),
         trace: crate::trace!(),
     }))
+}
+
+/// Refuses to provision unless every installer sentinel is a real directory.
+///
+/// On Windows the MSI creates the state folders with a service-specific ACL;
+/// folders recreated by the agent after a wipe inherit ProgramData's defaults,
+/// and the service later fails to replace `device.json` with OS error 5. This
+/// check only reads metadata and creates nothing.
+pub fn assert_installer_layout(layout: &disk::Layout) -> Result<(), ProvisionErr> {
+    for dir in layout.installer_sentinels() {
+        match std::fs::symlink_metadata(dir.path()) {
+            Ok(m) if m.is_dir() => {}
+            _ => {
+                return Err(ProvisionErr::InstallerLayoutErr(InstallerLayoutErr {
+                    missing: dir.path().clone(),
+                    trace: crate::trace!(),
+                }));
+            }
+        }
+    }
+    Ok(())
 }
 
 // tmp\ itself is installer-owned on Windows; delete only what provisioning wrote.

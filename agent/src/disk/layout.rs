@@ -2,6 +2,9 @@
 use crate::filesys;
 use crate::platform;
 
+/// Name of the installer-owned folder that marks an MSI-created directory.
+pub const INSTALLER_SENTINEL: &str = "installer-sentinel";
+
 #[derive(Clone, Debug)]
 pub struct Layout {
     pub filesystem_root: filesys::Dir,
@@ -22,6 +25,17 @@ impl Layout {
 
     pub fn auth(&self) -> AuthLayout {
         AuthLayout::new(self.root().subdir("auth"))
+    }
+
+    /// Sentinel folders that prove the state directory came from the installer.
+    ///
+    /// The Windows MSI creates these sentinels with an ACL only SYSTEM and
+    /// Administrators can modify; the agent never creates them.
+    pub fn installer_sentinels(&self) -> [filesys::Dir; 2] {
+        [
+            self.auth().root.subdir(INSTALLER_SENTINEL),
+            self.temp_dir().subdir(INSTALLER_SENTINEL),
+        ]
     }
 
     pub fn settings(&self) -> filesys::File {
