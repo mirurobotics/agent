@@ -29,10 +29,10 @@ Uninstalling, wiping, and reinstalling v0.10.4-beta.2 restored the sentinels and
 
 ## Progress
 
-- [ ] Milestone 1: OS error in `AtomicWriteFileErr` and `ReadDirErr` messages, with tests; commit.
-- [ ] Milestone 2: Windows provisioning guard (`assert_installer_layout`), with tests; commit.
-- [ ] Milestone 3: MSI harness stage for the wiped-state sequence; commit.
-- [ ] Milestone 4: README troubleshooting; commit.
+- [x] Milestone 1: OS error in `AtomicWriteFileErr` and `ReadDirErr` messages, with tests; commit.
+- [x] Milestone 2: Windows provisioning guard (`assert_installer_layout`), with tests; commit.
+- [x] Milestone 3: MSI harness stage for the wiped-state sequence; commit.
+- [x] Milestone 4: README troubleshooting; commit.
 - [ ] Preflight reports `CLEAN`; PR leaves draft.
 
 ## Surprises & Discoveries
@@ -65,6 +65,13 @@ Uninstalling, wiping, and reinstalling v0.10.4-beta.2 restored the sentinels and
 - Decision: The harness renames `%ProgramData%\Miru` away and back instead of deleting it.
   Rationale: The later uninstall stage still checks that customer-owned and representative files survive. Renaming within the same volume keeps the original DACLs, so restoring is exact.
   Date/Author: 2026-10-01, plan author.
+
+- Decision: `assert_installer_layout` treats only `NotFound` / `NotADirectory` (and a sentinel that exists but is not a directory) as a missing layout. Any other `symlink_metadata` error, such as `PermissionDenied`, returns `ProvisionErr::FileSysErr(FileSysErr::DirMetadataErr)` with the OS error as its source.
+  Rationale: Milestone 2 step 3 originally mapped every error to `InstallerLayoutErr`. A non-elevated `provision` on a healthy install cannot traverse the protected `auth` folder, and would have been told the folder was missing and to repair the MSI, hiding the real cause.
+  Date/Author: 2026-10-01, implement (refine pass).
+- Decision: The README troubleshooting trigger says the service "starts but then stops with service-specific error 1 (System event 7024)" rather than "fails to start with `Access is denied. (os error 5)`", and the sentence explaining `-File` was removed.
+  Rationale: The OS error text only appears in the log; the SCM reports `ServiceSpecific(1)` (`agent/src/windows/scm.rs`). The removed `-File` sentence's reason was wrong: `-Filter "miru.log*"` already excludes the `installer-sentinel` folder. `-File` stays in the snippet.
+  Date/Author: 2026-10-01, implement (refine pass).
 
 ## Outcomes & Retrospective
 
