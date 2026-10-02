@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 // internal crates
-use crate::mocks::{deleter::MockDeleter, upload_executor::MockUploadExecutor};
+use crate::mocks::{clock::TestClock, deleter::MockDeleter, upload_executor::MockUploadExecutor};
 use miru_agent::data_uploads::scan::{scanner::StableFile, StableFileSink};
 use miru_agent::data_uploads::upload::{
     Job, UploadStableFileSink, Uploader, UploaderExt, UploaderOptions,
@@ -13,7 +13,7 @@ use miru_agent::filesys::File;
 use miru_agent::models::{FileRule, FileRuleRetention, FileRuleUpload};
 
 // external crates
-use chrono::{DateTime, Utc};
+use chrono::DateTime;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
@@ -79,8 +79,7 @@ impl Harness {
             MockDeleter::new(),
             UploaderOptions::default(),
             None,
-            |_: Duration| async {},
-            Utc::now,
+            TestClock::new(),
         )
         .unwrap();
         let uploader = Arc::new(uploader);
