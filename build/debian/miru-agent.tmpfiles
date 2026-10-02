@@ -1,2 +1,6 @@
+# Folder modes for the agent, applied at every boot and by postinst. Keep
+# StateDirectoryMode and LogsDirectoryMode in miru.service equal to these.
+d /var/lib/miru 0700 miru miru -
+d /var/log/miru 0750 miru miru -
 d /srv/miru 0755 miru miru -
 d /run/miru 0750 miru miru -

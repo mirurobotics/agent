@@ -185,3 +185,20 @@ jobs:
 
       - name: Run Tests + Coverage Gate
         run: ./tools/lint/scripts/covgate.sh
+
+  debian-package:
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install ShellCheck
+        run: command -v shellcheck || { sudo apt-get update && sudo apt-get install -y shellcheck; }
+
+      - name: Lint maintainer scripts
+        run: |
+          shellcheck -s sh build/debian/postinst build/debian/postrm
+          shellcheck build/debian/tests/postinst-test.sh
+
+      - name: Run postinst container test
+        run: build/debian/tests/postinst-test.sh

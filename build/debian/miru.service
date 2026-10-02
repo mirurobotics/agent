@@ -11,8 +11,12 @@ Group=miru
 User=miru
 
 # runtime
+# The modes must match miru-agent.tmpfiles: without them systemd defaults to
+# 0755 and may apply that to the existing folders at start.
 StateDirectory=miru
+StateDirectoryMode=0700
 LogsDirectory=miru
+LogsDirectoryMode=0750
 ExecStart=/usr/sbin/miru-agent
 WorkingDirectory=/var/lib/miru
 
@@ -48,6 +52,21 @@ RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 RestrictRealtime=true
 # Prevents creating or executing set-user-ID or set-group-ID files
 RestrictSUIDSGID=true
+# Locks the execution domain (personality) so it cannot be changed
+LockPersonality=true
+# Prevents creating new namespaces
+RestrictNamespaces=true
+# Only allows system calls of the native architecture
+SystemCallArchitectures=native
+# Prevents changing the system clock
+ProtectClock=true
+# Prevents reading or writing the kernel log ring buffer
+ProtectKernelLogs=true
+# Deliberately not enabled:
+# - ProtectSystem=strict / ProtectHome: configs deploy to, and uploads read,
+#   arbitrary customer paths
+# - ProtectHostname: its private UTS namespace freezes the reported hostname
+# - a stricter UMask: consumers of deployed configs rely on 0644 files
 
 
 [Install]
