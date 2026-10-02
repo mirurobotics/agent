@@ -205,6 +205,43 @@ for folders created at the root of `C:\`, and none under `C:\Windows` or
 folder the service cannot write fails with an access-denied deployment error
 and leaves the target unchanged.
 
+## Resetting state and troubleshooting
+
+Do not delete `%ProgramData%\Miru` while the MSI is installed. Deleting it
+removes the folder permissions and `installer-sentinel` folders the installer
+created, and nothing recreates them. Folders recreated later inherit
+ProgramData's default permissions, so the service cannot replace its own state
+files.
+
+To reset the agent's state, choose one:
+
+- Uninstall first (`msiexec /x <msi>` or Apps & Features), then delete the
+  folder, then reinstall the MSI and provision.
+- Delete the folder, then repair the installation with
+  `msiexec /fvomus "<path to miru-agent-<version>.msi>"` (or reinstall the
+  MSI), then provision.
+
+If the folders were not created by the installer, `provision` and
+`reprovision` print an error containing `... not created by the installer ...`
+and stop without changing anything. Repair the installation as above, then
+provision again.
+
+If the service fails to start with `Access is denied. (os error 5)`, read the
+newest log from an elevated PowerShell session:
+
+```powershell
+Get-ChildItem -LiteralPath "$env:ProgramData\Miru\logs" -Filter "miru.log*" -File |
+    Sort-Object LastWriteTime | Select-Object -Last 1 | Get-Content -Tail 50
+```
+
+Keep `-File`, because `logs` contains an `installer-sentinel` folder that
+`Get-Content` cannot read. A line such as
+`failed to write file atomically '<path>': Access is denied. (os error 5)`
+means the service cannot replace that file. `icacls "$env:ProgramData\Miru"`
+should list `NT SERVICE\miru-agent` (or its SID). If it does not, the folders
+were not created by the installer: repair the MSI as above. Do not use
+`icacls /reset`, which only re-inherits ProgramData's default permissions.
+
 ## Access for local applications
 
 Applications on the device get access through the local group
