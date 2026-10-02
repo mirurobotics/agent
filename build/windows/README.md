@@ -226,16 +226,15 @@ If the folders were not created by the installer, `provision` and
 and stop without changing anything. Repair the installation as above, then
 provision again.
 
-If the service fails to start with `Access is denied. (os error 5)`, read the
-newest log from an elevated PowerShell session:
+If the service starts but then stops with service-specific error 1 (System
+event 7024), read the newest log from an elevated PowerShell session:
 
 ```powershell
 Get-ChildItem -LiteralPath "$env:ProgramData\Miru\logs" -Filter "miru.log*" -File |
     Sort-Object LastWriteTime | Select-Object -Last 1 | Get-Content -Tail 50
 ```
 
-Keep `-File`, because `logs` contains an `installer-sentinel` folder that
-`Get-Content` cannot read. A line such as
+A line such as
 `failed to write file atomically '<path>': Access is denied. (os error 5)`
 means the service cannot replace that file. `icacls "$env:ProgramData\Miru"`
 should list `NT SERVICE\miru-agent` (or its SID). If it does not, the folders

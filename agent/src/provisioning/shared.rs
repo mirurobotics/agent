@@ -3,7 +3,7 @@ use std::env;
 
 // internal crates
 use crate::disk::{self, settings};
-use crate::filesys::{self, files, PathExt};
+use crate::filesys::{self, errors::DirMetadataErr, files, FileSysErr, PathExt};
 use crate::network::{BackendHost, MqttHost};
 use crate::provisioning::errors::*;
 
@@ -26,22 +26,37 @@ pub fn read_token_from_env() -> Result<String, ProvisionErr> {
     }))
 }
 
-/// Refuses to provision unless every installer sentinel is a real directory.
-///
-/// On Windows the MSI creates the state folders with a service-specific ACL;
-/// folders recreated by the agent after a wipe inherit ProgramData's defaults,
-/// and the service later fails to replace `device.json` with OS error 5. This
-/// check only reads metadata and creates nothing.
+/// Returns `InstallerLayoutErr` unless every installer sentinel is a real
+/// directory (links do not count), or `FileSysErr` if a sentinel's metadata
+/// cannot be read. State folders not created by the installer lack its ACL.
+/// Reads metadata only; creates nothing.
 pub fn assert_installer_layout(layout: &disk::Layout) -> Result<(), ProvisionErr> {
     for dir in layout.installer_sentinels() {
-        match std::fs::symlink_metadata(dir.path()) {
-            Ok(m) if m.is_dir() => {}
-            _ => {
-                return Err(ProvisionErr::InstallerLayoutErr(InstallerLayoutErr {
-                    missing: dir.path().clone(),
-                    trace: crate::trace!(),
-                }));
+        let is_dir = match std::fs::symlink_metadata(dir.path()) {
+            Ok(m) => m.is_dir(),
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+                ) =>
+            {
+                false
             }
+            Err(e) => {
+                return Err(ProvisionErr::FileSysErr(FileSysErr::DirMetadataErr(
+                    DirMetadataErr {
+                        dir: dir.clone(),
+                        source: Box::new(e),
+                        trace: crate::trace!(),
+                    },
+                )));
+            }
+        };
+        if !is_dir {
+            return Err(ProvisionErr::InstallerLayoutErr(InstallerLayoutErr {
+                missing: dir.path().clone(),
+                trace: crate::trace!(),
+            }));
         }
     }
     Ok(())
