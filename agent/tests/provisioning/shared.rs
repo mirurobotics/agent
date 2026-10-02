@@ -1,19 +1,24 @@
+// standard crates
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+
 // internal crates
 use crate::mocks::http_client::MockClient;
 use crate::test_utils::filesys::dirs as test_dirs;
 use backend_api::models::Device;
 use miru_agent::crypt::base64;
-use miru_agent::disk::{Layout, Settings};
-use miru_agent::filesys::{dirs, files, PathExt};
+use miru_agent::disk::{layout::INSTALLER_SENTINEL, Layout, Settings};
+use miru_agent::filesys::{dirs, files, Dir, FileSysErr, PathExt, WriteOptions};
 use miru_agent::http::{errors::MockErr, HTTPErr};
-use miru_agent::provisioning::provision;
+use miru_agent::provisioning::errors::InstallerLayoutErr;
+use miru_agent::provisioning::{assert_installer_layout, provision, ProvisionErr};
 
 // external crates
 use serde_json::json;
 
 pub(super) const DEVICE_ID: &str = "75899aa4-b08a-4047-8526-880b1b832973";
 // Stands in for the Windows installer's sentinel folder in tmp\.
-pub(super) const TEMP_SENTINEL: &str = "installer-sentinel";
+pub(super) const TEMP_SENTINEL: &str = INSTALLER_SENTINEL;
 
 pub(super) fn new_jwt(device_id: &str) -> String {
     let payload = json!({
@@ -203,5 +208,160 @@ impl StorageSnapshot {
             self.public_key
         );
         assert_eq!(files::read_string(&auth.token()).await.ok(), self.token);
+    }
+}
+
+pub mod assert_installer_layout {
+    use super::*;
+
+    fn new_layout() -> (test_dirs::TempDir, Layout) {
+        let tmp = test_dirs::temp("installer-layout").unwrap();
+        let layout = Layout::new(tmp.to_dir());
+        (tmp, layout)
+    }
+
+    async fn create_sentinels(layout: &Layout) {
+        for sentinel in layout.installer_sentinels() {
+            dirs::create_if_absent(&sentinel).await.unwrap();
+        }
+    }
+
+    fn expect_layout_err(result: Result<(), ProvisionErr>) -> InstallerLayoutErr {
+        match result {
+            Err(ProvisionErr::InstallerLayoutErr(e)) => e,
+            other => panic!("expected InstallerLayoutErr, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn ok_when_both_sentinels_are_dirs() {
+        let (_tmp, layout) = new_layout();
+        create_sentinels(&layout).await;
+
+        assert_installer_layout(&layout).unwrap();
+    }
+
+    #[test]
+    fn missing_layout_is_rejected_and_nothing_is_created() {
+        let (_tmp, layout) = new_layout();
+        let [auth_sentinel, _] = layout.installer_sentinels();
+
+        let err = expect_layout_err(assert_installer_layout(&layout));
+
+        assert_eq!(&err.missing, auth_sentinel.path());
+        let msg = err.to_string();
+        assert!(
+            msg.contains("not created by the installer"),
+            "message: {msg}"
+        );
+        assert!(msg.contains("msiexec"), "message: {msg}");
+        assert!(
+            msg.contains(&auth_sentinel.path().display().to_string()),
+            "message: {msg}"
+        );
+        // the guard only reads metadata; it must not create the state dir
+        assert!(!layout.root().exists());
+    }
+
+    #[tokio::test]
+    async fn missing_tmp_sentinel_is_named() {
+        let (_tmp, layout) = new_layout();
+        let [auth_sentinel, tmp_sentinel] = layout.installer_sentinels();
+        dirs::create_if_absent(&auth_sentinel).await.unwrap();
+
+        let err = expect_layout_err(assert_installer_layout(&layout));
+
+        assert_eq!(&err.missing, tmp_sentinel.path());
+    }
+
+    #[tokio::test]
+    async fn sentinel_that_is_a_file_is_rejected() {
+        let (_tmp, layout) = new_layout();
+        let [auth_sentinel, tmp_sentinel] = layout.installer_sentinels();
+        dirs::create_if_absent(&auth_sentinel).await.unwrap();
+        let file = layout.temp_dir().file(INSTALLER_SENTINEL);
+        files::write_string(&file, "not a dir", WriteOptions::default())
+            .await
+            .unwrap();
+
+        let err = expect_layout_err(assert_installer_layout(&layout));
+
+        assert_eq!(&err.missing, tmp_sentinel.path());
+    }
+
+    #[tokio::test]
+    async fn parent_that_is_a_file_is_treated_as_missing() {
+        let (_tmp, layout) = new_layout();
+        let [auth_sentinel, _] = layout.installer_sentinels();
+        // `auth` is a regular file, so the sentinel lookup fails with
+        // ENOTDIR on Unix and NotFound on Windows; both mean "missing"
+        let auth_file = layout.root().file("auth");
+        files::write_string(&auth_file, "not a dir", WriteOptions::default())
+            .await
+            .unwrap();
+
+        let err = expect_layout_err(assert_installer_layout(&layout));
+
+        assert_eq!(&err.missing, auth_sentinel.path());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn symlinked_sentinel_is_rejected() {
+        let (tmp, layout) = new_layout();
+        let [auth_sentinel, tmp_sentinel] = layout.installer_sentinels();
+        dirs::create_if_absent(&auth_sentinel).await.unwrap();
+        dirs::create_if_absent(&layout.temp_dir()).await.unwrap();
+        let target = tmp.subdir("target");
+        dirs::create_if_absent(&target).await.unwrap();
+        std::os::unix::fs::symlink(target.path(), tmp_sentinel.path()).unwrap();
+
+        let err = expect_layout_err(assert_installer_layout(&layout));
+
+        assert_eq!(&err.missing, tmp_sentinel.path());
+    }
+
+    #[test]
+    fn unreadable_sentinel_path_returns_dir_metadata_err() {
+        let layout = Layout::new(Dir::new("invalid\0path"));
+        let [auth_sentinel, _] = layout.installer_sentinels();
+
+        let result = assert_installer_layout(&layout);
+
+        match result {
+            Err(ProvisionErr::FileSysErr(FileSysErr::DirMetadataErr(e))) => {
+                assert_eq!(e.source.kind(), std::io::ErrorKind::InvalidInput);
+                assert_eq!(e.dir.path(), auth_sentinel.path());
+            }
+            other => panic!("expected DirMetadataErr, got {other:?}"),
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn permission_denied_returns_dir_metadata_err() {
+        let (_tmp, layout) = new_layout();
+        create_sentinels(&layout).await;
+        let [auth_sentinel, _] = layout.installer_sentinels();
+        let auth_root = layout.auth().root;
+
+        // without search permission on `auth`, the sentinel's metadata is unreadable
+        dirs::set_permissions(&auth_root, std::fs::Permissions::from_mode(0o000))
+            .await
+            .unwrap();
+        let result = assert_installer_layout(&layout);
+        dirs::set_permissions(&auth_root, std::fs::Permissions::from_mode(0o755))
+            .await
+            .unwrap();
+
+        match result {
+            Err(ProvisionErr::FileSysErr(FileSysErr::DirMetadataErr(e))) => {
+                assert_eq!(e.source.kind(), std::io::ErrorKind::PermissionDenied);
+                assert_eq!(e.dir.path(), auth_sentinel.path());
+                let msg = e.to_string();
+                assert!(msg.contains("os error 13"), "message: {msg}");
+            }
+            other => panic!("expected DirMetadataErr, got {other:?}"),
+        }
     }
 }

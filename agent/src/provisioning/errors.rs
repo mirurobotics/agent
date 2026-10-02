@@ -17,9 +17,23 @@ pub struct MissingEnvVarErr {
 impl crate::errors::Error for MissingEnvVarErr {}
 
 #[derive(Debug, thiserror::Error)]
+#[error(
+    "Miru agent state directory is missing or was not created by the installer ('{}' not found). Do not delete %ProgramData%\\Miru while the Miru Agent is installed. Repair the installation (msiexec /fvomus <path to the Miru Agent MSI>) or reinstall the MSI, then provision again.",
+    .missing.display()
+)]
+pub struct InstallerLayoutErr {
+    pub missing: std::path::PathBuf,
+    pub trace: Box<Trace>,
+}
+
+impl crate::errors::Error for InstallerLayoutErr {}
+
+#[derive(Debug, thiserror::Error)]
 pub enum ProvisionErr {
     #[error(transparent)]
     MissingEnvVarErr(MissingEnvVarErr),
+    #[error(transparent)]
+    InstallerLayoutErr(InstallerLayoutErr),
     #[error(transparent)]
     AuthnErr(authn::AuthnErr),
     #[error(transparent)]
@@ -72,6 +86,7 @@ impl From<DiskErr> for ProvisionErr {
 
 crate::impl_error!(ProvisionErr {
     MissingEnvVarErr,
+    InstallerLayoutErr,
     AuthnErr,
     CryptErr,
     FileSysErr,

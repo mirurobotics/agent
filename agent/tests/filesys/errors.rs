@@ -276,8 +276,10 @@ mod display {
             trace: miru_agent::trace!(),
         });
         let msg = err.to_string();
-        assert!(msg.contains(expected_file.as_str()), "message: {msg}");
-        assert!(msg.contains("atomically"), "message: {msg}");
+        assert_eq!(
+            msg,
+            format!("failed to write file atomically '{expected_file}': atomic write failed")
+        );
     }
 
     #[test]
@@ -291,7 +293,10 @@ mod display {
             trace: miru_agent::trace!(),
         });
         let msg = err.to_string();
-        assert!(msg.contains(expected_dir.as_str()), "message: {msg}");
+        assert_eq!(
+            msg,
+            format!("failed to read directory '{expected_dir}': readdir failed")
+        );
     }
 
     #[test]

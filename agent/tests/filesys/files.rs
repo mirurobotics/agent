@@ -2,6 +2,8 @@
 use std::future::Future;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
+#[cfg(windows)]
+use std::os::windows::fs::OpenOptionsExt;
 use std::path::PathBuf;
 
 // internal crates
@@ -749,6 +751,68 @@ pub mod write_bytes {
         .unwrap();
         let perms = files::permissions(&file).await.unwrap();
         assert_eq!(perms.mode() & 0o777, 0o600);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn atomic_write_denied_reports_os_error() {
+        let dir = test_dirs::temp("testing").unwrap();
+        let file = dir.file("test-file");
+        files::write_string(&file, "original", WriteOptions::default())
+            .await
+            .unwrap();
+
+        // a read-only parent blocks creating the atomic temp file
+        filesys::dirs::set_permissions(&dir, std::fs::Permissions::from_mode(0o555))
+            .await
+            .unwrap();
+        let result = files::write_bytes(&file, b"x", WriteOptions::OVERWRITE_ATOMIC).await;
+        filesys::dirs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755))
+            .await
+            .unwrap();
+
+        let err = result.unwrap_err();
+        let msg = err.to_string();
+        match err {
+            FileSysErr::AtomicWriteFileErr(e) => {
+                assert_eq!(e.source.kind(), std::io::ErrorKind::PermissionDenied);
+            }
+            other => panic!("expected AtomicWriteFileErr, got {other:?}"),
+        }
+        assert!(msg.contains(&file.to_string()), "message: {msg}");
+        assert!(msg.contains("os error 13"), "message: {msg}");
+        assert_eq!(files::read_string(&file).await.unwrap(), "original");
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn atomic_overwrite_blocked_by_reader_reports_os_error() {
+        const FILE_SHARE_READ: u32 = 0x1;
+
+        let dir = test_dirs::temp("testing").unwrap();
+        let file = dir.file("test-file");
+        files::write_string(&file, "original", WriteOptions::default())
+            .await
+            .unwrap();
+
+        // a reader that withholds FILE_SHARE_DELETE blocks the atomic replace
+        let reader = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ)
+            .open(file.path())
+            .unwrap();
+        let result = files::write_bytes(&file, b"x", WriteOptions::OVERWRITE_ATOMIC).await;
+        drop(reader);
+
+        let err = result.unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            matches!(err, FileSysErr::AtomicWriteFileErr(_)),
+            "expected AtomicWriteFileErr, got {err:?}"
+        );
+        assert!(msg.contains(&file.to_string()), "message: {msg}");
+        assert!(msg.contains("os error"), "message: {msg}");
+        assert_eq!(files::read_string(&file).await.unwrap(), "original");
     }
 }
 

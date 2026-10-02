@@ -79,6 +79,9 @@ fn runtime() -> tokio::runtime::Runtime {
 }
 
 async fn run_provision(args: cli::ProvisionArgs) -> Result<provision::Outcome, ProvisionErr> {
+    #[cfg(windows)]
+    provisioning::assert_installer_layout(&disk::Layout::default())?;
+
     // initialize logging
     let tmp_dir = dirs::create_temp("miru-agent-provision-logs").await?;
     let options = logs::Options {
@@ -132,6 +135,9 @@ fn handle_provision_result(result: Result<provision::Outcome, ProvisionErr>) {
 async fn run_reprovision(
     args: cli::ReprovisionArgs,
 ) -> Result<backend_client::Device, ProvisionErr> {
+    #[cfg(windows)]
+    provisioning::assert_installer_layout(&disk::Layout::default())?;
+
     // initialize logging
     let tmp_dir = dirs::create_temp("miru-agent-reprovision-logs").await?;
     let options = logs::Options {

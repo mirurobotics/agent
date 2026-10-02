@@ -108,7 +108,7 @@ pub struct UnknownParentDirForFileErr {
 impl crate::errors::Error for UnknownParentDirForFileErr {}
 
 #[derive(Debug, thiserror::Error)]
-#[error("failed to read directory: {dir}")]
+#[error("failed to read directory '{dir}': {source}")]
 pub struct ReadDirErr {
     pub dir: Dir,
     pub source: Box<std::io::Error>,
@@ -118,7 +118,7 @@ pub struct ReadDirErr {
 impl crate::errors::Error for ReadDirErr {}
 
 #[derive(Debug, thiserror::Error)]
-#[error("failed to write file atomically: {file}")]
+#[error("failed to write file atomically '{file}': {source}")]
 pub struct AtomicWriteFileErr {
     pub file: File,
     pub source: Box<std::io::Error>,

@@ -64,6 +64,7 @@ function Invoke-IntegrationLifecycle {
     Invoke-UpgradeStage $packages
     Invoke-DowngradeStage $packages
     Invoke-RollbackStage $packages
+    Invoke-WipedStateStage $packages
     Invoke-UninstallStage
 }
 
@@ -739,25 +740,34 @@ function Get-AgentLogFiles {
     return @(Get-ChildItem -LiteralPath $logsRoot -Filter "miru.log*" -File)
 }
 
-# The running service holds the current file open for writing, so each file is
+# The running service holds the current log file open for writing, so files are
 # opened with read-write sharing.
-function Get-ActivationWaitCount {
+function Read-SharedText {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    $fs = $null
+    $reader = $null
+    try {
+        $fs = [IO.File]::Open($Path, 'Open', 'Read', 'ReadWrite')
+        $reader = New-Object IO.StreamReader($fs)
+        return $reader.ReadToEnd()
+    }
+    finally {
+        if ($null -ne $reader) { $reader.Dispose() }
+        if ($null -ne $fs) { $fs.Dispose() }
+    }
+}
+
+function Get-AgentLogMatchCount {
+    param([Parameter(Mandatory = $true)][string]$Pattern)
     $count = 0
     foreach ($log in @(Get-AgentLogFiles)) {
-        $fs = $null
-        $reader = $null
-        try {
-            $fs = [IO.File]::Open($log.FullName, 'Open', 'Read', 'ReadWrite')
-            $reader = New-Object IO.StreamReader($fs)
-            $text = $reader.ReadToEnd()
-        }
-        finally {
-            if ($null -ne $reader) { $reader.Dispose() }
-            if ($null -ne $fs) { $fs.Dispose() }
-        }
-        $count += [regex]::Matches($text, 'waiting for provisioning').Count
+        $count += [regex]::Matches((Read-SharedText $log.FullName), $Pattern).Count
     }
     return [int]$count
+}
+
+function Get-ActivationWaitCount {
+    return Get-AgentLogMatchCount -Pattern 'waiting for provisioning'
 }
 
 # The unprovisioned agent logs "waiting for provisioning" once per start, so a new
@@ -850,6 +860,148 @@ function Invoke-RollbackStage {
     Assert-ServiceInstalled "rollback"
     Assert-ServiceRuntimeIdentity "rollback" $baseline
     Write-Host "PASS failed v3 upgrade rolls back registration, hash, marker, sentinel, DACL, and full service config; the restored service holds only its required privileges"
+}
+
+# Stands in for an administrator deleting %ProgramData%\Miru while the MSI is
+# installed. The folder is renamed away rather than deleted so the later stages
+# still see the customer and representative files with their original DACLs.
+function Invoke-WipedStateStage {
+    param([Parameter(Mandatory = $true)]$Packages)
+    $backupName = "Miru.harness-backup-" + [Guid]::NewGuid().ToString("N")
+    $backup = Join-Path $env:ProgramData $backupName
+    $movedAway = $false
+    $savedToken = [Environment]::GetEnvironmentVariable("MIRU_PROVISIONING_TOKEN", "Process")
+    $devicePath = Join-Path $programDataRoot "device.json"
+    try {
+        Stop-Service miru-agent
+        Rename-Item -LiteralPath $programDataRoot -NewName $backupName
+        $movedAway = $true
+        Assert-True (-not (Test-Path -LiteralPath $programDataRoot)) "wiped state removes $programDataRoot"
+
+        [Environment]::SetEnvironmentVariable("MIRU_PROVISIONING_TOKEN", $null, "Process")
+        foreach ($command in @("provision", "reprovision")) {
+            $result = Invoke-AgentCli @($command)
+            Assert-Equal 1 $result.ExitCode "wiped state $command exits 1`n$($result.Output)"
+            Assert-True ($result.Output -match 'not created by the installer') "wiped state $command reports the missing installer layout`n$($result.Output)"
+            Assert-True (-not (Test-Path -LiteralPath $programDataRoot)) "wiped state $command creates no $programDataRoot"
+        }
+
+        Invoke-Msi @("/fvomus", ('"{0}"' -f $Packages.V2)) "fixture-v2-repair-after-wipe" @(0, 3010) | Out-Null
+        Assert-ProtectedAcls
+
+        $result = Invoke-AgentCli @("provision")
+        Assert-Equal 1 $result.ExitCode "repaired layout provision without a token exits 1`n$($result.Output)"
+        Assert-True ($result.Output -match 'Missing environment variable: MIRU_PROVISIONING_TOKEN') "repaired layout passes the guard and stops at the token check`n$($result.Output)"
+        Assert-True ($result.Output -notmatch 'not created by the installer') "repaired layout passes the installer layout guard`n$($result.Output)"
+        Assert-True (-not (Test-Path -LiteralPath $devicePath)) "failed provision writes no device.json"
+
+        # The repair restarts the service; the state must be written while it is stopped.
+        Stop-Service miru-agent
+        Write-ProvisionedState
+        Assert-InheritedProtection $devicePath
+
+        Wait-AgentStartup
+        Stop-Service miru-agent
+        # Read once, after the service stopped: any open handle would block the
+        # service's atomic replace and fake the original failure.
+        $device = [IO.File]::ReadAllText($devicePath) | ConvertFrom-Json
+        Assert-Equal "offline" $device.status "service patches the administrator-written device.json to offline"
+        Assert-Equal "harness" $device.name "service patched, not replaced by default, the administrator-written device.json"
+    }
+    catch {
+        Write-WipedStateEvidence
+        throw
+    }
+    finally {
+        [Environment]::SetEnvironmentVariable("MIRU_PROVISIONING_TOKEN", $savedToken, "Process")
+        Stop-Service miru-agent -ErrorAction Continue
+        if ($movedAway -and (Test-Path -LiteralPath $backup)) {
+            if (Test-Path -LiteralPath $programDataRoot) {
+                Remove-Item -LiteralPath $programDataRoot -Recurse -Force
+            }
+            Rename-Item -LiteralPath $backup -NewName (Split-Path -Leaf $programDataRoot)
+        }
+    }
+    $baseline = Get-ActivationWaitCount
+    Start-Service miru-agent
+    Assert-ServiceRuntimeIdentity "wiped-state restore" $baseline
+    Assert-ProtectedState "wiped-state restore"
+    Write-Host "PASS wiped state: provision and reprovision refuse without creating state; /fvomus repair restores protected folders and sentinels; the service replaces an administrator-written device.json"
+}
+
+# Returns the exit code and the combined stdout and stderr text.
+function Invoke-AgentCli {
+    param([Parameter(Mandatory = $true)][string[]]$Arguments)
+    # Windows PowerShell 5.1 wraps native stderr lines as ErrorRecords under
+    # 2>&1; with the inherited Stop preference the first one would throw before
+    # $LASTEXITCODE is read.
+    $ErrorActionPreference = "Continue"
+    $lines = @(& $agentPath @Arguments 2>&1 | ForEach-Object { "$_" })
+    return [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = ($lines -join "`n") }
+}
+
+# Provisioned state as an administrator would leave it, the way provision
+# writes it. [IO.File]::WriteAllText writes UTF-8 without a BOM; Set-Content in
+# 5.1 would add a BOM or use the ANSI code page.
+function Write-ProvisionedState {
+    # No poller, MQTT, or TCP server, so the service never contacts a backend.
+    [IO.File]::WriteAllText((Join-Path $programDataRoot "settings.json"),
+        '{"enable_poller":false,"enable_mqtt_worker":false,"enable_tcp_server":false}')
+    # Must match the executable exactly, or the service reconciles its version with the backend.
+    $v = @(& $agentPath --version)
+    Assert-Equal 0 $LASTEXITCODE "miru-agent --version succeeds"
+    Assert-True ($v.Count -ge 1) "miru-agent --version prints a version line"
+    $version = $v[0] -replace '^Version:\s*', ''
+    Assert-True ($version -match '^v\d') "miru-agent --version reports a version ($($v[0]))"
+    [IO.File]::WriteAllText((Join-Path $programDataRoot "agent_version"), "$version`n")
+    [IO.File]::WriteAllText((Join-Path $programDataRoot "device.json"),
+        '{"device_id":"dvc_harness","session_id":"harness","name":"harness","activated":true,"status":"online","last_synced_at":"1970-01-01T00:00:00Z","last_connected_at":"1970-01-01T00:00:00Z","last_disconnected_at":"1970-01-01T00:00:00Z"}')
+    # Written last: the keys' existence is what marks the agent as activated.
+    # Only existence is checked before the device.json patch.
+    foreach ($name in @("private_key.pem", "public_key.pem")) {
+        [IO.File]::WriteAllText((Join-Path $authRoot $name), "harness placeholder key`n")
+    }
+}
+
+# The service logs "Initializing token refresh worker..." right after
+# AppState::init, which patches device.json; an init failure logs
+# "Failed to start server" instead.
+function Wait-AgentStartup {
+    $started = [regex]::Escape('Initializing token refresh worker...')
+    $failed = 'Failed to start server'
+    $baseline = Get-AgentLogMatchCount -Pattern $started
+    $failureBaseline = Get-AgentLogMatchCount -Pattern $failed
+    Start-Service miru-agent
+    for ($attempt = 0; $attempt -lt 30; $attempt++) {
+        if ((Get-AgentLogMatchCount -Pattern $started) -gt $baseline) { return }
+        if ((Get-AgentLogMatchCount -Pattern $failed) -gt $failureBaseline) {
+            throw "miru-agent failed to start with the administrator-written state; see the log tail below"
+        }
+        Start-Sleep -Seconds 1
+    }
+    throw "miru-agent did not log its token refresh worker within 30 s"
+}
+
+# CI uploads only MSI logs, so print the ACLs and the agent's log tail.
+function Write-WipedStateEvidence {
+    # icacls reports failures on stderr; under Stop that would throw and hide
+    # the original failure.
+    $ErrorActionPreference = "Continue"
+    try {
+        foreach ($path in @($programDataRoot, (Join-Path $programDataRoot "device.json"))) {
+            if (Test-Path -LiteralPath $path) {
+                & icacls.exe $path 2>&1 | ForEach-Object { Write-Host "$_" }
+            }
+        }
+        $newest = Get-AgentLogFiles | Sort-Object LastWriteTime | Select-Object -Last 1
+        if ($null -ne $newest) {
+            Write-Host "Last 50 lines of $($newest.FullName):"
+            (Read-SharedText $newest.FullName) -split "\r?\n" | Select-Object -Last 50 | ForEach-Object { Write-Host $_ }
+        }
+    }
+    catch {
+        Write-Host "Wiped-state evidence collection also failed: $($_.Exception.Message)" -ForegroundColor Red
+    }
 }
 
 function Invoke-UninstallStage {
