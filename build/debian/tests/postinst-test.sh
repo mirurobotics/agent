@@ -270,6 +270,8 @@ test_admin_can_restrict_srv_miru() {
 	# and it survives an upgrade
 	expect_postinst_ok configure 0.10.3
 	expect_stat /srv/miru 750
+	expect_unreadable_by_others /srv/miru/configs/v1/motion.json
+	expect_readable_by app /srv/miru/configs/v1/motion.json
 }
 
 test_units_are_valid() {
