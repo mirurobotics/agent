@@ -262,7 +262,8 @@ test_admin_can_restrict_srv_miru() {
 	cp /usr/lib/tmpfiles.d/miru-agent.conf /etc/tmpfiles.d/miru-agent.conf
 	sed -i 's|^d /srv/miru 0755 |d /srv/miru 0750 |' /etc/tmpfiles.d/miru-agent.conf
 	systemd-tmpfiles --create miru-agent.conf || fail "systemd-tmpfiles failed"
-	expect_stat /srv/miru 750
+	[ "$(stat -c '%a %U %G' /srv/miru)" = '750 miru miru' ] ||
+		fail "documented check failed: $(stat -c '%a %U %G' /srv/miru)"
 	expect_unreadable_by_others /srv/miru/configs/v1/motion.json
 	expect_readable_by app /srv/miru/configs/v1/motion.json
 

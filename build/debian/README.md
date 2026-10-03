@@ -69,6 +69,9 @@ deployed under it. To limit them to the `miru` group, as Windows limits
 
 3. Apply it now: `sudo systemd-tmpfiles --create miru-agent.conf`. systemd
    re-applies it at every boot, and the package on every upgrade.
+4. Check it took effect: `stat -c '%a %U %G' /srv/miru` must print
+   `750 miru miru`. If it prints `755`, the `sed` in step 2 matched nothing;
+   fix the `/srv/miru` line in the override by hand and repeat step 3.
 
 Nothing inside `/srv/miru` changes: members read the existing configs through
 the folder. To undo, delete `/etc/tmpfiles.d/miru-agent.conf` and repeat step 3.
