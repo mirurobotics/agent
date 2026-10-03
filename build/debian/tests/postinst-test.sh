@@ -104,13 +104,23 @@ expect_legacy_contents_unchanged() {
 	done
 }
 
+# expect_readable_by <account> <path>
+expect_readable_by() {
+	runuser -u "$1" -- cat "$2" >/dev/null 2>&1 || fail "$1 cannot read $2"
+}
+
+# expect_unreadable_by <account> <path>
+expect_unreadable_by() {
+	! runuser -u "$1" -- cat "$2" >/dev/null 2>&1 || fail "$1 can read $2"
+}
+
 # An unrelated account stands in for "other" local users.
 expect_readable_by_others() {
-	runuser -u nobody -- cat "$1" >/dev/null 2>&1 || fail "others cannot read $1"
+	expect_readable_by nobody "$1"
 }
 
 expect_unreadable_by_others() {
-	! runuser -u nobody -- cat "$1" >/dev/null 2>&1 || fail "others can read $1"
+	expect_unreadable_by nobody "$1"
 }
 
 expect_units_restarted() {
@@ -152,6 +162,7 @@ reset_system() {
 		rm -rf "${entry%% *}"
 	done
 	rm -f /etc/tmpfiles.d/miru-agent.conf
+	userdel app 2>/dev/null || true
 	userdel miru 2>/dev/null || true
 	groupdel miru 2>/dev/null || true
 	rm -f "$postinst_out" "$systemctl_log"
@@ -241,6 +252,26 @@ test_tmpfiles_failure_fails_configure() {
 	! run_postinst configure || fail "postinst succeeded although systemd-tmpfiles failed"
 	grep -q 'Failed to create the miru directories' "$postinst_out" ||
 		fail "postinst did not report the systemd-tmpfiles failure"
+}
+
+# The opt-in in build/debian/README.md, run as documented.
+test_admin_can_restrict_srv_miru() {
+	seed_legacy_install
+	useradd -r -G miru -s /bin/false app
+	expect_postinst_ok configure 0.10.3
+	cp /usr/lib/tmpfiles.d/miru-agent.conf /etc/tmpfiles.d/miru-agent.conf
+	sed -i 's|^d /srv/miru 0755 |d /srv/miru 0750 |' /etc/tmpfiles.d/miru-agent.conf
+	systemd-tmpfiles --create miru-agent.conf || fail "systemd-tmpfiles failed"
+	[ "$(stat -c '%a %U %G' /srv/miru)" = '750 miru miru' ] ||
+		fail "documented check failed: $(stat -c '%a %U %G' /srv/miru)"
+	expect_unreadable_by_others /srv/miru/configs/v1/motion.json
+	expect_readable_by app /srv/miru/configs/v1/motion.json
+
+	# and it survives an upgrade
+	expect_postinst_ok configure 0.10.3
+	expect_stat /srv/miru 750
+	expect_unreadable_by_others /srv/miru/configs/v1/motion.json
+	expect_readable_by app /srv/miru/configs/v1/motion.json
 }
 
 test_units_are_valid() {
