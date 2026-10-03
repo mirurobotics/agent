@@ -89,15 +89,13 @@ jobs:
               - '.github/workflows/release.yml'
 
   # Build the exe the package tests install on a Blacksmith runner, where the
-  # compile is several times faster than on windows-latest. The dev profile is
-  # enough for installer tests; releases build and sign their own exe.
+  # compile is several times faster than on windows-latest. Release profile: a
+  # dev exe is much larger, which roughly doubled every MSI build in CI.
   windows-agent-build:
     needs: windows_package_scope
     if: needs.windows_package_scope.outputs.windows_package == 'true'
     runs-on: blacksmith-4vcpu-windows-2025
     timeout-minutes: 30
-    env:
-      CARGO_PROFILE_DEV_DEBUG: 0
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -109,7 +107,7 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
-          key: msi-exe
+          key: msi-release
           cache-on-failure: true
 
       - name: Install NASM (aws-lc-sys)
@@ -118,13 +116,13 @@ jobs:
           echo "C:\Program Files\NASM" >> $env:GITHUB_PATH
 
       - name: Build Windows Target
-        run: cargo build --target x86_64-pc-windows-msvc --package miru-agent --bin miru-agent --locked
+        run: cargo build --target x86_64-pc-windows-msvc --package miru-agent --bin miru-agent --locked --release
 
       - name: Upload agent executable
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ci-windows-agent-exe
-          path: target/x86_64-pc-windows-msvc/debug/miru-agent.exe
+          path: target/x86_64-pc-windows-msvc/release/miru-agent.exe
           if-no-files-found: error
           retention-days: 1
 
@@ -142,18 +140,18 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: ci-windows-agent-exe
-          path: target/x86_64-pc-windows-msvc/debug
+          path: target/x86_64-pc-windows-msvc/release
 
       - name: Restore pinned WiX SDK
         run: build\windows\restore-pinned.ps1 -ProjectPath build\windows\miru-agent.wixproj
 
       - name: Run package tests
         shell: powershell
-        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File build\windows\tests\package-tests.ps1 -ProjectPath build\windows\miru-agent.wixproj -BinDir target\x86_64-pc-windows-msvc\debug -ArtifactsDirectory build\windows\artifacts\package-tests
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File build\windows\tests\package-tests.ps1 -ProjectPath build\windows\miru-agent.wixproj -BinDir target\x86_64-pc-windows-msvc\release -ArtifactsDirectory build\windows\artifacts\package-tests
 
       - name: Run integration tests
         shell: powershell
-        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File build\windows\tests\integration-tests.ps1 -Configuration Debug -ConfirmDisposableTestMachine
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File build\windows\tests\integration-tests.ps1 -Configuration Release -ConfirmDisposableTestMachine
 
       - name: Upload Windows installer failure logs
         if: failure()

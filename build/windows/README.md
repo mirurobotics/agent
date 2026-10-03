@@ -249,7 +249,7 @@ Every pull request runs the agent test suite natively on Windows
 workflows additionally run the package and installer lifecycle on a separate
 `windows-package` job. That job also runs after pushes to `main` and
 `release/*`, and when the release workflow calls CI for a tag. It packages a
-dev-profile `miru-agent.exe` that `windows-agent-build` compiles on a faster
+release-profile `miru-agent.exe` that `windows-agent-build` compiles on a faster
 Blacksmith runner; the release workflow builds and signs its own. Pull requests
 that touch `build/**` or the workflows also run `windows-release-build` (the
 `cargo auditable` MSVC release build that uploads `miru-agent.exe` and
