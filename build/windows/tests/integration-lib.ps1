@@ -55,8 +55,10 @@ function Invoke-IntegrationRun {
 
 function Invoke-IntegrationLifecycle {
     Remove-LeftoverFixtures
-    $packages = Build-LifecyclePackages
     New-TestUser
+    $logons = Start-TestUserFirstLogons
+    $packages = Build-LifecyclePackages
+    Wait-TestUserFirstLogons $logons
     Initialize-CustomerState
     Invoke-InstallStage $packages
     New-CustomerGrant
@@ -137,6 +139,35 @@ function New-TestUser {
     New-LocalUser -Name $memberUser -Password $securePassword | Out-Null
     $script:createdMember = $true
     $script:memberUserSid = (Get-LocalUser -Name $memberUser).SID.Value
+}
+
+# A new account's first logon takes 12-15s on a fresh runner, which the
+# install-stage probes would otherwise pay. Log each test user on once while
+# the packages build.
+function Start-TestUserFirstLogons {
+    $accounts = @(@($testUser, $testPassword), @($memberUser, $memberPassword))
+    return @(foreach ($account in $accounts) {
+        Start-Job -ArgumentList "$env:COMPUTERNAME\$($account[0])", $account[1] -ScriptBlock {
+            param([string]$Name, [string]$Password)
+            $securePassword = ConvertTo-SecureString $Password -AsPlainText -Force
+            $credential = New-Object Management.Automation.PSCredential($Name, $securePassword)
+            $process = Start-Process -FilePath "powershell.exe" -Credential $credential `
+                -WorkingDirectory $env:SystemRoot -ArgumentList @("-NoProfile", "-Command", "exit 0") `
+                -Wait -PassThru
+            $process.ExitCode
+        }
+    })
+}
+
+function Wait-TestUserFirstLogons {
+    param([Parameter(Mandatory = $true)][object[]]$Jobs)
+    try {
+        $null = Wait-Job -Job $Jobs
+        foreach ($job in $Jobs) {
+            Assert-Equal 0 ([int](Receive-Job -Job $job)) "test user first logon"
+        }
+    }
+    finally { Remove-Job -Job $Jobs -Force }
 }
 
 function Initialize-CustomerState {
