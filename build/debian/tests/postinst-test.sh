@@ -45,8 +45,9 @@ if [ "$in_container" -eq 0 ]; then
 fi
 
 readonly debian_dir="$repo_root/build/debian"
-readonly postinst_out=/tmp/postinst.out
-readonly systemctl_log=/tmp/systemctl.log
+# outside /tmp, which the boot-time tmpfiles run cleans
+readonly postinst_out=/root/postinst.out
+readonly systemctl_log=/root/systemctl.log
 
 # Folders postinst owns, with the modes it must leave them in. All come from
 # the tmpfiles.d entry: only systemctl is mocked, so postinst's
@@ -221,10 +222,15 @@ test_fresh_install_creates_account_and_folders() {
 }
 
 test_boot_restores_drifted_folder_modes() {
+	local boot_cmd
 	seed_legacy_install
 	expect_postinst_ok configure 0.10.3
 	chmod 755 /var/lib/miru /var/log/miru
-	systemd-tmpfiles --create miru-agent.conf || fail "systemd-tmpfiles failed"
+	# what boot runs: systemd-tmpfiles-setup.service over every tmpfiles.d config
+	boot_cmd=$(sed -n 's/^ExecStart=//p' /lib/systemd/system/systemd-tmpfiles-setup.service)
+	[ -n "$boot_cmd" ] || fail "systemd-tmpfiles-setup.service has no ExecStart"
+	# shellcheck disable=SC2086 # split the command line
+	$boot_cmd || fail "boot tmpfiles run failed: $boot_cmd"
 	expect_folder_modes
 }
 
