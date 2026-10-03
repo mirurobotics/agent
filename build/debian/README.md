@@ -56,6 +56,8 @@ deployed under it. To limit them to the `miru` group, as Windows limits
 
 1. Add every account whose applications read configs to `miru` (see above),
    and restart those applications. Accounts left out lose access in step 3.
+   Membership also grants the device API socket and the discovery file, so
+   every account that can read configs can also call the device API.
 2. Override the packaged tmpfiles.d entry. A file in `/etc/tmpfiles.d` replaces
    the packaged one with the same name entirely, so copy it and change only the
    `/srv/miru` line:
