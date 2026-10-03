@@ -1,4 +1,4 @@
-# Linux permission hardening: private state, `miru-users` group, tighter unit
+# Linux permission hardening: private state and logs, tighter unit
 
 This ExecPlan is a living document. The sections Progress, Surprises & Discoveries, Decision Log, and Outcomes & Retrospective must be kept up to date as work proceeds.
 
@@ -14,27 +14,25 @@ Branch: `feat/linux-permission-hardening` (already created from `main`). Command
 
 ## Purpose / Big Picture
 
-Split on 2026-10-01 (see Decision Log): PR #281 delivers only the non-breaking part; the `miru-users` group, `/srv/miru/configs` restriction, and member migration described below ship in a stacked breaking follow-up PR.
+On a Linux device before this change the backend token is world-readable (`/var/lib/miru` is `0755` and `/var/lib/miru/auth/token.json` is `644`), and so are the logs. Windows already keeps the agent's data private to the service.
 
-On a Linux device today the backend token is world-readable (`/var/lib/miru/auth/token.json` is `644`), every state file and deployed config is readable by any local account, and the `miru` group is both the service's primary group and the group applications join for the device API socket. Windows already has the target model: the service account owns private data, and only the local `Miru Agent Users` group can read the device API discovery folder and the default configs folder.
+What PR #281 ships (non-breaking):
 
-After this change a Linux device matches that model:
+- `/var/lib/miru` is `0700 miru:miru` and `/var/log/miru` is `0750 miru:miru`. The folders are the access boundary: files inside keep their modes, and the agent code is unchanged. `sudo -u nobody cat /var/lib/miru/auth/token.json` fails with `Permission denied`.
+- The modes are declared once in `build/debian/miru-agent.tmpfiles`; postinst applies them with `systemd-tmpfiles` on every install and upgrade, and systemd at every boot. `StateDirectoryMode`/`LogsDirectoryMode` match them.
+- The systemd unit gains low-risk hardening directives.
+- The socket, `/run/miru`, the discovery file, and `/srv/miru` are unchanged.
 
-- `/var/lib/miru` and `auth/` are `0700 miru:miru`; every file the agent writes there is `0600` (public key `0640`). `sudo -u nobody cat /var/lib/miru/auth/token.json` fails with `Permission denied`.
-- A new system group `miru-users` (the Linux counterpart of `Miru Agent Users`) is the only group that can use `/run/miru/miru.sock`, read `/run/miru/device-api.json`, and read deployed configs in `/srv/miru/configs` (`2750 miru:miru-users`, setgid so new files inherit the group). Apps join `miru-users`, never `miru`.
-- `/var/log/miru` is `0750`. The systemd unit gains low-risk hardening directives.
-- Upgrades apply all of this to existing devices and copy existing `miru` group members into `miru-users` once.
+Not shipped here: restricting `/srv/miru` to the `miru` group is the breaking follow-up PR #285. The original design below (agent writes `0600`, a `miru-users` group, setgid configs, member migration, install-script changes) was built and then dropped or moved; the Decision Log records each step. Plan of Work, Concrete Steps, and Validation describe that original design and are kept as history.
 
-Breaking for customers: apps that use the socket or read `/srv/miru/configs` must be in `miru-users`. Accounts listed in `/etc/group` as `miru` members (or with `miru` as primary group) are migrated once, automatically, but must re-login or restart their services. Not migrated, and losing access on upgrade: config readers that were never in `miru` (configs were world-readable, so this is most of them) and services that get `miru` only through systemd `Group=`/`SupplementaryGroups=`. Removing world access on upgrade is the requested Windows-parity behavior, so the release note and `build/debian/README.md` must spell out both cases, and the docs-repo update (`docs/snippets/agent/permissions.mdx`, `docs/snippets/agent/filesys/default-perms.mdx`) must ship with the release.
-
-Out of scope: changing the service `UMask` (consumers of configs deployed outside `/srv/miru/configs` rely on `0644`), `ProtectSystem=strict`/`ProtectHome` (configs deploy to, and uploads read, arbitrary customer paths), `SystemCallFilter`, and the docs repo.
+Out of scope: changing the service `UMask` (consumers of configs deployed outside `/srv/miru` rely on `0644`), `ProtectSystem=strict`/`ProtectHome` (configs deploy to, and uploads read, arbitrary customer paths), `SystemCallFilter`, and the docs repo.
 
 ## Progress
 
 - [x] M0: `git mv plans/backlog/20261001-linux-permission-hardening.md plans/active/`, commit (`docs(plans): activate linux permission hardening plan`).
-- [x] M1: Agent writes private state with explicit modes (code + tests), commit.
-- [x] M2: Debian packaging (group, postinst, tmpfiles, socket, service) + container test + CI job, commit.
-- [x] M3: Install-script template + regenerated scripts, commit.
+- [x] M1: Agent writes private state with explicit modes (code + tests), commit. Later reverted: the folders are the boundary (Decision Log, 2026-10-01).
+- [x] M2: Debian packaging (group, postinst, tmpfiles, socket, service) + container test + CI job, commit. The `miru-users` group, socket change, and setgid configs were later reverted; postinst was reduced to one `systemd-tmpfiles` call.
+- [x] M3: Install-script template + regenerated scripts, commit. Later reverted with the `miru-users` group (Decision Log, split).
 - [x] M4: Docs and release note, commit.
 - [x] M5: Push, open draft PR, preflight reports `CLEAN`; fill Outcomes, `git mv` the plan to `plans/completed/`, commit, and re-run preflight to `CLEAN` (CI green on `e3f4bea5` in one round, run 36913309334, all 7 jobs including `debian-package` and `windows-package`; PR #281 draft).
 
@@ -72,7 +70,7 @@ Out of scope: changing the service `UMask` (consumers of configs deployed outsid
 
 ## Outcomes & Retrospective
 
-Delivered in PR #281 (mirurobotics/agent), non-breaking after the split (see Decision Log). The Debian package makes `/var/lib/miru` `0700` and `/var/log/miru` `0750` on every configure and through `StateDirectoryMode`/`LogsDirectoryMode`, so state (including `token.json`) and logs are private by folder, and hardens the unit. No agent code changed: per-file modes were built and then dropped in favour of the folder boundary. The socket, `/run/miru`, and the discovery file keep the `miru` group, and configs in `/srv/miru` keep their modes, so they stay world-readable. The `debian-package` CI job runs `shellcheck` and the postinst container test. The `miru-users` group, configs restriction, and member migration are in the stacked breaking follow-up PR. Remaining before release: the manual on-device check in Validation; the docs-repo `miru-users` update ships with the follow-up, not #281.
+Delivered in PR #281 (mirurobotics/agent), non-breaking after the split (see Decision Log). The Debian package makes `/var/lib/miru` `0700` and `/var/log/miru` `0750` on every configure and through `StateDirectoryMode`/`LogsDirectoryMode`, so state (including `token.json`) and logs are private by folder, and hardens the unit. No agent code changed: per-file modes were built and then dropped in favour of the folder boundary. The socket, `/run/miru`, and the discovery file keep the `miru` group, and configs in `/srv/miru` keep their modes, so they stay world-readable. The `debian-package` CI job runs `shellcheck` and the postinst container test. Restricting `/srv/miru` to the `miru` group is the stacked breaking follow-up #285 (the `miru-users` group was dropped). Remaining before release: the manual on-device check in Validation; the docs-repo update ships with #285, not #281.
 
 ## Context and Orientation
 
@@ -101,6 +99,8 @@ Design choices (record changes to these in the Decision Log): `miru-users` is ke
 Test conventions (`AGENTS.md`): integration tests in `agent/tests/` mirror `agent/src/` and run as the `mod` test target; use `miru_agent::filesys` helpers rather than `std::fs`; gate tests with `#[cfg(unix)]` only when asserting Unix semantics (mode bits); 4+ `assert_eq!` on fields of one variable trips the field-by-field lint. Shared fixtures live in `agent/tests/test_utils/` and must name the library `miru_agent::`.
 
 ## Plan of Work
+
+Historical: this section, Concrete Steps, and Validation describe the original design. See Purpose for what #281 ships.
 
 ### M1 — agent code
 

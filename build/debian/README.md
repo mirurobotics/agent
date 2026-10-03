@@ -60,6 +60,11 @@ under it are readable only by the `miru` group. Applications that read those
 configs from an account outside `miru` must join it (see above) before the
 upgrade, or they lose access.
 
+A log shipper (fluent-bit, promtail, and the like) that tails
+`/var/log/miru/*.log` as an account outside `miru` stops receiving logs after
+the upgrade. Add its account to `miru` (see above), or read the same logs from
+`journalctl -u miru`.
+
 ## Uninstall
 
 `apt purge` removes `/var/lib/miru`, `/var/log/miru`, and `/srv/miru`. The
