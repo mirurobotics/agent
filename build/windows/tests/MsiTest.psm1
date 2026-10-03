@@ -222,7 +222,10 @@ function Get-DotNetBuildArguments {
     $arguments = @(
         "build", $ProjectPath, "--no-restore", "--configuration", "Release",
         "-p:Platform=x64", "-p:Version=$Version", "-p:BinDir=$BinDir",
-        "-p:OutputPath=$OutputDirectory\", "-p:IntermediateOutputPath=$OutputDirectory\obj\"
+        "-p:OutputPath=$OutputDirectory\", "-p:IntermediateOutputPath=$OutputDirectory\obj\",
+        # Compressing miru-agent.exe into the cabinet dominates each build;
+        # test packages do not need it, and no table under test depends on it.
+        "-p:DefaultCompressionLevel=none"
     )
     if ($ProductCode) { $arguments += "-p:ProductCode=$ProductCode" }
     if ($TestWixSource) { $arguments += "-p:TestWixSource=$TestWixSource" }
@@ -231,8 +234,6 @@ function Get-DotNetBuildArguments {
 }
 
 # Builds the MSIs concurrently and returns their paths in input order. Each
-# build is mostly dotnet startup and ICE validation rather than CPU-bound work,
-# so running them together saves most of the sequential wall time. Each
 # hashtable holds Get-DotNetBuildArguments parameters with a distinct
 # OutputDirectory.
 function Invoke-DotNetBuilds {
@@ -240,7 +241,7 @@ function Invoke-DotNetBuilds {
     $location = (Get-Location).ProviderPath
     $jobs = @(foreach ($build in $Builds) {
         $arguments = Get-DotNetBuildArguments @build
-        Start-Job -ArgumentList $location, (, $arguments) -ScriptBlock {
+        Start-Job -ArgumentList $location, $arguments -ScriptBlock {
             param([string]$Location, [string[]]$Arguments)
             Set-Location -LiteralPath $Location
             & dotnet @Arguments 2>&1 | Out-String
