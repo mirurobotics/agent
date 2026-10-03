@@ -48,6 +48,32 @@ well.
 `miru` get nothing in the data root, and can read the logs in `/var/log/miru`;
 other accounts can read neither. The same logs are in `journalctl -u miru`.
 
+### Restricting configs to the `miru` group (opt-in)
+
+By default `/srv/miru` is `0755`, so any local account can read configs
+deployed under it. To limit them to the `miru` group, as Windows limits
+`ProgramData\Miru\configs` to `Miru Agent Users`:
+
+1. Add every account whose applications read configs to `miru` (see above),
+   and restart those applications. Accounts left out lose access in step 3.
+2. Override the packaged tmpfiles.d entry. A file in `/etc/tmpfiles.d` replaces
+   the packaged one with the same name entirely, so copy it and change only the
+   `/srv/miru` line:
+
+   ```sh
+   sudo cp /usr/lib/tmpfiles.d/miru-agent.conf /etc/tmpfiles.d/miru-agent.conf
+   sudo sed -i 's|^d /srv/miru 0755 |d /srv/miru 0750 |' /etc/tmpfiles.d/miru-agent.conf
+   ```
+
+3. Apply it now: `sudo systemd-tmpfiles --create miru-agent.conf`. systemd
+   re-applies it at every boot, and the package on every upgrade.
+
+Nothing inside `/srv/miru` changes: members read the existing configs through
+the folder. To undo, delete `/etc/tmpfiles.d/miru-agent.conf` and repeat step 3.
+After an upgrade, compare the override with
+`/usr/lib/tmpfiles.d/miru-agent.conf`: while the override exists, changes to
+the packaged entry do not apply.
+
 ## Upgrading
 
 Upgrades apply the table above. Compared with earlier releases, the data root
