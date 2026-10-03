@@ -122,7 +122,7 @@ function Get-IntegrationBuild {
         [Parameter(Mandatory = $true)][string]$ProductCode,
         [Parameter(Mandatory = $true)][string]$Marker
     )
-    $output = Initialize-Directory (Join-Path $artifactsRoot $Version)
+    $output = Initialize-Directory (Join-Path $packagesRoot $Version)
     $payload = Join-Path $output "rollback-payload.txt"
     [IO.File]::WriteAllText($payload, $Marker, [Text.Encoding]::ASCII)
     return @{
@@ -945,7 +945,9 @@ function Remove-TestFiles {
     }
     catch { Add-CleanupFailure "fixture marker deletion failed: $($_.Exception.Message)" }
     try {
-        if (Test-Path -LiteralPath $artifactsRoot) { Remove-Item -LiteralPath $artifactsRoot -Recurse -Force -ErrorAction Stop }
+        foreach ($root in @($artifactsRoot, $packagesRoot)) {
+            if (Test-Path -LiteralPath $root) { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction Stop }
+        }
     }
     catch { Add-CleanupFailure "temporary artifact deletion failed: $($_.Exception.Message)" }
 }

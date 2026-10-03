@@ -30,6 +30,10 @@ function Initialize-IntegrationPaths {
     $script:binDir = Join-Path $script:repositoryRoot $target
     $runId = "miru-integration-tests-" + [Guid]::NewGuid().ToString("N")
     $script:artifactsRoot = Join-Path ([IO.Path]::GetTempPath()) $runId
+    # Packages build in parallel; on CI runners %TEMP% is on the slow system
+    # drive, where concurrent builds ran three times slower.
+    $script:packagesRoot = Join-Path $script:repositoryRoot `
+        "build\windows\artifacts\$runId"
     $script:deterministicLogs = Join-Path $script:repositoryRoot `
         "build\windows\artifacts\package-tests\logs"
     $script:sessionLogs = New-MsiSessionLogDirectory $script:deterministicLogs
@@ -121,4 +125,5 @@ Initialize-IntegrationPaths $Configuration
 Initialize-IntegrationRuntime
 Assert-IntegrationPreconditions
 $script:artifactsRoot = Initialize-Directory $script:artifactsRoot
+$script:packagesRoot = Initialize-Directory $script:packagesRoot
 Invoke-IntegrationRun
