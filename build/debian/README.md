@@ -55,6 +55,11 @@ Upgrades apply the table above. Compared with earlier releases, the data root
 by others. The socket, the discovery file, and configs in `/srv/miru` are
 unchanged.
 
+A log shipper (fluent-bit, promtail, and the like) that tails
+`/var/log/miru/*.log` as an account outside `miru` stops receiving logs after
+the upgrade. Add its account to `miru` (see above), or read the same logs from
+`journalctl -u miru`.
+
 ## Uninstall
 
 `apt purge` removes `/var/lib/miru`, `/var/log/miru`, and `/srv/miru`. The
