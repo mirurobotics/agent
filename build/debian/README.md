@@ -19,21 +19,22 @@ inside alone (the private key is still written `0600`).
 | --- | --- | --- | --- |
 | `/var/lib/miru` (data root) | `0700` | `miru` | `miru` |
 | `/var/log/miru` | `0750` | `miru` | `miru` |
-| `/srv/miru` | `0755` | `miru` | `miru` |
+| `/srv/miru` | `0750` | `miru` | `miru` |
 | Configs deployed under `/srv/miru` and their folders | umask (normally `0644` / `0755`) | `miru` | `miru` |
 | `/run/miru` | `0750` | `miru` | `miru` |
 | `/run/miru/miru.sock` | `0660` | `root` | `miru` |
 | `/run/miru/device-api.json` (only with `enable_tcp_server`) | `0640` | `miru` | `miru` |
 
-`postinst` sets only `/srv/miru` itself; deployed configs keep their
-umask-derived modes, so any local account can read them, as before. Configs
-deployed outside `/srv/miru` keep their umask-derived modes too.
+Configs deployed under `/srv/miru` keep their umask-derived modes; `/srv/miru`
+itself limits them to the `miru` group. Configs deployed outside `/srv/miru`
+keep their umask-derived modes, and their folders decide who can read them.
 
 ## Access for local applications
 
 Members of the `miru` group can use the device API socket
-`/run/miru/miru.sock` and read the TCP discovery file
-`/run/miru/device-api.json`. Add each account whose applications call the API:
+`/run/miru/miru.sock`, read the TCP discovery file
+`/run/miru/device-api.json`, and read configs deployed under `/srv/miru`. Add
+each account whose applications call the API or read configs:
 
 ```sh
 sudo usermod -a -G miru <account>
@@ -52,8 +53,12 @@ other accounts can read neither. The same logs are in `journalctl -u miru`.
 
 Upgrades apply the table above. Compared with earlier releases, the data root
 (and so `auth/token.json`) becomes owner-only, and `/var/log/miru` loses access
-by others. The socket, the discovery file, and configs in `/srv/miru` are
-unchanged.
+by others. The socket and the discovery file are unchanged.
+
+**Breaking:** `/srv/miru` changes from `0755` to `0750`, so configs deployed
+under it are readable only by the `miru` group. Applications that read those
+configs from an account outside `miru` must join it (see above) before the
+upgrade, or they lose access.
 
 ## Uninstall
 

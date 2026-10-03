@@ -54,7 +54,7 @@ readonly systemctl_log=/tmp/systemctl.log
 readonly folders=(
 	"/var/lib/miru 700"
 	"/var/log/miru 750"
-	"/srv/miru 755"
+	"/srv/miru 750"
 	"/run/miru 750"
 )
 
@@ -103,13 +103,14 @@ expect_legacy_contents_unchanged() {
 	done
 }
 
-# An unrelated account stands in for "other" local users.
-expect_readable_by_others() {
-	runuser -u nobody -- cat "$1" >/dev/null 2>&1 || fail "others cannot read $1"
+# expect_readable_by <account> <path>
+expect_readable_by() {
+	runuser -u "$1" -- cat "$2" >/dev/null 2>&1 || fail "$1 cannot read $2"
 }
 
-expect_unreadable_by_others() {
-	! runuser -u nobody -- cat "$1" >/dev/null 2>&1 || fail "others can read $1"
+# expect_unreadable_by <account> <path>
+expect_unreadable_by() {
+	! runuser -u "$1" -- cat "$2" >/dev/null 2>&1 || fail "$1 can read $2"
 }
 
 expect_units_restarted() {
@@ -150,17 +151,20 @@ reset_system() {
 	for entry in "${folders[@]}"; do
 		rm -rf "${entry%% *}"
 	done
+	userdel app 2>/dev/null || true
 	userdel miru 2>/dev/null || true
 	groupdel miru 2>/dev/null || true
 	rm -f "$postinst_out" "$systemctl_log"
 }
 
 # Lay out an install from a release before the folders were tightened: every
-# folder world-readable, the token and logs 0644.
+# folder world-readable, the token and logs 0644. The account "app" is an
+# application in the miru group; "nobody" stands in for every other account.
 seed_legacy_install() {
 	local entry type path mode
 	groupadd -r miru
 	useradd -r -g miru -s /bin/false miru
+	useradd -r -G miru -s /bin/false app
 	for entry in "${folders[@]}"; do
 		mkdir -p "${entry%% *}"
 		chmod 755 "${entry%% *}"
@@ -194,13 +198,19 @@ test_upgrade_sets_folder_modes() {
 	expect_units_restarted
 }
 
-test_upgrade_makes_state_and_logs_private() {
+test_upgrade_limits_access_to_the_miru_group() {
 	seed_legacy_install
-	expect_readable_by_others /var/lib/miru/auth/token.json
+	expect_readable_by nobody /var/lib/miru/auth/token.json
+	expect_readable_by nobody /srv/miru/configs/v1/motion.json
 	expect_postinst_ok configure 0.10.3
-	expect_unreadable_by_others /var/lib/miru/auth/token.json
-	expect_unreadable_by_others /var/log/miru/miru.log
-	expect_readable_by_others /srv/miru/configs/v1/motion.json
+
+	expect_unreadable_by nobody /var/lib/miru/auth/token.json
+	expect_unreadable_by nobody /var/log/miru/miru.log
+	expect_unreadable_by nobody /srv/miru/configs/v1/motion.json
+
+	expect_unreadable_by app /var/lib/miru/auth/token.json
+	expect_readable_by app /var/log/miru/miru.log
+	expect_readable_by app /srv/miru/configs/v1/motion.json
 }
 
 test_reconfigure_is_idempotent() {
