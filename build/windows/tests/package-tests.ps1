@@ -22,18 +22,28 @@ function Reset-ChildDirectory {
     return Initialize-Directory $path
 }
 
-function Build-ProductionPackage {
+function Get-ProductionBuild {
     param(
         [Parameter(Mandatory = $true)][string]$Version,
         [Parameter(Mandatory = $true)][string]$Directory
     )
-    $built = Invoke-DotNetBuild -ProjectPath $resolvedProject `
-        -BinDir $resolvedBinDir -Version $Version -OutputDirectory $Directory
-    $path = Join-Path $Directory "miru-agent-$Version.msi"
-    if ($built -ne $path) { Copy-Item -LiteralPath $built -Destination $path -Force }
-    $metadata = Assert-Package $path $Version
+    return @{
+        ProjectPath = $resolvedProject; BinDir = $resolvedBinDir
+        Version = $Version; OutputDirectory = $Directory
+    }
+}
+
+function Assert-ProductionPackage {
+    param(
+        [Parameter(Mandatory = $true)][hashtable]$Build,
+        [Parameter(Mandatory = $true)][string]$Built
+    )
+    $version = $Build.Version
+    $path = Join-Path $Build.OutputDirectory "miru-agent-$version.msi"
+    if ($Built -ne $path) { Copy-Item -LiteralPath $Built -Destination $path -Force }
+    $metadata = Assert-Package $path $version
     Assert-ProductionTables $path
-    Write-Host "PASS package $Version"
+    Write-Host "PASS package $version"
     return $metadata
 }
 
@@ -333,16 +343,17 @@ function Assert-ServiceRecoveryTable {
         "WiX Util service recovery table present"
 }
 
-function Build-FixturePackage {
+function Get-FixtureBuild {
     param([Parameter(Mandatory = $true)][string]$Directory)
     $payload = Join-Path $Directory "rollback-payload.txt"
     [IO.File]::WriteAllText($payload, "fixture-contract", [Text.Encoding]::ASCII)
-    return Invoke-DotNetBuild -ProjectPath $resolvedProject `
-        -BinDir $resolvedBinDir -Version "1.2.0" `
-        -OutputDirectory $Directory `
-        -ProductCode $MsiFixtureProductCodes[2] `
-        -TestWixSource (Join-Path $PSScriptRoot "integration-test.wxs") `
-        -FixturePayloadPath $payload
+    return @{
+        ProjectPath = $resolvedProject; BinDir = $resolvedBinDir
+        Version = "1.2.0"; OutputDirectory = $Directory
+        ProductCode = $MsiFixtureProductCodes[2]
+        TestWixSource = (Join-Path $PSScriptRoot "integration-test.wxs")
+        FixturePayloadPath = $payload
+    }
 }
 
 function Invoke-ExpectedBuildFailure {
@@ -373,18 +384,23 @@ $resolvedBinDir = (Resolve-Path -LiteralPath $BinDir).Path
 $resolvedArtifacts = Initialize-Directory ([IO.Path]::GetFullPath($ArtifactsDirectory))
 $invalidDirectory = Reset-ChildDirectory $resolvedArtifacts "invalid"
 
-$v1 = Build-ProductionPackage "1.0.0" (Reset-ChildDirectory $resolvedArtifacts "v1")
-$v2 = Build-ProductionPackage "1.1.0" (Reset-ChildDirectory $resolvedArtifacts "v2")
+$v1Build = Get-ProductionBuild "1.0.0" (Reset-ChildDirectory $resolvedArtifacts "v1")
+$v2Build = Get-ProductionBuild "1.1.0" (Reset-ChildDirectory $resolvedArtifacts "v2")
 # Four-field form used for prerelease builds (v1.1.0-beta.1 -> 1.1.0.201);
 # Assert-Package checks the built ProductVersion.
-$null = Build-ProductionPackage "1.1.0.201" (Reset-ChildDirectory $resolvedArtifacts "v2-beta")
+$betaBuild = Get-ProductionBuild "1.1.0.201" (Reset-ChildDirectory $resolvedArtifacts "v2-beta")
+$fixtureBuild = Get-FixtureBuild (Reset-ChildDirectory $resolvedArtifacts "fixture")
+$built = @(Invoke-DotNetBuilds @($v1Build, $v2Build, $betaBuild, $fixtureBuild))
+
+$v1 = Assert-ProductionPackage $v1Build $built[0]
+$v2 = Assert-ProductionPackage $v2Build $built[1]
+$null = Assert-ProductionPackage $betaBuild $built[2]
 Assert-True (-not [string]::Equals($v1.ProductCode, $v2.ProductCode, `
     [StringComparison]::OrdinalIgnoreCase)) "normal ProductCodes differ"
 Assert-Equal $v1.UpgradeCode $v2.UpgradeCode "normal UpgradeCode remains stable"
 Write-Host "PASS ProductCodes differ, UpgradeCode stable"
 
-Assert-FailingFixtureContract (Build-FixturePackage `
-    (Reset-ChildDirectory $resolvedArtifacts "fixture"))
+Assert-FailingFixtureContract $built[3]
 Write-Host "PASS fixture custom-action contract"
 
 # One representative case per validation family proves the wixproj error

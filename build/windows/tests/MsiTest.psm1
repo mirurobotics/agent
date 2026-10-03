@@ -208,7 +208,7 @@ function Get-MsiIdentity {
     finally { Close-MsiDatabase $handle }
 }
 
-function Invoke-DotNetBuild {
+function Get-DotNetBuildArguments {
     param(
         [Parameter(Mandatory = $true)][string]$ProjectPath,
         [Parameter(Mandatory = $true)][string]$BinDir,
@@ -227,9 +227,39 @@ function Invoke-DotNetBuild {
     if ($ProductCode) { $arguments += "-p:ProductCode=$ProductCode" }
     if ($TestWixSource) { $arguments += "-p:TestWixSource=$TestWixSource" }
     if ($FixturePayloadPath) { $arguments += "-p:FixturePayloadPath=$FixturePayloadPath" }
-    & dotnet @arguments | Out-Host
-    if ($LASTEXITCODE -ne 0) { throw "dotnet build failed for version $Version" }
-    return Get-OutputMsi -OutputDirectory $OutputDirectory -Version $Version
+    return $arguments
+}
+
+# Builds the MSIs concurrently and returns their paths in input order. Each
+# build is mostly dotnet startup and ICE validation rather than CPU-bound work,
+# so running them together saves most of the sequential wall time. Each
+# hashtable holds Get-DotNetBuildArguments parameters with a distinct
+# OutputDirectory.
+function Invoke-DotNetBuilds {
+    param([Parameter(Mandatory = $true)][hashtable[]]$Builds)
+    $location = (Get-Location).ProviderPath
+    $jobs = @(foreach ($build in $Builds) {
+        $arguments = Get-DotNetBuildArguments @build
+        Start-Job -ArgumentList $location, (, $arguments) -ScriptBlock {
+            param([string]$Location, [string[]]$Arguments)
+            Set-Location -LiteralPath $Location
+            & dotnet @Arguments 2>&1 | Out-String
+            $LASTEXITCODE
+        }
+    })
+    try {
+        $null = Wait-Job -Job $jobs
+        $paths = @()
+        for ($i = 0; $i -lt $jobs.Count; $i++) {
+            $output, $exitCode = @(Receive-Job -Job $jobs[$i])
+            Write-Host $output
+            $version = $Builds[$i].Version
+            if ($exitCode -ne 0) { throw "dotnet build failed for version $version" }
+            $paths += Get-OutputMsi -OutputDirectory $Builds[$i].OutputDirectory -Version $version
+        }
+        return $paths
+    }
+    finally { Remove-Job -Job $jobs -Force }
 }
 
 function Get-OutputMsi {
@@ -289,7 +319,7 @@ Export-ModuleMember -Function @(
     "Test-MsiTable",
     "Get-MsiContract",
     "Get-MsiIdentity",
-    "Invoke-DotNetBuild",
+    "Invoke-DotNetBuilds",
     "Assert-FailingFixtureContract"
 ) -Variable @(
     "MsiProductName",
