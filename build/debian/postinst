@@ -30,7 +30,10 @@ post_install() {
     # create the miru directories and apply their modes; tmpfiles.d re-applies
     # them at every boot
     printf "\033[32m Creating the miru directories\033[0m\n"
-    systemd-tmpfiles --create miru-agent.conf || exit 1
+    if ! systemd-tmpfiles --create miru-agent.conf; then
+      printf "\033[31m Failed to create the miru directories (systemd-tmpfiles miru-agent.conf)\033[0m\n" >&2
+      exit 1
+    fi
 
     # reload the unit from disk 
     printf "\033[32m Reload the service unit from disk\033[0m\n"

@@ -151,6 +151,7 @@ reset_system() {
 	for entry in "${folders[@]}"; do
 		rm -rf "${entry%% *}"
 	done
+	rm -f /etc/tmpfiles.d/miru-agent.conf
 	userdel app 2>/dev/null || true
 	userdel miru 2>/dev/null || true
 	groupdel miru 2>/dev/null || true
@@ -235,6 +236,15 @@ test_boot_restores_drifted_folder_modes() {
 	chmod 755 /var/lib/miru /var/log/miru
 	systemd-tmpfiles --create miru-agent.conf || fail "systemd-tmpfiles failed"
 	expect_folder_modes
+}
+
+test_tmpfiles_failure_fails_configure() {
+	# systemd-tmpfiles fails when an entry's user does not exist
+	sed 's|^\(d /srv/miru [0-7]*\) miru|\1 no-such-user|' \
+		"$debian_dir/miru-agent.tmpfiles" >/etc/tmpfiles.d/miru-agent.conf
+	! run_postinst configure || fail "postinst succeeded although systemd-tmpfiles failed"
+	grep -q 'Failed to create the miru directories' "$postinst_out" ||
+		fail "postinst did not report the systemd-tmpfiles failure"
 }
 
 test_units_are_valid() {
