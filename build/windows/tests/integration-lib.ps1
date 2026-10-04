@@ -103,33 +103,29 @@ function Invoke-Msi {
 
 function Build-LifecyclePackages {
     Assert-True (Test-Path -LiteralPath (Join-Path $binDir "miru-agent.exe") -PathType Leaf) "real x64 miru-agent.exe exists"
-    $builds = @(
-        (Get-IntegrationBuild "1.0.0" $fixtureProducts[0] "fixture-v1"),
-        (Get-IntegrationBuild "1.1.0" $fixtureProducts[1] "fixture-v2"),
-        (Get-IntegrationBuild "1.2.0" $fixtureProducts[2] "fixture-v3"),
+    $packages = @{
+        V1 = Build-IntegrationPackage "1.0.0" $fixtureProducts[0] "fixture-v1"
+        V2 = Build-IntegrationPackage "1.1.0" $fixtureProducts[1] "fixture-v2"
+        V3 = Build-IntegrationPackage "1.2.0" $fixtureProducts[2] "fixture-v3"
         # Prerelease of V2 (v1.1.0-beta.1), four-field like release builds.
-        (Get-IntegrationBuild "1.1.0.201" $fixtureProducts[3] "fixture-v2-beta")
-    )
-    $built = @(Invoke-DotNetBuilds $builds)
-    $packages = @{ V1 = $built[0]; V2 = $built[1]; V3 = $built[2]; V2Beta = $built[3] }
+        V2Beta = Build-IntegrationPackage "1.1.0.201" $fixtureProducts[3] "fixture-v2-beta"
+    }
     Assert-FailingFixtureContract $packages.V3
     return $packages
 }
 
-function Get-IntegrationBuild {
+function Build-IntegrationPackage {
     param(
         [Parameter(Mandatory = $true)][string]$Version,
         [Parameter(Mandatory = $true)][string]$ProductCode,
         [Parameter(Mandatory = $true)][string]$Marker
     )
-    $output = Initialize-Directory (Join-Path $packagesRoot $Version)
+    $output = Initialize-Directory (Join-Path $artifactsRoot $Version)
     $payload = Join-Path $output "rollback-payload.txt"
     [IO.File]::WriteAllText($payload, $Marker, [Text.Encoding]::ASCII)
-    return @{
-        ProjectPath = $projectPath; BinDir = $binDir; Version = $Version
-        OutputDirectory = $output; ProductCode = $ProductCode
-        TestWixSource = $fixtureSource; FixturePayloadPath = $payload
-    }
+    Invoke-DotNetBuild -ProjectPath $projectPath -BinDir $binDir -Version $Version `
+        -OutputDirectory $output -ProductCode $ProductCode `
+        -TestWixSource $fixtureSource -FixturePayloadPath $payload
 }
 
 function New-TestUser {
@@ -945,9 +941,7 @@ function Remove-TestFiles {
     }
     catch { Add-CleanupFailure "fixture marker deletion failed: $($_.Exception.Message)" }
     try {
-        foreach ($root in @($artifactsRoot, $packagesRoot)) {
-            if (Test-Path -LiteralPath $root) { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction Stop }
-        }
+        if (Test-Path -LiteralPath $artifactsRoot) { Remove-Item -LiteralPath $artifactsRoot -Recurse -Force -ErrorAction Stop }
     }
     catch { Add-CleanupFailure "temporary artifact deletion failed: $($_.Exception.Message)" }
 }
