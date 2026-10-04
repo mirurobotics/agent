@@ -106,7 +106,7 @@
          ServiceSid is the service SID (`sc.exe showsid miru-agent`), hardcoded
          because CreateFolders runs before the service exists; recompute it if
          the service Name changes.
-         ProgramData\Miru (RootSddl) gives the service list and traverse only:
+         ProgramData\Miru (RootSddl) gives the service read and traverse only:
          the service keeps nothing there and reaches configs and device-api
          through their own descriptors.
          AgentPrivateSddl is the service-writable private descriptor: the

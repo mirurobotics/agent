@@ -31,7 +31,7 @@ The MSI:
 - protects `%ProgramData%\Miru` by setting its owner to Local System and
   applying a non-inherited DACL that gives Local System and built-in
   Administrators inheritable full control and the `miru-agent` service SID
-  only list and traverse access to the folder itself;
+  only read and traverse access to the folder itself;
 - protects `%ProgramData%\Miru\Agent`, the agent's private data folder, and its
   authored `logs`, `auth`, and `tmp` children by setting their owner to Local
   System and applying to each a non-inherited DACL that gives Local System and
@@ -174,7 +174,7 @@ so it cannot impersonate other accounts. The installer grants it full control
 of the files and folders inside `%ProgramData%\Miru\Agent`,
 `%ProgramData%\Miru\configs`, and `%ProgramData%\Miru\device-api`, but it
 cannot delete or change the permissions of the installer-created folders, and
-it can only list and traverse `%ProgramData%\Miru` itself. The agent keeps its
+it can only read and traverse `%ProgramData%\Miru` itself. The agent keeps its
 state in `%ProgramData%\Miru\Agent` and its logs in
 `%ProgramData%\Miru\Agent\logs`. Any other folder the agent uses must be
 granted to it explicitly.
