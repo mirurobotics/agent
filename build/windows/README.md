@@ -28,22 +28,27 @@ The MSI:
 - allows same-version upgrades, so a stable release replaces a prerelease of
   the same `MAJOR.MINOR.PATCH` in place (see [Code signing](#code-signing) for
   prerelease versions);
-- protects `%ProgramData%\Miru` and its authored `logs`, `auth`, and `tmp`
-  children by setting their owner to Local System and applying a non-inherited
-  DACL that gives Local System and built-in Administrators inheritable full
-  control, and gives the `miru-agent` service SID read, write, and traverse
-  access to each directory (but not delete or permission changes) plus full
-  control of the files and folders created inside it;
+- protects `%ProgramData%\Miru` by setting its owner to Local System and
+  applying a non-inherited DACL that gives Local System and built-in
+  Administrators inheritable full control and the `miru-agent` service SID
+  only list and traverse access to the folder itself;
+- protects `%ProgramData%\Miru\Agent`, the agent's private data folder, and its
+  authored `logs`, `auth`, and `tmp` children by setting their owner to Local
+  System and applying to each a non-inherited DACL that gives Local System and
+  built-in Administrators inheritable full control, and gives the service SID
+  read, write, and traverse access to the directory (but not delete or
+  permission changes) plus full control of the files and folders created inside
+  it;
 - creates the local group `Miru Agent Users` if it does not exist, and
   `%ProgramData%\Miru\device-api` and `%ProgramData%\Miru\configs` with the
-  same protected DACL as the other data folders plus inheritable read access
-  for `Miru Agent Users`, so the group's members can read the local device API
+  same protected DACL as `Agent` plus inheritable read access for
+  `Miru Agent Users`, so the group's members can read the local device API
   discovery file and deployed configs (see
   [Access for local applications](#access-for-local-applications));
-- creates an `installer-sentinel` folder in each of `logs`, `auth`, `tmp`,
-  `device-api`, and `configs`, owned by Local System and accessible only to
-  Local System and Administrators, so the service can never empty those
-  folders. The MSI reapplies the sentinels' permissions on repair and upgrade
+- creates an `installer-sentinel` folder in each of `Agent\logs`, `Agent\auth`,
+  `Agent\tmp`, `device-api`, and `configs`, owned by Local System and
+  accessible only to Local System and Administrators, so the service can never
+  empty those folders. The MSI reapplies the sentinels' permissions on repair and upgrade
   and never removes them, even on uninstall; do not delete them while the agent
   is installed; and
 - leaves populated customer state under `%ProgramData%\Miru` in place during
@@ -149,16 +154,30 @@ try {
 `provision --check` is read-only and returns 0 when provisioned, 3 when not
 provisioned, and 1 when the state is undetermined or an error occurs.
 
+### Upgrading from a beta
+
+The betas v0.10.4-beta.2 and v0.11.0-beta.1 kept the agent's state and logs
+directly in `%ProgramData%\Miru`. Later versions keep them in
+`%ProgramData%\Miru\Agent` and do not migrate the old state. To move a beta
+device to a later version, uninstall the beta, delete `%ProgramData%\Miru` from
+an elevated shell (for example
+`Remove-Item -Recurse -Force "$env:ProgramData\Miru"`), install the new MSI,
+and provision again.
+
 ## Service account and folder access
 
 The service runs as the virtual account `NT SERVICE\miru-agent`, the Windows
 counterpart of the Linux `miru` user. Windows creates the account from the
 service name, so it has no password to manage. It has no administrator rights
 and holds only the bypass-traverse-checking privilege (`SeChangeNotifyPrivilege`),
-so it cannot impersonate other accounts. The installer grants it access to
-`%ProgramData%\Miru` only: full control of the files and folders inside, but it
-cannot delete or change the permissions of the installer-created folders. Any
-other folder the agent uses must be granted to it explicitly.
+so it cannot impersonate other accounts. The installer grants it full control
+of the files and folders inside `%ProgramData%\Miru\Agent`,
+`%ProgramData%\Miru\configs`, and `%ProgramData%\Miru\device-api`, but it
+cannot delete or change the permissions of the installer-created folders, and
+it can only list and traverse `%ProgramData%\Miru` itself. The agent keeps its
+state in `%ProgramData%\Miru\Agent` and its logs in
+`%ProgramData%\Miru\Agent\logs`. Any other folder the agent uses must be
+granted to it explicitly.
 
 Run the grants below from an elevated PowerShell session after the MSI is
 installed, because the account name resolves only once the service exists. At
@@ -218,9 +237,9 @@ can read two folders:
 - `%ProgramData%\Miru\configs`: the default config deployment target.
 
 Only Local System, Administrators, the service, and members can read them.
-Members get nothing on the rest of `%ProgramData%\Miru` (such as
-`settings.json` or `auth`); Windows lets them open files by full path without
-access to the parent folders.
+Members get nothing on `%ProgramData%\Miru` or `%ProgramData%\Miru\Agent`
+(which holds `settings.json`, `auth`, and the logs); Windows lets them open
+files by full path without access to the parent folders.
 
 The MSI creates the group empty. From an elevated PowerShell session, add each
 local user or service account whose applications call the API or read configs,
@@ -276,32 +295,39 @@ unrestricted SID type, and only `SeChangeNotifyPrivilege`) after install,
 maintenance, upgrade, failed-upgrade rollback, and failed uninstall. It asserts the service runs as its service SID, holds no privilege
 but `SeChangeNotifyPrivilege`, and writes its log after install, upgrade, and
 both rollbacks, and that it is removed after uninstall.
+The service's log must be written to `%ProgramData%\Miru\Agent\logs`, and
+`%ProgramData%\Miru\logs`, `auth`, and `tmp` must never exist at any stage.
 Maintenance, upgrade, rollback, and ordinary uninstall must retain customer
-state, including customer-owned files under `%ProgramData%\Miru` and its
-`logs`, `auth`, and `tmp` children. The
-root and its `logs`, `auth`, and `tmp` children must be owned by Local System,
-with protected DACLs permitting inheritable full control only for Local System
-and built-in Administrators, and for the `miru-agent` service SID read, write,
-and traverse access to each directory plus full control of its contents,
-including when those directories existed with hostile ownership and protected
-permissions before installation or maintenance.
-Non-administrators must not read sensitive files created in those directories
-after installation, create children, or change the directory permissions.
-`device-api` and `configs` must have the same descriptor plus one inheritable
-read-only ACE for `Miru Agent Users`, including when they existed with hostile
-ownership and permissions before installation, maintenance, or upgrade. A
-non-administrator member of `Miru Agent Users` must be able to read files
-created in `device-api` and `configs` but not create children there or change
-their permissions, and must not read files in the root, `logs`, `auth`, or
-`tmp`; a non-member must not read any of them. The group must exist after
-install, keep its member through maintenance, upgrade, rollback, and
+state, including customer-owned files in `%ProgramData%\Miru` and in
+`%ProgramData%\Miru\Agent` and its `logs`, `auth`, and `tmp` children. The
+root must be owned by Local System, with a protected DACL permitting
+inheritable full control only for Local System and built-in Administrators and
+one non-inherited ACE giving the `miru-agent` service SID read and traverse
+access to the root itself. `Agent` and its `logs`, `auth`, and `tmp` children
+must be owned by Local System, with protected DACLs permitting inheritable full
+control only for Local System and built-in Administrators, and for the service
+SID read, write, and traverse access to each directory plus full control of its
+contents. These descriptors must hold even when the directories existed with
+hostile ownership and protected permissions before installation or
+maintenance.
+Non-administrators must not read sensitive files created in the root or those
+directories after installation, create children, or change the directory
+permissions.
+`device-api` and `configs` must have the same descriptor as `Agent` plus one
+inheritable read-only ACE for `Miru Agent Users`, including when they existed
+with hostile ownership and permissions before installation, maintenance, or
+upgrade. A non-administrator member of `Miru Agent Users` must be able to read
+files created in `device-api` and `configs` but not create children there or
+change their permissions, and must not read files in the root, `Agent`, `logs`,
+`auth`, or `tmp`; a non-member must not read any of them. The group must exist
+after install, keep its member through maintenance, upgrade, rollback, and
 uninstall, and keep the ACEs throughout.
-After every stage, including uninstall, each of `logs`, `auth`, `tmp`,
-`device-api`, and `configs` must contain an `installer-sentinel` folder that is
-not a reparse point, is owned by Local System, and has a protected DACL
-permitting full control only for Local System and built-in Administrators,
-including when the sentinels existed with hostile ownership and permissions
-before installation, maintenance, or upgrade.
+After every stage, including uninstall, each of `Agent\logs`, `Agent\auth`,
+`Agent\tmp`, `device-api`, and `configs` must contain an `installer-sentinel`
+folder that is not a reparse point, is owned by Local System, and has a
+protected DACL permitting full control only for Local System and built-in
+Administrators, including when the sentinels existed with hostile ownership and
+permissions before installation, maintenance, or upgrade.
 A folder outside `%ProgramData%\Miru` granted Modify to the service must keep
 that grant, keyed to the service SID, through maintenance, upgrade, rollback,
 and uninstall.
