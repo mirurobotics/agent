@@ -16,20 +16,24 @@ $MsiServiceSettings = [pscustomobject]@{
     SidType = "unrestricted"
     RequiredPrivileges = @("SeChangeNotifyPrivilege")
 }
-$MsiExpectedSddl = "O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;;FRFWFX;;;$MsiServiceSid)(A;OICIIO;FA;;;$MsiServiceSid)"
+$MsiRootSddl = "O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;;FRFX;;;$MsiServiceSid)"
+$MsiAgentPrivateSddl = "O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;;FRFWFX;;;$MsiServiceSid)(A;OICIIO;FA;;;$MsiServiceSid)"
+$MsiRootServiceRights = 0x1200A9   # FRFX: .NET reports ReadAndExecute, Synchronize
 $MsiServiceDirectoryRights = 0x1201BF   # FRFWFX: .NET reports ReadAndExecute, Write, Synchronize
 $MsiTrustedSids = @("S-1-5-18", "S-1-5-32-544", $MsiServiceSid)
+# Component, GUID, Directory, Parent, Name, SDDL.
 $MsiExpectedDirectories = @(
-    @("MiruDataDir", "{D0542DF7-5B61-4F09-938B-57F05C1B5458}", "MIRUDATA", "CommonAppDataFolder", "Miru"),
-    @("MiruLogsDir", "{C3AF8332-28E8-4707-8430-780C553D86EC}", "MIRULOGS", "MIRUDATA", "logs"),
-    @("MiruAuthDir", "{A2AE361A-41E6-427A-AF4C-ACCEE7F451F9}", "MIRUAUTH", "MIRUDATA", "auth"),
-    @("MiruTmpDir", "{D654A9BF-2860-44FA-8FFB-A8E36986197B}", "MIRUTMP", "MIRUDATA", "tmp"),
-    @("MiruDeviceApiDir", "{3CA14BB2-FB56-4907-93EF-45ED80886D9E}", "MIRUDEVICEAPI", "MIRUDATA", "device-api"),
-    @("MiruConfigsDir", "{8491B347-8F1B-45B1-9F15-B3EE02A99885}", "MIRUCONFIGS", "MIRUDATA", "configs")
+    @("MiruDataDir", "{D0542DF7-5B61-4F09-938B-57F05C1B5458}", "MIRUDATA", "CommonAppDataFolder", "Miru", $MsiRootSddl),
+    @("MiruAgentDataDir", "{CAAEBE5E-2175-4DFC-A6DE-62973DF3A85D}", "MIRUAGENTDATA", "MIRUDATA", "Agent", $MsiAgentPrivateSddl),
+    @("MiruAgentLogsDir", "{8E86BA6A-C047-47C5-B274-515DBEE58C69}", "MIRUAGENTLOGS", "MIRUAGENTDATA", "logs", $MsiAgentPrivateSddl),
+    @("MiruAgentAuthDir", "{B26BE954-6594-4944-AFCC-24A427B7A45A}", "MIRUAGENTAUTH", "MIRUAGENTDATA", "auth", $MsiAgentPrivateSddl),
+    @("MiruAgentTmpDir", "{D299C395-E3BF-4594-BAAC-36F4E4D18BA3}", "MIRUAGENTTMP", "MIRUAGENTDATA", "tmp", $MsiAgentPrivateSddl),
+    @("MiruDeviceApiDir", "{3CA14BB2-FB56-4907-93EF-45ED80886D9E}", "MIRUDEVICEAPI", "MIRUDATA", "device-api", $MsiAgentPrivateSddl),
+    @("MiruConfigsDir", "{8491B347-8F1B-45B1-9F15-B3EE02A99885}", "MIRUCONFIGS", "MIRUDATA", "configs", $MsiAgentPrivateSddl)
 )
 $MsiSentinelName = "installer-sentinel"
 $MsiSentinelSddl = "O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)"
-$MsiSentinelDirectoryIds = @("MIRULOGSSENTINEL", "MIRUAUTHSENTINEL", "MIRUTMPSENTINEL", "MIRUDEVICEAPISENTINEL", "MIRUCONFIGSSENTINEL")
+$MsiSentinelDirectoryIds = @("MIRUAGENTLOGSSENTINEL", "MIRUAGENTAUTHSENTINEL", "MIRUAGENTTMPSENTINEL", "MIRUDEVICEAPISENTINEL", "MIRUCONFIGSSENTINEL")
 # Local group for applications that use the agent, and the folders (directory
 # Id, component) it can read: the device API discovery file and deployed configs.
 $MsiAgentUsersGroup = "Miru Agent Users"
@@ -298,7 +302,9 @@ Export-ModuleMember -Function @(
     "MsiServiceAccount",
     "MsiServiceSid",
     "MsiServiceSettings",
-    "MsiExpectedSddl",
+    "MsiRootSddl",
+    "MsiAgentPrivateSddl",
+    "MsiRootServiceRights",
     "MsiServiceDirectoryRights",
     "MsiTrustedSids",
     "MsiExpectedDirectories",

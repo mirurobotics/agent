@@ -39,10 +39,11 @@ pub mod windows_defaults {
     }
 
     #[test]
-    fn log_dir_nests_miru_logs_under_program_data() {
+    fn log_dir_nests_miru_agent_logs_under_program_data() {
         let expected: PathBuf = [
             OsString::from(r"D:\CustomData"),
             "Miru".into(),
+            "Agent".into(),
             "logs".into(),
         ]
         .iter()
@@ -58,6 +59,7 @@ pub mod windows_defaults {
         let expected: PathBuf = [
             OsString::from(r"C:\ProgramData"),
             "Miru".into(),
+            "Agent".into(),
             "logs".into(),
         ]
         .iter()
@@ -77,6 +79,12 @@ pub mod dispatch {
 
     #[cfg(unix)]
     #[test]
+    fn data_root_suffix_is_var_lib_miru() {
+        assert_eq!(platform::data_root_suffix(), PathBuf::from("var/lib/miru"));
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn log_dir_matches_unix_default() {
         assert_eq!(platform::log_dir(), platform::unix_log_dir());
     }
@@ -87,6 +95,15 @@ pub mod dispatch {
         assert_eq!(
             platform::data_root_base(),
             platform::windows_data_root_base(std::env::var_os("ProgramData")),
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn data_root_suffix_is_miru_agent() {
+        assert_eq!(
+            platform::data_root_suffix(),
+            PathBuf::from("Miru").join("Agent"),
         );
     }
 

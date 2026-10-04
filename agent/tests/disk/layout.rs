@@ -27,7 +27,7 @@ fn expected_root_under(base: &Path) -> PathBuf {
     }
     #[cfg(windows)]
     {
-        base.join("Miru")
+        base.join("Miru").join("Agent")
     }
 }
 
@@ -180,13 +180,17 @@ pub mod storage_layout {
         #[cfg(unix)]
         let expected = PathBuf::from("/run/miru/device-api.json");
         #[cfg(windows)]
-        let expected = {
-            let mut path = expected_root_under(&expected_default_base());
-            path.push("device-api");
-            path.push("device-api.json");
-            path
-        };
+        let expected = expected_default_base()
+            .join("Miru")
+            .join("device-api")
+            .join("device-api.json");
         assert_eq!(file.to_string(), expected.display().to_string());
+    }
+
+    #[test]
+    fn device_api_is_outside_data_root() {
+        let layout = Layout::default();
+        assert!(!layout.device_api().path().starts_with(layout.root().path()));
     }
 }
 
