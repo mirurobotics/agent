@@ -3,10 +3,16 @@
      xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
   <?define ProductName = "Miru Agent" ?>
   <?define Manufacturer = "Miru" ?>
-  <?define ServiceSid = "S-1-5-80-1251439239-454917380-1008020685-2030257057-91624695" ?>
+  <!-- `sc.exe showsid miru-agent`; hardcoded because CreateFolders runs before
+       the service exists. Recompute if the service Name changes. -->
+  <?define ServiceSid ="S-1-5-80-1251439239-454917380-1008020685-2030257057-91624695" ?>
+  <!-- ProgramData\Miru: the service can only read and traverse it. -->
   <?define RootSddl = "O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;;FRFX;;;$(ServiceSid))" ?>
+  <!-- The service can use the folder but not delete or re-permission it, and
+       has full control of its contents. -->
   <?define AgentPrivateSddl = "O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;;FRFWFX;;;$(ServiceSid))(A;OICIIO;FA;;;$(ServiceSid))" ?>
-  <?define SentinelSddl = "O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)" ?>
+  <!-- SYSTEM and Administrators only. -->
+  <?define SentinelSddl ="O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)" ?>
   <?ifndef ProductCode ?><?define ProductCode = "*" ?><?endif ?>
 
   <Package Name="$(ProductName)"
@@ -99,43 +105,16 @@
       </Component>
     </ComponentGroup>
 
-    <!-- These directory-keyed components deliberately contain no RemoveFolder or
-         registry resource. Windows Installer reapplies the protected descriptor
-         during repair and upgrade, while populated customer state survives an
-         ordinary uninstall.
-         ServiceSid is the service SID (`sc.exe showsid miru-agent`), hardcoded
-         because CreateFolders runs before the service exists; recompute it if
-         the service Name changes.
-         ProgramData\Miru (RootSddl) gives the service read and traverse only:
-         the service keeps nothing there and reaches configs and device-api
-         through their own descriptors.
-         AgentPrivateSddl is the service-writable private descriptor: the
-         service may use the directory but not delete or re-permission it, with
-         full control of its contents. Agent, its logs, auth, and tmp children,
-         device-api, and configs each apply it as their own protected
-         descriptor rather than inheriting it; inheriting from Agent would give
-         the service full control of logs, auth, and tmp themselves, so it
-         could delete their sentinels.
-         The installer-sentinel folders (SentinelSddl), which the service cannot
-         delete, keep Agent\logs, Agent\auth, Agent\tmp, device-api, and configs
-         non-empty so that none can become a mount point that a repair or
-         upgrade follows; they are permanent. Agent needs no sentinel because
-         its protected children keep it non-empty; ProgramData\Miru needs none
-         for the same reason, and the service cannot write to it anyway. -->
-    <!-- The Miru Agent Users local group, for applications that use the agent,
-         gets inheritable read on two folders and nothing on ProgramData\Miru
-         or ProgramData\Miru\Agent (bypass traverse checking lets members open
-         files by full path):
-         device-api, which holds the local device API discovery file (port and
-         bearer token), and configs, the default config deployment target. The
-         group's SID is machine-specific, so util:PermissionEx adds its ACE by
-         name after CreateFolders applies the protected descriptor; the ACE is
-         reapplied on repair and upgrade and restored by WiX's rollback of that
-         action. The group is created if missing and kept on uninstall with its
-         members, because these folders and their ACEs survive uninstall too.
-         Never grant Users or Authenticated Users here: whoever can read the
-         discovery file can call every device API route, and configs may hold
-         secrets. -->
+    <!-- Each folder applies its own protected descriptor instead of inheriting
+         one, which would let the service delete it. Undeletable sentinel
+         folders keep each leaf folder non-empty, so none can become a mount
+         point that a repair or upgrade follows. Nothing here has RemoveFolder:
+         state survives uninstall, and repair and upgrade reapply the ACLs. -->
+    <!-- Miru Agent Users (apps that use the agent) can read device-api (port
+         and bearer token) and configs, and nothing else. Its SID differs per
+         machine, so util:PermissionEx adds it by name. Never grant Users or
+         Authenticated Users: the discovery file unlocks every device API
+         route, and configs may hold secrets. -->
     <ComponentGroup Id="DataDirs">
       <Component Id="MiruDataDir" Directory="MIRUDATA" Guid="D0542DF7-5B61-4F09-938B-57F05C1B5458" Bitness="always64" KeyPath="yes">
         <CreateFolder>
