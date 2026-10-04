@@ -120,7 +120,7 @@ function Build-IntegrationPackage {
         [Parameter(Mandatory = $true)][string]$ProductCode,
         [Parameter(Mandatory = $true)][string]$Marker
     )
-    $output = Initialize-Directory (Join-Path $artifactsRoot $Version)
+    $output = Initialize-Directory (Join-Path $packagesRoot $Version)
     $payload = Join-Path $output "rollback-payload.txt"
     [IO.File]::WriteAllText($payload, $Marker, [Text.Encoding]::ASCII)
     Invoke-DotNetBuild -ProjectPath $projectPath -BinDir $binDir -Version $Version `
@@ -974,10 +974,12 @@ function Remove-TestFiles {
         if (Test-Path -LiteralPath $markerPath) { Remove-Item -LiteralPath $markerPath -Force -ErrorAction Stop }
     }
     catch { Add-CleanupFailure "fixture marker deletion failed: $($_.Exception.Message)" }
-    try {
-        if (Test-Path -LiteralPath $artifactsRoot) { Remove-Item -LiteralPath $artifactsRoot -Recurse -Force -ErrorAction Stop }
+    foreach ($root in @($artifactsRoot, $packagesRoot)) {
+        try {
+            if (Test-Path -LiteralPath $root) { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction Stop }
+        }
+        catch { Add-CleanupFailure "temporary artifact deletion failed for ${root}: $($_.Exception.Message)" }
     }
-    catch { Add-CleanupFailure "temporary artifact deletion failed: $($_.Exception.Message)" }
 }
 
 function Complete-IntegrationRun {

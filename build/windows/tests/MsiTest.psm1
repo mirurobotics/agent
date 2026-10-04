@@ -226,7 +226,10 @@ function Invoke-DotNetBuild {
     $arguments = @(
         "build", $ProjectPath, "--no-restore", "--configuration", "Release",
         "-p:Platform=x64", "-p:Version=$Version", "-p:BinDir=$BinDir",
-        "-p:OutputPath=$OutputDirectory\", "-p:IntermediateOutputPath=$OutputDirectory\obj\"
+        "-p:OutputPath=$OutputDirectory\", "-p:IntermediateOutputPath=$OutputDirectory\obj\",
+        # Compressing miru-agent.exe into the cabinet dominates each build;
+        # test packages do not need it, and no table under test depends on it.
+        "-p:DefaultCompressionLevel=none"
     )
     if ($ProductCode) { $arguments += "-p:ProductCode=$ProductCode" }
     if ($TestWixSource) { $arguments += "-p:TestWixSource=$TestWixSource" }

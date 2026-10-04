@@ -30,6 +30,10 @@ function Initialize-IntegrationPaths {
     $script:binDir = Join-Path $script:repositoryRoot $target
     $runId = "miru-integration-tests-" + [Guid]::NewGuid().ToString("N")
     $script:artifactsRoot = Join-Path ([IO.Path]::GetTempPath()) $runId
+    # On CI runners %TEMP% is on the slow system drive, where each package
+    # build took 6-18s against about 3s under the repository on D:.
+    $script:packagesRoot = Join-Path $script:repositoryRoot `
+        "build\windows\artifacts\$runId"
     $script:deterministicLogs = Join-Path $script:repositoryRoot `
         "build\windows\artifacts\package-tests\logs"
     $script:sessionLogs = New-MsiSessionLogDirectory $script:deterministicLogs
@@ -126,4 +130,5 @@ Initialize-IntegrationPaths $Configuration
 Initialize-IntegrationRuntime
 Assert-IntegrationPreconditions
 $script:artifactsRoot = Initialize-Directory $script:artifactsRoot
+$script:packagesRoot = Initialize-Directory $script:packagesRoot
 Invoke-IntegrationRun
