@@ -48,9 +48,9 @@ The MSI:
 - creates an `installer-sentinel` folder in each of `Agent\logs`, `Agent\auth`,
   `Agent\tmp`, `device-api`, and `configs`, owned by Local System and
   accessible only to Local System and Administrators, so the service can never
-  empty those folders. The MSI reapplies the sentinels' permissions on repair and upgrade
-  and never removes them, even on uninstall; do not delete them while the agent
-  is installed; and
+  empty those folders. The MSI reapplies the sentinels' permissions on repair
+  and upgrade and never removes them, even on uninstall; do not delete them
+  while the agent is installed; and
 - leaves populated customer state under `%ProgramData%\Miru` in place during
   maintenance, upgrades, rollback, and ordinary uninstall, and keeps the
   `Miru Agent Users` group and its members. Uninstall always leaves the

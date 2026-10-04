@@ -166,7 +166,7 @@ function Invoke-InstallStage {
 }
 
 # Loosen ProgramData\Miru and every protected directory so the next installer
-# operation must repair it.
+# operation must repair them.
 function Add-PermissiveAces {
     param([string]$OwnerSid = "")
     foreach ($path in @($programDataRoot) + @($protectedRoots) + @($agentUsersRoots) + @($installerSentinelDirs)) {
