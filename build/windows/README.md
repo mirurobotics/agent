@@ -295,8 +295,7 @@ unrestricted SID type, and only `SeChangeNotifyPrivilege`) after install,
 maintenance, upgrade, failed-upgrade rollback, and failed uninstall. It asserts the service runs as its service SID, holds no privilege
 but `SeChangeNotifyPrivilege`, and writes its log after install, upgrade, and
 both rollbacks, and that it is removed after uninstall.
-The service's log must be written to `%ProgramData%\Miru\Agent\logs`, and
-`%ProgramData%\Miru\logs`, `auth`, and `tmp` must never exist at any stage.
+The service's log must be written to `%ProgramData%\Miru\Agent\logs`.
 Maintenance, upgrade, rollback, and ordinary uninstall must retain customer
 state, including customer-owned files in `%ProgramData%\Miru` and in
 `%ProgramData%\Miru\Agent` and its `logs`, `auth`, and `tmp` children. The

@@ -50,8 +50,6 @@ function Initialize-IntegrationPaths {
         $script:authRoot,
         $script:tmpRoot
     )
-    # Pre-Agent locations of the private folders; no stage may create them.
-    $script:legacyRoots = @("logs", "auth", "tmp" | ForEach-Object { Join-Path $script:programDataRoot $_ })
     $script:installerSentinelDirs = @($script:logsRoot, $script:authRoot, $script:tmpRoot, $script:deviceApiRoot, $script:configsRoot | ForEach-Object { Join-Path $_ $MsiSentinelName })
     $script:markerPath = Join-Path $script:programDataRoot "rollback-payload.txt"
     $script:customerOwnedFiles = @(

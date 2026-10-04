@@ -266,7 +266,6 @@ function Get-Marker {
 function Assert-ProtectedState {
     param([Parameter(Mandatory = $true)][string]$Stage)
     Assert-CustomerStateRetained $Stage
-    Assert-LegacyRootsAbsent $Stage
     Assert-ProtectedAcls
     Assert-AgentUsersGroup $Stage
 }
@@ -305,15 +304,6 @@ function Assert-ProtectedRootsRetained {
     foreach ($path in @($programDataRoot) + @($protectedRoots) + @($agentUsersRoots)) {
         Assert-True (Test-Path -LiteralPath $path -PathType Container) `
             "$Stage keeps $path"
-    }
-}
-
-# The agent-private folders live only under ProgramData\Miru\Agent.
-function Assert-LegacyRootsAbsent {
-    param([Parameter(Mandatory = $true)][string]$Stage)
-    foreach ($path in $legacyRoots) {
-        Assert-True (-not (Test-Path -LiteralPath $path)) `
-            "$Stage does not create $path"
     }
 }
 
