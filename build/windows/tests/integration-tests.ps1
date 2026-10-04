@@ -37,16 +37,19 @@ function Initialize-IntegrationPaths {
     $script:deterministicLogs = Join-Path $script:repositoryRoot `
         "build\windows\artifacts\package-tests\logs"
     $script:sessionLogs = New-MsiSessionLogDirectory $script:deterministicLogs
+    # ProgramData\Miru has its own read-and-traverse root descriptor; the
+    # agent-private folders sit under ProgramData\Miru\Agent.
     $script:programDataRoot = Join-Path $env:ProgramData "Miru"
-    $script:logsRoot = Join-Path $script:programDataRoot "logs"
-    $script:authRoot = Join-Path $script:programDataRoot "auth"
-    $script:tmpRoot = Join-Path $script:programDataRoot "tmp"
+    $script:agentDataRoot = Join-Path $script:programDataRoot "Agent"
+    $script:logsRoot = Join-Path $script:agentDataRoot "logs"
+    $script:authRoot = Join-Path $script:agentDataRoot "auth"
+    $script:tmpRoot = Join-Path $script:agentDataRoot "tmp"
     $script:deviceApiRoot = Join-Path $script:programDataRoot "device-api"
     $script:configsRoot = Join-Path $script:programDataRoot "configs"
-    # Protected like the roots above, plus read for Miru Agent Users.
+    # Protected like $protectedRoots, plus read for Miru Agent Users.
     $script:agentUsersRoots = @($script:deviceApiRoot, $script:configsRoot)
     $script:protectedRoots = @(
-        $script:programDataRoot,
+        $script:agentDataRoot,
         $script:logsRoot,
         $script:authRoot,
         $script:tmpRoot
@@ -55,6 +58,8 @@ function Initialize-IntegrationPaths {
     $script:markerPath = Join-Path $script:programDataRoot "rollback-payload.txt"
     $script:customerOwnedFiles = @(
         (New-CustomerOwnedFile (Join-Path $script:programDataRoot `
+            "root-owned.txt") "root-owned-retain"),
+        (New-CustomerOwnedFile (Join-Path $script:agentDataRoot `
             "integration-sentinel.txt") "retain-me"),
         (New-CustomerOwnedFile (Join-Path $script:logsRoot `
             "customer-owned.log") "customer-owned-log-retain"),

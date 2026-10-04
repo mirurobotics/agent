@@ -140,7 +140,7 @@ function New-TestUser {
 }
 
 function Initialize-CustomerState {
-    foreach ($path in $protectedRoots) {
+    foreach ($path in @($programDataRoot) + @($protectedRoots)) {
         Initialize-Directory $path | Out-Null
     }
     foreach ($log in @(Get-AgentLogFiles)) { Remove-Item -LiteralPath $log.FullName -Force }
@@ -165,10 +165,11 @@ function Invoke-InstallStage {
     Write-Host "PASS initial install, ACL correction, $MsiAgentUsersGroup read, denial, and service installed"
 }
 
-# Loosen every protected directory so the next installer operation must repair it.
+# Loosen ProgramData\Miru and every protected directory so the next installer
+# operation must repair them.
 function Add-PermissiveAces {
     param([string]$OwnerSid = "")
-    foreach ($path in @($protectedRoots) + @($agentUsersRoots) + @($installerSentinelDirs)) {
+    foreach ($path in @($programDataRoot) + @($protectedRoots) + @($agentUsersRoots) + @($installerSentinelDirs)) {
         Set-PermissiveAcl $path $OwnerSid
         Assert-PermissiveAcl $path $OwnerSid
     }
@@ -300,7 +301,7 @@ function Assert-CustomerGrant {
 
 function Assert-ProtectedRootsRetained {
     param([Parameter(Mandatory = $true)][string]$Stage)
-    foreach ($path in @($protectedRoots) + @($agentUsersRoots)) {
+    foreach ($path in @($programDataRoot) + @($protectedRoots) + @($agentUsersRoots)) {
         Assert-True (Test-Path -LiteralPath $path -PathType Container) `
             "$Stage keeps $path"
     }
@@ -319,6 +320,7 @@ function Assert-OwnedFilesRetained {
 }
 
 function Assert-ProtectedAcls {
+    Assert-RootAcl $programDataRoot
     foreach ($path in $protectedRoots) { Assert-ProtectedAcl $path }
     foreach ($path in $agentUsersRoots) { Assert-ProtectedAcl $path -AgentUsersCanRead }
     foreach ($path in $installerSentinelDirs) { Assert-InstallerSentinelAcl $path }
@@ -351,6 +353,30 @@ function Assert-ProtectedAcl {
         ForEach-Object { Assert-FullControlAce $_ $LiteralPath -Inheritable })
     $expectedAdmins = @($MsiTrustedSids | Where-Object { $_ -ne $MsiServiceSid })
     Assert-Equal (($expectedAdmins | Sort-Object) -join ",") (($adminSids | Sort-Object) -join ",") "$LiteralPath administrator ACE identities"
+    & icacls.exe $LiteralPath 2>&1 | Out-Null
+    Assert-Equal 0 $LASTEXITCODE "icacls can inspect $LiteralPath"
+}
+
+# ProgramData\Miru: the service may read and traverse the directory itself, and
+# nothing it holds inherits a service ACE. Miru Agent Users get no ACE.
+function Assert-RootAcl {
+    param([Parameter(Mandatory = $true)][string]$LiteralPath)
+    $acl = Get-Acl -LiteralPath $LiteralPath
+    Assert-Equal "S-1-5-18" $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value "$LiteralPath owner is SYSTEM"
+    Assert-True $acl.AreAccessRulesProtected "$LiteralPath DACL inheritance is disabled"
+    $rules = @($acl.Access)
+    Assert-Equal 3 $rules.Count "exactly 3 total $LiteralPath ACEs"
+    $explicit = @($rules | Where-Object { -not $_.IsInherited })
+    Assert-Equal 3 $explicit.Count "exactly 3 explicit $LiteralPath ACEs"
+    $service = @($explicit | Where-Object { (Get-RuleSid $_) -eq $MsiServiceSid })
+    Assert-Equal 1 $service.Count "$LiteralPath has one service SID ACE"
+    Assert-Equal "Allow" $service[0].AccessControlType.ToString() "$LiteralPath service ACE type"
+    Assert-Equal $MsiRootServiceRights ([int]$service[0].FileSystemRights) "$LiteralPath service ACE grants read and traverse only"
+    Assert-Equal 0 ([int]$service[0].InheritanceFlags) "$LiteralPath service ACE is not inherited"
+    Assert-Equal 0 ([int]$service[0].PropagationFlags) "$LiteralPath service ACE has no propagation flags"
+    $adminSids = @($explicit | Where-Object { (Get-RuleSid $_) -ne $MsiServiceSid } |
+        ForEach-Object { Assert-FullControlAce $_ $LiteralPath -Inheritable })
+    Assert-Equal "S-1-5-18,S-1-5-32-544" (($adminSids | Sort-Object) -join ",") "$LiteralPath administrator ACE identities"
     & icacls.exe $LiteralPath 2>&1 | Out-Null
     Assert-Equal 0 $LASTEXITCODE "icacls can inspect $LiteralPath"
 }
@@ -445,9 +471,10 @@ function Get-RuleSid {
 function Assert-TrustedIdentities {
     param(
         [Parameter(Mandatory = $true)][string[]]$Sids,
-        [Parameter(Mandatory = $true)][string]$Label
+        [Parameter(Mandatory = $true)][string]$Label,
+        [Parameter(Mandatory = $true)][string[]]$Expected
     )
-    Assert-Equal (($MsiTrustedSids | Sort-Object) -join ",") (($Sids | Sort-Object) -join ",") "$Label ACE identities"
+    Assert-Equal (($Expected | Sort-Object) -join ",") (($Sids | Sort-Object) -join ",") "$Label ACE identities"
 }
 
 # Probes as a non-member and as a Miru Agent Users member. Only the member may
@@ -468,19 +495,22 @@ function Invoke-NonAdminProbe {
     Assert-ProtectedState "$Stage after non-admin probes"
 }
 
-# Fresh files in each protected directory prove inheritance without relying on
-# files secured by an earlier operation. The device-api file stands in for the
-# discovery file, which only the running agent writes, and the configs file for
-# a deployed config.
+# Fresh files in ProgramData\Miru and each protected directory prove inheritance
+# without relying on files secured by an earlier operation. Files in
+# ProgramData\Miru inherit no service ACE (-NoService). The device-api file
+# stands in for the discovery file, which only the running agent writes, and
+# the configs file for a deployed config.
 function New-RepresentativeFiles {
     param([Parameter(Mandatory = $true)][string]$Stage)
-    return @(@($protectedRoots) + @($agentUsersRoots) | ForEach-Object { New-RepresentativeFile $_ $Stage })
+    return @(@(New-RepresentativeFile $programDataRoot $Stage -NoService) +
+        @(@($protectedRoots) + @($agentUsersRoots) | ForEach-Object { New-RepresentativeFile $_ $Stage }))
 }
 
 function New-RepresentativeFile {
     param(
         [Parameter(Mandatory = $true)][string]$Parent,
-        [Parameter(Mandatory = $true)][string]$Stage
+        [Parameter(Mandatory = $true)][string]$Stage,
+        [switch]$NoService
     )
     $file = [pscustomobject]@{
         Parent = $Parent
@@ -492,15 +522,18 @@ function New-RepresentativeFile {
     [IO.File]::WriteAllText($file.Path, $file.Contents)
     Assert-True (Test-Path -LiteralPath $file.Path -PathType Leaf) "representative read target exists"
     Assert-True (-not (Test-Path -LiteralPath $file.CreatePath)) "representative create target is absent"
-    Assert-InheritedProtection $file.Path -AgentUsersCanRead:$file.AgentUsersCanRead
+    Assert-InheritedProtection $file.Path -AgentUsersCanRead:$file.AgentUsersCanRead -NoService:$NoService
     [void]$representativeFiles.Add($file)
     return $file
 }
 
+# -NoService: the parent grants the service SID nothing inheritable, so only
+# SYSTEM and Administrators are expected.
 function Assert-InheritedProtection {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
-        [switch]$AgentUsersCanRead
+        [switch]$AgentUsersCanRead,
+        [switch]$NoService
     )
     $acl = Get-Acl -LiteralPath $Path
     Assert-True (-not $acl.AreAccessRulesProtected) "$Path inherits its DACL"
@@ -513,10 +546,11 @@ function Assert-InheritedProtection {
         Assert-Equal 1 $agentUsers.Count "$Path has one inherited $MsiAgentUsersGroup ACE"
         Assert-AgentUsersReadAce $agentUsers[0] $Path
     }
+    $expected = @($MsiTrustedSids | Where-Object { -not $NoService -or $_ -ne $MsiServiceSid })
     $trusted = @($rules | Where-Object { (Get-RuleSid $_) -ne $agentUsersSid })
-    Assert-Equal $MsiTrustedSids.Count $trusted.Count "$Path has only trusted inherited ACEs"
+    Assert-Equal $expected.Count $trusted.Count "$Path has only trusted inherited ACEs"
     $sids = @($trusted | ForEach-Object { Assert-FullControlAce $_ $Path })
-    Assert-TrustedIdentities $sids $Path
+    Assert-TrustedIdentities $sids $Path -Expected $expected
 }
 
 function New-ProbeWorkspace {
@@ -761,7 +795,7 @@ function Get-ActivationWaitCount {
 }
 
 # The unprovisioned agent logs "waiting for provisioning" once per start, so a new
-# line proves it can write logs\ through the installer's ACE.
+# line proves it can write Agent\logs\ through the installer's ACE.
 function Assert-ServiceRuntimeIdentity {
     param(
         [Parameter(Mandatory = $true)][string]$Stage,
@@ -877,7 +911,7 @@ function Write-FailureEvidence {
     try {
         Write-Host "Related products: $(@(Get-RelatedProducts) -join ', ')"
         if (Test-Path -LiteralPath $programDataRoot) { & icacls.exe $programDataRoot }
-        foreach ($path in $agentUsersRoots) {
+        foreach ($path in @($protectedRoots) + @($agentUsersRoots)) {
             if (Test-Path -LiteralPath $path) { & icacls.exe $path }
         }
         if (Test-Path -LiteralPath $agentPath) { Get-FileHash -Algorithm SHA256 -LiteralPath $agentPath }

@@ -10,7 +10,7 @@ use std::path::PathBuf;
 
 /// Base directory the agent's data [`Layout`](crate::disk::Layout) roots
 /// under: `/` on Unix (the layout appends `var/lib/miru`), `%ProgramData%`
-/// on Windows (the layout appends `Miru`).
+/// on Windows (the layout appends `Miru\Agent`).
 pub fn data_root_base() -> PathBuf {
     #[cfg(unix)]
     {
@@ -27,7 +27,7 @@ pub fn unix_data_root_base() -> PathBuf {
 }
 
 /// Path segments appended to [`data_root_base`] to form the agent's data root:
-/// `var/lib/miru` on Unix, `Miru` on Windows (under `%ProgramData%`).
+/// `var/lib/miru` on Unix, `Miru\Agent` on Windows (under `%ProgramData%`).
 pub fn data_root_suffix() -> PathBuf {
     #[cfg(unix)]
     {
@@ -35,7 +35,7 @@ pub fn data_root_suffix() -> PathBuf {
     }
     #[cfg(windows)]
     {
-        PathBuf::from("Miru")
+        PathBuf::from("Miru").join("Agent")
     }
 }
 
@@ -61,8 +61,10 @@ pub fn unix_log_dir() -> PathBuf {
     PathBuf::from("/var/log/miru")
 }
 
+/// `%ProgramData%\Miru\Agent\logs`, inside the agent's private data root.
 pub fn windows_log_dir(program_data: Option<OsString>) -> PathBuf {
     windows_data_root_base(program_data)
         .join("Miru")
+        .join("Agent")
         .join("logs")
 }

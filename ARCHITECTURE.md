@@ -71,7 +71,7 @@ All source lives under `agent/src/`. The binary entry point is `main.rs`.
 
 ### Persistence
 
-`disk` — on-disk state management. `disk::Layout` defines the directory structure. `disk::Storage` wraps per-entity stores with capacity limits. Key files on disk: `settings.json`, `device.json`, `auth/` (private key and token). The TCP discovery file (port and bearer token) is `/run/miru/device-api.json` on Linux and `device-api/device-api.json` under the data root on Windows.
+`disk` — on-disk state management. `disk::Layout` defines the directory structure. `disk::Storage` wraps per-entity stores with capacity limits. Key files on disk: `settings.json`, `device.json`, `auth/` (private key and token). The TCP discovery file (port and bearer token) is `/run/miru/device-api.json` on Linux and `%ProgramData%\Miru\device-api\device-api.json` on Windows.
 
 ### Background workers
 
@@ -109,4 +109,4 @@ All workers receive a broadcast shutdown signal and clean up gracefully.
 
 **Authentication.** JWT-based. The `TokenManager` runs as a background task, refreshing the token before expiry using the device's RSA private key. `http::Client` reads the current token from `TokenManager` for every request. Token persistence is via `TokenFile` (atomic writes to disk).
 
-**Storage.** `disk::Layout` defines where everything lives on disk (default: `/var/lib/miru/`). On Linux the data root is `0700` and `/var/log/miru` is `0750`; the folders, not per-file modes, keep state and logs private (see `build/debian/README.md`). The TCP discovery file is `/run/miru/device-api.json` on Linux and `device-api/device-api.json` under the data root on Windows. `disk::Storage` provides typed stores for devices, deployments, releases, and settings, each with configurable capacity limits.
+**Storage.** `disk::Layout` defines where everything lives on disk (default: `/var/lib/miru/`; `%ProgramData%\Miru\Agent` on Windows, with logs in `Agent\logs`). On Linux the data root is `0700` and `/var/log/miru` is `0750`; the folders, not per-file modes, keep state and logs private (see `build/debian/README.md`). The TCP discovery file is `/run/miru/device-api.json` on Linux and `%ProgramData%\Miru\device-api\device-api.json` on Windows, a sibling of the private data root. `disk::Storage` provides typed stores for devices, deployments, releases, and settings, each with configurable capacity limits.

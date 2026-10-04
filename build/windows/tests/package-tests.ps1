@@ -99,11 +99,12 @@ function Assert-RetainedDirectoryComponent {
         [Parameter(Mandatory = $true)][object[]]$Expected,
         [Parameter(Mandatory = $true)]$Layout
     )
-    $name, $guid, $directory, $parent, $leaf = $Expected
+    # $null takes the SDDL column; without it $leaf would capture the remainder.
+    $name, $guid, $directory, $parent, $leaf, $null = $Expected
     $retained = @($Layout.Components | Where-Object { $_[0] -eq $name })
     Assert-Equal 1 $retained.Count "retained component $name"
     Assert-Equal $guid $retained[0][1].ToUpperInvariant() `
-        "$name stable component identity"
+        "$name component GUID"
     Assert-Equal $directory $retained[0][2] "$name component directory"
     Assert-True (([int]$retained[0][3] -band 256) -ne 0) "$name is 64-bit"
     Assert-True ([string]::IsNullOrEmpty($retained[0][4])) `
@@ -146,7 +147,7 @@ function Assert-ProtectedPermissionRows {
         "FROM ``MsiLockPermissionsEx``"
     $permissions = @(Get-MsiRows $Database $permissionQuery 3)
     $expected = @(@($MsiExpectedDirectories | ForEach-Object {
-        "$($_[2])|CreateFolder|$MsiExpectedSddl"
+        "$($_[2])|CreateFolder|$($_[5])"
     }) + @($MsiSentinelDirectoryIds | ForEach-Object {
         "$_|CreateFolder|$MsiSentinelSddl"
     }) | Sort-Object)
