@@ -96,8 +96,9 @@ impl Layout {
     ///
     /// On Unix this is `/run/miru/device-api.json`, beside the socket, so
     /// clients read it without a grant on the private data root. On Windows
-    /// it is `device-api/device-api.json` under the data root, the directory
-    /// the installer ACLs for the `Miru Agent Users` group.
+    /// it is `%ProgramData%\Miru\device-api\device-api.json`, a sibling of
+    /// the private `Miru\Agent` data root, in the directory the installer
+    /// opens to the `Miru Agent Users` group.
     pub fn device_api(&self) -> filesys::File {
         #[cfg(unix)]
         {
@@ -108,7 +109,10 @@ impl Layout {
         }
         #[cfg(windows)]
         {
-            self.root().subdir("device-api").file("device-api.json")
+            self.filesystem_root
+                .subdir("Miru")
+                .subdir("device-api")
+                .file("device-api.json")
         }
     }
 }
