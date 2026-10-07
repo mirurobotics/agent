@@ -1,6 +1,6 @@
 // internal crates
 use backend_api::models::Release as BackendRelease;
-use miru_agent::models::Release;
+use miru_agent::models::{Os, Release};
 
 // external crates
 use chrono::{DateTime, Utc};
@@ -28,6 +28,11 @@ impl ModelFixture for Release {
     fn optional_fields() -> Vec<OptionalField> {
         vec![
             OptionalField {
+                key: "os",
+                value: json!(not_host_os()),
+                default_value: json!(Os::HOST),
+            },
+            OptionalField {
                 key: "created_at",
                 value: json!("2023-11-14T22:13:20Z"),
                 default_value: json!("1970-01-01T00:00:00Z"),
@@ -46,6 +51,14 @@ impl ModelFixture for Release {
     }
 }
 
+// a value distinct from the host fallback, so the test sees the field being read
+fn not_host_os() -> Os {
+    match Os::HOST {
+        Os::Linux => Os::Windows,
+        Os::Windows => Os::Linux,
+    }
+}
+
 serde_tests!(Release);
 
 #[test]
@@ -57,6 +70,7 @@ fn defaults() {
         id,
         version: String::new(),
         git_commit_id: None,
+        os: Os::HOST,
         created_at: DateTime::<Utc>::UNIX_EPOCH,
         updated_at: DateTime::<Utc>::UNIX_EPOCH,
         file_rule_ids: Vec::new(),
@@ -74,6 +88,7 @@ fn from_backend() {
         id: "rel_123".to_string(),
         version: "1.0.0".to_string(),
         git_commit_id: Some("gc_123".to_string()),
+        os: backend_api::models::Os::OS_WINDOWS,
         created_at: now.to_rfc3339(),
         updated_at: now.to_rfc3339(),
         git_commit: None,
@@ -89,6 +104,7 @@ fn from_backend() {
         id: "rel_123".to_string(),
         version: "1.0.0".to_string(),
         git_commit_id: Some("gc_123".to_string()),
+        os: Os::Windows,
         created_at: now,
         updated_at: now,
         file_rule_ids: vec!["upl_rule_1".to_string(), "upl_rule_2".to_string()],
@@ -105,6 +121,7 @@ fn from_backend_invalid_dates() {
         id: "rel_789".to_string(),
         version: "3.0.0".to_string(),
         git_commit_id: None,
+        os: backend_api::models::Os::OS_LINUX,
         created_at: "not-a-date".to_string(),
         updated_at: "also-not-a-date".to_string(),
         git_commit: None,

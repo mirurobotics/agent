@@ -11,6 +11,7 @@ fn rule(id: &str, digest: &str, retention: Option<FileRuleRetention>) -> FileRul
         id: id.to_string(),
         name: "camera-logs".to_string(),
         digest: digest.to_string(),
+        os: miru_agent::models::Os::Linux,
         source: FileRuleSource {
             glob: "/data/*.mcap".to_string(),
             stability_window_secs: 30,
