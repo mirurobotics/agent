@@ -9,8 +9,8 @@
 use crate::models;
 use serde::{Deserialize, Serialize};
 
-/// Os : An operating system family, from the agent's build-time OS vocabulary. Shared across resources (devices, config schemas, file rules). This is the machine-readable OS kind, distinct from a human-readable version string. - `linux` - `windows` 
-/// An operating system family, from the agent's build-time OS vocabulary. Shared across resources (devices, config schemas, file rules). This is the machine-readable OS kind, distinct from a human-readable version string. - `linux` - `windows` 
+/// Os : An operating system family, from the agent's build-time OS vocabulary. Shared across resources (devices, config schemas, file rules, releases). This is the machine-readable OS kind, distinct from a human-readable version string. - `linux` - `windows` 
+/// An operating system family, from the agent's build-time OS vocabulary. Shared across resources (devices, config schemas, file rules, releases). This is the machine-readable OS kind, distinct from a human-readable version string. - `linux` - `windows` 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub enum Os {
     #[serde(rename = "linux")]
