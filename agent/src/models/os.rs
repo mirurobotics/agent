@@ -7,17 +7,18 @@ use serde::Serialize;
 use tracing::warn;
 
 // ======================================= OS ======================================= //
-#[derive(Clone, Copy, Debug, Default, Serialize, PartialEq, Eq, Hash)]
+// No `Default`: the only sensible fallback is `Os::HOST`, which the macro and the
+// release and file rule deserializers use directly.
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum Os {
-    #[default]
     Linux,
     Windows,
 }
 
 impl_status_enum!(
     enum Os,
-    default: Linux,
+    default: HOST,
     label: "os",
     log: warn,
     backend_type: backend_client::Os,
@@ -31,8 +32,9 @@ impl_status_enum!(
 impl Os {
     /// The OS family this agent was built for. The backend rejects deployments whose
     /// release OS differs from the device's, so this is also the OS of every release
-    /// and file rule the agent caches, which makes it the fallback for cache entries
-    /// written before `os` existed.
+    /// and file rule the agent caches. That makes it the one fallback for an `os` the
+    /// agent can't read: an unknown wire or backend value, or a cache entry written
+    /// before `os` existed.
     pub const HOST: Os = if cfg!(windows) {
         Os::Windows
     } else {
