@@ -1,6 +1,7 @@
 // internal crates
 use crate::http::{
     errors::HTTPErr,
+    path,
     query::{Page, QueryParams, MAX_PAGE_LIMIT},
     request, ClientI,
 };
@@ -91,7 +92,7 @@ pub async fn get(
     token: &str,
 ) -> Result<Deployment, HTTPErr> {
     let qp = QueryParams::new().expand(expansions);
-    let url = format!("{}/deployments/{}", client.base_url(), id);
+    let url = path::url(client.base_url(), &["deployments", id])?;
     let request = request::Params::get(&url).with_query(qp).with_token(token);
     super::client::fetch(client, request).await
 }
@@ -100,7 +101,7 @@ pub async fn update(
     client: &impl ClientI,
     params: UpdateParams<'_>,
 ) -> Result<Deployment, HTTPErr> {
-    let url = format!("{}/deployments/{}", client.base_url(), params.id,);
+    let url = path::url(client.base_url(), &["deployments", params.id])?;
     let request = request::Params::patch(&url, request::marshal_json(params.updates)?)
         .with_token(params.token);
     super::client::fetch(client, request).await

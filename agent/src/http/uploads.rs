@@ -1,5 +1,5 @@
 // internal crates
-use crate::http::{errors::HTTPErr, request, ClientI};
+use crate::http::{errors::HTTPErr, path, request, ClientI};
 use backend_api::models::{CreateUploadRequest, Upload, UploadCredentials, UploadWithCredentials};
 
 // ================================ PARAM STRUCTS ================================== //
@@ -34,13 +34,13 @@ pub async fn vend_credentials(
     client: &impl ClientI,
     params: VendCredentialsParams<'_>,
 ) -> Result<UploadCredentials, HTTPErr> {
-    let url = format!("{}/uploads/{}/credentials", client.base_url(), params.id);
+    let url = path::url(client.base_url(), &["uploads", params.id, "credentials"])?;
     let request = request::Params::post(&url, String::new()).with_token(params.token);
     super::client::fetch(client, request).await
 }
 
 pub async fn confirm(client: &impl ClientI, params: ConfirmParams<'_>) -> Result<Upload, HTTPErr> {
-    let url = format!("{}/uploads/{}/confirm", client.base_url(), params.id);
+    let url = path::url(client.base_url(), &["uploads", params.id, "confirm"])?;
     let request = request::Params::post(&url, String::new()).with_token(params.token);
     super::client::fetch(client, request).await
 }
