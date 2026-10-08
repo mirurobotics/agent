@@ -1,3 +1,6 @@
+// standard crates
+use std::sync::Arc;
+
 // internal crates
 use crate::mocks::backend::{PanicBackend, StubBackend};
 use crate::test_utils::filesys::dirs as test_dirs;
@@ -142,28 +145,28 @@ pub mod get_git_commit {
         assert_eq!(stub.git_commit_calls(), 0);
     }
 
-    #[cfg(unix)]
     #[tokio::test]
     async fn cache_write_failure_still_returns_value() {
-        use miru_agent::filesys::dirs;
-        use std::os::unix::fs::PermissionsExt;
-
-        // root ignores directory permissions, so the write cannot be made to fail
-        if nix::unistd::geteuid().is_root() {
-            return;
-        }
         let (dir, stor) = setup("gc_cache_write_failure").await;
-        // the cache writes atomically through a temp file in its directory
-        let readonly = std::fs::Permissions::from_mode(0o555);
-        dirs::set_permissions(dir.dir(), readonly).await.unwrap();
-        let stub = StubBackend::new().with_git_commit(Ok(backend_value("gc_1")));
+        let stor = Arc::new(stor);
+        // shutting the cache down during the fetch lets the read succeed and the write fail
+        let stub = StubBackend::new()
+            .with_git_commit(Ok(backend_value("gc_1")))
+            .before_fetch({
+                let stor = stor.clone();
+                move || {
+                    let stor = stor.clone();
+                    async move { stor.shutdown().await.unwrap() }
+                }
+            });
 
         let result = git_cmt_svc::get(&stor, &stub, "gc_1".to_string()).await;
-
-        let readwrite = std::fs::Permissions::from_mode(0o755);
-        dirs::set_permissions(dir.dir(), readwrite).await.unwrap();
         assert_eq!(result.unwrap(), GitCommit::from(backend_value("gc_1")));
-        assert!(stor
+
+        let (reopened, _) = GitCommits::spawn(16, dir.file("git_commits.json"), 1000)
+            .await
+            .unwrap();
+        assert!(reopened
             .read_optional("gc_1".to_string())
             .await
             .unwrap()
