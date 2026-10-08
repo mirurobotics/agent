@@ -38,6 +38,8 @@ pub mod git_commit;
 pub use self::git_commit::GitCommit;
 pub mod health_response;
 pub use self::health_response::HealthResponse;
+pub mod os;
+pub use self::os::Os;
 pub mod release;
 pub use self::release::Release;
 pub mod release_version;

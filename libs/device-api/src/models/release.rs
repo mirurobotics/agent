@@ -26,19 +26,23 @@ pub struct Release {
     /// IDs of the file rules included in this release. Retrieve each file rule with `GET /file_rules/{file_rule_id}`.
     #[serde(rename = "file_rule_ids")]
     pub file_rule_ids: Vec<String>,
+    /// The operating system family this release targets, derived from its config schemas and file rules, which must all agree. A release with neither is `linux`. Read-only: clients cannot set it.
+    #[serde(rename = "os")]
+    pub os: models::Os,
     /// Timestamp of when the release was created.
     #[serde(rename = "created_at")]
     pub created_at: String,
 }
 
 impl Release {
-    pub fn new(object: Object, id: String, version: String, git_commit_id: Option<String>, file_rule_ids: Vec<String>, created_at: String) -> Release {
+    pub fn new(object: Object, id: String, version: String, git_commit_id: Option<String>, file_rule_ids: Vec<String>, os: models::Os, created_at: String) -> Release {
         Release {
             object,
             id,
             version,
             git_commit_id,
             file_rule_ids,
+            os,
             created_at,
         }
     }

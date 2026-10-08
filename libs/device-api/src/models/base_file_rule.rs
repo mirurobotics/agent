@@ -24,6 +24,9 @@ pub struct BaseFileRule {
     /// The digest of the file rule. File rules are immutable and deduplicated by digest within a workspace.
     #[serde(rename = "digest")]
     pub digest: String,
+    /// The operating system family this file rule targets, derived from `source.glob`: a glob starting with `/` is `linux`, and a glob starting with a drive letter is `windows`. Read-only: clients cannot set it.
+    #[serde(rename = "os")]
+    pub os: models::Os,
     #[serde(rename = "source")]
     pub source: Box<models::FileRuleSource>,
     /// Where matching files are uploaded. Absent when the rule only enforces local retention.
@@ -42,12 +45,13 @@ pub struct BaseFileRule {
 
 impl BaseFileRule {
     /// A file rule declares which files on a device Miru manages and what to do with them: upload them to a bucket, delete the local copies once they are no longer needed, or both. `retention` is optional and marks the rules that delete: when it is absent the device keeps matching files indefinitely — Miru never deletes them — and when it is present the rule deletes each matching file once its retention guarantee ends. A rule that both deletes and uploads always states `retention.require_upload`, so whether local deletion waits for the upload is itself an explicit decision. 
-    pub fn new(object: Object, id: String, name: String, digest: String, source: models::FileRuleSource, created_at: String, updated_at: String) -> BaseFileRule {
+    pub fn new(object: Object, id: String, name: String, digest: String, os: models::Os, source: models::FileRuleSource, created_at: String, updated_at: String) -> BaseFileRule {
         BaseFileRule {
             object,
             id,
             name,
             digest,
+            os,
             source: Box::new(source),
             upload: None,
             retention: None,
