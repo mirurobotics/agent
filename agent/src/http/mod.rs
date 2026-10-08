@@ -4,6 +4,7 @@ pub mod deployments;
 pub mod devices;
 pub mod errors;
 pub mod git_commits;
+pub mod path;
 pub mod query;
 pub mod releases;
 pub mod request;

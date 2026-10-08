@@ -1,5 +1,5 @@
 // internal crates
-use crate::http::{errors::HTTPErr, request, ClientI};
+use crate::http::{errors::HTTPErr, path, request, ClientI};
 use backend_api::models::{
     Device, ProvisionDeviceRequest, ReprovisionDeviceRequest, TokenResponse,
     UpdateDeviceFromAgentRequest,
@@ -58,7 +58,7 @@ pub async fn issue_token(
 }
 
 pub async fn update(client: &impl ClientI, params: UpdateParams<'_>) -> Result<Device, HTTPErr> {
-    let url = format!("{}/devices/{}", client.base_url(), params.id);
+    let url = path::url(client.base_url(), &["devices", params.id])?;
     let request = request::Params::patch(&url, request::marshal_json(params.payload)?)
         .with_token(params.token);
     super::client::fetch(client, request).await
