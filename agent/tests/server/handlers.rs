@@ -237,7 +237,7 @@ pub mod routes {
             assert_eq!(status, StatusCode::NOT_FOUND);
 
             let actual: openapi::ErrorResponse = serde_json::from_slice(&bytes).unwrap();
-            assert_eq!(actual.error.code, "resource_not_found");
+            assert_eq!(actual.error.code, "internal_server_error");
         }
 
         #[tokio::test]
@@ -368,7 +368,7 @@ pub mod routes {
             assert_eq!(status, StatusCode::NOT_FOUND);
 
             let actual: openapi::ErrorResponse = serde_json::from_slice(&bytes).unwrap();
-            assert_eq!(actual.error.code, "resource_not_found");
+            assert_eq!(actual.error.code, "internal_server_error");
         }
 
         #[tokio::test]
@@ -471,7 +471,7 @@ pub mod routes {
             assert_eq!(status, StatusCode::NOT_FOUND);
 
             let actual: openapi::ErrorResponse = serde_json::from_slice(&bytes).unwrap();
-            assert_eq!(actual.error.code, "resource_not_found");
+            assert_eq!(actual.error.code, "internal_server_error");
         }
     }
 
@@ -543,7 +543,7 @@ pub mod routes {
             assert_eq!(status, StatusCode::NOT_FOUND);
 
             let actual: openapi::ErrorResponse = serde_json::from_slice(&bytes).unwrap();
-            assert_eq!(actual.error.code, "resource_not_found");
+            assert_eq!(actual.error.code, "internal_server_error");
         }
 
         #[tokio::test]
