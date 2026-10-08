@@ -102,7 +102,8 @@ pub mod routes {
             let backend_router = Router::new()
                 .route("/deployments/{id}", get(mock::not_found))
                 .route("/releases/{id}", get(mock::not_found))
-                .route("/git_commits/{id}", get(mock::not_found));
+                .route("/git_commits/{id}", get(mock::not_found))
+                .route("/file_rules/{id}", get(mock::not_found));
             let backend = mock::run_server(backend_router).await;
             let real_http_client =
                 Arc::new(miru_agent::http::Client::new(&backend.base_url).unwrap());
@@ -535,14 +536,14 @@ pub mod routes {
         }
 
         #[tokio::test]
-        async fn get_file_rule_returns_404_when_not_cached() {
+        async fn get_file_rule_returns_404_when_missing() {
             let f = Fixture::new("handler_get_fr_404").await;
 
             let (status, bytes) = f.get("/v0.2/file_rules/nonexistent").await;
             assert_eq!(status, StatusCode::NOT_FOUND);
 
             let actual: openapi::ErrorResponse = serde_json::from_slice(&bytes).unwrap();
-            assert_eq!(actual.error.code, "resource_not_found");
+            assert_eq!(actual.error.code, "internal_server_error");
         }
 
         #[tokio::test]

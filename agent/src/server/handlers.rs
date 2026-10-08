@@ -160,7 +160,9 @@ pub async fn get_file_rule(
 ) -> impl IntoResponse {
     handle(
         async {
-            let rule = file_rule_svc::get(&state.storage.file_rules, file_rule_id).await?;
+            let backend = HttpBackend::new(state.http_client.as_ref(), state.token_mngr.as_ref());
+            let rule =
+                file_rule_svc::get(&state.storage.file_rules, &backend, file_rule_id).await?;
             Ok::<_, ServerErr>(device_server::BaseFileRule::from(&rule))
         },
         "Error getting file rule",
