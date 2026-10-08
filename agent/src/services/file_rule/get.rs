@@ -16,10 +16,10 @@ pub async fn get<B: BackendFetcher>(
     }
     let rule = models::FileRule::from(backend.fetch_file_rule(&id).await?);
     if let Err(e) = file_rules
-        .write_if_absent(id.clone(), rule.clone(), |_, _| false)
+        .write_if_absent(rule.id.clone(), rule.clone(), |_, _| false)
         .await
     {
-        error!("failed to cache file rule {id}: {e}");
+        error!("failed to cache file rule {}: {e}", rule.id);
     }
     Ok(rule)
 }
