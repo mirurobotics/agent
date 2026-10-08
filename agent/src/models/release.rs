@@ -1,6 +1,6 @@
 // internal crates
 use crate::deserialize_error;
-use crate::models::FileRuleID;
+use crate::models::{FileRuleID, Os};
 use backend_api::models as backend_client;
 
 // external crates
@@ -17,6 +17,7 @@ pub struct Release {
     pub id: String,
     pub version: String,
     pub git_commit_id: Option<String>,
+    pub os: Os,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub file_rule_ids: Vec<FileRuleID>,
@@ -28,6 +29,7 @@ impl Default for Release {
             id: format!("unknown-{}", Uuid::new_v4()),
             version: String::new(),
             git_commit_id: None,
+            os: Os::HOST,
             created_at: DateTime::<Utc>::UNIX_EPOCH,
             updated_at: DateTime::<Utc>::UNIX_EPOCH,
             file_rule_ids: Vec::new(),
@@ -44,6 +46,7 @@ impl Release {
             id: release.id,
             version: release.version,
             git_commit_id: release.git_commit_id,
+            os: (&release.os).into(),
             created_at: release
                 .created_at
                 .parse::<DateTime<Utc>>()
@@ -67,6 +70,9 @@ impl<'de> Deserialize<'de> for Release {
             id: String,
             version: String,
             git_commit_id: Option<String>,
+            // releases cached before os existed have none
+            #[serde(default)]
+            os: Option<Os>,
             created_at: Option<DateTime<Utc>>,
             updated_at: Option<DateTime<Utc>>,
             #[serde(default)]
@@ -80,6 +86,7 @@ impl<'de> Deserialize<'de> for Release {
             id: result.id,
             version: result.version,
             git_commit_id: result.git_commit_id,
+            os: result.os.unwrap_or(Os::HOST),
             created_at: result
                 .created_at
                 .unwrap_or_else(|| deserialize_error!("release", "created_at", default.created_at)),

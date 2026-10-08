@@ -6,149 +6,41 @@ info:
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
-  x-release-version: v0.5.1
+  x-release-version: v0.5.2
   x-git-commit:
-    sha: cb40733d18b6bd3b363cb199e23f177f808b667f
-    url: https://github.com/mirurobotics/openapi/commit/cb40733d18b6bd3b363cb199e23f177f808b667f
-    message: 'feat(device): constrain device os/arch to DeviceOS/DeviceArch enums
-      (#289)
-
-
-      ## Summary
-
-
-      Constrains the device `os` and `arch` fields (added as free-form strings
-
-      in the merged #284) to named string enums matching the backend
-
-      `pltenums` package.
-
-
-      - New enum component schemas under `apis/configs/components/enums/`:
-
-      - `device-os.yaml` → `DeviceOS` = `[linux, windows]` (`DEVICE_OS_*`
-
-      varnames)
-
-      - `device-arch.yaml` → `DeviceArch` = `[x86_64, aarch64]`
-
-      (`DEVICE_ARCH_*` varnames)
-
-      - `BaseDevice.os`/`arch` (`apis/configs/components/schemas/device.yaml`)
-
-      become nullable enum references via the established `allOf: [ $ref ]` +
-
-      `nullable: true` + `description` pattern (mirroring
-
-      `current_deployment`); the `os` description drops the stale `macos`
-
-      mention.
-
-      - The three agent request schemas — `ProvisionDeviceRequest`,
-
-      `ReprovisionDeviceRequest`, `UpdateDeviceFromAgentRequest` in
-
-      `apis/apps/backend-server/agent/components/requests/device.yaml` — use
-
-      bare enum `$ref`s and stay optional.
-
-      - Regenerated all backend-server bundles
-
-      (`agent`/`cli`/`frontend`/`platform`) and added a
-
-      `.redocly.lint-ignore.yaml` whitelist entry for the new nullable-`$ref`
-
-      siblings, following the repo''s existing convention.
-
-
-      Fields stay nullable/optional, so agents that omit them are unaffected.
-
-      Aliases (`amd64`/`x64`/`arm64`) are intentionally excluded from the wire
-
-      enum — they remain backend parse-time leniency only.
-
-
-      ## Plan
-
-
-      `plans/completed/20260920-device-os-arch-enums.md`
-
-
-      ## Validation
-
-
-      - `./scripts/regen.sh` — all bundles regenerated
-
-      - `./scripts/lint.sh` — passes
-
-      - `./scripts/is-stale.sh` — no drift
-
-      - `./scripts/lint-surface.sh` — passes
-
-
-      CI is green (lint, stale-specs, tool-tests, surface-lint, stlc
-
-      generate).
-
-
-      🤖 Generated with [Claude Code](https://claude.com/claude-code)
-
-
-      <!-- codesmith:footer -->
-
-      ---
-
-      <a
-
-      href="https://app.blacksmith.sh/mirurobotics/codesmith/openapi/pr/289?ref=codesmith_pr_footer"><picture><source
-
-      media="(prefers-color-scheme: dark)"
-
-      srcset="https://pr-comments-assets.blacksmith.sh/codesmith/view-with-codesmith-dark-v2.svg"><source
-
-      media="(prefers-color-scheme: light)"
-
-      srcset="https://pr-comments-assets.blacksmith.sh/codesmith/view-with-codesmith-light-v2.svg"><img
-
-      alt="View with [code]smith"
-
-      src="https://pr-comments-assets.blacksmith.sh/codesmith/view-with-codesmith-dark-v2.svg"></picture></a>
-
-      <a
-
-      href="https://backend.blacksmith.sh/track/enable-autofix?expires=1792539810&installation_model_id=425273&pr_number=289&ref=codesmith_pr_footer&repository=mirurobotics%2Fopenapi&return_to=https%3A%2F%2Fgithub.com%2Fmirurobotics%2Fopenapi%2Fpull%2F289&signature=2c732c9bdf5520e44727609563b1cf2796167d834647e4e9e096ca2f3ba0c797"><picture><source
-
-      media="(prefers-color-scheme: dark)"
-
-      srcset="https://pr-comments-assets.blacksmith.sh/codesmith/autofix-with-codesmith-dark.svg"><source
-
-      media="(prefers-color-scheme: light)"
-
-      srcset="https://pr-comments-assets.blacksmith.sh/codesmith/autofix-with-codesmith-light.svg"><img
-
-      alt="Autofix with [code]smith"
-
-      src="https://pr-comments-assets.blacksmith.sh/codesmith/autofix-with-codesmith-light.svg"></picture></a>
-
-      <sup>Need help on this PR? Tag <code>@codesmith</code> with what you
-
-      need. Autofix is disabled.</sup>
-
-
-      <!-- codesmith:autofix:disabled -->
-
-      <!-- /codesmith:footer -->
-
-
-      ---------
-
-
-      Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>'
+    sha: 97aec4ae3541349ead148f90acedb59b0f543fdb
+    url: https://github.com/mirurobotics/openapi/commit/97aec4ae3541349ead148f90acedb59b0f543fdb
+    message: "docs(stlc): how to change SDK custom code (#307)\n\n## Why\n\nHand-written\
+      \ SDK code goes back to stlc's intended flow (upstream docs:\n\"Custom code\"\
+      \ and \"Branching and collaboration\"):\n1. Edit the code in a local checkout\
+      \ of the staging SDK repo.\n2. Seal it with `stlc build`.\n3. Merge the tracking\
+      \ file through a PR here.\n\nA tracking file shows only two commit IDs, so the\
+      \ code itself needs\nsomewhere to be reviewed. That's why we tried merging PRs\
+      \ into the\nstaging repos (mirurobotics/infra#294), which stlc doesn't support.\n\
+      mirurobotics/python-device-sdk-staging#3 needed a manual re-seal (#305),\nand\
+      \ mirurobotics/infra#299 turns those merges off again.\n\nThis PR documents\
+      \ the flow, with the review happening in a **review-only\nPR on the staging\
+      \ repo**.\n\n## What\n\nNew `docs/sdk-custom-code.md`, linked from the README:\n\
+      - **What custom code is:** what tracking files hold and how stlc applies\nthem.\n\
+      - **Rules:**\n  - nothing merges into staging `main`; PRs there are for review\
+      \ only;\n  - prefer config over code;\n  - put new code in `src/<package>/lib/`.\n\
+      - **Steps:**\n  1. `stlc build` to get the local checkout.\n2. Commit on a `custom-code/<topic>`\
+      \ branch from staging `origin/main`,\nso the diff is only the change.\n3. Open\
+      \ a review-only PR on the staging repo. GitHub shows the change\nand the AI\
+      \ review runs.\n4. Cherry-pick the commit onto local `main` and `stlc build`\
+      \ to seal it.\n5. Open the tracking-file PR here, linking the staging PR, and\
+      \ close the\nstaging PR after it lands.\n\nAn earlier version of this PR added\
+      \ a CI job that commented the\ncustom-code diff here. It's removed in favour\
+      \ of reviewing in the SDK\nrepo, so the PR is now docs only.\n\n## Depends on\n\
+      \nmirurobotics/infra#299. Until it's applied, a review PR on\n`python-device-sdk-staging`\
+      \ could still be merged, which is the\nsituation #305 had to repair.\n\n\U0001F916\
+      \ Generated with [Claude Code](https://claude.com/claude-code)\n\n---------\n\
+      \nCo-authored-by: Claude Opus 5.5 <noreply@anthropic.com>"
     author: ben-miru
     branch: HEAD
     dirty: false
   x-build:
-    built_at: '2026-09-21T22:10:20.659656+00:00'
+    built_at: '2026-10-07T01:59:25.983854+00:00'
 servers:
 - url: https://staging.api.mirurobotics.com/agent/v1
   description: Staging
@@ -646,14 +538,14 @@ components:
     ReleaseVersion:
       type: string
       enum:
-      - v0.5.1
+      - v0.5.2
       x-enum-varnames:
       - RELEASE_VERSION
       x-stainless-const: true
     APIGitCommit:
       type: string
       enum:
-      - cb40733d18b6bd3b363cb199e23f177f808b667f
+      - 97aec4ae3541349ead148f90acedb59b0f543fdb
       x-enum-varnames:
       - API_GIT_COMMIT
       x-stainless-const: true
@@ -958,6 +850,25 @@ components:
           format: date-time
           example: '2024-01-01T00:00:00Z'
           description: Timestamp of when the device release was last updated.
+    OS:
+      title: OS
+      type: string
+      description: 'An operating system family, from the agent''s build-time OS vocabulary.
+        Shared across resources (devices, config schemas, file rules, releases). This
+        is the machine-readable OS kind, distinct from a human-readable version string.
+
+        - `linux`
+
+        - `windows`
+
+        '
+      example: linux
+      enum:
+      - linux
+      - windows
+      x-enum-varnames:
+      - OS_LINUX
+      - OS_WINDOWS
     BaseRelease:
       title: Base Release
       type: object
@@ -966,6 +877,7 @@ components:
       - id
       - version
       - git_commit_id
+      - os
       - created_at
       - updated_at
       properties:
@@ -989,6 +901,13 @@ components:
           nullable: true
           example: git_commit_123
           description: The ID of the git commit associated with this release.
+        os:
+          allOf:
+          - $ref: '#/components/schemas/OS'
+          readOnly: true
+          description: 'The operating system family this release targets, derived
+            from its config schemas and file rules, which must all agree. A release
+            with neither is `linux`. Read-only: clients cannot set it.'
         created_at:
           type: string
           format: date-time
@@ -1090,12 +1009,13 @@ components:
       properties:
         glob:
           type: string
-          pattern: ^/
+          pattern: ^(/|[A-Za-z]:[\\/])
           maxLength: 1024
           example: /var/log/robot/*.log
           description: A glob pattern selecting the files this rule manages. Must
-            be absolute (start with `/`), at most 1024 bytes, and must contain no
-            `..` segments and no empty path segments.
+            be absolute (start with `/` on Linux, or a drive letter followed by `:\`
+            or `:/` on Windows, e.g. `C:\logs\*.log`), at most 1024 bytes, and must
+            contain no `..` segments and no empty path segments.
         stability_window_secs:
           type: integer
           format: int64
@@ -1235,6 +1155,7 @@ components:
       - id
       - name
       - digest
+      - os
       - source
       - created_at
       - updated_at
@@ -1262,6 +1183,13 @@ components:
           example: sha256:1234567890
           description: The digest of the file rule. File rules are immutable and deduplicated
             by digest within a workspace.
+        os:
+          allOf:
+          - $ref: '#/components/schemas/OS'
+          readOnly: true
+          description: 'The operating system family this file rule targets, derived
+            from `source.glob`: a glob starting with `/` is `linux`, and a glob starting
+            with a drive letter is `windows`. Read-only: clients cannot set it.'
         source:
           $ref: '#/components/schemas/FileRuleSource'
         upload:
@@ -1291,6 +1219,7 @@ components:
         id: file_rule_123
         name: Robot Logs
         digest: sha256:1234567890
+        os: linux
         source:
           glob: /var/log/robot/*.log
           stability_window_secs: 60
@@ -1327,6 +1256,7 @@ components:
               id: file_rule_123
               name: Robot Logs
               digest: sha256:1234567890
+              os: linux
               source:
                 glob: /var/log/robot/*.log
                 stability_window_secs: 60
@@ -1346,6 +1276,7 @@ components:
         id: rls_123
         version: v1.0.0
         git_commit_id: git_commit_123
+        os: linux
         created_at: '2024-01-01T00:00:00Z'
         updated_at: '2024-01-01T00:00:00Z'
     BaseConfigInstance:
@@ -2112,25 +2043,6 @@ components:
       - DEVICE_STATUS_ONLINE
       - DEVICE_STATUS_OFFLINE
       - DEVICE_STATUS_ARCHIVED
-    OS:
-      title: OS
-      type: string
-      description: 'An operating system family, from the agent''s build-time OS vocabulary.
-        Shared across resources (devices, config schemas, file rules). This is the
-        machine-readable OS kind, distinct from a human-readable version string.
-
-        - `linux`
-
-        - `windows`
-
-        '
-      example: linux
-      enum:
-      - linux
-      - windows
-      x-enum-varnames:
-      - OS_LINUX
-      - OS_WINDOWS
     Arch:
       title: Arch
       type: string

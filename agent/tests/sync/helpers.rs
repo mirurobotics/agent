@@ -68,6 +68,7 @@ pub fn make_backend_release(id: &str, gc_id: Option<&str>) -> BackendRelease {
         id: id.to_string(),
         version: format!("1.0.0-{id}"),
         git_commit_id: gc_id.map(|s| s.to_string()),
+        os: backend_api::models::Os::OS_LINUX,
         created_at: Utc::now().to_rfc3339(),
         updated_at: Utc::now().to_rfc3339(),
         git_commit,

@@ -1,5 +1,6 @@
 // internal crates
 use crate::deserialize_error;
+use crate::models::Os;
 use backend_api::models as backend_client;
 
 // external crates
@@ -63,6 +64,7 @@ pub struct FileRule {
     pub id: FileRuleID,
     pub name: String,
     pub digest: String,
+    pub os: Os,
     pub source: FileRuleSource,
     pub upload: Option<FileRuleUpload>,
     pub retention: Option<FileRuleRetention>,
@@ -76,6 +78,7 @@ impl Default for FileRule {
             id: format!("unknown-{}", Uuid::new_v4()),
             name: String::new(),
             digest: String::new(),
+            os: Os::HOST,
             source: FileRuleSource::default(),
             upload: None,
             retention: None,
@@ -91,6 +94,7 @@ impl From<backend_client::BaseFileRule> for FileRule {
             id: rule.id,
             name: rule.name,
             digest: rule.digest,
+            os: (&rule.os).into(),
             source: (*rule.source).into(),
             upload: rule.upload.map(|u| (*u).into()),
             retention: rule.retention.map(|r| FileRuleRetention {
@@ -125,6 +129,9 @@ impl<'de> Deserialize<'de> for FileRule {
             id: String,
             name: String,
             digest: String,
+            // file rules cached before os existed have none
+            #[serde(default)]
+            os: Option<Os>,
             source: FileRuleSource,
             #[serde(default)]
             upload: Option<FileRuleUpload>,
@@ -141,6 +148,7 @@ impl<'de> Deserialize<'de> for FileRule {
             id: result.id,
             name: result.name,
             digest: result.digest,
+            os: result.os.unwrap_or(Os::HOST),
             source: result.source,
             upload: result.upload,
             retention: result.retention,

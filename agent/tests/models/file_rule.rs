@@ -1,6 +1,6 @@
 // internal crates
 use backend_api::models as backend_client;
-use miru_agent::models::{FileRule, FileRuleRetention, FileRuleSource, FileRuleUpload};
+use miru_agent::models::{FileRule, FileRuleRetention, FileRuleSource, FileRuleUpload, Os};
 
 // external crates
 use chrono::{DateTime, Utc};
@@ -39,6 +39,11 @@ impl ModelFixture for FileRule {
     fn optional_fields() -> Vec<OptionalField> {
         vec![
             OptionalField {
+                key: "os",
+                value: json!(not_host_os()),
+                default_value: json!(Os::HOST),
+            },
+            OptionalField {
                 key: "upload",
                 value: json!({
                     "upload_collection_id": "upl_col_123",
@@ -71,6 +76,14 @@ impl ModelFixture for FileRule {
     }
 }
 
+// a value distinct from the host fallback, so the test sees the field being read
+fn not_host_os() -> Os {
+    match Os::HOST {
+        Os::Linux => Os::Windows,
+        Os::Windows => Os::Linux,
+    }
+}
+
 serde_tests!(FileRule);
 
 #[test]
@@ -84,6 +97,7 @@ fn defaults() {
         id,
         name: String::new(),
         digest: String::new(),
+        os: Os::HOST,
         source: FileRuleSource::default(),
         upload: None,
         retention: None,
@@ -116,6 +130,7 @@ fn backend_rule(
         id: "file_rule_123".to_string(),
         name: "camera-logs".to_string(),
         digest: "sha256:abc123".to_string(),
+        os: backend_client::Os::OS_WINDOWS,
         source: Box::new(backend_client::FileRuleSource {
             glob: "/data/*.mcap".to_string(),
             stability_window_secs: 30,
@@ -146,6 +161,7 @@ fn from_backend() {
         id: "file_rule_123".to_string(),
         name: "camera-logs".to_string(),
         digest: "sha256:abc123".to_string(),
+        os: Os::Windows,
         source: FileRuleSource {
             glob: "/data/*.mcap".to_string(),
             stability_window_secs: 30,
@@ -178,6 +194,7 @@ fn from_backend_no_upload_or_retention() {
         id: "file_rule_123".to_string(),
         name: "camera-logs".to_string(),
         digest: "sha256:abc123".to_string(),
+        os: Os::Windows,
         source: FileRuleSource {
             glob: "/data/*.mcap".to_string(),
             stability_window_secs: 30,
