@@ -4,7 +4,6 @@ use crate::test_utils::filesys::dirs as test_dirs;
 use backend_api::models as backend_client;
 use miru_agent::authn::errors::{AuthnErr, MockError as AuthnMockError};
 use miru_agent::disk::GitCommits;
-use miru_agent::filesys::Overwrite;
 use miru_agent::http::errors::{HTTPErr, MockErr as HttpMockErr, RequestFailed};
 use miru_agent::http::request::Params as HttpParams;
 use miru_agent::models::GitCommit;
@@ -21,92 +20,120 @@ async fn setup(name: &str) -> (test_dirs::TempDir, GitCommits) {
     (dir, stor)
 }
 
+fn backend_value(id: &str) -> backend_client::GitCommit {
+    backend_client::GitCommit {
+        id: id.to_string(),
+        sha: "abc123".to_string(),
+        message: "initial commit".to_string(),
+        ..Default::default()
+    }
+}
+
+fn request_failed(status: reqwest::StatusCode) -> ServiceErr {
+    ServiceErr::HTTPErr(HTTPErr::RequestFailed(RequestFailed {
+        request: HttpParams::get("http://test/cache-miss").meta().unwrap(),
+        status,
+        error: None,
+        trace: miru_agent::trace!(),
+    }))
+}
+
+type ErrCase = (&'static str, ServiceErr, fn(&ServiceErr) -> bool);
+
+fn backend_errors() -> Vec<ErrCase> {
+    vec![
+        (
+            "404",
+            request_failed(reqwest::StatusCode::NOT_FOUND),
+            |e| matches!(e, ServiceErr::HTTPErr(HTTPErr::RequestFailed(rf)) if rf.status == 404),
+        ),
+        (
+            "500",
+            request_failed(reqwest::StatusCode::INTERNAL_SERVER_ERROR),
+            |e| matches!(e, ServiceErr::HTTPErr(HTTPErr::RequestFailed(rf)) if rf.status == 500),
+        ),
+        (
+            "network",
+            ServiceErr::HTTPErr(HTTPErr::MockErr(HttpMockErr {
+                is_network_conn_err: true,
+            })),
+            |e| matches!(e, ServiceErr::HTTPErr(HTTPErr::MockErr(_))),
+        ),
+        (
+            "authn",
+            ServiceErr::SyncErr(SyncErr::AuthnErr(AuthnErr::MockError(AuthnMockError {
+                is_network_conn_err: false,
+                trace: miru_agent::trace!(),
+            }))),
+            |e| matches!(e, ServiceErr::SyncErr(SyncErr::AuthnErr(_))),
+        ),
+        (
+            "sync",
+            ServiceErr::SyncErr(SyncErr::MockErr(SyncMockErr {
+                is_network_conn_err: false,
+            })),
+            |e| matches!(e, ServiceErr::SyncErr(SyncErr::MockErr(_))),
+        ),
+    ]
+}
+
 pub mod get_git_commit {
     use super::*;
 
     #[tokio::test]
-    async fn returns_git_commit_by_id() {
-        let (_dir, stor) = setup("get_gc_by_id").await;
-        let gc = GitCommit {
-            id: "gc_1".to_string(),
-            sha: "abc123".to_string(),
-            message: "initial commit".to_string(),
-            ..Default::default()
-        };
-        stor.write(
-            "gc_1".to_string(),
-            gc.clone(),
-            |_, _| false,
-            Overwrite::Allow,
-        )
-        .await
-        .unwrap();
-
-        let result = git_cmt_svc::get(&stor, &PanicBackend, "gc_1".to_string())
-            .await
-            .unwrap();
-        assert_eq!(result.id, "gc_1");
-        assert_eq!(result.sha, "abc123");
-        assert_eq!(result.message, "initial commit");
-    }
-}
-
-pub mod get_git_commit_fallback {
-    use super::*;
-
-    #[tokio::test]
     async fn cache_hit_no_backend_call() {
-        let (_dir, stor) = setup("fb_gc_cache_hit").await;
-        let gc = GitCommit {
-            id: "gc_1".to_string(),
-            sha: "abc123".to_string(),
-            message: "initial commit".to_string(),
-            ..Default::default()
-        };
-        stor.write(
-            "gc_1".to_string(),
-            gc.clone(),
-            |_, _| false,
-            Overwrite::Allow,
-        )
-        .await
-        .unwrap();
+        let (_dir, stor) = setup("gc_cache_hit").await;
+        let cached = GitCommit::from(backend_value("gc_1"));
+        stor.write_if_absent("gc_1".to_string(), cached.clone(), |_, _| false)
+            .await
+            .unwrap();
 
         let result = git_cmt_svc::get(&stor, &PanicBackend, "gc_1".to_string())
             .await
             .unwrap();
-        assert_eq!(result.id, "gc_1");
+        assert_eq!(result, cached);
     }
 
     #[tokio::test]
-    async fn cache_miss_backend_hit_caches_value() {
-        let (_dir, stor) = setup("fb_gc_backend_hit").await;
-        let backend_gc = backend_client::GitCommit {
-            id: "gc_1".to_string(),
-            sha: "abc123".to_string(),
-            message: "hi".to_string(),
-            ..Default::default()
-        };
-        let stub = StubBackend::new().with_git_commit(Ok(backend_gc));
+    async fn cache_miss_fetches_and_caches() {
+        let (_dir, stor) = setup("gc_cache_miss").await;
+        let stub = StubBackend::new().with_git_commit(Ok(backend_value("gc_1")));
 
         let result = git_cmt_svc::get(&stor, &stub, "gc_1".to_string())
             .await
             .unwrap();
-        assert_eq!(result.id, "gc_1");
-        assert_eq!(result.sha, "abc123");
+        assert_eq!(result, GitCommit::from(backend_value("gc_1")));
         assert_eq!(stub.git_commit_calls(), 1);
 
         // the stub has no second response, so a second call must be served from the cache
-        let result2 = git_cmt_svc::get(&stor, &stub, "gc_1".to_string())
+        let cached = git_cmt_svc::get(&stor, &stub, "gc_1".to_string())
             .await
             .unwrap();
-        assert_eq!(result2.id, "gc_1");
+        assert_eq!(cached, result);
         assert_eq!(stub.git_commit_calls(), 1);
     }
 
     #[tokio::test]
+    async fn backend_errors_propagate_and_cache_nothing() {
+        let (_dir, stor) = setup("gc_backend_errors").await;
+        for (name, err, is_expected) in backend_errors() {
+            let stub = StubBackend::new().with_git_commit(Err(err));
+
+            let result = git_cmt_svc::get(&stor, &stub, "gc_1".to_string()).await;
+
+            let err = result.expect_err(name);
+            assert!(is_expected(&err), "{name}: {err:?}");
+            assert!(stor
+                .read_optional("gc_1".to_string())
+                .await
+                .unwrap()
+                .is_none());
+        }
+    }
+
+    #[tokio::test]
     async fn cache_read_failure_returns_error_without_backend_call() {
-        let (_dir, stor) = setup("fb_gc_cache_read_failure").await;
+        let (_dir, stor) = setup("gc_cache_read_failure").await;
         stor.shutdown().await.unwrap();
         let stub = StubBackend::new();
 
@@ -117,7 +144,7 @@ pub mod get_git_commit_fallback {
 
     #[cfg(unix)]
     #[tokio::test]
-    async fn cache_write_failure_still_returns_git_commit() {
+    async fn cache_write_failure_still_returns_value() {
         use miru_agent::filesys::dirs;
         use std::os::unix::fs::PermissionsExt;
 
@@ -125,104 +152,21 @@ pub mod get_git_commit_fallback {
         if nix::unistd::geteuid().is_root() {
             return;
         }
-        let (dir, stor) = setup("fb_gc_cache_write_failure").await;
+        let (dir, stor) = setup("gc_cache_write_failure").await;
         // the cache writes atomically through a temp file in its directory
         let readonly = std::fs::Permissions::from_mode(0o555);
         dirs::set_permissions(dir.dir(), readonly).await.unwrap();
-        let backend_gc = backend_client::GitCommit {
-            id: "gc_1".to_string(),
-            ..Default::default()
-        };
-        let stub = StubBackend::new().with_git_commit(Ok(backend_gc));
+        let stub = StubBackend::new().with_git_commit(Ok(backend_value("gc_1")));
 
         let result = git_cmt_svc::get(&stor, &stub, "gc_1".to_string()).await;
 
         let readwrite = std::fs::Permissions::from_mode(0o755);
         dirs::set_permissions(dir.dir(), readwrite).await.unwrap();
-        assert_eq!(result.unwrap().id, "gc_1");
+        assert_eq!(result.unwrap(), GitCommit::from(backend_value("gc_1")));
         assert!(stor
             .read_optional("gc_1".to_string())
             .await
             .unwrap()
             .is_none());
-    }
-
-    #[tokio::test]
-    async fn cache_miss_backend_404_propagates_http_err() {
-        let (_dir, stor) = setup("fb_gc_404").await;
-        let err = ServiceErr::HTTPErr(HTTPErr::RequestFailed(RequestFailed {
-            request: HttpParams::get("http://test/cache-miss").meta().unwrap(),
-            status: reqwest::StatusCode::NOT_FOUND,
-            error: None,
-            trace: miru_agent::trace!(),
-        }));
-        let stub = StubBackend::new().with_git_commit(Err(err));
-
-        let result = git_cmt_svc::get(&stor, &stub, "gc_1".to_string()).await;
-        assert!(matches!(
-            result,
-            Err(ServiceErr::HTTPErr(HTTPErr::RequestFailed(_)))
-        ));
-    }
-
-    #[tokio::test]
-    async fn cache_miss_backend_500_returns_error() {
-        let (_dir, stor) = setup("fb_gc_500").await;
-        let err = ServiceErr::HTTPErr(HTTPErr::RequestFailed(RequestFailed {
-            request: HttpParams::get("http://test/cache-miss").meta().unwrap(),
-            status: reqwest::StatusCode::INTERNAL_SERVER_ERROR,
-            error: None,
-            trace: miru_agent::trace!(),
-        }));
-        let stub = StubBackend::new().with_git_commit(Err(err));
-
-        let result = git_cmt_svc::get(&stor, &stub, "gc_1".to_string()).await;
-        assert!(matches!(
-            result,
-            Err(ServiceErr::HTTPErr(HTTPErr::RequestFailed(_)))
-        ));
-    }
-
-    #[tokio::test]
-    async fn cache_miss_backend_network_err_returns_error() {
-        let (_dir, stor) = setup("fb_gc_network").await;
-        let err = ServiceErr::HTTPErr(HTTPErr::MockErr(HttpMockErr {
-            is_network_conn_err: true,
-        }));
-        let stub = StubBackend::new().with_git_commit(Err(err));
-
-        let result = git_cmt_svc::get(&stor, &stub, "gc_1".to_string()).await;
-        assert!(matches!(result, Err(ServiceErr::HTTPErr(_))));
-    }
-
-    #[tokio::test]
-    async fn cache_miss_token_err_propagates_authn_err() {
-        let (_dir, stor) = setup("fb_gc_token").await;
-        let err = ServiceErr::SyncErr(SyncErr::AuthnErr(AuthnErr::MockError(AuthnMockError {
-            is_network_conn_err: false,
-            trace: miru_agent::trace!(),
-        })));
-        let stub = StubBackend::new().with_git_commit(Err(err));
-
-        let result = git_cmt_svc::get(&stor, &stub, "gc_1".to_string()).await;
-        assert!(matches!(
-            result,
-            Err(ServiceErr::SyncErr(SyncErr::AuthnErr(_)))
-        ));
-    }
-
-    #[tokio::test]
-    async fn cache_miss_non_authn_sync_err_propagates() {
-        let (_dir, stor) = setup("fb_gc_sync_err").await;
-        let err = ServiceErr::SyncErr(SyncErr::MockErr(SyncMockErr {
-            is_network_conn_err: false,
-        }));
-        let stub = StubBackend::new().with_git_commit(Err(err));
-
-        let result = git_cmt_svc::get(&stor, &stub, "gc_1".to_string()).await;
-        assert!(matches!(
-            result,
-            Err(ServiceErr::SyncErr(SyncErr::MockErr(_)))
-        ));
     }
 }
