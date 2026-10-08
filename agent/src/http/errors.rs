@@ -29,8 +29,6 @@ impl crate::errors::Error for RequestFailed {
     fn code(&self) -> Code {
         match &self.error {
             Some(error) => Code::BackendError(error.error.code.clone()),
-            // a 404 without an error body, e.g. from a route the backend doesn't serve
-            None if self.status == reqwest::StatusCode::NOT_FOUND => Code::ResourceNotFound,
             None => Code::InternalServerError,
         }
     }

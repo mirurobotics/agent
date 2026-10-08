@@ -74,10 +74,11 @@ pub mod request_failed {
         );
     }
 
-    // A 404 without an error body (e.g. a route the backend doesn't serve) maps to
-    // ResourceNotFound.
+    // A 404 without an error body keeps the HTTP status and uses the same code as
+    // every other body-less failure. The backend's own not-found code arrives only
+    // in an error JSON body.
     #[test]
-    fn not_found_without_error_is_resource_not_found() {
+    fn not_found_without_error_is_internal() {
         let err = RequestFailed {
             request: meta(),
             status: reqwest::StatusCode::NOT_FOUND,
@@ -86,7 +87,7 @@ pub mod request_failed {
         };
         assert_error(
             &err,
-            Expected::new(Code::ResourceNotFound, reqwest::StatusCode::NOT_FOUND),
+            Expected::new(Code::InternalServerError, reqwest::StatusCode::NOT_FOUND),
         );
     }
 
