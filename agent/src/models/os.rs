@@ -1,6 +1,7 @@
 // internal crates
 use crate::models::status::impl_status_enum;
 use backend_api::models as backend_client;
+use device_api::models as agent_server;
 
 // external crates
 use serde::Serialize;
@@ -21,11 +22,12 @@ impl_status_enum!(
     default: HOST,
     label: "os",
     log: warn,
+    agent_type: agent_server::Os,
     backend_type: backend_client::Os,
     unknown_backend: backend_client::Os::OsUnknown,
     mappings: [
-        Linux => "linux" => backend_client::Os::OS_LINUX,
-        Windows => "windows" => backend_client::Os::OS_WINDOWS,
+        Linux => "linux" => agent_server::Os::OS_LINUX => backend_client::Os::OS_LINUX,
+        Windows => "windows" => agent_server::Os::OS_WINDOWS => backend_client::Os::OS_WINDOWS,
     ]
 );
 

@@ -9,175 +9,45 @@ info:
     url: https://opensource.org/licenses/MIT
   x-release-version: v0.2.2
   x-git-commit:
-    sha: 81f3a3a05a8a3c4e6502304248e73aa7683895b8
-    url: https://github.com/mirurobotics/openapi/commit/81f3a3a05a8a3c4e6502304248e73aa7683895b8
-    message: 'feat(device): add file_rule_ids to releases and GET /file_rules/{file_rule_id}
-      (#291)
-
-
-      ## Summary
-
-
-      - Adds a required `file_rule_ids` array (`string[]`) to the
-
-      device-server `Release` schema. It is an empty array when the release
-
-      has no file rules. Both the property and the schema-level `example`
-
-      include `["file_rule_123"]`.
-
-      - Adds `GET /file_rules/{file_rule_id}` (`getFileRule`, tag `File
-
-      Rules`) to the Device API. It returns the shared `BaseFileRule` and
-
-      reuses the shared `file_rule_id` path parameter from
-
-      `apis/configs/params.yaml`.
-
-      - Registers a `file_rules` resource in `tools/stainless/device.yml`
-
-      (`retrieve: get /file_rules/{file_rule_id}`, model `file_rule` →
-
-      `BaseFileRule`). MIRU018 route parity requires this. Without it, lint
-
-      fails with `Route get /file_rules/{file_rule_id} is in OpenAPI spec but
-
-      not in Stainless config`.
-
-      - Regenerates `apis/apps/device-server/openapi.gen.yaml`. No other
-
-      bundle changes.
-
-
-      ## Why the design changed
-
-
-      This PR first added `expand=file_rules` to the release endpoints (commit
-
-      `93ef737`). That approach is **reverted** in a new revert commit
-
-      (`805d8e9`), with no history rewritten. The Device API already
-
-      references related resources by ID and has a GET for each. For example,
-
-      `Deployment.release_id` → `GET /releases/{release_id}` and
-
-      `Release.git_commit_id` → `GET /git_commits/{git_commit_id}`. The Device
-
-      API has no `expand` parameter anywhere, so `expand=file_rules` would
-
-      have been the first. The IDs go on `Release`, not `Deployment`, because
-
-      every Miru API attaches file rules to releases (e.g.
-
-      `CreateReleaseRequest.file_rule_ids`). The agent also already stores
-
-      `file_rule_ids` on its internal release model.
-
-
-      The branch also merges `origin/main` with a merge commit, which brings
-
-      in #290 (custom-code tracking files only; bundles stay fresh).
-
-
-      ## Client flow
-
-
-      1. `GET /releases/current` returns the release of the currently deployed
-
-      deployment, including `file_rule_ids`.
-
-      2. `GET /file_rules/{id}` for each ID.
-
-      3. Check `upload`. A rule uploads files when `upload` is present.
-
-      Retention-only rules omit it.
-
-
-      With the generated Python device SDK:
-
-
-      ```python
-
-      rel = client.releases.current()
-
-      uploads = any(client.file_rules.retrieve(i).upload is not None for i in rel.file_rule_ids)
-
-      ```
-
-
-      ## Versioning
-
-
-      The change is additive and backward compatible for clients. The API
-
-      version stays `v0.2`, and the socket URL stays `http://localhost/v0.2`.
-
-      It ships as Device API `v0.2.2` when a maintainer tags `device/v0.2.2`
-
-      on the merge commit on `main` after merge. No source file is bumped,
-
-      because `x-release-version` is written at release time from the tag.
-
-
-      ## Validation
-
-
-      - `scripts/preflight.sh`: all checks passed (MIRU lint + Redocly lint,
-
-      surface lint, tool tests and coverage).
-
-      - `scripts/is-stale.sh`: all generated specs are up to date after every
-
-      commit.
-
-      - Acceptance script against the bundle: `Release.file_rule_ids` is
-
-      required, `expand`/`ReleaseExpansion` are gone, `getFileRule` returns
-
-      `BaseFileRule`, and the servers URL is unchanged.
-
-      - MIRU018 guard: removing the Stainless entry makes lint fail for `get
-
-      /file_rules/{file_rule_id}`, and restoring it makes lint pass.
-
-
-      ## Out of scope (follow-ups)
-
-
-      - Agent: serving `Release.file_rule_ids` and `GET
-
-      /file_rules/{file_rule_id}` from its local file-rule cache (404 when not
-
-      cached).
-
-      - Device SDK release.
-
-      - Docs-repo updates.
-
-
-      Plan: `plans/active/20260922-device-file-rule-ids-and-endpoint.md`.
-
-
-      🤖 Generated with [Claude Code](https://claude.com/claude-code)
-
-
-      https://claude.ai/code/session_014KRJokLfSVXNVbkJFpQK44
-
-
-      ---------
-
-
-      Co-authored-by: Claude <noreply@anthropic.com>'
-    author: miru-agents
-    branch: HEAD
+    sha: 97aec4ae3541349ead148f90acedb59b0f543fdb
+    url: https://github.com/mirurobotics/openapi/commit/97aec4ae3541349ead148f90acedb59b0f543fdb
+    message: "docs(stlc): how to change SDK custom code (#307)\n\n## Why\n\nHand-written\
+      \ SDK code goes back to stlc's intended flow (upstream docs:\n\"Custom code\"\
+      \ and \"Branching and collaboration\"):\n1. Edit the code in a local checkout\
+      \ of the staging SDK repo.\n2. Seal it with `stlc build`.\n3. Merge the tracking\
+      \ file through a PR here.\n\nA tracking file shows only two commit IDs, so the\
+      \ code itself needs\nsomewhere to be reviewed. That's why we tried merging PRs\
+      \ into the\nstaging repos (mirurobotics/infra#294), which stlc doesn't support.\n\
+      mirurobotics/python-device-sdk-staging#3 needed a manual re-seal (#305),\nand\
+      \ mirurobotics/infra#299 turns those merges off again.\n\nThis PR documents\
+      \ the flow, with the review happening in a **review-only\nPR on the staging\
+      \ repo**.\n\n## What\n\nNew `docs/sdk-custom-code.md`, linked from the README:\n\
+      - **What custom code is:** what tracking files hold and how stlc applies\nthem.\n\
+      - **Rules:**\n  - nothing merges into staging `main`; PRs there are for review\
+      \ only;\n  - prefer config over code;\n  - put new code in `src/<package>/lib/`.\n\
+      - **Steps:**\n  1. `stlc build` to get the local checkout.\n2. Commit on a `custom-code/<topic>`\
+      \ branch from staging `origin/main`,\nso the diff is only the change.\n3. Open\
+      \ a review-only PR on the staging repo. GitHub shows the change\nand the AI\
+      \ review runs.\n4. Cherry-pick the commit onto local `main` and `stlc build`\
+      \ to seal it.\n5. Open the tracking-file PR here, linking the staging PR, and\
+      \ close the\nstaging PR after it lands.\n\nAn earlier version of this PR added\
+      \ a CI job that commented the\ncustom-code diff here. It's removed in favour\
+      \ of reviewing in the SDK\nrepo, so the PR is now docs only.\n\n## Depends on\n\
+      \nmirurobotics/infra#299. Until it's applied, a review PR on\n`python-device-sdk-staging`\
+      \ could still be merged, which is the\nsituation #305 had to repair.\n\n\U0001F916\
+      \ Generated with [Claude Code](https://claude.com/claude-code)\n\n---------\n\
+      \nCo-authored-by: Claude Opus 5.5 <noreply@anthropic.com>"
+    author: ben-miru
+    branch: main
     dirty: false
   x-build:
-    built_at: '2026-09-22T20:30:31.318897+00:00'
+    built_at: '2026-10-08T16:48:37.141271+00:00'
 servers:
 - url: http://localhost/v0.2
   description: localhost
-security: []
+security:
+- {}
+- BearerAuth: []
 paths:
   /health:
     get:
@@ -395,6 +265,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/Event'
 components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: The token from the agent's discovery file. Required over loopback
+        TCP; not used over the Unix socket.
   schemas:
     ErrorResponse:
       type: object
@@ -420,7 +296,7 @@ components:
     APIGitCommit:
       type: string
       enum:
-      - 81f3a3a05a8a3c4e6502304248e73aa7683895b8
+      - 97aec4ae3541349ead148f90acedb59b0f543fdb
       x-enum-varnames:
       - API_GIT_COMMIT
       x-stainless-const: true
@@ -890,6 +766,25 @@ components:
         last_attempted_sync_at: '2021-01-01T00:00:00Z'
         in_cooldown: true
         cooldown_ends_at: '2021-01-01T00:00:00Z'
+    OS:
+      title: OS
+      type: string
+      description: 'An operating system family, from the agent''s build-time OS vocabulary.
+        Shared across resources (devices, config schemas, file rules, releases). This
+        is the machine-readable OS kind, distinct from a human-readable version string.
+
+        - `linux`
+
+        - `windows`
+
+        '
+      example: linux
+      enum:
+      - linux
+      - windows
+      x-enum-varnames:
+      - OS_LINUX
+      - OS_WINDOWS
     FileRuleSource:
       title: File Rule Source
       type: object
@@ -899,12 +794,13 @@ components:
       properties:
         glob:
           type: string
-          pattern: ^/
+          pattern: ^(/|[A-Za-z]:[\\/])
           maxLength: 1024
           example: /var/log/robot/*.log
           description: A glob pattern selecting the files this rule manages. Must
-            be absolute (start with `/`), at most 1024 bytes, and must contain no
-            `..` segments and no empty path segments.
+            be absolute (start with `/` on Linux, or a drive letter followed by `:\`
+            or `:/` on Windows, e.g. `C:\logs\*.log`), at most 1024 bytes, and must
+            contain no `..` segments and no empty path segments.
         stability_window_secs:
           type: integer
           format: int64
@@ -1044,6 +940,7 @@ components:
       - id
       - name
       - digest
+      - os
       - source
       - created_at
       - updated_at
@@ -1071,6 +968,13 @@ components:
           example: sha256:1234567890
           description: The digest of the file rule. File rules are immutable and deduplicated
             by digest within a workspace.
+        os:
+          allOf:
+          - $ref: '#/components/schemas/OS'
+          readOnly: true
+          description: 'The operating system family this file rule targets, derived
+            from `source.glob`: a glob starting with `/` is `linux`, and a glob starting
+            with a drive letter is `windows`. Read-only: clients cannot set it.'
         source:
           $ref: '#/components/schemas/FileRuleSource'
         upload:
@@ -1100,6 +1004,7 @@ components:
         id: file_rule_123
         name: Robot Logs
         digest: sha256:1234567890
+        os: linux
         source:
           glob: /var/log/robot/*.log
           stability_window_secs: 60
@@ -1169,6 +1074,7 @@ components:
       - version
       - git_commit_id
       - file_rule_ids
+      - os
       - created_at
       properties:
         object:
@@ -1199,6 +1105,13 @@ components:
           - file_rule_123
           description: IDs of the file rules included in this release. Retrieve each
             file rule with `GET /file_rules/{file_rule_id}`.
+        os:
+          allOf:
+          - $ref: '#/components/schemas/OS'
+          readOnly: true
+          description: 'The operating system family this release targets, derived
+            from its config schemas and file rules, which must all agree. A release
+            with neither is `linux`. Read-only: clients cannot set it.'
         created_at:
           type: string
           format: date-time
@@ -1211,6 +1124,7 @@ components:
         git_commit_id: git_commit_123
         file_rule_ids:
         - file_rule_123
+        os: linux
         created_at: '2024-01-01T00:00:00Z'
     Event:
       title: Event

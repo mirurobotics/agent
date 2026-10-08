@@ -228,6 +228,7 @@ pub mod release_response {
             id: "rls-1".into(),
             version: "1.0.0".into(),
             git_commit_id: None,
+            os: openapi::Os::OS_LINUX,
             file_rule_ids: Vec::new(),
             created_at: t.to_rfc3339(),
         };
@@ -254,6 +255,7 @@ pub mod release_response {
             id: "rls-2".into(),
             version: "2.0.0".into(),
             git_commit_id: Some("gc-1".into()),
+            os: openapi::Os::OS_LINUX,
             file_rule_ids: Vec::new(),
             created_at: t.to_rfc3339(),
         };
@@ -269,6 +271,7 @@ pub mod release_response {
             id: "rls-3".into(),
             version: "3.0.0".into(),
             git_commit_id: None,
+            os: miru_agent::models::Os::Windows,
             created_at: t,
             updated_at: t,
             file_rule_ids: vec!["fr-1".into(), "fr-2".into()],
@@ -279,6 +282,7 @@ pub mod release_response {
             id: "rls-3".into(),
             version: "3.0.0".into(),
             git_commit_id: None,
+            os: openapi::Os::OS_WINDOWS,
             file_rule_ids: vec!["fr-1".into(), "fr-2".into()],
             created_at: t.to_rfc3339(),
         };
