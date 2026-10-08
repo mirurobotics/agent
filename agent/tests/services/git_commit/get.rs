@@ -96,11 +96,55 @@ pub mod get_git_commit_fallback {
         assert_eq!(result.sha, "abc123");
         assert_eq!(stub.git_commit_calls(), 1);
 
-        // Second call with PanicBackend must succeed (proves cache).
-        let result2 = git_cmt_svc::get(&stor, &PanicBackend, "gc_1".to_string())
+        // the stub has no second response, so a second call must be served from the cache
+        let result2 = git_cmt_svc::get(&stor, &stub, "gc_1".to_string())
             .await
             .unwrap();
         assert_eq!(result2.id, "gc_1");
+        assert_eq!(stub.git_commit_calls(), 1);
+    }
+
+    #[tokio::test]
+    async fn cache_read_failure_returns_error_without_backend_call() {
+        let (_dir, stor) = setup("fb_gc_cache_read_failure").await;
+        stor.shutdown().await.unwrap();
+        let stub = StubBackend::new();
+
+        let result = git_cmt_svc::get(&stor, &stub, "gc_1".to_string()).await;
+        assert!(matches!(result, Err(ServiceErr::CacheErr(_))));
+        assert_eq!(stub.git_commit_calls(), 0);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn cache_write_failure_still_returns_git_commit() {
+        use miru_agent::filesys::dirs;
+        use std::os::unix::fs::PermissionsExt;
+
+        // root ignores directory permissions, so the write cannot be made to fail
+        if nix::unistd::geteuid().is_root() {
+            return;
+        }
+        let (dir, stor) = setup("fb_gc_cache_write_failure").await;
+        // the cache writes atomically through a temp file in its directory
+        let readonly = std::fs::Permissions::from_mode(0o555);
+        dirs::set_permissions(dir.dir(), readonly).await.unwrap();
+        let backend_gc = backend_client::GitCommit {
+            id: "gc_1".to_string(),
+            ..Default::default()
+        };
+        let stub = StubBackend::new().with_git_commit(Ok(backend_gc));
+
+        let result = git_cmt_svc::get(&stor, &stub, "gc_1".to_string()).await;
+
+        let readwrite = std::fs::Permissions::from_mode(0o755);
+        dirs::set_permissions(dir.dir(), readwrite).await.unwrap();
+        assert_eq!(result.unwrap().id, "gc_1");
+        assert!(stor
+            .read_optional("gc_1".to_string())
+            .await
+            .unwrap()
+            .is_none());
     }
 
     #[tokio::test]
