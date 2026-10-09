@@ -44,8 +44,41 @@ jobs:
     env:
       # Full PDBs dominate MSVC link time; test diagnostics do not need them.
       CARGO_PROFILE_DEV_DEBUG: 0
+      # Link the five test binaries with rust-lld (ships in every MSVC
+      # toolchain; rustc puts its directory on the linker's PATH and infers
+      # the lld-link flavor from the file stem). Job-level on purpose: the
+      # CARGO prefix puts it in rust-cache's key, so artifacts from the two
+      # linkers never share a cache.
+      CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER: rust-lld.exe
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The suites are bound by per-file-operation latency on NTFS. A ReFS
+      # Dev Drive skips most filesystem filter drivers. Mounting it at
+      # `target` keeps rust-cache and every cargo command unchanged, and
+      # routing TEMP/TMP onto it moves every tempfile fixture there. Done
+      # inline (same cmdlets as samypr100/setup-dev-drive) because the
+      # repo's Actions allowlist does not include that action. The VHD is
+      # never dismounted: rust-cache's post step saves `target` from the
+      # still-mounted drive and the runner is discarded afterwards.
+      - name: Create Dev Drive (ReFS) for target and temp
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $mount = Join-Path $env:GITHUB_WORKSPACE 'target'
+          New-Item -ItemType Directory -Force $mount | Out-Null
+          $part = New-VHD -Path 'D:\dev_drive.vhdx' -SizeBytes 12GB -Dynamic |
+            Mount-VHD -NoDriveLetter -PassThru |
+            Initialize-Disk -PassThru |
+            New-Partition -UseMaximumSize
+          $part | Format-Volume -DevDrive -Confirm:$false -Force | Out-Null
+          $part | Add-PartitionAccessPath -AccessPath $mount | Out-Null
+          $tmp = Join-Path $mount 'tmp'
+          New-Item -ItemType Directory -Force $tmp | Out-Null
+          "TEMP=$tmp" >> $env:GITHUB_ENV
+          "TMP=$tmp" >> $env:GITHUB_ENV
+          $part | Get-Volume | Select-Object FileSystemType, Size, SizeRemaining | Format-List | Out-String
+          fsutil devdrv query $mount
 
       - name: Install Rust Toolchain
         uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
@@ -63,10 +96,35 @@ jobs:
           choco install nasm -y
           echo "C:\Program Files\NASM" >> $env:GITHUB_PATH
 
+      - name: Probe Runner
+        shell: pwsh
+        run: |
+          # Pipe each table through Out-String; pwsh otherwise defers
+          # formatting and drops later tables of a different object type.
+          Get-MpComputerStatus | Select-Object RealTimeProtectionEnabled, AntivirusEnabled | Format-List | Out-String
+          Get-MpPreference | Select-Object DisableRealtimeMonitoring, ExclusionPath | Format-List | Out-String
+          "NUMBER_OF_PROCESSORS=$env:NUMBER_OF_PROCESSORS"
+          "TEMP=$env:TEMP"
+          "RUNNER_TEMP=$env:RUNNER_TEMP"
+          Get-PSDrive C, D | Select-Object Name, Used, Free | Format-Table -AutoSize | Out-String
+
+      # One cargo invocation on purpose: agent/build.rs re-runs on every
+      # invocation (its rerun-if-changed paths are relative to the package
+      # dir), so a separate --no-run step would rebuild miru-agent twice.
+      # Compile time is the `Finished` line's timestamp minus the step start;
+      # --timings records per-crate compile durations for the artifact below.
       - name: Run Windows Tests
         env:
           RUST_LOG: "off"
-        run: cargo test --package miru-agent --locked
+        run: cargo test --package miru-agent --locked --timings
+
+      - name: Upload Cargo Timings
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-cargo-timings
+          path: target/cargo-timings/cargo-timing.html
+          if-no-files-found: ignore
 
   windows_package_scope:
     name: windows-package-scope
