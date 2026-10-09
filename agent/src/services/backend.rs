@@ -9,14 +9,14 @@ use crate::sync;
 use backend_api::models as backend_client;
 
 /// Single seam used by the services layer to fetch resources from the backend
-/// on a local-cache miss. Consolidates the previous per-resource fetcher
-/// traits (`DeploymentFetcher`, `ReleaseFetcher`, `GitCommitFetcher`) into a
-/// single interface so that stubbing one backend stubs them all.
+/// on a local-cache miss. One interface for every resource, so that stubbing
+/// one backend stubs them all.
 #[allow(async_fn_in_trait)]
 pub trait BackendFetcher: Send + Sync {
     async fn fetch_deployment(&self, id: &str) -> Result<backend_client::Deployment, ServiceErr>;
     async fn fetch_release(&self, id: &str) -> Result<backend_client::Release, ServiceErr>;
     async fn fetch_git_commit(&self, id: &str) -> Result<backend_client::GitCommit, ServiceErr>;
+    async fn fetch_file_rule(&self, id: &str) -> Result<backend_client::BaseFileRule, ServiceErr>;
 }
 
 /// Production `BackendFetcher` wrapping an `http::ClientI` and an
@@ -65,6 +65,15 @@ impl<'a, C: ClientI, T: TokenManagerExt> BackendFetcher for HttpBackend<'a, C, T
         let token = self.token().await?;
         http::with_retry(|| async {
             http::git_commits::get(self.client, id, &[], &token.token).await
+        })
+        .await
+        .map_err(ServiceErr::from)
+    }
+
+    async fn fetch_file_rule(&self, id: &str) -> Result<backend_client::BaseFileRule, ServiceErr> {
+        let token = self.token().await?;
+        http::with_retry(|| async {
+            http::file_rules::get(self.client, id, &[], &token.token).await
         })
         .await
         .map_err(ServiceErr::from)
