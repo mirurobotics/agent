@@ -22,27 +22,22 @@ pub async fn get<B: BackendFetcher>(
         return Ok(rls);
     }
     let mut backend_rls = backend.fetch_release(&id).await?;
-    let backend_rules = backend_rls.file_rules.take().ok_or_else(|| {
+    let bknd_file_rules = backend_rls.file_rules.take().ok_or_else(|| {
         ServiceErr::FileRulesNotExpanded(FileRulesNotExpandedErr {
             release_id: id.clone(),
         })
     })?;
     let file_rule_ids: Vec<models::FileRuleID> =
-        backend_rules.iter().map(|r| r.id.clone()).collect();
+        bknd_file_rules.iter().map(|r| r.id.clone()).collect();
     let storage_rls = models::Release::from_backend(backend_rls, file_rule_ids);
-    // A cached release skips the backend fetch, so never cache it while one of
-    // its rule bodies is missing.
-    if cache_file_rules(file_rules, backend_rules).await {
-        cache_release(releases, storage_rls.clone()).await;
-    }
+    // A missed rule write is recovered by file_rule::get, so it does not block
+    // caching the release.
+    cache_file_rules(file_rules, bknd_file_rules).await;
+    cache_release(releases, storage_rls.clone()).await;
     Ok(storage_rls)
 }
 
-async fn cache_file_rules(
-    file_rules: &disk::FileRules,
-    rules: Vec<backend_client::BaseFileRule>,
-) -> bool {
-    let mut all_cached = true;
+async fn cache_file_rules(file_rules: &disk::FileRules, rules: Vec<backend_client::BaseFileRule>) {
     for rule in rules {
         let rule = models::FileRule::from(rule);
         let id = rule.id.clone();
@@ -51,10 +46,8 @@ async fn cache_file_rules(
             .await
         {
             error!("failed to cache file rule {id}: {e}");
-            all_cached = false;
         }
     }
-    all_cached
 }
 
 async fn cache_release(releases: &disk::Releases, storage_rls: models::Release) {

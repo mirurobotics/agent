@@ -312,7 +312,7 @@ pub mod get_release_fallback {
         let cached_2 = fr_stor.read("file_rule_2".to_string()).await.unwrap();
         assert_eq!(cached_2, FileRule::from(retention_rule));
 
-        // The release is cached now that its rule bodies are.
+        // The release is cached with the ids of the rules that were stored.
         let result = rls_svc::get(&rls_stor, &fr_stor, &PanicBackend, "rls_1".to_string())
             .await
             .unwrap();
@@ -346,7 +346,7 @@ pub mod get_release_fallback {
     }
 
     #[tokio::test]
-    async fn cache_miss_rule_cache_failure_does_not_cache_release() {
+    async fn cache_miss_rule_cache_failure_still_caches_release() {
         let (_dir, rls_stor, fr_stor) = setup("fb_rls_rule_cache_failure").await;
         fr_stor.shutdown().await.unwrap();
         let backend_rls = backend_release(vec![backend_upload_rule("file_rule_1")]);
@@ -357,7 +357,7 @@ pub mod get_release_fallback {
             .unwrap();
         assert_eq!(result.file_rule_ids, vec!["file_rule_1".to_string()]);
 
-        let cached = rls_stor.read_optional("rls_1".to_string()).await.unwrap();
-        assert!(cached.is_none());
+        let cached = rls_stor.read("rls_1".to_string()).await.unwrap();
+        assert_eq!(cached.file_rule_ids, vec!["file_rule_1".to_string()]);
     }
 }
