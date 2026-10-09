@@ -3,7 +3,7 @@ use crate::mocks::backend::{PanicBackend, StubBackend};
 use crate::test_utils::filesys::dirs as test_dirs;
 use backend_api::models as backend_client;
 use miru_agent::authn::errors::{AuthnErr, MockError as AuthnMockError};
-use miru_agent::disk::{Deployments, Releases};
+use miru_agent::disk::{Deployments, FileRules, Releases};
 use miru_agent::filesys::Overwrite;
 use miru_agent::http::errors::{HTTPErr, RequestFailed};
 use miru_agent::http::request::Params as HttpParams;
@@ -15,7 +15,7 @@ use miru_agent::sync::SyncErr;
 // external crates
 use chrono::{DateTime, Utc};
 
-async fn setup(name: &str) -> (test_dirs::TempDir, Deployments, Releases) {
+async fn setup(name: &str) -> (test_dirs::TempDir, Deployments, Releases, FileRules) {
     let dir = test_dirs::temp(name).unwrap();
     let (dpl_stor, _) = Deployments::spawn(16, dir.file("deployments.json"), 1000)
         .await
@@ -23,7 +23,10 @@ async fn setup(name: &str) -> (test_dirs::TempDir, Deployments, Releases) {
     let (rls_stor, _) = Releases::spawn(16, dir.file("releases.json"), 1000)
         .await
         .unwrap();
-    (dir, dpl_stor, rls_stor)
+    let (fr_stor, _) = FileRules::spawn(16, dir.file("file_rules.json"), 1000)
+        .await
+        .unwrap();
+    (dir, dpl_stor, rls_stor, fr_stor)
 }
 
 pub mod get_current_release {
@@ -31,7 +34,7 @@ pub mod get_current_release {
 
     #[tokio::test]
     async fn returns_release_for_deployed_deployment() {
-        let (_dir, dpl_stor, rls_stor) = setup("get_cur_rls").await;
+        let (_dir, dpl_stor, rls_stor, fr_stor) = setup("get_cur_rls").await;
 
         let rls = Release {
             id: "rls_1".to_string(),
@@ -57,7 +60,7 @@ pub mod get_current_release {
             .await
             .unwrap();
 
-        let result = rls_svc::get_current(&dpl_stor, &rls_stor, &PanicBackend)
+        let result = rls_svc::get_current(&dpl_stor, &rls_stor, &fr_stor, &PanicBackend)
             .await
             .unwrap();
         assert_eq!(result.id, "rls_1");
@@ -66,15 +69,15 @@ pub mod get_current_release {
 
     #[tokio::test]
     async fn no_deployed_deployment_returns_error() {
-        let (_dir, dpl_stor, rls_stor) = setup("get_cur_rls_no_dpl").await;
+        let (_dir, dpl_stor, rls_stor, fr_stor) = setup("get_cur_rls_no_dpl").await;
 
-        let result = rls_svc::get_current(&dpl_stor, &rls_stor, &PanicBackend).await;
+        let result = rls_svc::get_current(&dpl_stor, &rls_stor, &fr_stor, &PanicBackend).await;
         assert!(matches!(result, Err(ServiceErr::CacheErr(_))));
     }
 
     #[tokio::test]
     async fn deployed_deployment_with_missing_release_returns_backend_error() {
-        let (_dir, dpl_stor, rls_stor) = setup("get_cur_rls_missing").await;
+        let (_dir, dpl_stor, rls_stor, fr_stor) = setup("get_cur_rls_missing").await;
 
         let dpl = Deployment {
             id: "dpl_1".to_string(),
@@ -98,7 +101,7 @@ pub mod get_current_release {
         }));
         let stub = StubBackend::new().with_release(Err(err));
 
-        let result = rls_svc::get_current(&dpl_stor, &rls_stor, &stub).await;
+        let result = rls_svc::get_current(&dpl_stor, &rls_stor, &fr_stor, &stub).await;
         assert!(matches!(
             result,
             Err(ServiceErr::HTTPErr(HTTPErr::RequestFailed(_)))
@@ -107,7 +110,7 @@ pub mod get_current_release {
 
     #[tokio::test]
     async fn multiple_deployed_deployments_returns_error() {
-        let (_dir, dpl_stor, rls_stor) = setup("get_cur_rls_multi_dpl").await;
+        let (_dir, dpl_stor, rls_stor, fr_stor) = setup("get_cur_rls_multi_dpl").await;
 
         let dpl_a = Deployment {
             id: "dpl_a".to_string(),
@@ -137,7 +140,7 @@ pub mod get_current_release {
             .await
             .unwrap();
 
-        let result = rls_svc::get_current(&dpl_stor, &rls_stor, &PanicBackend).await;
+        let result = rls_svc::get_current(&dpl_stor, &rls_stor, &fr_stor, &PanicBackend).await;
         assert!(matches!(result, Err(ServiceErr::CacheErr(_))));
     }
 }
@@ -159,7 +162,7 @@ pub mod get_current_release_fallback {
 
     #[tokio::test]
     async fn release_cached_no_backend_call() {
-        let (_dir, dpl_stor, rls_stor) = setup("fb_cur_rls_cached").await;
+        let (_dir, dpl_stor, rls_stor, fr_stor) = setup("fb_cur_rls_cached").await;
 
         let rls = Release {
             id: "rls_1".to_string(),
@@ -177,7 +180,7 @@ pub mod get_current_release_fallback {
             .await
             .unwrap();
 
-        let result = rls_svc::get_current(&dpl_stor, &rls_stor, &PanicBackend)
+        let result = rls_svc::get_current(&dpl_stor, &rls_stor, &fr_stor, &PanicBackend)
             .await
             .unwrap();
         assert_eq!(result.id, "rls_1");
@@ -186,7 +189,7 @@ pub mod get_current_release_fallback {
 
     #[tokio::test]
     async fn release_not_cached_backend_returns_release() {
-        let (_dir, dpl_stor, rls_stor) = setup("fb_cur_rls_backend_hit").await;
+        let (_dir, dpl_stor, rls_stor, fr_stor) = setup("fb_cur_rls_backend_hit").await;
 
         let dpl = make_deployed("rls_1");
         dpl_stor
@@ -203,7 +206,7 @@ pub mod get_current_release_fallback {
         };
         let stub = StubBackend::new().with_release(Ok(backend_rls));
 
-        let result = rls_svc::get_current(&dpl_stor, &rls_stor, &stub)
+        let result = rls_svc::get_current(&dpl_stor, &rls_stor, &fr_stor, &stub)
             .await
             .unwrap();
         assert_eq!(result.id, "rls_1");
@@ -213,7 +216,7 @@ pub mod get_current_release_fallback {
 
     #[tokio::test]
     async fn release_not_cached_backend_404_returns_error() {
-        let (_dir, dpl_stor, rls_stor) = setup("fb_cur_rls_404").await;
+        let (_dir, dpl_stor, rls_stor, fr_stor) = setup("fb_cur_rls_404").await;
 
         let dpl = make_deployed("rls_1");
         dpl_stor
@@ -229,7 +232,7 @@ pub mod get_current_release_fallback {
         }));
         let stub = StubBackend::new().with_release(Err(err));
 
-        let result = rls_svc::get_current(&dpl_stor, &rls_stor, &stub).await;
+        let result = rls_svc::get_current(&dpl_stor, &rls_stor, &fr_stor, &stub).await;
         assert!(matches!(
             result,
             Err(ServiceErr::HTTPErr(HTTPErr::RequestFailed(_)))
@@ -238,7 +241,7 @@ pub mod get_current_release_fallback {
 
     #[tokio::test]
     async fn release_not_cached_backend_token_err_returns_error() {
-        let (_dir, dpl_stor, rls_stor) = setup("fb_cur_rls_token").await;
+        let (_dir, dpl_stor, rls_stor, fr_stor) = setup("fb_cur_rls_token").await;
 
         let dpl = make_deployed("rls_1");
         dpl_stor
@@ -252,7 +255,7 @@ pub mod get_current_release_fallback {
         })));
         let stub = StubBackend::new().with_release(Err(err));
 
-        let result = rls_svc::get_current(&dpl_stor, &rls_stor, &stub).await;
+        let result = rls_svc::get_current(&dpl_stor, &rls_stor, &fr_stor, &stub).await;
         assert!(matches!(
             result,
             Err(ServiceErr::SyncErr(SyncErr::AuthnErr(_)))

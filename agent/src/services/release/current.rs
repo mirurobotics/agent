@@ -8,9 +8,10 @@ use crate::services::{
 pub async fn get_current(
     deployments: &disk::Deployments,
     releases: &disk::Releases,
+    file_rules: &disk::FileRules,
     backend: &impl BackendFetcher,
 ) -> Result<models::Release, ServiceErr> {
     let dpl = dpl_svc::get_current(deployments).await?;
-    let release = rls_svc::get(releases, backend, dpl.release_id).await?;
+    let release = rls_svc::get(releases, file_rules, backend, dpl.release_id).await?;
     Ok(release)
 }
