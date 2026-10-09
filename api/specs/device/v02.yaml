@@ -7,74 +7,47 @@ info:
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
-  x-release-version: v0.2.1
+  x-release-version: v0.2.2
   x-git-commit:
-    sha: 10dc72e22958a4851e7f6718f5b7542b0c7f62e1
-    url: https://github.com/mirurobotics/openapi/commit/10dc72e22958a4851e7f6718f5b7542b0c7f62e1
-    message: 'feat(lint): add x-summary to event schemas and enforce via MIRU024 (#15)
-
-
-      ## Summary
-
-
-      - Add `x-summary` extension field and richer `description` to all
-
-      `*Event` data schemas (`DeploymentDeployedEvent`,
-
-      `DeploymentRemovedEvent`, `ValidateDeploymentEvent`)
-
-      - Add MIRU024 lint rule (`event_schema_x_summary_required`) that
-
-      enforces `x-summary` on all `*Event` schemas (excluding the `Event`
-
-      envelope)
-
-      - Add 3 test fixtures and test class for MIRU024 (197 tests pass, 99%
-
-      coverage)
-
-
-      The `x-summary` field is consumed by the docs codegen
-
-      (`docs/api/generate_event_pages.py`) as the page subtitle, while
-
-      `description` provides the longer inline body text. This makes generated
-
-      event type reference pages more useful.
-
-
-      ## Test plan
-
-
-      - [x] `./tools/lint/test.sh` — 197 tests pass
-
-      - [x] `./tools/lint/covgate.sh` — 99% coverage (gate: 98%)
-
-      - [x] `./scripts/lint.sh` — all custom MIRU rules and Redocly clean
-
-      - [x] MIRU024 fires on `*Event` schema missing `x-summary`
-
-      - [x] MIRU024 passes when `x-summary` is present
-
-      - [x] MIRU024 exempts the `Event` envelope schema
-
-
-      🤖 Generated with [Claude Code](https://claude.com/claude-code)
-
-
-      ---------
-
-
-      Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>'
+    sha: 97aec4ae3541349ead148f90acedb59b0f543fdb
+    url: https://github.com/mirurobotics/openapi/commit/97aec4ae3541349ead148f90acedb59b0f543fdb
+    message: "docs(stlc): how to change SDK custom code (#307)\n\n## Why\n\nHand-written\
+      \ SDK code goes back to stlc's intended flow (upstream docs:\n\"Custom code\"\
+      \ and \"Branching and collaboration\"):\n1. Edit the code in a local checkout\
+      \ of the staging SDK repo.\n2. Seal it with `stlc build`.\n3. Merge the tracking\
+      \ file through a PR here.\n\nA tracking file shows only two commit IDs, so the\
+      \ code itself needs\nsomewhere to be reviewed. That's why we tried merging PRs\
+      \ into the\nstaging repos (mirurobotics/infra#294), which stlc doesn't support.\n\
+      mirurobotics/python-device-sdk-staging#3 needed a manual re-seal (#305),\nand\
+      \ mirurobotics/infra#299 turns those merges off again.\n\nThis PR documents\
+      \ the flow, with the review happening in a **review-only\nPR on the staging\
+      \ repo**.\n\n## What\n\nNew `docs/sdk-custom-code.md`, linked from the README:\n\
+      - **What custom code is:** what tracking files hold and how stlc applies\nthem.\n\
+      - **Rules:**\n  - nothing merges into staging `main`; PRs there are for review\
+      \ only;\n  - prefer config over code;\n  - put new code in `src/<package>/lib/`.\n\
+      - **Steps:**\n  1. `stlc build` to get the local checkout.\n2. Commit on a `custom-code/<topic>`\
+      \ branch from staging `origin/main`,\nso the diff is only the change.\n3. Open\
+      \ a review-only PR on the staging repo. GitHub shows the change\nand the AI\
+      \ review runs.\n4. Cherry-pick the commit onto local `main` and `stlc build`\
+      \ to seal it.\n5. Open the tracking-file PR here, linking the staging PR, and\
+      \ close the\nstaging PR after it lands.\n\nAn earlier version of this PR added\
+      \ a CI job that commented the\ncustom-code diff here. It's removed in favour\
+      \ of reviewing in the SDK\nrepo, so the PR is now docs only.\n\n## Depends on\n\
+      \nmirurobotics/infra#299. Until it's applied, a review PR on\n`python-device-sdk-staging`\
+      \ could still be merged, which is the\nsituation #305 had to repair.\n\n\U0001F916\
+      \ Generated with [Claude Code](https://claude.com/claude-code)\n\n---------\n\
+      \nCo-authored-by: Claude Opus 5.5 <noreply@anthropic.com>"
     author: ben-miru
-    branch: HEAD
+    branch: main
     dirty: false
   x-build:
-    built_at: '2026-04-06T19:21:53.148075+00:00'
+    built_at: '2026-10-08T16:48:37.141271+00:00'
 servers:
 - url: http://localhost/v0.2
   description: localhost
-security: []
+security:
+- {}
+- BearerAuth: []
 paths:
   /health:
     get:
@@ -162,6 +135,22 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SyncDeviceResponse'
+  /file_rules/{file_rule_id}:
+    get:
+      tags:
+      - File Rules
+      summary: Get
+      description: Retrieve a file rule by its ID.
+      operationId: getFileRule
+      parameters:
+      - $ref: '#/components/parameters/file_rule_id'
+      responses:
+        '200':
+          description: Successfully retrieved the file rule.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BaseFileRule'
   /git_commits/{git_commit_id}:
     get:
       tags:
@@ -276,6 +265,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/Event'
 components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: The token from the agent's discovery file. Required over loopback
+        TCP; not used over the Unix socket.
   schemas:
     ErrorResponse:
       type: object
@@ -291,10 +286,17 @@ components:
       x-enum-varnames:
       - API_VERSION
       x-stainless-const: true
+    ReleaseVersion:
+      type: string
+      enum:
+      - v0.2.2
+      x-enum-varnames:
+      - RELEASE_VERSION
+      x-stainless-const: true
     APIGitCommit:
       type: string
       enum:
-      - 10dc72e22958a4851e7f6718f5b7542b0c7f62e1
+      - 97aec4ae3541349ead148f90acedb59b0f543fdb
       x-enum-varnames:
       - API_GIT_COMMIT
       x-stainless-const: true
@@ -302,9 +304,9 @@ components:
       title: DeploymentDeployedEvent
       type: object
       x-summary: A deployment's config instances have been written to the device's
-        filesystem.
+        file system.
       description: Emitted when a deployment's config instances have been written
-        to the device's filesystem and are available for consumption. Use this event
+        to the device's file system and are available for consumption. Use this event
         to reload configuration, restart dependent services, or confirm that new configuration
         is live on the device.
       required:
@@ -348,9 +350,9 @@ components:
       title: DeploymentRemovedEvent
       type: object
       x-summary: A deployment's config instances have been removed from the device's
-        filesystem.
+        file system.
       description: Emitted when a deployment's config instances have been removed
-        from the device's filesystem and the deployment has been archived. Use this
+        from the device's file system and the deployment has been archived. Use this
         event to clean up resources or stop services that depended on the removed
         configuration.
       required:
@@ -408,6 +410,7 @@ components:
       - git_commit
       - api_version
       - api_git_commit
+      - api_release_version
       - rust_version
       - build_date
       - os
@@ -429,6 +432,10 @@ components:
           type: string
           description: The git commit of the API.
           example: a1b2c3d4
+        api_release_version:
+          type: string
+          description: The API release version of the agent.
+          example: v0.2.0-beta.1
         rust_version:
           type: string
           description: The version of Rust.
@@ -451,6 +458,7 @@ components:
         git_commit: a1b2c3d4
         api_version: v1-0
         api_git_commit: a1b2c3d4
+        api_release_version: v0.2.0-beta.1
         rust_version: 1.93.0
         build_date: '2026-02-24T10:30:00Z'
         os: linux
@@ -758,6 +766,259 @@ components:
         last_attempted_sync_at: '2021-01-01T00:00:00Z'
         in_cooldown: true
         cooldown_ends_at: '2021-01-01T00:00:00Z'
+    OS:
+      title: OS
+      type: string
+      description: 'An operating system family, from the agent''s build-time OS vocabulary.
+        Shared across resources (devices, config schemas, file rules, releases). This
+        is the machine-readable OS kind, distinct from a human-readable version string.
+
+        - `linux`
+
+        - `windows`
+
+        '
+      example: linux
+      enum:
+      - linux
+      - windows
+      x-enum-varnames:
+      - OS_LINUX
+      - OS_WINDOWS
+    FileRuleSource:
+      title: File Rule Source
+      type: object
+      required:
+      - glob
+      - stability_window_secs
+      properties:
+        glob:
+          type: string
+          pattern: ^(/|[A-Za-z]:[\\/])
+          maxLength: 1024
+          example: /var/log/robot/*.log
+          description: A glob pattern selecting the files this rule manages. Must
+            be absolute (start with `/` on Linux, or a drive letter followed by `:\`
+            or `:/` on Windows, e.g. `C:\logs\*.log`), at most 1024 bytes, and must
+            contain no `..` segments and no empty path segments.
+        stability_window_secs:
+          type: integer
+          format: int64
+          example: 60
+          description: How long, in seconds, a matching file's size and modification
+            time must stay unchanged (quiescent) before it is considered finished
+            and eligible for upload. Files in a format with a finalization marker
+            (e.g. MCAP, parquet) are detected directly; this window is the fallback
+            for other files.
+      example:
+        glob: /var/log/robot/*.log
+        stability_window_secs: 60
+    FileRuleUpload:
+      title: File Rule Upload
+      type: object
+      required:
+      - upload_collection_id
+      - upload_collection_name
+      - bucket_id
+      - bucket_name
+      - path
+      properties:
+        upload_collection_id:
+          type: string
+          example: upl_col_123
+          description: ID of the upload collection the resulting uploads are grouped
+            into.
+        upload_collection_name:
+          type: string
+          example: Robot Logs
+          description: The name of the upload collection the resulting uploads are
+            grouped into.
+        bucket_id:
+          type: string
+          example: bkt_123
+          description: ID of the bucket this rule uploads to.
+        bucket_name:
+          type: string
+          example: my-uploads-bucket
+          description: Name of the bucket this rule uploads to.
+        path:
+          type: string
+          pattern: .*\{upload_id\}.*
+          maxLength: 1024
+          example: '{device_id}/{year}-{month}-{day}/{upload_id}/{file_name}'
+          description: The object-path template the collected file is written to.
+            Must contain `{upload_id}` so every upload lands on a distinct object
+            key, be at most 1024 bytes, have balanced braces, and contain no `..`
+            segments and no empty path segments. The supported variables are `{device_id}`,
+            `{device_name}`, `{file_name}`, `{upload_id}`, `{year}`, `{month}`, `{day}`,
+            `{hour}`, and `{minute}`.
+      example:
+        upload_collection_id: upl_col_123
+        upload_collection_name: Robot Logs
+        bucket_id: bkt_123
+        bucket_name: my-uploads-bucket
+        path: '{device_id}/{year}-{month}-{day}/{upload_id}/{file_name}'
+    FileRuleRetention:
+      title: File Rule Retention
+      type: object
+      description: 'The retention block a file rule carries when it deletes local
+        files; a
+
+        rule without one keeps matching files indefinitely and Miru never
+
+        deletes them. Retention operates in two phases. The retention guarantee
+
+        ends once a matching file goes quiescent — its size and modification
+
+        time have stayed unchanged for `source.stability_window_secs` — and,
+
+        when `require_upload` is `true`, once its upload has been durably
+
+        confirmed; the file is then eligible for deletion, and callers may no
+
+        longer rely on it being present. `ttl_secs` schedules the enforcement
+
+        that follows: how long the file lives on after the guarantee ends
+
+        before the device deletes it. Both phases keep running on the device
+
+        even when no release is deployed, so tearing down a deployment does not
+
+        silently stop reclaiming disk.
+
+        '
+      required:
+      - ttl_secs
+      properties:
+        require_upload:
+          type: boolean
+          example: true
+          description: 'Whether a file must have its upload durably confirmed before
+            it may be deleted. Present exactly when the rule has an `upload` block.
+            When `true`, a slow or failing upload keeps the local file: the device
+            abandons an upload after 9 attempts, so a permanently failing upload retains
+            the file indefinitely. When `false`, the upload is best-effort: the file
+            may be deleted once eligible even if its upload has not completed, and
+            an unfinished upload is abandoned.'
+        ttl_secs:
+          type: integer
+          format: int64
+          example: 604800
+          description: 'How long, in seconds, the file lives on after it becomes eligible
+            for deletion. The clock starts when the retention guarantee ends, not
+            when the file was written: this schedules enforcement of a guarantee that
+            has already ended, so it defers the deletion, not the end of the guarantee.
+            `0` means the file is deleted as soon as it becomes eligible.'
+      example:
+        require_upload: true
+        ttl_secs: 604800
+    BaseFileRule:
+      title: Base File Rule
+      type: object
+      description: 'A file rule declares which files on a device Miru manages and
+        what to do
+
+        with them: upload them to a bucket, delete the local copies once they
+
+        are no longer needed, or both. `retention` is optional and marks the
+
+        rules that delete: when it is absent the device keeps matching files
+
+        indefinitely — Miru never deletes them — and when it is present the rule
+
+        deletes each matching file once its retention guarantee ends. A rule
+
+        that both deletes and uploads always states `retention.require_upload`,
+
+        so whether local deletion waits for the upload is itself an explicit
+
+        decision.
+
+        '
+      required:
+      - object
+      - id
+      - name
+      - digest
+      - os
+      - source
+      - created_at
+      - updated_at
+      properties:
+        object:
+          type: string
+          enum:
+          - file_rule
+          example: file_rule
+          x-stainless-const: true
+          description: The object type, which is always `file_rule`.
+        id:
+          type: string
+          example: file_rule_123
+          description: ID of the file rule.
+        name:
+          type: string
+          example: Robot Logs
+          description: 'A human-readable name for the file rule. Not unique within
+            a workspace: file rules are immutable, so each authored revision mints
+            a new rule and several rules may share a name. The name participates in
+            the rule''s digest, so renaming a rule mints a new rule.'
+        digest:
+          type: string
+          example: sha256:1234567890
+          description: The digest of the file rule. File rules are immutable and deduplicated
+            by digest within a workspace.
+        os:
+          allOf:
+          - $ref: '#/components/schemas/OS'
+          readOnly: true
+          description: 'The operating system family this file rule targets, derived
+            from `source.glob`: a glob starting with `/` is `linux`, and a glob starting
+            with a drive letter is `windows`. Read-only: clients cannot set it.'
+        source:
+          $ref: '#/components/schemas/FileRuleSource'
+        upload:
+          allOf:
+          - $ref: '#/components/schemas/FileRuleUpload'
+          description: Where matching files are uploaded. Absent when the rule only
+            enforces local retention.
+        retention:
+          allOf:
+          - $ref: '#/components/schemas/FileRuleRetention'
+          description: Governs deletion of the local copies of matching files. Absent
+            when the device keeps matching files indefinitely — Miru never deletes
+            them; present when the rule deletes each matching file once its retention
+            guarantee ends.
+        created_at:
+          type: string
+          format: date-time
+          example: '2021-01-01T00:00:00Z'
+          description: Timestamp of when the file rule was created.
+        updated_at:
+          type: string
+          format: date-time
+          example: '2021-01-01T00:00:00Z'
+          description: Timestamp of when the file rule was last updated.
+      example:
+        object: file_rule
+        id: file_rule_123
+        name: Robot Logs
+        digest: sha256:1234567890
+        os: linux
+        source:
+          glob: /var/log/robot/*.log
+          stability_window_secs: 60
+        upload:
+          upload_collection_id: upl_col_123
+          upload_collection_name: Robot Logs
+          bucket_id: bkt_123
+          bucket_name: my-uploads-bucket
+          path: '{device_id}/{year}-{month}-{day}/{upload_id}/{file_name}'
+        retention:
+          require_upload: true
+          ttl_secs: 604800
+        created_at: '2021-01-01T00:00:00Z'
+        updated_at: '2021-01-01T00:00:00Z'
     GitCommit:
       title: Git Commit
       type: object
@@ -812,6 +1073,8 @@ components:
       - id
       - version
       - git_commit_id
+      - file_rule_ids
+      - os
       - created_at
       properties:
         object:
@@ -834,6 +1097,21 @@ components:
           nullable: true
           example: git_commit_123
           description: The ID of the git commit associated with this release.
+        file_rule_ids:
+          type: array
+          items:
+            type: string
+          example:
+          - file_rule_123
+          description: IDs of the file rules included in this release. Retrieve each
+            file rule with `GET /file_rules/{file_rule_id}`.
+        os:
+          allOf:
+          - $ref: '#/components/schemas/OS'
+          readOnly: true
+          description: 'The operating system family this release targets, derived
+            from its config schemas and file rules, which must all agree. A release
+            with neither is `linux`. Read-only: clients cannot set it.'
         created_at:
           type: string
           format: date-time
@@ -844,6 +1122,9 @@ components:
         id: rls_123
         version: v1.0.0
         git_commit_id: git_commit_123
+        file_rule_ids:
+        - file_rule_123
+        os: linux
         created_at: '2024-01-01T00:00:00Z'
     Event:
       title: Event
@@ -915,6 +1196,10 @@ components:
           type: string
           example: This is a message for a user
           description: A human-readable message describing the error.
+      example:
+        code: invalid_request
+        params: {}
+        message: This is a message for a user
   parameters:
     deployment_id:
       name: deployment_id
@@ -924,6 +1209,14 @@ components:
       schema:
         type: string
         example: dpl_123
+    file_rule_id:
+      name: file_rule_id
+      in: path
+      required: true
+      description: The unique identifier of the file rule.
+      schema:
+        type: string
+        example: file_rule_123
     git_commit_id:
       name: git_commit_id
       in: path
