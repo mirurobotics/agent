@@ -70,20 +70,15 @@ impl From<&models::FileRuleUpload> for device_server::FileRuleUpload {
     }
 }
 
-// Per the spec, `require_upload` is present exactly when the rule has an `upload` block.
-fn to_retention(
-    retention: &models::FileRuleRetention,
-    has_upload: bool,
-) -> device_server::FileRuleRetention {
+fn to_retention(retention: &models::FileRuleRetention) -> device_server::FileRuleRetention {
     device_server::FileRuleRetention {
-        require_upload: has_upload.then_some(retention.require_upload),
+        require_upload: retention.require_upload,
         ttl_secs: i64::try_from(retention.ttl_secs).unwrap_or(i64::MAX),
     }
 }
 
 impl From<&models::FileRule> for device_server::BaseFileRule {
     fn from(rule: &models::FileRule) -> Self {
-        let has_upload = rule.upload.is_some();
         device_server::BaseFileRule {
             object: device_server::base_file_rule::Object::FileRule,
             id: rule.id.clone(),
@@ -92,10 +87,7 @@ impl From<&models::FileRule> for device_server::BaseFileRule {
             os: (&rule.os).into(),
             source: Box::new((&rule.source).into()),
             upload: rule.upload.as_ref().map(|u| Box::new(u.into())),
-            retention: rule
-                .retention
-                .as_ref()
-                .map(|r| Box::new(to_retention(r, has_upload))),
+            retention: rule.retention.as_ref().map(|r| Box::new(to_retention(r))),
             created_at: rule.created_at.to_rfc3339(),
             updated_at: rule.updated_at.to_rfc3339(),
         }

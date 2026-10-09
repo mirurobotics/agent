@@ -330,7 +330,7 @@ pub mod file_rule_response {
         let rule = rule(
             Some(upload()),
             Some(FileRuleRetention {
-                require_upload: true,
+                require_upload: Some(true),
                 ttl_secs: 3600,
             }),
         );
@@ -369,7 +369,7 @@ pub mod file_rule_response {
         let rule = rule(
             Some(upload()),
             Some(FileRuleRetention {
-                require_upload: false,
+                require_upload: Some(false),
                 ttl_secs: 60,
             }),
         );
@@ -385,12 +385,11 @@ pub mod file_rule_response {
 
     #[test]
     fn converts_retention_only_rule_omits_require_upload() {
-        // require_upload is dropped whenever the rule has no upload block,
-        // whatever the stored value.
+        // A stored absence is copied through and omitted from the JSON.
         let rule = rule(
             None,
             Some(FileRuleRetention {
-                require_upload: true,
+                require_upload: None,
                 ttl_secs: 0,
             }),
         );
@@ -426,7 +425,7 @@ pub mod file_rule_response {
         let rule = rule(
             None,
             Some(FileRuleRetention {
-                require_upload: false,
+                require_upload: Some(false),
                 ttl_secs: u64::MAX,
             }),
         );

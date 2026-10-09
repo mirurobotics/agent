@@ -490,7 +490,7 @@ pub mod routes {
                     path: "robots/".into(),
                 }),
                 retention: Some(FileRuleRetention {
-                    require_upload: true,
+                    require_upload: Some(true),
                     ttl_secs: 3600,
                 }),
                 created_at: fixed_time(),
@@ -504,7 +504,7 @@ pub mod routes {
                 id: id.into(),
                 name: "tmp".into(),
                 retention: Some(FileRuleRetention {
-                    require_upload: false,
+                    require_upload: Some(false),
                     ttl_secs: 60,
                 }),
                 created_at: fixed_time(),

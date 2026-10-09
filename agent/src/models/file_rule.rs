@@ -51,7 +51,10 @@ impl From<backend_client::FileRuleUpload> for FileRuleUpload {
 // ============================ FILE RULE RETENTION ================================ //
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FileRuleRetention {
-    pub require_upload: bool,
+    /// `None` when the backend omitted the field, which it does for a rule
+    /// with no upload block.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub require_upload: Option<bool>,
     pub ttl_secs: u64,
 }
 
@@ -98,7 +101,7 @@ impl From<backend_client::BaseFileRule> for FileRule {
             source: (*rule.source).into(),
             upload: rule.upload.map(|u| (*u).into()),
             retention: rule.retention.map(|r| FileRuleRetention {
-                require_upload: r.require_upload.unwrap_or(false),
+                require_upload: r.require_upload,
                 ttl_secs: r.ttl_secs.max(0) as u64,
             }),
             created_at: rule

@@ -45,7 +45,7 @@ fn upload_rule() -> FileRule {
     FileRule {
         upload: Some(FileRuleUpload::default()),
         retention: Some(FileRuleRetention {
-            require_upload: true,
+            require_upload: Some(true),
             ttl_secs: 60,
         }),
         ..FileRule::default()

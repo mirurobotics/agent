@@ -45,7 +45,7 @@ async fn write_then_read_round_trips() {
         "upl_rule_1",
         "sha256:aaa",
         Some(FileRuleRetention {
-            require_upload: true,
+            require_upload: Some(true),
             ttl_secs: 0,
         }),
     );
@@ -73,7 +73,7 @@ async fn write_if_absent_does_not_overwrite_existing() {
         "upl_rule_x",
         "sha256:second",
         Some(FileRuleRetention {
-            require_upload: true,
+            require_upload: Some(true),
             ttl_secs: 0,
         }),
     );

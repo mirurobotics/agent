@@ -53,7 +53,7 @@ async fn upload_with_unrequired_retention_enqueues_a_delete_job() {
     let rule = rule(
         Some(FileRuleUpload::default()),
         Some(FileRuleRetention {
-            require_upload: false,
+            require_upload: Some(false),
             ttl_secs: 3600,
         }),
     );
@@ -72,7 +72,7 @@ async fn retention_only_rule_enqueues_a_delete_job() {
     let rule = rule(
         None,
         Some(FileRuleRetention {
-            require_upload: false,
+            require_upload: Some(false),
             ttl_secs: 0,
         }),
     );
@@ -91,7 +91,7 @@ async fn required_upload_retention_enqueues_nothing() {
     let rule = rule(
         Some(FileRuleUpload::default()),
         Some(FileRuleRetention {
-            require_upload: true,
+            require_upload: Some(true),
             ttl_secs: 0,
         }),
     );
@@ -122,7 +122,7 @@ async fn enqueue_failure_is_swallowed() {
     let rule = rule(
         None,
         Some(FileRuleRetention {
-            require_upload: false,
+            require_upload: Some(false),
             ttl_secs: 60,
         }),
     );

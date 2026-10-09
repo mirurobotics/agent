@@ -174,7 +174,7 @@ fn from_backend() {
             path: "{device_id}/logs".to_string(),
         }),
         retention: Some(FileRuleRetention {
-            require_upload: true,
+            require_upload: Some(true),
             ttl_secs: 3600,
         }),
         created_at: created,
@@ -208,7 +208,7 @@ fn from_backend_no_upload_or_retention() {
 }
 
 #[test]
-fn from_backend_absent_require_upload_is_false() {
+fn from_backend_absent_require_upload_stays_absent() {
     let now = Utc::now().to_rfc3339();
     let backend = backend_rule(
         &now,
@@ -224,7 +224,7 @@ fn from_backend_absent_require_upload_is_false() {
     assert_eq!(
         rule.retention,
         Some(FileRuleRetention {
-            require_upload: false,
+            require_upload: None,
             ttl_secs: 60,
         })
     );
@@ -247,7 +247,7 @@ fn from_backend_negative_ttl_secs_clamps_to_zero() {
     assert_eq!(
         rule.retention,
         Some(FileRuleRetention {
-            require_upload: true,
+            require_upload: Some(true),
             ttl_secs: 0,
         })
     );
@@ -270,7 +270,7 @@ fn from_backend_zero_ttl_secs_is_preserved() {
     assert_eq!(
         rule.retention,
         Some(FileRuleRetention {
-            require_upload: false,
+            require_upload: Some(false),
             ttl_secs: 0,
         })
     );
@@ -293,7 +293,7 @@ fn retention_default() {
     assert_eq!(
         FileRuleRetention::default(),
         FileRuleRetention {
-            require_upload: false,
+            require_upload: None,
             ttl_secs: 0,
         }
     );
