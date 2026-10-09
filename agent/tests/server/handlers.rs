@@ -40,6 +40,7 @@ pub mod version_tests {
             git_commit: COMMIT.to_string(),
             api_version: version::api_version(),
             api_git_commit: version::api_git_commit(),
+            api_release_version: version::api_release_version(),
             rust_version: version::RUST_VERSION.to_string(),
             build_date: version::BUILD_DATE.to_string(),
             os: version::OS.to_string(),
@@ -62,7 +63,8 @@ pub mod routes {
     use miru_agent::events::hub::{EventHub, SpawnOptions};
     use miru_agent::filesys::Overwrite;
     use miru_agent::models::{
-        Deployment, DplActivity, DplErrStatus, DplTarget, GitCommit, Release,
+        Deployment, DplActivity, DplErrStatus, DplTarget, FileRule, FileRuleRetention,
+        FileRuleUpload, GitCommit, Release,
     };
     use miru_agent::server::{routes, State};
     use miru_agent::sync::Syncer;
@@ -100,7 +102,8 @@ pub mod routes {
             let backend_router = Router::new()
                 .route("/deployments/{id}", get(mock::not_found))
                 .route("/releases/{id}", get(mock::not_found))
-                .route("/git_commits/{id}", get(mock::not_found));
+                .route("/git_commits/{id}", get(mock::not_found))
+                .route("/file_rules/{id}", get(mock::not_found));
             let backend = mock::run_server(backend_router).await;
             let real_http_client =
                 Arc::new(miru_agent::http::Client::new(&backend.base_url).unwrap());
@@ -399,7 +402,7 @@ pub mod routes {
                 os: miru_agent::models::Os::Linux,
                 created_at: t,
                 updated_at: t,
-                file_rule_ids: Vec::new(),
+                file_rule_ids: vec!["fr-1".into(), "fr-2".into()],
             };
             f.state
                 .storage
@@ -414,6 +417,7 @@ pub mod routes {
             let actual: openapi::Release = serde_json::from_slice(&bytes).unwrap();
             assert_eq!(actual.id, "rls-1");
             assert_eq!(actual.version, "2.0.0");
+            assert_eq!(actual.file_rule_ids, vec!["fr-1", "fr-2"]);
         }
 
         #[tokio::test]
@@ -464,6 +468,64 @@ pub mod routes {
             let f = Fixture::new("handler_get_gc_404").await;
 
             let (status, bytes) = f.get("/v0.2/git_commits/nonexistent").await;
+            assert_eq!(status, StatusCode::NOT_FOUND);
+
+            let actual: openapi::ErrorResponse = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(actual.error.code, "internal_server_error");
+        }
+    }
+
+    mod file_rules {
+        use super::*;
+
+        fn upload_rule(id: &str) -> FileRule {
+            FileRule {
+                id: id.into(),
+                name: "logs".into(),
+                upload: Some(FileRuleUpload {
+                    upload_collection_id: "uc-1".into(),
+                    upload_collection_name: "logs".into(),
+                    bucket_id: "bkt-1".into(),
+                    bucket_name: "fleet-logs".into(),
+                    path: "robots/".into(),
+                }),
+                retention: Some(FileRuleRetention {
+                    require_upload: Some(true),
+                    ttl_secs: 3600,
+                }),
+                created_at: fixed_time(),
+                updated_at: fixed_time(),
+                ..Default::default()
+            }
+        }
+
+        async fn store_rule(f: &Fixture, rule: FileRule) {
+            f.state
+                .storage
+                .file_rules
+                .write_if_absent(rule.id.clone(), rule, |_, _| false)
+                .await
+                .unwrap();
+        }
+
+        #[tokio::test]
+        async fn get_file_rule_returns_200() {
+            let f = Fixture::new("handler_get_fr").await;
+            let rule = upload_rule("fr-1");
+            store_rule(&f, rule.clone()).await;
+
+            let (status, bytes) = f.get("/v0.2/file_rules/fr-1").await;
+            assert_eq!(status, StatusCode::OK);
+
+            let actual: openapi::BaseFileRule = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(actual, openapi::BaseFileRule::from(&rule));
+        }
+
+        #[tokio::test]
+        async fn get_file_rule_returns_404_when_missing() {
+            let f = Fixture::new("handler_get_fr_404").await;
+
+            let (status, bytes) = f.get("/v0.2/file_rules/nonexistent").await;
             assert_eq!(status, StatusCode::NOT_FOUND);
 
             let actual: openapi::ErrorResponse = serde_json::from_slice(&bytes).unwrap();

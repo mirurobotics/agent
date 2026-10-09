@@ -765,7 +765,7 @@ mod retention_producer {
     /// A retention block requiring the upload, with `ttl_secs`.
     fn required(ttl_secs: u64) -> Option<FileRuleRetention> {
         Some(FileRuleRetention {
-            require_upload: true,
+            require_upload: Some(true),
             ttl_secs,
         })
     }
@@ -881,7 +881,7 @@ mod retention_producer {
         );
         let mut job = make_job("a.log");
         job.retention = Some(FileRuleRetention {
-            require_upload: false,
+            require_upload: Some(false),
             ttl_secs: 300,
         });
 
