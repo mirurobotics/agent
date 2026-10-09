@@ -2,7 +2,8 @@
 use crate::mocks::http_client::{Call, MockClient};
 use backend_api::models::{UpdateDeploymentRequest, UpdateDeviceFromAgentRequest};
 use miru_agent::http::{
-    config_instances, deployments, devices, git_commits, path, releases, uploads, HTTPErr,
+    config_instances, deployments, devices, file_rules, git_commits, path, releases, uploads,
+    HTTPErr,
 };
 
 pub mod url {
@@ -83,6 +84,7 @@ pub mod request {
 
         let errs = [
             git_commits::get(&mock, id, &[], token).await.err(),
+            file_rules::get(&mock, id, &[], token).await.err(),
             releases::get(&mock, id, &[], token).await.err(),
             deployments::get(&mock, id, &[], token).await.err(),
             deployments::update(

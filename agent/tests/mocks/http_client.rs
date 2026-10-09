@@ -3,9 +3,9 @@ use std::sync::{Arc, Mutex};
 
 // internal crates
 use backend_api::models::{
-    Deployment as BackendDeployment, DeploymentList, Device, Error as ApiError, ErrorResponse,
-    GitCommit as BackendGitCommit, Release as BackendRelease, TokenResponse, Upload,
-    UploadCredentials, UploadWithCredentials,
+    BaseFileRule as BackendFileRule, Deployment as BackendDeployment, DeploymentList, Device,
+    Error as ApiError, ErrorResponse, GitCommit as BackendGitCommit, Release as BackendRelease,
+    TokenResponse, Upload, UploadCredentials, UploadWithCredentials,
 };
 use miru_agent::http::{self, request::Params, HTTPErr};
 
@@ -33,6 +33,7 @@ pub enum Call {
     GetConfigInstanceContent,
     GetRelease,
     GetGitCommit,
+    GetFileRule,
     CreateUpload,
     VendUploadCredentials,
     ConfirmUpload,
@@ -57,6 +58,7 @@ type ListDeploymentsFn = Mutex<Box<dyn Fn() -> Result<DeploymentList, HTTPErr> +
 type SingleDeploymentFn = Mutex<Box<dyn Fn() -> Result<BackendDeployment, HTTPErr> + Send + Sync>>;
 type SingleReleaseFn = Mutex<Box<dyn Fn() -> Result<BackendRelease, HTTPErr> + Send + Sync>>;
 type SingleGitCommitFn = Mutex<Box<dyn Fn() -> Result<BackendGitCommit, HTTPErr> + Send + Sync>>;
+type SingleFileRuleFn = Mutex<Box<dyn Fn() -> Result<BackendFileRule, HTTPErr> + Send + Sync>>;
 type GetCfgInstContentFn = Mutex<Box<dyn Fn(&str) -> Result<String, HTTPErr> + Send + Sync>>;
 type UpdateDeviceFn = Mutex<Box<dyn Fn() -> Result<Device, HTTPErr> + Send + Sync>>;
 type GetDeviceFn = Mutex<Box<dyn Fn() -> Result<Device, HTTPErr> + Send + Sync>>;
@@ -76,6 +78,7 @@ pub struct MockClient {
     pub update_deployment_fn: SingleDeploymentFn,
     pub get_release_fn: SingleReleaseFn,
     pub get_git_commit_fn: SingleGitCommitFn,
+    pub get_file_rule_fn: SingleFileRuleFn,
     pub get_cfg_inst_content_fn: GetCfgInstContentFn,
     pub create_upload_fn: CreateUploadFn,
     pub vend_upload_credentials_fn: VendUploadCredentialsFn,
@@ -96,6 +99,7 @@ impl Default for MockClient {
             update_deployment_fn: Mutex::new(Box::new(|| Ok(BackendDeployment::default()))),
             get_release_fn: Mutex::new(Box::new(|| Ok(BackendRelease::default()))),
             get_git_commit_fn: Mutex::new(Box::new(|| Ok(BackendGitCommit::default()))),
+            get_file_rule_fn: Mutex::new(Box::new(|| Ok(BackendFileRule::default()))),
             get_cfg_inst_content_fn: Mutex::new(Box::new(|_id| Ok("{}".to_string()))),
             create_upload_fn: Mutex::new(Box::new(|| Ok(UploadWithCredentials::default()))),
             vend_upload_credentials_fn: Mutex::new(Box::new(|| Ok(UploadCredentials::default()))),
@@ -169,6 +173,13 @@ impl MockClient {
         *self.get_git_commit_fn.lock().unwrap() = Box::new(f);
     }
 
+    pub fn set_get_file_rule<F>(&self, f: F)
+    where
+        F: Fn() -> Result<BackendFileRule, HTTPErr> + Send + Sync + 'static,
+    {
+        *self.get_file_rule_fn.lock().unwrap() = Box::new(f);
+    }
+
     pub fn set_get_config_instance_content<F>(&self, f: F)
     where
         F: Fn(&str) -> Result<String, HTTPErr> + Send + Sync + 'static,
@@ -232,6 +243,7 @@ impl MockClient {
             }
             (m, p) if *m == Method::GET && p.starts_with("/releases/") => Call::GetRelease,
             (m, p) if *m == Method::GET && p.starts_with("/git_commits/") => Call::GetGitCommit,
+            (m, p) if *m == Method::GET && p.starts_with("/file_rules/") => Call::GetFileRule,
             (m, p)
                 if *m == Method::POST
                     && p.starts_with("/uploads/")
@@ -264,6 +276,7 @@ impl MockClient {
             Call::UpdateDeployment => json(&(self.update_deployment_fn.lock().unwrap())()?),
             Call::GetRelease => json(&(self.get_release_fn.lock().unwrap())()?),
             Call::GetGitCommit => json(&(self.get_git_commit_fn.lock().unwrap())()?),
+            Call::GetFileRule => json(&(self.get_file_rule_fn.lock().unwrap())()?),
             Call::CreateUpload => json(&(self.create_upload_fn.lock().unwrap())()?),
             Call::VendUploadCredentials => {
                 json(&(self.vend_upload_credentials_fn.lock().unwrap())()?)

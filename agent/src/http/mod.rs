@@ -3,6 +3,7 @@ pub mod config_instances;
 pub mod deployments;
 pub mod devices;
 pub mod errors;
+pub mod file_rules;
 pub mod git_commits;
 pub mod path;
 pub mod query;

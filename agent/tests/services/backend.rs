@@ -379,3 +379,91 @@ async fn fetch_git_commit_with_retry_recovers_from_network_error() {
     // Retry logic: 2 failures + 1 success = 3 total calls.
     assert_eq!(mock.call_count(Call::GetGitCommit), 3);
 }
+
+// ================================ fetch_file_rule ================================ //
+
+#[tokio::test]
+async fn fetch_file_rule_constructs_url_no_expand() {
+    let mock = MockClient::default();
+    let token_mngr = StubTokenManager::ok("test-token");
+    let backend = HttpBackend::new(&mock, &token_mngr);
+
+    backend.fetch_file_rule("fr_1").await.unwrap();
+
+    let expected = CapturedRequest {
+        call: Call::GetFileRule,
+        method: reqwest::Method::GET,
+        path: "/file_rules/fr_1".to_string(),
+        url: "http://mock/file_rules/fr_1".to_string(),
+        query: vec![],
+        body: None,
+        token: Some("test-token".to_string()),
+    };
+    assert_eq!(mock.requests(), vec![expected]);
+}
+
+#[tokio::test]
+async fn fetch_file_rule_returns_deserialized_value() {
+    let mock = MockClient::default();
+    let expected = backend_client::BaseFileRule {
+        id: "fr_1".to_string(),
+        name: "logs".to_string(),
+        digest: "digest_1".to_string(),
+        ..Default::default()
+    };
+    mock.set_get_file_rule({
+        let expected = expected.clone();
+        move || Ok(expected.clone())
+    });
+    let token_mngr = StubTokenManager::ok("test-token");
+    let backend = HttpBackend::new(&mock, &token_mngr);
+
+    let rule = backend.fetch_file_rule("fr_1").await.unwrap();
+    assert_eq!(rule, expected);
+}
+
+#[tokio::test]
+async fn fetch_file_rule_token_failure_returns_sync_err() {
+    let mock = MockClient::default();
+    let token_mngr = StubTokenManager::err(AuthnErr::MockError(AuthnMockError {
+        is_network_conn_err: false,
+        trace: miru_agent::trace!(),
+    }));
+    let backend = HttpBackend::new(&mock, &token_mngr);
+
+    let result = backend.fetch_file_rule("fr_1").await;
+    assert!(matches!(
+        result,
+        Err(ServiceErr::SyncErr(SyncErr::AuthnErr(AuthnErr::MockError(
+            _
+        ))))
+    ));
+    // No HTTP request should have been issued.
+    assert!(mock.requests().is_empty());
+}
+
+#[tokio::test]
+async fn fetch_file_rule_404_propagates_as_request_failed() {
+    let mock = MockClient::default();
+    mock.set_get_file_rule(|| {
+        Err(HTTPErr::RequestFailed(RequestFailed {
+            request: HttpParams::get("http://mock/file_rules/fr_1")
+                .meta()
+                .unwrap(),
+            status: reqwest::StatusCode::NOT_FOUND,
+            error: None,
+            trace: miru_agent::trace!(),
+        }))
+    });
+    let token_mngr = StubTokenManager::ok("test-token");
+    let backend = HttpBackend::new(&mock, &token_mngr);
+
+    let result = backend.fetch_file_rule("fr_1").await;
+    let err = result.expect_err("expected 404 to propagate as error");
+    match err {
+        ServiceErr::HTTPErr(HTTPErr::RequestFailed(rf)) => {
+            assert_eq!(rf.status, reqwest::StatusCode::NOT_FOUND);
+        }
+        other => panic!("expected ServiceErr::HTTPErr(RequestFailed), got {other:?}"),
+    }
+}

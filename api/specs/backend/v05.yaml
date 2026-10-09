@@ -6,41 +6,132 @@ info:
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
-  x-release-version: v0.5.2
+  x-release-version: v0.5.3
   x-git-commit:
-    sha: 97aec4ae3541349ead148f90acedb59b0f543fdb
-    url: https://github.com/mirurobotics/openapi/commit/97aec4ae3541349ead148f90acedb59b0f543fdb
-    message: "docs(stlc): how to change SDK custom code (#307)\n\n## Why\n\nHand-written\
-      \ SDK code goes back to stlc's intended flow (upstream docs:\n\"Custom code\"\
-      \ and \"Branching and collaboration\"):\n1. Edit the code in a local checkout\
-      \ of the staging SDK repo.\n2. Seal it with `stlc build`.\n3. Merge the tracking\
-      \ file through a PR here.\n\nA tracking file shows only two commit IDs, so the\
-      \ code itself needs\nsomewhere to be reviewed. That's why we tried merging PRs\
-      \ into the\nstaging repos (mirurobotics/infra#294), which stlc doesn't support.\n\
-      mirurobotics/python-device-sdk-staging#3 needed a manual re-seal (#305),\nand\
-      \ mirurobotics/infra#299 turns those merges off again.\n\nThis PR documents\
-      \ the flow, with the review happening in a **review-only\nPR on the staging\
-      \ repo**.\n\n## What\n\nNew `docs/sdk-custom-code.md`, linked from the README:\n\
-      - **What custom code is:** what tracking files hold and how stlc applies\nthem.\n\
-      - **Rules:**\n  - nothing merges into staging `main`; PRs there are for review\
-      \ only;\n  - prefer config over code;\n  - put new code in `src/<package>/lib/`.\n\
-      - **Steps:**\n  1. `stlc build` to get the local checkout.\n2. Commit on a `custom-code/<topic>`\
-      \ branch from staging `origin/main`,\nso the diff is only the change.\n3. Open\
-      \ a review-only PR on the staging repo. GitHub shows the change\nand the AI\
-      \ review runs.\n4. Cherry-pick the commit onto local `main` and `stlc build`\
-      \ to seal it.\n5. Open the tracking-file PR here, linking the staging PR, and\
-      \ close the\nstaging PR after it lands.\n\nAn earlier version of this PR added\
-      \ a CI job that commented the\ncustom-code diff here. It's removed in favour\
-      \ of reviewing in the SDK\nrepo, so the PR is now docs only.\n\n## Depends on\n\
-      \nmirurobotics/infra#299. Until it's applied, a review PR on\n`python-device-sdk-staging`\
-      \ could still be merged, which is the\nsituation #305 had to repair.\n\n\U0001F916\
-      \ Generated with [Claude Code](https://claude.com/claude-code)\n\n---------\n\
-      \nCo-authored-by: Claude Opus 5.5 <noreply@anthropic.com>"
+    sha: b94639f25c8285c55280bd49787b7f1c700c3cf7
+    url: https://github.com/mirurobotics/openapi/commit/b94639f25c8285c55280bd49787b7f1c700c3cf7
+    message: 'feat(agent): add GET /file_rules/{file_rule_id} (#292)
+
+
+      ## Summary
+
+
+      - Adds `GET /file_rules/{file_rule_id}` (`getFileRule`, tag `File
+
+      Rules`) to the backend agent API. It returns the shared `BaseFileRule`,
+
+      which is the same object the agent already gets embedded in `GET
+
+      /releases/{release_id}?expand=file_rules`. It mirrors the agent
+
+      `git-commits.yaml` path: `Miru-Version` header, the shared
+
+      `file_rule_id` path param, only `200` declared, and security inherited
+
+      from the root `DeviceSessionToken`.
+
+      - Why: the agent serves file rules only from its local cache, and the
+
+      cache can miss because releases and file rules are cached and pruned
+
+      independently. With this path documented, the agent can fall back to the
+
+      backend on a cache miss, just as it already does for deployments,
+
+      releases, and git commits.
+
+      - Regenerates `apis/apps/backend-server/agent/openapi.gen.yaml`. No
+
+      other bundles change. The agent API has no Stainless config, so there
+
+      are no SDK config updates.
+
+
+      ## Dependencies and release
+
+
+      - This PR must merge before the backend agent-API endpoint
+
+      (mirurobotics/backend#872) can land. That PR vendors the released agent
+
+      spec, and its endpoint-parity test requires every served route to be
+
+      documented. This PR is also a prerequisite for the agent''s backend
+
+      fallback on a file rule cache miss.
+
+      - **After merge, a maintainer needs to tag the squash-merge commit on
+
+      `main` `agent/v0.5.3`.** (`agent/v0.5.2` was taken by #293''s `os`
+
+      fields.) That tag publishes the `agent.yaml` and
+
+      `agent.changelog.stable.md` release assets that the backend vendors.
+
+
+      ## Test plan
+
+
+      - [x] `./scripts/regen.sh`: only the agent bundle changes
+
+      - [x] `./scripts/preflight.sh`: `=== All checks passed ===`
+
+
+      🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+
+      <!-- codesmith:footer -->
+
+      ---
+
+      <a
+
+      href="https://app.blacksmith.sh/mirurobotics/codesmith/openapi/pr/292?autoLogin=true&ref=codesmith_pr_footer"><picture><source
+
+      media="(prefers-color-scheme: dark)"
+
+      srcset="https://pr-comments-assets.blacksmith.sh/codesmith/view-with-codesmith-dark-v2.svg"><source
+
+      media="(prefers-color-scheme: light)"
+
+      srcset="https://pr-comments-assets.blacksmith.sh/codesmith/view-with-codesmith-light-v2.svg"><img
+
+      alt="View with [code]smith"
+
+      src="https://pr-comments-assets.blacksmith.sh/codesmith/view-with-codesmith-dark-v2.svg"></picture></a>
+
+      <a
+
+      href="https://backend.blacksmith.sh/track/enable-autofix?expires=1792873279&installation_model_id=425273&pr_number=292&ref=codesmith_pr_footer&repository=mirurobotics%2Fopenapi&return_to=https%3A%2F%2Fgithub.com%2Fmirurobotics%2Fopenapi%2Fpull%2F292&signature=d85fe9b822d33c85cd826a8dd0feff029bb33a97f3341c39849ebfde28b5b3e3"><picture><source
+
+      media="(prefers-color-scheme: dark)"
+
+      srcset="https://pr-comments-assets.blacksmith.sh/codesmith/autofix-with-codesmith-dark.svg"><source
+
+      media="(prefers-color-scheme: light)"
+
+      srcset="https://pr-comments-assets.blacksmith.sh/codesmith/autofix-with-codesmith-light.svg"><img
+
+      alt="Autofix with [code]smith"
+
+      src="https://pr-comments-assets.blacksmith.sh/codesmith/autofix-with-codesmith-dark.svg"></picture></a>
+
+      <sup>Need help on this PR? Tag <code>@codesmith</code> with what you
+
+      need. Autofix is disabled.</sup>
+
+
+      <!-- codesmith:autofix:disabled -->
+
+      <!-- /codesmith:footer -->
+
+
+      Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>'
     author: ben-miru
     branch: HEAD
     dirty: false
   x-build:
-    built_at: '2026-10-07T01:59:25.983854+00:00'
+    built_at: '2026-10-08T21:21:42.941878+00:00'
 servers:
 - url: https://staging.api.mirurobotics.com/agent/v1
   description: Staging
@@ -274,6 +365,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GitCommit'
+  /file_rules/{file_rule_id}:
+    parameters:
+    - $ref: '#/components/parameters/MiruVersion'
+    get:
+      tags:
+      - File Rules
+      summary: Get
+      operationId: getFileRule
+      description: Retrieve a file rule by its ID.
+      parameters:
+      - $ref: '#/components/parameters/file_rule_id'
+      responses:
+        '200':
+          description: Successfully retrieved the file rule.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BaseFileRule'
   /device:
     parameters:
     - $ref: '#/components/parameters/MiruVersion'
@@ -538,14 +647,14 @@ components:
     ReleaseVersion:
       type: string
       enum:
-      - v0.5.2
+      - v0.5.3
       x-enum-varnames:
       - RELEASE_VERSION
       x-stainless-const: true
     APIGitCommit:
       type: string
       enum:
-      - 97aec4ae3541349ead148f90acedb59b0f543fdb
+      - b94639f25c8285c55280bd49787b7f1c700c3cf7
       x-enum-varnames:
       - API_GIT_COMMIT
       x-stainless-const: true
@@ -2529,6 +2638,14 @@ components:
       schema:
         type: string
         example: git_commit_123
+    file_rule_id:
+      name: file_rule_id
+      in: path
+      required: true
+      description: The unique identifier of the file rule.
+      schema:
+        type: string
+        example: file_rule_123
     device_id:
       name: device_id
       in: path

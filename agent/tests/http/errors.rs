@@ -74,6 +74,23 @@ pub mod request_failed {
         );
     }
 
+    // A 404 without an error body keeps the HTTP status and uses the same code as
+    // every other body-less failure. The backend's own not-found code arrives only
+    // in an error JSON body.
+    #[test]
+    fn not_found_without_error_is_internal() {
+        let err = RequestFailed {
+            request: meta(),
+            status: reqwest::StatusCode::NOT_FOUND,
+            error: None,
+            trace: trace(),
+        };
+        assert_error(
+            &err,
+            Expected::new(Code::InternalServerError, reqwest::StatusCode::NOT_FOUND),
+        );
+    }
+
     // Covers the `error: None` branch of code()/params() and the http_status
     // passthrough with a distinct status: InternalServerError code, no params.
     #[test]
