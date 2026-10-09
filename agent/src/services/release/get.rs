@@ -30,8 +30,8 @@ pub async fn get<B: BackendFetcher>(
     let file_rule_ids: Vec<models::FileRuleID> =
         bknd_file_rules.iter().map(|r| r.id.clone()).collect();
     let storage_rls = models::Release::from_backend(backend_rls, file_rule_ids);
-    // A missed rule write is recovered by file_rule::get, so it does not block
-    // caching the release.
+    // A failed rule write is logged and does not block caching the release; sync
+    // rewrites the rule bodies of active deployments.
     cache_file_rules(file_rules, bknd_file_rules).await;
     cache_release(releases, storage_rls.clone()).await;
     Ok(storage_rls)
