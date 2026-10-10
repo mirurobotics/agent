@@ -52,9 +52,9 @@ pub struct UploaderOptions {
     /// false timeout discards transfer progress, so this errs generous while
     /// still guaranteeing every attempt terminates.
     pub attempt_timeout_bytes_per_sec: u64,
-    /// Backstop on the network-error attempt exemption: a job first observed
-    /// longer ago than this is dropped even if every failure so far was
-    /// network-classified.
+    /// Backstop on the network-error attempt exemption: a job that has waited
+    /// out this much network-failure backoff is dropped even if every failure
+    /// so far was network-classified.
     pub max_job_age: TimeDelta,
 }
 
@@ -245,12 +245,16 @@ where
     }
 
     /// Network connection errors are expected and do not count toward the
-    /// attempt budget. Drop the job if it has aged past the backstop;
-    /// otherwise stamp a flat cooldown and requeue at the tail.
-    async fn handle_network_failure(&mut self, entry: QueueEntry, err: UploadErr) -> Flow {
-        let age = (self.now_fn)() - entry.job.first_observed_at;
-        if age >= self.options.max_job_age {
-            Self::log_age_drop(&entry, age, &err);
+    /// attempt budget. Drop the job once it has waited out `max_job_age` of
+    /// network-failure backoff; otherwise stamp a flat cooldown and requeue at
+    /// the tail. The backstop counts the waits themselves, not the time since
+    /// the file was observed: a robot that booted with its clock at 1970
+    /// stamps observations decades in the past, and NTP correcting the clock
+    /// must not make every queued upload look a week overdue.
+    async fn handle_network_failure(&mut self, mut entry: QueueEntry, err: UploadErr) -> Flow {
+        let max_age_secs = u64::try_from(self.options.max_job_age.num_seconds()).unwrap_or(0);
+        if entry.network_backoff_secs >= max_age_secs {
+            Self::log_age_drop(&entry, &err);
             self.queue.remove(entry.id).await;
             return Flow::Continue;
         }
@@ -261,6 +265,9 @@ where
              retrying in {wait}s: {err:?}",
             entry.job.file
         );
+        entry.network_backoff_secs = entry
+            .network_backoff_secs
+            .saturating_add(u64::try_from(wait).unwrap_or(0));
         self.requeue_after(entry, wait).await;
         Flow::Continue
     }
@@ -371,12 +378,12 @@ where
         );
     }
 
-    fn log_age_drop(entry: &QueueEntry, age: TimeDelta, err: &UploadErr) {
+    fn log_age_drop(entry: &QueueEntry, err: &UploadErr) {
         error!(
-            "dropping upload job: network-classified failures only, for {} days since the file \
-             was first observed (rule {}, file {}, digest {}, attempt {}); suspect a permanent \
+            "dropping upload job: network-classified failures only, for {}s of retry \
+             backoff (rule {}, file {}, digest {}, attempt {}); suspect a permanent \
              failure misclassified as a network error: {err:?}",
-            age.num_days(),
+            entry.network_backoff_secs,
             entry.job.file_rule_id,
             entry.job.file,
             entry.job.digest,

@@ -159,6 +159,32 @@ mod wire {
         assert_eq!(entry["next_attempt_at"], serde_json::Value::Null, "{raw}");
     }
 
+    /// The network-backoff tally survives a restart, and is only written once
+    /// it is non-zero so a fresh entry keeps the pinned key set.
+    #[tokio::test]
+    async fn network_backoff_secs_round_trips() {
+        let dir = test_dirs::temp("upload_queue_test").unwrap();
+        let path = dir.to_dir().file("upload_queue.json");
+        let entry = QueueEntry {
+            id: Uuid::new_v4(),
+            job: make_job("a.log"),
+            attempts: 0,
+            next_attempt_at: None,
+            network_backoff_secs: 20,
+        };
+        {
+            let mut queue = Queue::from_snapshot(8, open(&path).await);
+            queue.requeue(entry.clone()).await;
+        }
+
+        let raw: serde_json::Value =
+            serde_json::from_str(&files::read_string(&path).await.unwrap()).unwrap();
+        assert_eq!(raw["entries"][0]["network_backoff_secs"], 20);
+
+        let queue = Queue::from_snapshot(8, open(&path).await);
+        assert_eq!(queue.next_ready(Utc::now()).unwrap(), entry);
+    }
+
     #[tokio::test]
     async fn legacy_snapshot_without_next_attempt_at_loads() {
         let dir = test_dirs::temp("upload_queue_test").unwrap();
@@ -169,6 +195,7 @@ mod wire {
                 job: make_job("a.log"),
                 attempts: 2,
                 next_attempt_at: None,
+                network_backoff_secs: 0,
             }],
         };
 

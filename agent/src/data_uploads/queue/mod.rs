@@ -39,6 +39,16 @@ pub struct QueueEntry<J> {
     /// Earliest instant this entry is eligible; `None` means "eligible now".
     #[serde(default)]
     pub next_attempt_at: Option<DateTime<Utc>>,
+    /// Total backoff, in seconds, this entry has waited out after
+    /// network-classified failures. Counted from the waits themselves rather
+    /// than from wall-clock timestamps, so a clock that jumps forward (e.g. NTP
+    /// correcting a robot that booted at 1970) cannot age an entry out.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub network_backoff_secs: u64,
+}
+
+fn is_zero(secs: &u64) -> bool {
+    *secs == 0
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -161,6 +171,7 @@ impl<J: QueueJob> Queue<J> {
             job,
             attempts: 0,
             next_attempt_at: None,
+            network_backoff_secs: 0,
         });
         self.persist().await;
         info!(
@@ -224,6 +235,21 @@ impl<J: QueueJob> Queue<J> {
         }
         self.persist().await;
         warn!("{}: pulled {reset} deadline(s) back to {horizon}", J::LABEL);
+    }
+
+    /// Apply `f` to every queued job, persisting once if `f` reported a change
+    /// for any of them. Returns how many jobs changed.
+    pub async fn update_jobs(&mut self, mut f: impl FnMut(&mut J) -> bool) -> usize {
+        let mut changed = 0;
+        for entry in self.entries.iter_mut() {
+            if f(&mut entry.job) {
+                changed += 1;
+            }
+        }
+        if changed > 0 {
+            self.persist().await;
+        }
+        changed
     }
 
     /// The sole writer to disk. Called by every mutator as its last act.

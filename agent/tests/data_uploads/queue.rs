@@ -136,6 +136,7 @@ pub mod cases {
                     job: make("a.log"),
                     attempts: 7,
                     next_attempt_at: Some(now()),
+                    network_backoff_secs: 0,
                 }],
             };
             let mut value = serde_json::to_value(&snapshot).unwrap();
@@ -286,6 +287,7 @@ pub mod cases {
                     job: make("waiting"),
                     attempts: 1,
                     next_attempt_at: Some(deadline),
+                    network_backoff_secs: 0,
                 })
                 .await;
             enqueue(&mut queue, make("ready_1")).await;
@@ -376,6 +378,7 @@ pub mod cases {
                     job: make("b.log"),
                     attempts: 2,
                     next_attempt_at: None,
+                    network_backoff_secs: 0,
                 })
                 .await;
 
@@ -454,6 +457,7 @@ pub mod cases {
                     job: make("waiting"),
                     attempts: 1,
                     next_attempt_at: Some(now() + TimeDelta::hours(1)),
+                    network_backoff_secs: 0,
                 })
                 .await;
 
@@ -479,6 +483,7 @@ pub mod cases {
                         job: make(name),
                         attempts: 1,
                         next_attempt_at: Some(deadline),
+                        network_backoff_secs: 0,
                     })
                     .await;
             }
@@ -523,6 +528,7 @@ pub mod cases {
                         job: make("a.log"),
                         attempts: 1,
                         next_attempt_at: Some(beyond),
+                        network_backoff_secs: 0,
                     })
                     .await;
                 queue.reset_invalid_deadlines(horizon).await;
@@ -552,6 +558,7 @@ pub mod cases {
                         job: make(name),
                         attempts: 1,
                         next_attempt_at: Some(deadline),
+                        network_backoff_secs: 0,
                     })
                     .await;
             }

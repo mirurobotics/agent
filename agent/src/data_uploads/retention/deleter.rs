@@ -5,10 +5,13 @@ use std::time::SystemTime;
 
 // internal crates
 use crate::cooldown;
-use crate::data_uploads::retention::{
-    errors::*,
-    job::Job,
-    queue::{DeleteQueueSnapshotFile, Queue, QueueEntry},
+use crate::data_uploads::{
+    clock,
+    retention::{
+        errors::*,
+        job::Job,
+        queue::{DeleteQueueSnapshotFile, Queue, QueueEntry},
+    },
 };
 use crate::filesys::{errors::FileSysErr, files};
 use crate::trace;
@@ -99,6 +102,12 @@ impl SingleThreadDeleter {
 
     async fn sweep(&mut self) -> Result<(), DeleteErr> {
         let now = (self.now_fn)();
+        // A backward clock jump can leave backoff deadlines far in the future;
+        // pull them back so no entry is stranded behind one.
+        self.queue
+            .reset_invalid_deadlines(now + TimeDelta::seconds(self.backoff.max_secs.max(0)))
+            .await;
+        self.restamp_unset_clock_jobs(now).await;
         // Budget: one visit per entry that is due at `now`. A retried entry is
         // requeued at the tail, behind every entry not yet visited, so this
         // budget is exactly enough to visit each due entry once and never
@@ -115,6 +124,34 @@ impl SingleThreadDeleter {
             }
         }
         Ok(())
+    }
+
+    /// Re-stamps every job observed before [`clock::floor`] as observed `now`,
+    /// once the clock is past the floor. Such a stamp came from a robot clock
+    /// that had not been set yet (e.g. 1970 before NTP), so its TTL would read
+    /// as long expired the moment NTP corrected the clock and the file would be
+    /// deleted at once. Restarting the TTL from the first trustworthy reading
+    /// errs toward keeping the file longer, never shorter.
+    async fn restamp_unset_clock_jobs(&mut self, now: DateTime<Utc>) {
+        if clock::is_before_floor(now) {
+            return;
+        }
+        let restamped = self
+            .queue
+            .update_jobs(|job| {
+                if !clock::is_before_floor(job.last_observed_at) {
+                    return false;
+                }
+                job.last_observed_at = now;
+                true
+            })
+            .await;
+        if restamped > 0 {
+            warn!(
+                "delete: {restamped} job(s) were observed before the clock was set; \
+                 restarting their TTL from {now}"
+            );
+        }
     }
 
     /// Counted failures bump the attempt budget. Drop when the budget is
@@ -1004,6 +1041,82 @@ mod tests {
                 ..DeleterArgs::default()
             });
             assert!(restored.queue.is_empty());
+        }
+    }
+
+    /// Robots without an RTC stamp observations before NTP has set the clock.
+    mod unset_clock {
+        use super::*;
+        use crate::data_uploads::clock;
+
+        // A file observed at 1970 with a 60s TTL: once NTP corrects the
+        // clock, its TTL restarts from the first trustworthy reading instead
+        // of reading as decades expired and deleting the file at once.
+        #[tokio::test]
+        async fn pre_floor_observation_restarts_its_ttl() {
+            let tmp = temp_file(b"aaaa").await;
+            let synced = clock::floor().timestamp() + 1000;
+            let clock = Clock::new(synced);
+            let mut deleter = deleter(&clock);
+            deleter
+                .enqueue(make_job(tmp.file(), 1000, 60).await)
+                .await
+                .unwrap();
+
+            deleter.sweep().await.unwrap();
+            assert!(tmp.file().exists(), "deleted on the first post-NTP sweep");
+            let job = deleter.queue.entries()[0].clone();
+            assert_eq!(job.last_observed_at, at(synced));
+
+            clock.advance(60);
+            deleter.sweep().await.unwrap();
+            assert!(!tmp.file().exists());
+            assert_eq!(deleter.len(), 0);
+        }
+
+        // While the clock itself is still before the floor, stamps and "now"
+        // come from the same unset clock, so the TTL is left alone.
+        #[tokio::test]
+        async fn nothing_is_restamped_before_the_clock_is_set() {
+            let tmp = temp_file(b"aaaa").await;
+            let clock = Clock::new(1000);
+            let mut deleter = deleter(&clock);
+            let job = make_job(tmp.file(), 1000, 60).await;
+            deleter.enqueue(job.clone()).await.unwrap();
+
+            deleter.sweep().await.unwrap();
+
+            assert_eq!(deleter.queue.entries(), [job]);
+        }
+
+        // A backward clock jump can strand a backoff deadline far in the
+        // future; the sweep pulls it back within the backoff ceiling.
+        #[tokio::test]
+        async fn far_future_backoff_deadline_is_pulled_back() {
+            let dir = test_dirs::temp("delete-unset-clock-deadline").unwrap();
+            let clock = Clock::new(1000);
+            let mut deleter = SingleThreadDeleter::new(DeleterArgs {
+                now_fn: Arc::new(clock.now_fn()),
+                backoff: cooldown::Backoff {
+                    base_secs: 10,
+                    growth_factor: 2,
+                    max_secs: 60,
+                },
+                ..DeleterArgs::default()
+            });
+            deleter
+                .enqueue(undeletable_dir_job(&dir, at(1000)).await)
+                .await
+                .unwrap();
+            let mut entry = deleter.queue.queue_entries()[0].clone();
+            entry.next_attempt_at = Some(at(1_000_000));
+            deleter.queue.requeue(entry).await;
+
+            deleter.sweep().await.unwrap();
+
+            let entry = deleter.queue.queue_entries()[0].clone();
+            assert_eq!(entry.attempts, 0);
+            assert_eq!(entry.next_attempt_at, Some(at(1060)));
         }
     }
 
