@@ -74,13 +74,23 @@ impl Store {
         upload_id: &str,
         landed: &std::collections::HashMap<i32, CompletedPart>,
     ) -> Result<Vec<CompletedPart>, S3Err> {
+        // Opened lazily on the first part that needs uploading, then reused for
+        // every later part. Reading every part from one handle pins the upload to
+        // the file that existed at that moment: if logrotate renames the path
+        // mid-upload and creates a new file there, the remaining parts still come
+        // from the original inode instead of silently mixing in the new file.
+        let mut handle: Option<tokio::fs::File> = None;
         let mut parts: Vec<CompletedPart> = Vec::new();
         for (part_number, offset, len) in Self::part_plan(src.size) {
             let part = match landed.get(&part_number) {
                 Some(existing) => existing.clone(),
                 None => {
-                    self.upload_part(&src.file, dst, upload_id, part_number, offset, len)
-                        .await?
+                    let f = match handle.as_mut() {
+                        Some(f) => f,
+                        None => handle.insert(Self::open_source(&src.file, dst).await?),
+                    };
+                    let buf = Self::read_part_bytes(f, &src.file, dst, offset, len).await?;
+                    self.upload_part(dst, upload_id, part_number, buf).await?
                 }
             };
             parts.push(part);
@@ -229,21 +239,28 @@ impl Store {
         self.complete_multipart_upload(dst, upload_id, &parts).await
     }
 
-    /// Reads `src[offset..offset+length]` into an in-memory buffer, mapping any
-    /// open/seek/read failure to a terminal [`S3Err::LocalIoErr`] via
-    /// [`errors::map_body_io_err`]. Peak memory is one part (`length` bytes); the
-    /// caller uploads parts sequentially, so at most one part is buffered at a
-    /// time. A file that shrank below `offset + length` makes `read_exact` return
-    /// `UnexpectedEof`, which maps to the same terminal `LocalIoErr`.
+    /// Opens `src` for reading parts, mapping a failure to a terminal
+    /// [`S3Err::LocalIoErr`] via [`errors::map_body_io_err`].
+    async fn open_source(src: &File, dst: &Object) -> Result<tokio::fs::File, S3Err> {
+        tokio::fs::File::open(src.path())
+            .await
+            .map_err(|e| errors::map_body_io_err("upload_part", dst, src, e))
+    }
+
+    /// Reads `[offset..offset+length]` from the already-open handle `f` (opened
+    /// from `src`) into an in-memory buffer, mapping any seek/read failure to a
+    /// terminal [`S3Err::LocalIoErr`] via [`errors::map_body_io_err`]. Peak memory
+    /// is one part (`length` bytes); the caller uploads parts sequentially, so at
+    /// most one part is buffered at a time. A file that shrank below
+    /// `offset + length` makes `read_exact` return `UnexpectedEof`, which maps to
+    /// the same terminal `LocalIoErr`.
     async fn read_part_bytes(
+        f: &mut tokio::fs::File,
         src: &File,
         dst: &Object,
         offset: u64,
         length: u64,
     ) -> Result<Vec<u8>, S3Err> {
-        let mut f = tokio::fs::File::open(src.path())
-            .await
-            .map_err(|e| errors::map_body_io_err("upload_part", dst, src, e))?;
         f.seek(SeekFrom::Start(offset))
             .await
             .map_err(|e| errors::map_body_io_err("upload_part", dst, src, e))?;
@@ -254,19 +271,16 @@ impl Store {
         Ok(buf)
     }
 
-    /// Streams a single part (`file[offset..offset+len]`) to S3 and returns the
-    /// [`CompletedPart`] describing it. `InvalidResponseErr` if the response
-    /// omits the ETag.
+    /// Uploads one part's bytes (`buf`, read by [`Self::read_part_bytes`]) to S3
+    /// and returns the [`CompletedPart`] describing it. `InvalidResponseErr` if
+    /// the response omits the ETag.
     async fn upload_part(
         &self,
-        src: &File,
         dst: &Object,
         upload_id: &str,
         part_number: i32,
-        offset: u64,
-        length: u64,
+        buf: Vec<u8>,
     ) -> Result<CompletedPart, S3Err> {
-        let buf = Self::read_part_bytes(src, dst, offset, length).await?;
         let body = ByteStream::from(buf);
 
         let output = self
@@ -824,6 +838,37 @@ mod tests {
                 // follow-up on the wire.
                 assert_eq!(actual_shapes(&replay), vec![create_shape(), abort_shape()]);
             }
+        }
+    }
+
+    /// Every part is read from the handle opened for the first part, so a
+    /// path that is rotated mid-upload keeps streaming the original file.
+    pub mod rotation {
+        use super::*;
+
+        #[cfg(unix)]
+        #[tokio::test]
+        async fn parts_read_after_rotation_come_from_the_original_file() {
+            let src = temp_file_with(b"original-bytes").await;
+            let dst = obj("big.bin");
+            let mut handle = Store::open_source(src.file(), &dst).await.unwrap();
+
+            // logrotate: rename the file away, then create a new one at the
+            // same path with different, longer content.
+            let rotated = src.file().path().with_extension("1");
+            tokio::fs::rename(src.file().path(), &rotated)
+                .await
+                .unwrap();
+            tokio::fs::write(src.file().path(), b"replacement-bytes-longer")
+                .await
+                .unwrap();
+
+            let part = Store::read_part_bytes(&mut handle, src.file(), &dst, 9, 5)
+                .await
+                .unwrap();
+            assert_eq!(part, b"bytes");
+
+            tokio::fs::remove_file(&rotated).await.unwrap();
         }
     }
 
