@@ -167,29 +167,57 @@ impl SingleThreadScanner {
         // retention engine has eligibility to act on.
         let now = (self.now_fn)();
         for rule in rules.iter() {
-            match self.scanners.get_mut(&rule.id) {
-                Some(scanner) => scanner.set_deployment(deployment.clone()),
-                None => {
-                    let config = Config {
-                        deployment: deployment.clone(),
-                        rule: rule.clone(),
-                    };
-                    self.scanners.insert(
-                        rule.id.clone(),
-                        RuleScanner::new(config, now, Options::default()).await?,
-                    );
-                }
+            if !self.ensure_scanner(&deployment, rule, now).await {
+                deployed.remove(&rule.id);
             }
         }
 
         self.deployed = deployed;
         self.persist_snapshot().await;
 
-        let count = rules.len();
+        let count = self.deployed.len();
+        let skipped = rules.len() - count;
         let deployment_id = &deployment.id;
-        info!("scan: applied {count} rule(s) for deployment {deployment_id}");
+        info!(
+            "scan: applied {count} rule(s) for deployment {deployment_id} \
+             ({skipped} skipped)"
+        );
 
         Ok(())
+    }
+
+    /// Points `rule`'s scanner at `deployment`, creating the scanner if it does
+    /// not exist yet. Returns `false` when the scanner cannot be built (e.g. a
+    /// malformed glob): the error is logged and the caller leaves the rule out
+    /// of the deployed set rather than failing the whole update. Failing the
+    /// update would leave the previous deployment's rules in `deployed`, so
+    /// their uploads and retention deletions would keep running under a policy
+    /// that has been replaced.
+    async fn ensure_scanner(
+        &mut self,
+        deployment: &Deployment,
+        rule: &FileRule,
+        now: DateTime<Utc>,
+    ) -> bool {
+        if let Some(scanner) = self.scanners.get_mut(&rule.id) {
+            scanner.set_deployment(deployment.clone());
+            return true;
+        }
+        let config = Config {
+            deployment: deployment.clone(),
+            rule: rule.clone(),
+        };
+        match RuleScanner::new(config, now, Options::default()).await {
+            Ok(scanner) => {
+                self.scanners.insert(rule.id.clone(), scanner);
+                true
+            }
+            Err(err) => {
+                let rule_id = &rule.id;
+                error!("scan: skipping rule {rule_id}; failed to create its scanner: {err}");
+                false
+            }
+        }
     }
 
     async fn scan(&mut self) -> Result<(), ScanErr> {
@@ -1425,6 +1453,45 @@ mod tests {
                 active_rule_ids(&scanner).await,
                 BTreeSet::from(["current-rule".to_string()])
             );
+        }
+
+        // One malformed glob must not block the rest of the rule set. The bad
+        // rule is skipped, the valid rules deploy, and the previous rules leave
+        // the deployed set so they stop discovering (and stop feeding
+        // retention) under a policy that was replaced.
+        #[tokio::test]
+        async fn update_rules_skips_invalid_glob_and_applies_the_rest() {
+            let dir = test_dirs::temp("testing").unwrap();
+            let glob = mcap_glob(&dir);
+            let clock = Clock::new(1000);
+            let (scanner, sink) = spawn_scanner_with_sink(&clock);
+
+            deploy(&scanner, vec![upload_rule("old", &glob, 0)]).await;
+
+            let rules = vec![
+                upload_rule("bad", "/logs/[ab.log", 0),
+                upload_rule("new", &glob, 0),
+            ];
+            scanner.update_rules(deployment("d2"), rules).await.unwrap();
+
+            // the bad rule has no scanner; the old rule drains (no candidates)
+            // and is pruned on the next tick.
+            scan_once(&scanner).await;
+            assert_eq!(
+                active_rule_ids(&scanner).await,
+                BTreeSet::from(["new".to_string()])
+            );
+
+            // only the new rule discovers and reports files.
+            write(&dir, "a.mcap", b"aaa").await;
+            scan_once(&scanner).await;
+            tick(&scanner, &clock, 1).await;
+            let reported: Vec<String> = sink
+                .events()
+                .iter()
+                .map(|(stable, _)| stable.file_rule_id.clone())
+                .collect();
+            assert_eq!(reported, vec!["new".to_string()]);
         }
 
         // A re-push of the same rule must NOT swallow files that appeared since
