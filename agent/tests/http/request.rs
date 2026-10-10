@@ -135,6 +135,52 @@ pub mod params {
         }
     }
 
+    pub mod debug_redaction {
+        use super::*;
+
+        #[test]
+        fn token_value_is_redacted() {
+            let params = Params::get("https://example.com/api").with_token("super-secret");
+            let debug = format!("{params:?}");
+            assert!(
+                !debug.contains("super-secret"),
+                "token value must not appear in Debug output: {debug}"
+            );
+            assert!(
+                debug.contains("REDACTED"),
+                "present token must render as redacted: {debug}"
+            );
+        }
+
+        #[test]
+        fn absent_token_has_no_redaction_marker() {
+            let params = Params::get("https://example.com/api");
+            let debug = format!("{params:?}");
+            assert!(
+                !debug.contains("REDACTED"),
+                "absent token must not render a redaction marker: {debug}"
+            );
+            assert!(
+                debug.contains("None"),
+                "absent token should render as None: {debug}"
+            );
+        }
+
+        #[test]
+        fn non_token_fields_still_visible() {
+            let params = Params::get("https://example.com/api").with_token("super-secret");
+            let debug = format!("{params:?}");
+            assert!(
+                debug.contains("https://example.com/api"),
+                "url must remain visible in Debug output: {debug}"
+            );
+            assert!(
+                debug.contains("GET"),
+                "method must remain visible in Debug output: {debug}"
+            );
+        }
+    }
+
     pub mod builders {
         use super::*;
 

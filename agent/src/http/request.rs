@@ -17,7 +17,7 @@ use tokio::time::Duration;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct Params<'a> {
     pub method: reqwest::Method,
     pub url: &'a str,
@@ -25,6 +25,19 @@ pub struct Params<'a> {
     pub body: Option<String>,
     pub timeout: Duration,
     pub token: Option<&'a str>,
+}
+
+impl fmt::Debug for Params<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Params")
+            .field("method", &self.method)
+            .field("url", &self.url)
+            .field("query", &self.query)
+            .field("body", &self.body)
+            .field("timeout", &self.timeout)
+            .field("token", &self.token.map(|_| "[REDACTED]"))
+            .finish()
+    }
 }
 
 impl<'a> Params<'a> {
