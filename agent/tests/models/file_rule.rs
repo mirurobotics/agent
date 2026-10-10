@@ -298,3 +298,24 @@ fn retention_default() {
         }
     );
 }
+
+#[test]
+fn requires_upload_honors_an_explicit_value() {
+    for (require_upload, rule_uploads) in [(true, false), (false, true)] {
+        let retention = FileRuleRetention {
+            require_upload: Some(require_upload),
+            ttl_secs: 0,
+        };
+        assert_eq!(retention.requires_upload(rule_uploads), require_upload);
+    }
+}
+
+#[test]
+fn requires_upload_defaults_to_whether_the_rule_uploads() {
+    let retention = FileRuleRetention {
+        require_upload: None,
+        ttl_secs: 0,
+    };
+    assert!(retention.requires_upload(true));
+    assert!(!retention.requires_upload(false));
+}

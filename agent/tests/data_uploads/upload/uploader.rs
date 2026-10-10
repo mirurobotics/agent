@@ -866,11 +866,37 @@ mod retention_producer {
     }
 
     // require_upload: false files were already enqueued at stability by the
-    // retention sink; the confirm-time enqueue is a same-path duplicate, which
-    // the queue permits and the sweep resolves harmlessly. Any retention on a
-    // confirmed upload produces a delete job.
+    // retention sink, so the confirm path must not book a second delete job.
     #[tokio::test]
-    async fn unrequired_retention_also_enqueues_a_delete_job() {
+    async fn unrequired_retention_enqueues_nothing() {
+        let (mock, mut started_rx) = MockUploadExecutor::new();
+        mock.push_step(MockStep::Ok);
+        let deleter = MockDeleter::new();
+        let (uploader, handle, _sleeps, _clock) = spawn_with_test_clock_and_deleter(
+            mock.clone(),
+            deleter.clone(),
+            UploaderOptions::default(),
+        );
+        let mut job = make_job("a.log");
+        job.retention = Some(FileRuleRetention {
+            require_upload: Some(false),
+            ttl_secs: 300,
+        });
+
+        timed(uploader.enqueue(job.clone())).await.unwrap();
+        timed(started_rx.recv()).await.unwrap();
+        await_drained(&uploader).await;
+
+        timed(uploader.shutdown()).await.unwrap();
+        timed(handle).await.unwrap();
+        assert_eq!(deleter.recorded_calls(), []);
+    }
+
+    // An upload job's retention without require_upload (e.g. from a stale
+    // cached rule) is treated as requiring the upload, so the confirm path
+    // is where its delete job comes from.
+    #[tokio::test]
+    async fn absent_require_upload_enqueues_a_delete_job() {
         let (mock, mut started_rx) = MockUploadExecutor::new();
         mock.push_step(MockStep::Ok);
         let deleter = MockDeleter::new();
@@ -881,7 +907,7 @@ mod retention_producer {
         );
         let mut job = make_job("a.log");
         job.retention = Some(FileRuleRetention {
-            require_upload: Some(false),
+            require_upload: None,
             ttl_secs: 300,
         });
 
