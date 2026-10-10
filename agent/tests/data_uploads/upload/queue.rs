@@ -11,7 +11,7 @@
 // internal crates
 use crate::data_uploads::queue::queue_suite;
 use crate::test_utils::filesys::{abs_path, dirs as test_dirs};
-use miru_agent::data_uploads::queue::QueueJob;
+use miru_agent::data_uploads::queue::{self, QueueJob};
 use miru_agent::data_uploads::upload::{Job, Queue, QueueEntry, QueueSnapshot, QueueSnapshotFile};
 use miru_agent::filesys::{files, File, WriteOptions};
 
@@ -74,9 +74,9 @@ mod wire {
 
     /// Pins the persisted wire format on the read side: an entry is
     /// `{id, job, attempts, next_attempt_at}` with the job's fields nested
-    /// rather than flattened. `SingleThreadStateFile::new_with_default`
-    /// silently overwrites a snapshot it cannot parse, so a shape change would
-    /// wipe a live user's queue instead of erroring — this test is the guard.
+    /// rather than flattened. A snapshot that no longer parses is moved aside
+    /// and only its still-parseable entries are kept, so a shape change would
+    /// still drop a live user's queued jobs — this test is the guard.
     ///
     /// `upload_job` is deterministic, so the expected job comes from it. The
     /// raw `"file"` value is a plain host-rooted string rather than `File`'s
@@ -159,6 +159,48 @@ mod wire {
         assert_eq!(entry["next_attempt_at"], serde_json::Value::Null, "{raw}");
     }
 
+    /// One entry that no longer parses (e.g. after a downgrade changed the
+    /// job shape) costs only that entry: the rest of the queue survives.
+    #[tokio::test]
+    async fn unparseable_entry_is_dropped_and_the_rest_kept() {
+        let dir = test_dirs::temp("upload_queue_test").unwrap();
+        let path = dir.to_dir().file("upload_queue.json");
+        let snapshot = QueueSnapshot {
+            entries: vec![
+                QueueEntry {
+                    id: Uuid::new_v4(),
+                    job: make_job("bad.log"),
+                    attempts: 0,
+                    next_attempt_at: None,
+                },
+                QueueEntry {
+                    id: Uuid::new_v4(),
+                    job: make_job("good.log"),
+                    attempts: 1,
+                    next_attempt_at: None,
+                },
+            ],
+        };
+        let mut value = serde_json::to_value(&snapshot).unwrap();
+        value["entries"][0]["job"]
+            .as_object_mut()
+            .unwrap()
+            .remove("digest");
+        files::write_string(&path, &value.to_string(), WriteOptions::OVERWRITE_ATOMIC)
+            .await
+            .unwrap();
+
+        let file: QueueSnapshotFile = queue::open_snapshot_file(path.clone()).await.unwrap();
+        let queue = Queue::from_snapshot(8, file);
+
+        assert_eq!(queue.len(), 1);
+        let entry = queue.next_ready(Utc::now()).unwrap();
+        assert_eq!(entry.id, snapshot.entries[1].id);
+        // the recovered queue is what is now on disk
+        let on_disk: QueueSnapshot = files::read_json(&path).await.unwrap();
+        assert_eq!(on_disk.entries, vec![snapshot.entries[1].clone()]);
+    }
+
     #[tokio::test]
     async fn legacy_snapshot_without_next_attempt_at_loads() {
         let dir = test_dirs::temp("upload_queue_test").unwrap();
@@ -181,8 +223,8 @@ mod wire {
             .await
             .unwrap();
 
-        // if deserialization failed, new_with_default would silently write an
-        // empty default snapshot and the pop below would find nothing
+        // if deserialization failed, new_with_default would move the file
+        // aside and start empty, and the pop below would find nothing
         let queue = Queue::from_snapshot(8, open(&path).await);
         let entry = queue.next_ready(Utc::now()).unwrap();
         assert_eq!(entry.attempts, 2);
