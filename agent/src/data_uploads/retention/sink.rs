@@ -40,7 +40,7 @@ impl<D: DeleterExt> StableFileSink for RetentionStableFileSink<D> {
             let Some(retention) = &rule.retention else {
                 return;
             };
-            if retention.require_upload.unwrap_or(false) {
+            if retention.requires_upload(rule.upload.is_some()) {
                 let path = &file.file;
                 let rule_id = &rule.id;
                 debug!(
