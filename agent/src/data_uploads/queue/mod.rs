@@ -5,7 +5,7 @@ use std::collections::VecDeque;
 
 // internal crates
 pub use self::errors::QueueFullErr;
-use crate::filesys::state_file::SingleThreadStateFile;
+use crate::filesys::{state_file::SingleThreadStateFile, File, FileSysErr};
 use crate::models::Patch;
 
 // external crates
@@ -56,6 +56,27 @@ impl<J> Default for QueueSnapshot<J> {
     }
 }
 
+impl<J: DeserializeOwned> QueueSnapshot<J> {
+    /// Recovers what it can from a snapshot that failed to parse as a whole:
+    /// every entry that still deserializes on its own is kept, and the rest
+    /// are dropped with a log line. One entry that no longer parses (e.g.
+    /// after an upgrade or downgrade changed the job shape) must not cost the
+    /// whole queue. `None` when the bytes are not a snapshot at all.
+    pub fn salvage(bytes: &[u8]) -> Option<Self> {
+        let value: serde_json::Value = serde_json::from_slice(bytes).ok()?;
+        let raw = value.get("entries")?.as_array()?;
+        let entries: Vec<QueueEntry<J>> = raw
+            .iter()
+            .filter_map(|entry| serde_json::from_value(entry.clone()).ok())
+            .collect();
+        let dropped = raw.len() - entries.len();
+        if dropped > 0 {
+            warn!("queue snapshot: dropped {dropped} entry(ies) that could not be parsed");
+        }
+        Some(Self { entries })
+    }
+}
+
 impl<J> Patch<QueueSnapshot<J>> for QueueSnapshot<J> {
     fn patch(&mut self, patch: QueueSnapshot<J>) {
         *self = patch;
@@ -65,6 +86,15 @@ impl<J> Patch<QueueSnapshot<J>> for QueueSnapshot<J> {
 /// The queue's persistence handle: an atomically-written JSON snapshot with an
 /// in-memory cache. Mirrors the scanner's `ScanSnapshotFile`.
 pub type QueueSnapshotFile<J> = SingleThreadStateFile<QueueSnapshot<J>, QueueSnapshot<J>>;
+
+/// Opens a queue snapshot, starting empty when it does not exist yet and
+/// keeping every entry that still parses when the file is corrupt (see
+/// [`SingleThreadStateFile::new_or_recover`]).
+pub async fn open_snapshot_file<J: QueueJob>(
+    file: File,
+) -> Result<QueueSnapshotFile<J>, FileSysErr> {
+    QueueSnapshotFile::new_or_recover(file, QueueSnapshot::default(), QueueSnapshot::salvage).await
+}
 
 /// In-memory job queue with an optional snapshot. Every mutation (`enqueue`,
 /// `remove`, `requeue`, `reset_invalid_deadlines`) persists as its last act,
@@ -277,6 +307,31 @@ mod tests {
             file_rule_id: "file_rule_1".to_string(),
             deployment_id: "dpl_1".to_string(),
         }
+    }
+
+    #[test]
+    fn salvage_rejects_bytes_that_are_not_a_snapshot() {
+        assert_eq!(QueueSnapshot::<Job>::salvage(b"not json"), None);
+        assert_eq!(QueueSnapshot::<Job>::salvage(b"{}"), None);
+        assert_eq!(QueueSnapshot::<Job>::salvage(br#"{"entries":1}"#), None);
+    }
+
+    #[test]
+    fn salvage_keeps_only_parseable_entries() {
+        let good = QueueEntry {
+            id: Uuid::new_v4(),
+            job: job("a.log"),
+            attempts: 3,
+            next_attempt_at: None,
+        };
+        let bytes = serde_json::to_vec(&serde_json::json!({
+            "entries": [good.clone(), {"id": Uuid::new_v4(), "job": {"file": 1}}],
+        }))
+        .unwrap();
+
+        let salvaged = QueueSnapshot::<Job>::salvage(&bytes).unwrap();
+
+        assert_eq!(salvaged.entries, vec![good]);
     }
 
     #[tokio::test]

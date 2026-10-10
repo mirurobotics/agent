@@ -6,6 +6,7 @@ use std::sync::Arc;
 use crate::authn::{self, token_mngr::TokenFile, TokenManagerExt};
 use crate::cooldown;
 use crate::data_uploads::{
+    queue,
     retention::{self, DeleterExt},
     scan::{self, state::ScanSnapshotFile, ScannerArgs, ScannerExt},
     upload::{self, UploaderExt},
@@ -170,12 +171,7 @@ impl AppState {
     async fn init_deleter(
         layout: &disk::Layout,
     ) -> Result<(Arc<retention::Deleter>, tokio::task::JoinHandle<()>), server::ServerErr> {
-        let snapshot_file = match retention::DeleteQueueSnapshotFile::new_with_default(
-            layout.delete_queue(),
-            Default::default(),
-        )
-        .await
-        {
+        let snapshot_file = match queue::open_snapshot_file(layout.delete_queue()).await {
             Ok(file) => Some(file),
             Err(e) => {
                 tracing::error!(
@@ -205,12 +201,7 @@ impl AppState {
         token_mngr: Arc<authn::TokenManager>,
         deleter: Arc<retention::Deleter>,
     ) -> Result<(Arc<upload::Uploader>, tokio::task::JoinHandle<()>), server::ServerErr> {
-        let snapshot_file = match upload::QueueSnapshotFile::new_with_default(
-            layout.upload_queue(),
-            Default::default(),
-        )
-        .await
-        {
+        let snapshot_file = match queue::open_snapshot_file(layout.upload_queue()).await {
             Ok(file) => Some(file),
             Err(e) => {
                 tracing::error!(
