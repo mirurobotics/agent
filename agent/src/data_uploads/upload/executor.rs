@@ -1,4 +1,5 @@
 // standard crates
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
 // internal crates
@@ -8,6 +9,7 @@ use crate::data_uploads::upload::{
     job::Job,
     transfer::ObjectTransfer,
 };
+use crate::errors::{Error, HTTPCode};
 use crate::http::{self, ClientI};
 use backend_api::models::{CreateUploadRequest, UploadSource, UploadWithCredentials};
 
@@ -68,19 +70,38 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> LiveExecutor<C, T, X> {
         .map_err(classified_executor_err)
     }
 
+    /// Confirms upload `id`. A confirm whose response was lost (network error
+    /// after the backend committed) is re-sent by [`http::with_retry`]; the
+    /// backend's confirm is idempotent today and answers the retry with 200,
+    /// but a retry answered with 409 Conflict is also treated as "already
+    /// confirmed". Failing it instead would drop the job before its delete job
+    /// is enqueued, so a `require_upload` file would never be deleted. A 409 on
+    /// the first send cannot be our own lost commit, so it still fails.
     async fn confirm_upload(&self, id: &str) -> Result<(), UploadErr> {
         let token = self.token().await?;
-        http::with_retry(|| async {
+        let sends = AtomicU32::new(0);
+        let result = http::with_retry(|| async {
+            sends.fetch_add(1, Ordering::Relaxed);
             let params = http::uploads::ConfirmParams {
                 id,
                 token: &token.token,
             };
             http::uploads::confirm(self.http_client.as_ref(), params).await
         })
-        .await
-        .map(|_| ())
-        .map_err(classified_executor_err)
+        .await;
+        match result {
+            Ok(_) => Ok(()),
+            Err(err) if sends.load(Ordering::Relaxed) > 1 && is_conflict(&err) => {
+                info!("upload: confirm retry for upload {id} reported it already confirmed");
+                Ok(())
+            }
+            Err(err) => Err(classified_executor_err(err)),
+        }
     }
+}
+
+fn is_conflict(err: &http::HTTPErr) -> bool {
+    err.http_status() == HTTPCode::CONFLICT
 }
 
 impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> UploadExecutor for LiveExecutor<C, T, X> {
