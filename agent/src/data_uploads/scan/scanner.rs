@@ -234,9 +234,14 @@ impl SingleThreadScanner {
             self.scanners.remove(&rule_id);
         }
 
-        self.persist_snapshot().await;
+        // Hand stable files to the sinks BEFORE persisting the ledger that
+        // records them as reported. If the agent dies mid-dispatch, the
+        // on-disk snapshot still holds them as candidates and the next process
+        // re-emits them. The reverse order would lose them for good: recorded
+        // as done, never queued. A duplicate is cheaper than a lost file.
         let delivered = stable_files.len();
         self.dispatch_stable_files(stable_files).await;
+        self.persist_snapshot().await;
 
         debug!(
             "scan: tick complete; {delivered} stable file(s) delivered to sinks, \
@@ -1033,6 +1038,69 @@ mod tests {
             let events = sink.events();
             assert_eq!(events.len(), 1);
             assert_eq!(events[0].0, expected);
+        }
+
+        /// A [`StableFileSink`] that, at delivery time, reads the scanner
+        /// snapshot back off disk and records how many ledger entries it
+        /// already held. Pins the dispatch-before-persist order.
+        struct SnapshotProbeSink {
+            state_path: File,
+            seen: Arc<Mutex<Vec<usize>>>,
+        }
+
+        impl StableFileSink for SnapshotProbeSink {
+            fn on_stable_file<'a>(
+                &'a self,
+                _file: StableFile,
+                _rule: &'a FileRule,
+            ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+                Box::pin(async move {
+                    let snapshot = read_snapshot(&self.state_path).await;
+                    let ledgered = snapshot.rules.values().map(|r| r.ledger_count()).sum();
+                    self.seen.lock().unwrap().push(ledgered);
+                })
+            }
+        }
+
+        // The ledger that marks a file as reported reaches disk only after the
+        // sinks have taken the file. If the agent died mid-dispatch, the
+        // on-disk snapshot would still hold the file as a candidate and the
+        // next process would re-emit it instead of losing it.
+        #[tokio::test]
+        async fn ledger_is_persisted_after_dispatch() {
+            let dir = test_dirs::temp("testing").unwrap();
+            let state_path = dir.file("scanner.json");
+            let clock = Clock::new(1000);
+            let seen = Arc::new(Mutex::new(Vec::new()));
+            let probe = SnapshotProbeSink {
+                state_path: state_path.clone(),
+                seen: seen.clone(),
+            };
+            let (scanner, _h) = Scanner::spawn(
+                64,
+                ScannerArgs {
+                    now_fn: Arc::new(clock.now_fn()),
+                    sinks: vec![Arc::new(probe)],
+                    snapshot_file: Some(state_file(&state_path).await),
+                },
+            )
+            .unwrap();
+            deploy(
+                &scanner,
+                vec![upload_rule(DEFAULT_RULE_ID, &mcap_glob(&dir), 0)],
+            )
+            .await;
+
+            write(&dir, "a.mcap", b"aaa").await;
+            scan_once(&scanner).await; // discover
+            tick(&scanner, &clock, 1).await; // evaluate => deliver
+
+            // during delivery the on-disk ledger did not yet record the file...
+            assert_eq!(*seen.lock().unwrap(), vec![0]);
+            // ...and once the tick finished, it did.
+            let snapshot = read_snapshot(&state_path).await;
+            let ledgered: usize = snapshot.rules.values().map(|r| r.ledger_count()).sum();
+            assert_eq!(ledgered, 1);
         }
 
         /// A retention-only rule runs the full scan pipeline — glob, stability
