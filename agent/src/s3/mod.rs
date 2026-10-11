@@ -626,13 +626,12 @@ mod tests {
                 assert_eq!(actual_shapes(&replay), vec![]);
             }
 
-            #[cfg(unix)]
             #[tokio::test]
             async fn put_unopenable_source_maps_to_local_io_err() {
-                // A path under a regular file fails to open with `NotADirectory`
-                // rather than `NotFound`, which is `LocalIoErr`, before any request.
-                let parent = temp_file_with(b"not a directory").await;
-                let src = File::new(parent.file().path().join("child.bin"));
+                // Every platform rejects a path with an interior NUL byte as
+                // `InvalidInput` rather than `NotFound`, so the open fails as
+                // `LocalIoErr` before any request.
+                let src = File::new("/tmp/bad\0name.bin");
                 let (store, replay) = store_with(vec![]);
 
                 let err = store

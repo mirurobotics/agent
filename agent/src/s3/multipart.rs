@@ -721,7 +721,6 @@ mod tests {
             assert_eq!(actual_shapes(&replay), vec![create_shape(), abort_shape()]);
         }
 
-        #[cfg(unix)]
         #[tokio::test]
         async fn path_replaced_after_open_uploads_the_opened_file() {
             const PART_SIZE: u64 = 8 * 1024 * 1024;
