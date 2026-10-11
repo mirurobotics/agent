@@ -625,6 +625,30 @@ mod tests {
                 ));
                 assert_eq!(actual_shapes(&replay), vec![]);
             }
+
+            #[cfg(unix)]
+            #[tokio::test]
+            async fn put_unopenable_source_maps_to_local_io_err() {
+                // A path under a regular file fails to open with `NotADirectory`
+                // rather than `NotFound`, which is `LocalIoErr`, before any request.
+                let parent = temp_file_with(b"not a directory").await;
+                let src = File::new(parent.file().path().join("child.bin"));
+                let (store, replay) = store_with(vec![]);
+
+                let err = store
+                    .put(src, &obj("k"), &HashMap::new())
+                    .await
+                    .unwrap_err();
+
+                let S3Err::LocalIoErr(inner) = &err else {
+                    panic!("expected LocalIoErr, got {err:?}");
+                };
+                assert_eq!(
+                    (inner.operation.as_str(), &inner.object),
+                    ("open_source", &obj("k"))
+                );
+                assert_eq!(actual_shapes(&replay), vec![]);
+            }
         }
     }
 
