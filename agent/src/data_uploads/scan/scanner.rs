@@ -234,11 +234,9 @@ impl SingleThreadScanner {
             self.scanners.remove(&rule_id);
         }
 
-        // Hand stable files to the sinks BEFORE persisting the ledger that
-        // records them as reported. If the agent dies mid-dispatch, the
-        // on-disk snapshot still holds them as candidates and the next process
-        // re-emits them. The reverse order would lose them for good: recorded
-        // as done, never queued. A duplicate is cheaper than a lost file.
+        // Dispatch before persisting. A crash in between leaves them as
+        // candidates, so the next process re-emits them. Persisting first
+        // would record them as done without ever queueing them.
         let delivered = stable_files.len();
         self.dispatch_stable_files(stable_files).await;
         self.persist_snapshot().await;
