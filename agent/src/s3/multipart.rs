@@ -74,22 +74,15 @@ impl Store {
         upload_id: &str,
         landed: &std::collections::HashMap<i32, CompletedPart>,
     ) -> Result<Vec<CompletedPart>, S3Err> {
-        // Opened lazily on the first part that needs uploading, then reused for
-        // every later part. Reading every part from one handle pins the upload to
-        // the file that existed at that moment: if logrotate renames the path
-        // mid-upload and creates a new file there, the remaining parts still come
-        // from the original inode instead of silently mixing in the new file.
-        let mut handle: Option<tokio::fs::File> = None;
+        // One handle for every part, so a path replacement mid-upload (logrotate)
+        // cannot mix the new file into later parts.
+        let mut file = Self::open_source(&src.file, dst).await?;
         let mut parts: Vec<CompletedPart> = Vec::new();
         for (part_number, offset, len) in Self::part_plan(src.size) {
             let part = match landed.get(&part_number) {
                 Some(existing) => existing.clone(),
                 None => {
-                    let f = match handle.as_mut() {
-                        Some(f) => f,
-                        None => handle.insert(Self::open_source(&src.file, dst).await?),
-                    };
-                    let buf = Self::read_part_bytes(f, &src.file, dst, offset, len).await?;
+                    let buf = Self::read_part_bytes(&mut file, &src.file, dst, offset, len).await?;
                     self.upload_part(dst, upload_id, part_number, buf).await?
                 }
             };
