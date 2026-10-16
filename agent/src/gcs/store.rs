@@ -16,7 +16,9 @@ use google_cloud_auth::credentials::{Credentials as GcsCredentials, EntityTag};
 use google_cloud_gax::retry_policy::RetryPolicyExt as _;
 use google_cloud_storage::client::{Storage, StorageControl};
 use google_cloud_storage::retry_policy::RetryableErrors;
-use google_cloud_storage::streaming_source::{FileSource, Payload, Seek, SizeHint, StreamingSource};
+use google_cloud_storage::streaming_source::{
+    FileSource, Payload, Seek, SizeHint, StreamingSource,
+};
 use http::HeaderValue;
 use tokio::io::AsyncWriteExt as _;
 use tracing::warn;
