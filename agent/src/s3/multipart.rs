@@ -31,7 +31,10 @@ impl Store {
         let started = Instant::now();
         let upload_id = self.create_multipart_upload(dst, metadata).await?;
 
-        match self.exec_multipart_upload(&mut src, dst, &upload_id, started).await {
+        match self
+            .exec_multipart_upload(&mut src, dst, &upload_id, started)
+            .await
+        {
             Ok(()) => Ok(()),
             Err(err) => {
                 // Best-effort cleanup: don't mask the original error if the abort
@@ -57,7 +60,8 @@ impl Store {
         let started = Instant::now();
         let landed = self.list_parts(dst, upload_id).await?;
         let parts = self.upload_parts(&mut src, dst, upload_id, &landed).await?;
-        self.complete_multipart_upload(dst, upload_id, &parts, src.size, started).await
+        self.complete_multipart_upload(dst, upload_id, &parts, src.size, started)
+            .await
     }
 
     /// Walks [`Self::part_plan`] in order. For each part number present in
@@ -224,7 +228,8 @@ impl Store {
         let parts = self
             .upload_parts(src, dst, upload_id, &std::collections::HashMap::new())
             .await?;
-        self.complete_multipart_upload(dst, upload_id, &parts, src.size, started).await
+        self.complete_multipart_upload(dst, upload_id, &parts, src.size, started)
+            .await
     }
 
     /// Uploads one part's bytes to S3 and returns the [`CompletedPart`]

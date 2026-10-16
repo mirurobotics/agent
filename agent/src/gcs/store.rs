@@ -158,7 +158,8 @@ impl Store {
         dst: &Object,
         metadata: &HashMap<String, String>,
     ) -> Result<(), GcsErr> {
-        self.put_with_limits(src, dst, metadata, UPLOAD_LIMITS).await
+        self.put_with_limits(src, dst, metadata, UPLOAD_LIMITS)
+            .await
     }
 
     /// [`Self::put`] with explicit progress limits, so tests can use short ones.

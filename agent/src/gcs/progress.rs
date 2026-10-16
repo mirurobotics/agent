@@ -60,7 +60,8 @@ impl<S: StreamingSource + Send + Sync> StreamingSource for ProgressSource<S> {
                 Some(Ok(chunk)) => self.pending = chunk,
                 Some(Err(e)) => return Some(Err(e)),
                 None => {
-                    self.progress.send_if_modified(|p| !std::mem::replace(&mut p.eof, true));
+                    self.progress
+                        .send_if_modified(|p| !std::mem::replace(&mut p.eof, true));
                     return None;
                 }
             }
@@ -84,7 +85,8 @@ impl<S: Seek> Seek for ProgressSource<S> {
     /// the watchdog to the idle bound.
     fn seek(&mut self, offset: u64) -> impl Future<Output = Result<(), Self::Error>> + Send {
         self.pending.clear();
-        self.progress.send_if_modified(|p| std::mem::replace(&mut p.eof, false));
+        self.progress
+            .send_if_modified(|p| std::mem::replace(&mut p.eof, false));
         self.inner.seek(offset)
     }
 }
@@ -137,6 +139,7 @@ async fn idle_elapsed(progress: &mut watch::Receiver<Progress>, limits: Limits) 
 #[cfg(test)]
 mod tests {
     // standard crates
+    use std::collections::VecDeque;
     use std::future::pending;
 
     // internal crates
@@ -196,6 +199,18 @@ mod tests {
             }
         }
 
+        /// Yields the given chunks in order (the SDK's own multi-chunk source
+        /// type is crate-private, so generic code can't be instantiated with it).
+        struct ChunksSource(VecDeque<Bytes>);
+
+        impl StreamingSource for ChunksSource {
+            type Error = std::io::Error;
+
+            async fn next(&mut self) -> Option<Result<Bytes, Self::Error>> {
+                self.0.pop_front().map(Ok)
+            }
+        }
+
         #[tokio::test]
         async fn rechunks_into_bounded_frames() {
             let input = pattern(100 * KIB);
@@ -213,10 +228,8 @@ mod tests {
             let first = pattern(40 * KIB);
             let second = Bytes::from(vec![7u8; 10 * KIB]);
             let (tx, _rx) = watch::channel(Progress::default());
-            let mut src = ProgressSource::new(
-                Payload::from(vec![first.clone(), second.clone()]),
-                tx,
-            );
+            let chunks = ChunksSource(VecDeque::from([first.clone(), second.clone()]));
+            let mut src = ProgressSource::new(chunks, tx);
 
             let frames = drain(&mut src).await;
 
