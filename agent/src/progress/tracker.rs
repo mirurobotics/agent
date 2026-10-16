@@ -5,9 +5,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 // internal crates
-use crate::progress::counter::Progress;
-use crate::progress::format::{duration, mib, position, rate};
-use crate::progress::report::Intervals;
+use crate::progress::{
+    counter::Progress,
+    format::{duration, mib, position, rate},
+    report::Intervals,
+};
 
 // external crates
 use tokio::time::{Instant, MissedTickBehavior};
