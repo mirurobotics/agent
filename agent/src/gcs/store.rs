@@ -604,14 +604,14 @@ mod tests {
             while let Some(chunk) = source.next().await {
                 chunk.unwrap();
             }
-            assert_eq!(progress.done(), 11);
+            assert_eq!(progress.sent(), 11);
 
             source.seek(6).await.unwrap();
-            assert_eq!(progress.done(), 6);
+            assert_eq!(progress.sent(), 6);
 
             let rest = source.next().await.unwrap().unwrap();
             assert_eq!(&rest[..], b"world");
-            assert_eq!(progress.done(), 11);
+            assert_eq!(progress.sent(), 11);
         }
 
         #[tokio::test]

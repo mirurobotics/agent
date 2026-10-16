@@ -17,33 +17,33 @@ pub const REPORT_INTERVAL: Duration = Duration::from_secs(30);
 #[derive(Debug)]
 pub struct Progress {
     total: u64,
-    done: AtomicU64,
+    sent: AtomicU64,
 }
 
 impl Progress {
     pub fn new(total: u64) -> Self {
         Self {
             total,
-            done: AtomicU64::new(0),
+            sent: AtomicU64::new(0),
         }
     }
 
     pub fn add(&self, bytes: u64) {
-        self.done.fetch_add(bytes, Ordering::Relaxed);
+        self.sent.fetch_add(bytes, Ordering::Relaxed);
     }
 
     /// Moves the position to `offset`, e.g. when the transfer resends from an
     /// earlier byte, and returns the previous position.
     pub fn seek_to(&self, offset: u64) -> u64 {
-        self.done.swap(offset, Ordering::Relaxed)
+        self.sent.swap(offset, Ordering::Relaxed)
     }
 
     pub fn total(&self) -> u64 {
         self.total
     }
 
-    pub fn done(&self) -> u64 {
-        self.done.load(Ordering::Relaxed)
+    pub fn sent(&self) -> u64 {
+        self.sent.load(Ordering::Relaxed)
     }
 }
 
@@ -84,7 +84,7 @@ where
         tokio::select! {
             result = &mut work => break result,
             _ = ticker.tick() => {
-                let report = intervals.report(progress.done(), ending.started.elapsed());
+                let report = intervals.report(progress.sent(), ending.started.elapsed());
                 if report.healthy {
                     info!("{}: {}", ending.label, report.message);
                 } else {
@@ -138,7 +138,7 @@ impl Ending {
         let message = summary(
             outcome,
             progress.total(),
-            progress.done(),
+            progress.sent(),
             self.started.elapsed(),
         );
         match outcome {
@@ -246,22 +246,22 @@ fn advancing(
     }
 }
 
-fn summary(outcome: Outcome, total: u64, done: u64, elapsed: Duration) -> String {
+fn summary(outcome: Outcome, total: u64, sent: u64, elapsed: Duration) -> String {
     format!(
         "{outcome} after {}; {}, {}/s average",
         duration(elapsed.as_secs()),
-        position(total, done),
-        mib(rate(done, elapsed))
+        position(total, sent),
+        mib(rate(sent, elapsed))
     )
 }
 
-/// `done of total (pct%) sent`, or just `done sent` when the total is 0.
-fn position(total: u64, done: u64) -> String {
+/// `{sent} of {total} ({pct}%) sent`, or just `{sent} sent` when `total` is 0.
+fn position(total: u64, sent: u64) -> String {
     if total == 0 {
-        return format!("{} sent", mib(done));
+        return format!("{} sent", mib(sent));
     }
-    let pct = done as f64 * 100.0 / total as f64;
-    format!("{} of {} ({pct:.1}%) sent", mib(done), mib(total))
+    let pct = sent as f64 * 100.0 / total as f64;
+    format!("{} of {} ({pct:.1}%) sent", mib(sent), mib(total))
 }
 
 /// Bytes per second over `over`, or 0 for a zero-length span.
@@ -302,7 +302,7 @@ mod tests {
             progress.add(4);
             progress.add(3);
             assert_eq!(progress.seek_to(2), 7);
-            assert_eq!((progress.total(), progress.done()), (10, 2));
+            assert_eq!((progress.total(), progress.sent()), (10, 2));
         }
     }
 
@@ -476,7 +476,7 @@ mod tests {
         async fn returns_the_work_result_with_its_progress() {
             let result = track("test".to_string(), 10, 0, |progress| async move {
                 progress.add(10);
-                Ok::<_, ()>((progress.total(), progress.done()))
+                Ok::<_, ()>((progress.total(), progress.sent()))
             })
             .await;
             assert_eq!(result, Ok((10, 10)));
