@@ -40,11 +40,22 @@ pub trait ObjectTransfer: Send + Sync {
 /// simple vs resumable) with the vended OAuth2 bearer token for `gcs`. Optional
 /// transport settings feed the same store builders as the default HTTPS
 /// transport and cloud endpoints.
-#[derive(Default)]
 pub struct SdkTransfer {
     s3_http_client: Option<aws_sdk_s3::config::SharedHttpClient>,
     s3_force_path_style: bool,
     gcs_endpoint: Option<String>,
+}
+
+/// Builds the S3 HTTPS client once per transfer, which lives for the app's
+/// lifetime, so every upload shares its connection pool.
+impl Default for SdkTransfer {
+    fn default() -> Self {
+        Self {
+            s3_http_client: Some(s3::http_client()),
+            s3_force_path_style: false,
+            gcs_endpoint: None,
+        }
+    }
 }
 
 impl SdkTransfer {

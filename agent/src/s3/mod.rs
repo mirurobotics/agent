@@ -1,17 +1,24 @@
 // standard crates
 use std::collections::HashMap;
 use std::io::SeekFrom;
+use std::time::Duration;
 
 // internal crates
 use crate::filesys::{errors::PathDoesNotExistErr, file::File, path::PathExt, FileSysErr};
 use crate::trace;
 
 // external crates
-use aws_sdk_s3::config::{BehaviorVersion, Credentials as AwsCredentials, Region};
-use aws_sdk_s3::primitives::ByteStream;
+use aws_sdk_s3::config::timeout::TimeoutConfig;
+use aws_sdk_s3::config::{
+    BehaviorVersion, Credentials as AwsCredentials, Region, SharedHttpClient,
+    StalledStreamProtectionConfig,
+};
 use aws_sdk_s3::Client;
+use aws_smithy_http_client::{proxy, tls, Builder, ConnectorBuilder};
+use bytes::Bytes;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
+mod body;
 pub mod errors;
 pub mod multipart;
 
@@ -22,6 +29,69 @@ pub use errors::S3Err;
 /// below it go through a single `PutObject`. S3's own multipart part-size
 /// floor is 5 MiB; 8 MiB gives headroom while keeping part counts small.
 pub(crate) const PART_SIZE: u64 = 8 * 1024 * 1024; // 8 MiB
+
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// Time limit for bodyless calls, SDK retries and backoff included.
+const ATTEMPT_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// PutObject/UploadPart get `BODY_ATTEMPT_FLOOR` plus one second per
+/// `MIN_UPLOAD_BYTES_PER_SEC` of body: a tail or response stall after the last
+/// frame (which stalled-stream protection no longer watches) ends at this limit.
+const BODY_ATTEMPT_FLOOR: Duration = Duration::from_secs(90);
+const MIN_UPLOAD_BYTES_PER_SEC: u64 = 64 * 1024;
+
+/// Longest a request body may go without progress.
+const STALL_GRACE: Duration = Duration::from_secs(60);
+
+/// Cap for `CompleteMultipartUpload`, which can take minutes on large uploads.
+const COMPLETE_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(600);
+
+/// Best-effort `AbortMultipartUpload` cleanup.
+const ABORT_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// One limit for both the whole operation and each attempt, so SDK retries
+/// cannot stack past it.
+fn timeout_config(limit: Duration) -> TimeoutConfig {
+    TimeoutConfig::builder()
+        .connect_timeout(CONNECT_TIMEOUT)
+        .operation_timeout(limit)
+        .operation_attempt_timeout(limit)
+        .build()
+}
+
+pub(crate) fn body_attempt_timeout(len: u64) -> Duration {
+    BODY_ATTEMPT_FLOOR + Duration::from_secs(len.div_ceil(MIN_UPLOAD_BYTES_PER_SEC))
+}
+
+/// `CompleteMultipartUpload` shares the attempt budget with the parts before
+/// it, so it gets the body budget the parts left.
+pub(crate) fn complete_attempt_timeout(size: u64, parts_elapsed: Duration) -> Duration {
+    body_attempt_timeout(size)
+        .saturating_sub(parts_elapsed)
+        .clamp(ATTEMPT_TIMEOUT, COMPLETE_ATTEMPT_TIMEOUT)
+}
+
+/// Per-operation config override applying `limit` (see [`timeout_config`]).
+pub(crate) fn attempt_override(limit: Duration) -> aws_sdk_s3::config::Builder {
+    aws_sdk_s3::Config::builder().timeout_config(timeout_config(limit))
+}
+
+/// One HTTPS client for every S3 store built from it, so uploads reuse pooled
+/// connections instead of a fresh TCP+TLS handshake per upload. Mirrors the
+/// SDK default client: rustls with aws-lc, proxy settings from the environment.
+pub fn http_client() -> SharedHttpClient {
+    Builder::new().build_with_connector_fn(|settings, components| {
+        let mut conn = ConnectorBuilder::default()
+            .tls_provider(tls::Provider::Rustls(tls::rustls_provider::CryptoMode::AwsLc));
+        conn.set_connector_settings(settings.cloned());
+        if let Some(components) = components {
+            conn.set_sleep_impl(components.sleep_impl());
+        }
+        conn.set_proxy_config(Some(proxy::ProxyConfig::from_env()));
+        conn.build()
+    })
+}
 
 pub struct Config {
     pub creds: Credentials,
@@ -115,7 +185,7 @@ impl Store {
 
     pub(crate) fn build(
         cfg: Config,
-        http_client: Option<aws_sdk_s3::config::SharedHttpClient>,
+        http_client: Option<SharedHttpClient>,
         force_path_style: bool,
     ) -> Self {
         let s3creds = AwsCredentials::new(
@@ -129,7 +199,14 @@ impl Store {
             .behavior_version(BehaviorVersion::latest())
             .region(Region::new(cfg.region))
             .credentials_provider(s3creds)
-            .force_path_style(force_path_style);
+            .force_path_style(force_path_style)
+            .timeout_config(timeout_config(ATTEMPT_TIMEOUT))
+            .stalled_stream_protection(
+                StalledStreamProtectionConfig::enabled()
+                    .upload_enabled(true)
+                    .grace_period(STALL_GRACE)
+                    .build(),
+            );
         if let Some(http_client) = http_client {
             builder = builder.http_client(http_client);
         }
@@ -176,7 +253,8 @@ impl Store {
     }
 
     /// Uploads `src` as a single `PutObject`. The body is buffered in memory, so
-    /// the SDK can replay it on a retry without reopening the path.
+    /// the SDK can replay it on a retry without reopening the path, and is
+    /// yielded in frames so a stalled transfer is detected.
     pub async fn put_singlepart(
         &self,
         mut src: Source,
@@ -184,13 +262,15 @@ impl Store {
         metadata: &HashMap<String, String>,
     ) -> Result<(), S3Err> {
         let size = src.size;
-        let body = ByteStream::from(src.read("put_object", dst, 0, size).await?);
+        let body = body::chunked(Bytes::from(src.read("put_object", dst, 0, size).await?));
         self.client
             .put_object()
             .bucket(&dst.bucket)
             .key(&dst.key)
             .body(body)
             .set_metadata((!metadata.is_empty()).then(|| metadata.clone()))
+            .customize()
+            .config_override(attempt_override(body_attempt_timeout(size)))
             .send()
             .await
             .map_err(|e| errors::map_sdk_err("put_object", dst, e))?;

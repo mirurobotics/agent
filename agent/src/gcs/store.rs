@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use crate::filesys::{errors::PathDoesNotExistErr, file::File, path::PathExt, FileSysErr};
 use crate::gcs::{
     errors::{self, is_not_found, map_gcs_err, BuildErr, ConnectionErr},
+    progress::{self, Limits, Progress, ProgressSource},
     Credentials, GcsErr, Object, StaticTokenCredentials,
 };
 use crate::trace;
@@ -14,19 +15,31 @@ use google_cloud_auth::credentials::{Credentials as GcsCredentials, EntityTag};
 use google_cloud_gax::retry_policy::RetryPolicyExt as _;
 use google_cloud_storage::client::{Storage, StorageControl};
 use google_cloud_storage::retry_policy::RetryableErrors;
+use google_cloud_storage::streaming_source::{FileSource, Payload};
 use http::HeaderValue;
 use tokio::io::AsyncWriteExt as _;
 
 /// Per-attempt timeout for the gRPC control-plane ops (delete/exists) — tiny
-/// metadata RPCs. Without it the underlying client has no request timeout, no
+/// metadata RPCs. Without it the gRPC control client has no request timeout, no
 /// connect timeout, and no TCP keepalive, so a silently dropped connection
 /// (NAT expiry, cellular drop) hangs the call forever.
+/// The HTTP data client does have reqwest's TCP keepalive but no connect
+/// timeout, which is why `put`/`get` bound progress with idle windows instead.
 const CONTROL_ATTEMPT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
-/// Maximum time `get` waits for the response to start or for the next body
-/// chunk. Bounds *progress* rather than the whole transfer, so it holds for
-/// arbitrarily large objects.
-const READ_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+/// Maximum time `get` or `put` may go without byte progress (including the wait
+/// for a response to start). Bounds *progress* rather than the whole transfer,
+/// so it holds for arbitrarily large objects.
+const IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Longest wait after the last body byte for send buffers to drain and GCS to
+/// answer.
+const FINALIZE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(90);
+
+const UPLOAD_LIMITS: Limits = Limits {
+    idle: IDLE_TIMEOUT,
+    finalize: FINALIZE_TIMEOUT,
+};
 
 /// An async GCS client holding the HTTP data client ([`Storage`]) for uploads/downloads
 /// and the gRPC control client ([`StorageControl`]) for delete/exists.
@@ -129,18 +142,31 @@ impl Store {
     /// failure to open the source is [`GcsErr::LocalIoErr`]. The GCS SDK
     /// chooses between simple and resumable transfer based on the payload size.
     ///
-    /// The upload itself carries no timeout — a single attempt spans the whole
-    /// body, so no fixed bound fits arbitrary sizes. A silently dead connection
-    /// can stall this call; callers that need a bound must enforce their own
-    /// size-scaled deadline (e.g. `tokio::time::timeout`) around it. The
-    /// upload actor does exactly that: `Worker::attempt_upload` in
-    /// `agent/src/upload/uploader.rs` bounds every attempt with a
-    /// floor-plus-per-byte deadline (`UploaderOptions::attempt_deadline`).
+    /// Every request is bounded by progress, not size: no body bytes accepted by
+    /// the HTTP stack for [`IDLE_TIMEOUT`], or no response within
+    /// [`FINALIZE_TIMEOUT`] after the last body byte, aborts the call with a
+    /// retryable [`GcsErr::ConnectionErr`]. The idle window also covers
+    /// connect/TLS (the SDK offers no connect-timeout knob) and SDK-internal
+    /// retries and backoff.
+    ///
+    /// Dropping the future orphans any resumable session (GCS expires it
+    /// server-side); the caller's next attempt restarts from byte 0.
     pub async fn put(
         &self,
         src: File,
         dst: &Object,
         metadata: &HashMap<String, String>,
+    ) -> Result<(), GcsErr> {
+        self.put_with_limits(src, dst, metadata, UPLOAD_LIMITS).await
+    }
+
+    /// [`Self::put`] with explicit progress limits, so tests can use short ones.
+    async fn put_with_limits(
+        &self,
+        src: File,
+        dst: &Object,
+        metadata: &HashMap<String, String>,
+        limits: Limits,
     ) -> Result<(), GcsErr> {
         let resource_name = dst.resource_name();
         let file = tokio::fs::File::open(src.path()).await.map_err(|e| {
@@ -154,12 +180,17 @@ impl Store {
                 errors::map_body_io_err("put_object", dst, &src, e)
             }
         })?;
-        self.data
-            .write_object(&resource_name, &dst.key, file)
-            .set_metadata(metadata.clone())
-            .send_unbuffered()
-            .await
-            .map_err(|e| map_gcs_err("put_object", dst, e))?;
+        let (tx, rx) = tokio::sync::watch::channel(Progress::default());
+        let payload = ProgressSource::new(Payload::<FileSource>::from(file), tx);
+        let send = async {
+            self.data
+                .write_object(&resource_name, &dst.key, payload)
+                .set_metadata(metadata.clone())
+                .send_unbuffered()
+                .await
+                .map_err(|e| map_gcs_err("put_object", dst, e))
+        };
+        progress::watch_progress(send, rx, limits, dst).await?;
         Ok(())
     }
 
@@ -168,7 +199,7 @@ impl Store {
     pub async fn get(&self, src: &Object, dest: &File) -> Result<(), GcsErr> {
         let resource_name = src.resource_name();
         let send = self.data.read_object(&resource_name, &src.key).send();
-        let mut resp = match tokio::time::timeout(READ_IDLE_TIMEOUT, send)
+        let mut resp = match tokio::time::timeout(IDLE_TIMEOUT, send)
             .await
             .map_err(|_| Self::idle_timeout_err(src))?
         {
@@ -189,7 +220,7 @@ impl Store {
         // write on an unbuffered tokio File dispatches a blocking task —
         // buffer so multi-GB downloads don't pay one dispatch per frame.
         let mut writer = tokio::io::BufWriter::with_capacity(512 * 1024, file);
-        while let Some(chunk) = tokio::time::timeout(READ_IDLE_TIMEOUT, resp.next())
+        while let Some(chunk) = tokio::time::timeout(IDLE_TIMEOUT, resp.next())
             .await
             .map_err(|_| Self::idle_timeout_err(src))?
         {
@@ -253,12 +284,12 @@ impl Store {
         }
     }
 
-    /// A read made no progress within [`READ_IDLE_TIMEOUT`] — a silently dead
+    /// A `get` made no progress within [`IDLE_TIMEOUT`] — a silently dead
     /// connection, surfaced as a retryable network error.
     fn idle_timeout_err(src: &Object) -> GcsErr {
         GcsErr::ConnectionErr(ConnectionErr {
             object: src.clone(),
-            msg: format!("no data received for {}s", READ_IDLE_TIMEOUT.as_secs()),
+            msg: format!("no data received for {}s", IDLE_TIMEOUT.as_secs()),
             trace: trace!(),
         })
     }

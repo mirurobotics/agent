@@ -1,10 +1,14 @@
 // internal crates
-use crate::s3::{errors, errors::NoSuchUploadErr, Object, S3Err, Source, Store, PART_SIZE};
+use crate::s3::{
+    attempt_override, body, body_attempt_timeout, complete_attempt_timeout, errors,
+    errors::NoSuchUploadErr, Object, S3Err, Source, Store, ABORT_ATTEMPT_TIMEOUT, PART_SIZE,
+};
 
 // external crates
 use aws_sdk_s3::operation::list_parts::ListPartsOutput;
-use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart};
+use bytes::Bytes;
+use tokio::time::Instant;
 
 type UploadID = String;
 
@@ -49,9 +53,10 @@ impl Store {
         dst: &Object,
         upload_id: &str,
     ) -> Result<(), S3Err> {
+        let started = Instant::now();
         let landed = self.list_parts(dst, upload_id).await?;
         let parts = self.upload_parts(&mut src, dst, upload_id, &landed).await?;
-        self.complete_multipart_upload(dst, upload_id, &parts).await
+        self.complete_multipart_upload(dst, upload_id, &parts, src.size, started).await
     }
 
     /// Walks [`Self::part_plan`] in order. For each part number present in
@@ -213,10 +218,11 @@ impl Store {
         dst: &Object,
         upload_id: &str,
     ) -> Result<(), S3Err> {
+        let started = Instant::now();
         let parts = self
             .upload_parts(src, dst, upload_id, &std::collections::HashMap::new())
             .await?;
-        self.complete_multipart_upload(dst, upload_id, &parts).await
+        self.complete_multipart_upload(dst, upload_id, &parts, src.size, started).await
     }
 
     /// Uploads one part's bytes to S3 and returns the [`CompletedPart`]
@@ -228,7 +234,8 @@ impl Store {
         part_number: i32,
         buf: Vec<u8>,
     ) -> Result<CompletedPart, S3Err> {
-        let body = ByteStream::from(buf);
+        let len = buf.len() as u64;
+        let body = body::chunked(Bytes::from(buf));
 
         let output = self
             .client
@@ -238,6 +245,8 @@ impl Store {
             .upload_id(upload_id)
             .part_number(part_number)
             .body(body)
+            .customize()
+            .config_override(attempt_override(body_attempt_timeout(len)))
             .send()
             .await
             .map_err(|e| errors::map_sdk_err("upload_part", dst, e))?;
@@ -252,12 +261,16 @@ impl Store {
     }
 
     /// Completes a multipart upload from the `(part_number, etag)` pairs of the
-    /// landed parts.
+    /// landed parts. `size` is the object size and `started` when its parts
+    /// began uploading; together they bound this call (see
+    /// [`complete_attempt_timeout`]).
     async fn complete_multipart_upload(
         &self,
         obj: &Object,
         upload_id: &str,
         parts: &[CompletedPart],
+        size: u64,
+        started: Instant,
     ) -> Result<(), S3Err> {
         let completed = CompletedMultipartUpload::builder()
             .set_parts(Some(parts.to_vec()))
@@ -268,6 +281,8 @@ impl Store {
             .key(&obj.key)
             .upload_id(upload_id)
             .multipart_upload(completed)
+            .customize()
+            .config_override(attempt_override(complete_attempt_timeout(size, started.elapsed())))
             .send()
             .await
             .map_err(|e| errors::map_sdk_err("complete_multipart_upload", obj, e))?;
@@ -282,6 +297,8 @@ impl Store {
             .bucket(&obj.bucket)
             .key(&obj.key)
             .upload_id(upload_id)
+            .customize()
+            .config_override(attempt_override(ABORT_ATTEMPT_TIMEOUT))
             .send()
             .await
             .map_err(|e| errors::map_sdk_err("abort_multipart_upload", obj, e))?;

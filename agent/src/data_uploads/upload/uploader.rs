@@ -43,11 +43,11 @@ pub struct UploaderOptions {
     /// Backoff between attempts; the exponent is the job's lifetime attempt
     /// count minus one, so waits grow across requeues and cap at `max_secs`.
     pub backoff: cooldown::Backoff,
-    /// Fixed floor of the per-attempt upload deadline. Covers control-plane
+    /// Fixed floor of the per-attempt backstop deadline. Covers control-plane
     /// RPCs (create/confirm, each bounded at 3 × 10s attempts) and connection
     /// setup so tiny files are never starved.
     pub attempt_timeout_floor: Duration,
-    /// Minimum-throughput assumption scaling the per-attempt deadline with
+    /// Minimum-throughput assumption scaling the per-attempt backstop with
     /// file size. Deliberately far below any plausible sustained uplink: a
     /// false timeout discards transfer progress, so this errs generous while
     /// still guaranteeing every attempt terminates.
@@ -76,8 +76,15 @@ impl Default for UploaderOptions {
 }
 
 impl UploaderOptions {
-    /// Deadline for one upload attempt of `size` bytes: floor plus a
-    /// per-byte allowance at the minimum-throughput assumption.
+    /// Backstop deadline for one upload attempt of `size` bytes: floor plus a
+    /// per-byte allowance at the minimum-throughput assumption. Guarantees
+    /// every attempt terminates; expiry counts against the attempt budget.
+    ///
+    /// Stalls are caught first by the stores' own bounds (GCS's no-progress
+    /// watchdog; S3 stalled-stream protection and per-call limits) and surface
+    /// as uncounted network errors. Those bounds end before this deadline when
+    /// create takes ≤ 30 s (≤ 20 s for S3 multipart, whose best-effort abort
+    /// may add 10 s) and bytes move at ≥ `attempt_timeout_bytes_per_sec`.
     pub fn attempt_deadline(&self, size: u64) -> Duration {
         let bps = self.attempt_timeout_bytes_per_sec.max(1);
         self.attempt_timeout_floor
