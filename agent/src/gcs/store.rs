@@ -166,7 +166,8 @@ impl Store {
             .await
             .map_err(|e| errors::map_body_io_err("put_object", dst, &src, e))?
             .len();
-        track(format!("upload: {src}"), size, REPORT_INTERVAL, |progress| {
+        let label = format!("upload: {src}");
+        track(label, size, REPORT_INTERVAL, |progress| {
             let payload = CountingSource {
                 inner: Payload::from(file),
                 progress,

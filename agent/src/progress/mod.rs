@@ -69,7 +69,9 @@ where
         started: Instant::now(),
         logged: false,
     };
-    let mut work = std::pin::pin!(work(progress.clone()));
+    // Boxed so a caller's async state holds a pointer instead of inlining the
+    // transfer's (deep SDK) future, which overflows rustc's layout query depth.
+    let mut work = Box::pin(work(progress.clone()));
     let mut ticker = tokio::time::interval_at(ending.started + interval, interval);
     ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
     let mut prev = 0;
@@ -382,11 +384,16 @@ mod tests {
         // Runs one progressing and one stalled interval before the work fails.
         #[tokio::test(start_paused = true)]
         async fn reports_while_the_work_runs() {
-            let result = track("test".to_string(), 10 * MIB, INTERVAL, |progress| async move {
-                progress.add(MIB);
-                tokio::time::sleep(Duration::from_secs(61)).await;
-                Err::<(), _>("failed")
-            })
+            let result = track(
+                "test".to_string(),
+                10 * MIB,
+                INTERVAL,
+                |progress| async move {
+                    progress.add(MIB);
+                    tokio::time::sleep(Duration::from_secs(61)).await;
+                    Err::<(), _>("failed")
+                },
+            )
             .await;
             assert_eq!(result, Err("failed"));
         }
