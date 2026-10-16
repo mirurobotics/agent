@@ -1,9 +1,11 @@
 // standard crates
 use std::collections::HashMap;
 use std::io::SeekFrom;
+use std::sync::Arc;
 
 // internal crates
 use crate::filesys::{errors::PathDoesNotExistErr, file::File, path::PathExt, FileSysErr};
+use crate::progress::Progress;
 use crate::trace;
 
 // external crates
@@ -104,6 +106,7 @@ impl Source {
 
 pub struct Store {
     client: Client,
+    progress: Arc<Progress>,
 }
 
 impl Store {
@@ -135,7 +138,14 @@ impl Store {
         }
         Self {
             client: Client::from_conf(builder.build()),
+            progress: Arc::default(),
         }
+    }
+
+    /// Records the bytes [`Self::put`] has uploaded into `progress`.
+    pub fn with_progress(mut self, progress: Arc<Progress>) -> Self {
+        self.progress = progress;
+        self
     }
 
     /// Test-only constructor that injects a caller-provided HTTP client (e.g. a
@@ -184,6 +194,7 @@ impl Store {
         metadata: &HashMap<String, String>,
     ) -> Result<(), S3Err> {
         let size = src.size;
+        self.progress.set_total(size);
         let body = ByteStream::from(src.read("put_object", dst, 0, size).await?);
         self.client
             .put_object()
@@ -194,6 +205,7 @@ impl Store {
             .send()
             .await
             .map_err(|e| errors::map_sdk_err("put_object", dst, e))?;
+        self.progress.add(size);
         Ok(())
     }
 
@@ -301,6 +313,7 @@ mod tests {
     use miru_agent::filesys::file::File;
     use miru_agent::filesys::path::PathExt;
     use miru_agent::filesys::{files, FileSysErr, WriteOptions};
+    use miru_agent::progress::{Progress, Snapshot};
     use miru_agent::s3::{Config, Credentials, Object, S3Err, Source, Store};
 
     // external crates
@@ -459,6 +472,32 @@ mod tests {
 
             async fn source_of(tf: &test_files::TempFile, key: &str) -> Source {
                 Source::open(tf.to_file(), &obj(key)).await.unwrap()
+            }
+
+            #[tokio::test]
+            async fn put_records_progress() {
+                let key = "artifacts/hello.txt";
+                let src = temp_file_with(b"hello world").await;
+                let (store, _replay) = store_expecting(
+                    req("PUT", "artifacts/hello.txt?x-id=PutObject"),
+                    resp(200, &[]),
+                );
+                let progress = std::sync::Arc::new(Progress::default());
+
+                store
+                    .with_progress(progress.clone())
+                    .put_singlepart(source_of(&src, key).await, &obj(key), &HashMap::new())
+                    .await
+                    .unwrap();
+
+                assert_eq!(
+                    progress.snapshot(),
+                    Snapshot {
+                        total: 11,
+                        done: 11,
+                        rewinds: 0,
+                    }
+                );
             }
 
             #[tokio::test]

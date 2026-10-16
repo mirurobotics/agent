@@ -29,6 +29,7 @@ aws-smithy-types = { version = "1.5", default-features = false }
 aws-lc-rs = "1.18.0"
 axum = { version = "0.8.3" }
 base64 = "0.22.1"
+bytes = "1.12.1"
 chrono = { version = "0.4.40", features = ["serde"] }
 config-agent = { path = "apps/agent" }
 futures = "0.3.31"

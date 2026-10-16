@@ -200,7 +200,7 @@ where
     }
 
     async fn run_attempt(&mut self, mut entry: QueueEntry) -> Flow {
-        Self::log_attempt(&entry);
+        self.log_attempt(&entry);
         match self.attempt_upload(&entry).await {
             // the attempt was cancelled -> leave the entry in the queue so the next
             // boot picks it up rather than losing it
@@ -349,12 +349,15 @@ where
         self.queue.requeue(entry).await;
     }
 
-    fn log_attempt(entry: &QueueEntry) {
+    fn log_attempt(&self, entry: &QueueEntry) {
         let file = &entry.job.file;
         let rule = &entry.job.file_rule_id;
         let size = entry.job.size;
         let attempt = entry.attempts + 1;
-        info!("upload: attempting {file} rule {rule} size {size} attempt {attempt}");
+        let limit = self.options.attempt_deadline(size).as_secs();
+        info!(
+            "upload: attempting {file} rule {rule} size {size} attempt {attempt} deadline {limit}s"
+        );
     }
 
     fn log_success(entry: &QueueEntry) {

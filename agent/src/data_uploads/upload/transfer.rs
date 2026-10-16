@@ -1,6 +1,8 @@
 // standard crates
 use std::collections::HashMap;
 use std::future::Future;
+use std::sync::Arc;
+use std::time::Duration;
 
 // internal crates
 use crate::data_uploads::upload::errors::{
@@ -8,12 +10,17 @@ use crate::data_uploads::upload::errors::{
 };
 use crate::filesys::File;
 use crate::gcs;
+use crate::progress::{Progress, Reporter};
 use crate::s3;
 use backend_api::models::upload_credentials::Scheme;
 use backend_api::models::{S3UploadCredentials, UploadCredentials, UploadDestination};
 
 // external crates
-use tracing::info;
+use chrono::{DateTime, Utc};
+use tracing::{info, warn};
+
+/// How often a running transfer logs its progress.
+const PROGRESS_INTERVAL: Duration = Duration::from_secs(30);
 
 /// The seam between the upload executor and the concrete cloud-storage SDKs.
 /// Given the vended downscoped credentials and the server-authorized
@@ -83,12 +90,15 @@ impl SdkTransfer {
         destination: &UploadDestination,
         file: &File,
         metadata: &HashMap<String, String>,
+        progress: &Arc<Progress>,
     ) -> Result<(), UploadErr> {
         let creds = credentials
             .s3_credentials
             .as_deref()
             .ok_or_else(|| executor_err(TransferErr::MissingS3Credentials))?;
-        let store = self.s3_store(s3_config(creds));
+        let store = self
+            .s3_store(s3_config(creds))
+            .with_progress(progress.clone());
         let object = s3::Object {
             bucket: destination.bucket_name.clone(),
             key: destination.object_key.clone(),
@@ -107,6 +117,7 @@ impl SdkTransfer {
         destination: &UploadDestination,
         file: &File,
         metadata: &HashMap<String, String>,
+        progress: &Arc<Progress>,
     ) -> Result<(), UploadErr> {
         let creds = credentials
             .gcs_credentials
@@ -117,7 +128,8 @@ impl SdkTransfer {
                 access_token: creds.access_token.clone(),
             })
             .await
-            .map_err(classified_executor_err)?;
+            .map_err(classified_executor_err)?
+            .with_progress(progress.clone());
         let object = gcs::Object {
             bucket: destination.bucket_name.clone(),
             key: destination.object_key.clone(),
@@ -151,18 +163,43 @@ impl ObjectTransfer for SdkTransfer {
             "upload: transferring file {} via scheme {:?} to bucket {} key {}",
             file, credentials.scheme, destination.bucket_name, destination.object_key
         );
-        match credentials.scheme {
+        let expires_at = &credentials.expires_at;
+        match minutes_until(expires_at, Utc::now()) {
+            Some(minutes) => {
+                info!("upload: credentials for {file} expire in {minutes} min ({expires_at})")
+            }
+            None => {
+                warn!("upload: credentials for {file} have an unparseable expiry {expires_at:?}")
+            }
+        }
+
+        let progress = Arc::new(Progress::default());
+        let reporter = Reporter::spawn(
+            format!("upload: {file}"),
+            progress.clone(),
+            PROGRESS_INTERVAL,
+        );
+        let result = match credentials.scheme {
             Scheme::S3 => {
-                self.transfer_s3(credentials, destination, file, metadata)
+                self.transfer_s3(credentials, destination, file, metadata, &progress)
                     .await
             }
             Scheme::Gcs => {
-                self.transfer_gcs(credentials, destination, file, metadata)
+                self.transfer_gcs(credentials, destination, file, metadata, &progress)
                     .await
             }
             Scheme::SchemeUnknown => Err(executor_err(TransferErr::UnrecognizedScheme)),
-        }
+        };
+        reporter.finish(result.is_ok());
+        result
     }
+}
+
+/// Minutes from `now` until the RFC 3339 instant `expires_at`, negative once it
+/// has passed. `None` when `expires_at` does not parse.
+fn minutes_until(expires_at: &str, now: DateTime<Utc>) -> Option<i64> {
+    let at = DateTime::parse_from_rfc3339(expires_at).ok()?;
+    Some((at.with_timezone(&Utc) - now).num_minutes())
 }
 
 /// Maps vended S3 session credentials into an [`s3::Config`]. Kept separate so
@@ -185,7 +222,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     // internal crates
-    use super::s3_config;
+    use super::{minutes_until, s3_config};
     use crate::test_utils::{
         filesys::{files as test_files, missing_file},
         http_client::run_server,
@@ -586,6 +623,16 @@ mod tests {
             ),
             ("us-east-1", "AKIA_TEST", "secret", "session")
         );
+    }
+
+    #[test]
+    fn minutes_until_counts_down_to_expiry() {
+        let now = chrono::DateTime::parse_from_rfc3339("2021-01-01T00:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        assert_eq!(minutes_until("2021-01-01T01:00:00Z", now), Some(60));
+        assert_eq!(minutes_until("2020-12-31T23:30:00Z", now), Some(-30));
+        assert_eq!(minutes_until("not a time", now), None);
     }
 
     #[tokio::test]

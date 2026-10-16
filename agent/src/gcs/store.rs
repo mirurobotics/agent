@@ -1,5 +1,6 @@
 // standard crates
 use std::collections::HashMap;
+use std::sync::Arc;
 
 // internal crates
 use crate::filesys::{errors::PathDoesNotExistErr, file::File, path::PathExt, FileSysErr};
@@ -7,6 +8,7 @@ use crate::gcs::{
     errors::{self, is_not_found, map_gcs_err, BuildErr, ConnectionErr},
     Credentials, GcsErr, Object, StaticTokenCredentials,
 };
+use crate::progress::Progress;
 use crate::trace;
 
 // external crates
@@ -14,8 +16,10 @@ use google_cloud_auth::credentials::{Credentials as GcsCredentials, EntityTag};
 use google_cloud_gax::retry_policy::RetryPolicyExt as _;
 use google_cloud_storage::client::{Storage, StorageControl};
 use google_cloud_storage::retry_policy::RetryableErrors;
+use google_cloud_storage::streaming_source::{FileSource, Payload, Seek, SizeHint, StreamingSource};
 use http::HeaderValue;
 use tokio::io::AsyncWriteExt as _;
+use tracing::warn;
 
 /// Per-attempt timeout for the gRPC control-plane ops (delete/exists) — tiny
 /// metadata RPCs. Without it the underlying client has no request timeout, no
@@ -33,6 +37,7 @@ const READ_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60
 pub struct Store {
     data: Storage,
     control: StorageControl,
+    progress: Arc<Progress>,
 }
 
 impl Store {
@@ -118,7 +123,17 @@ impl Store {
             }
         };
 
-        Ok(Self { data, control })
+        Ok(Self {
+            data,
+            control,
+            progress: Arc::default(),
+        })
+    }
+
+    /// Records the bytes [`Self::put`] hands to the SDK into `progress`.
+    pub fn with_progress(mut self, progress: Arc<Progress>) -> Self {
+        self.progress = progress;
+        self
     }
 
     /// Creates or overwrites an object by streaming a file off disk.
@@ -154,8 +169,19 @@ impl Store {
                 errors::map_body_io_err("put_object", dst, &src, e)
             }
         })?;
+        let size = file
+            .metadata()
+            .await
+            .map_err(|e| errors::map_body_io_err("put_object", dst, &src, e))?
+            .len();
+        self.progress.set_total(size);
+        let payload = CountingSource {
+            inner: Payload::from(file),
+            progress: self.progress.clone(),
+            object: dst.to_string(),
+        };
         self.data
-            .write_object(&resource_name, &dst.key, file)
+            .write_object(&resource_name, &dst.key, payload)
             .set_metadata(metadata.clone())
             .send_unbuffered()
             .await
@@ -272,6 +298,45 @@ impl Store {
     }
 }
 
+/// The SDK's file source, counting the bytes the SDK reads into `progress` and
+/// logging when the SDK seeks back to resend data within one upload.
+struct CountingSource {
+    inner: Payload<FileSource>,
+    progress: Arc<Progress>,
+    object: String,
+}
+
+impl StreamingSource for CountingSource {
+    type Error = std::io::Error;
+
+    async fn next(&mut self) -> Option<Result<bytes::Bytes, Self::Error>> {
+        let chunk = self.inner.next().await;
+        if let Some(Ok(bytes)) = &chunk {
+            self.progress.add(bytes.len() as u64);
+        }
+        chunk
+    }
+
+    async fn size_hint(&self) -> Result<SizeHint, Self::Error> {
+        self.inner.size_hint().await
+    }
+}
+
+impl Seek for CountingSource {
+    type Error = std::io::Error;
+
+    async fn seek(&mut self, offset: u64) -> Result<(), Self::Error> {
+        let prev = self.progress.seek_to(offset);
+        if offset < prev {
+            warn!(
+                "gcs: resending {} from byte {offset} after reading {prev} bytes",
+                self.object
+            );
+        }
+        self.inner.seek(offset).await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     // standard crates
@@ -291,6 +356,7 @@ mod tests {
         BuildErr, ConnectionErr, LocalIoErr, ObjectNotFoundErr, RequestFailedErr,
     };
     use miru_agent::gcs::{Credentials, GcsErr, Object, Store};
+    use miru_agent::progress::{Progress, Snapshot};
 
     // external crates
     use axum::body::Bytes;
@@ -525,6 +591,60 @@ mod tests {
                     .windows(b"hello world".len())
                     .any(|w| w == b"hello world"),
                 "uploaded multipart body must contain the file bytes"
+            );
+        }
+
+        #[tokio::test]
+        async fn upload_records_progress() {
+            let rec = HttpRecorder::default();
+            let progress = Arc::new(Progress::default());
+            let store = http_store(rec.clone())
+                .await
+                .with_progress(progress.clone());
+            let src = temp_file_with(b"hello world").await;
+
+            store
+                .put(src.to_file(), &obj("artifacts/hello.txt"), &HashMap::new())
+                .await
+                .unwrap();
+
+            assert_eq!(
+                progress.snapshot(),
+                Snapshot {
+                    total: 11,
+                    done: 11,
+                    rewinds: 0,
+                }
+            );
+        }
+
+        #[tokio::test]
+        async fn counting_source_counts_reads_and_rewinds() {
+            use google_cloud_storage::streaming_source::{Payload, Seek, StreamingSource};
+
+            let src = temp_file_with(b"hello world").await;
+            let file = tokio::fs::File::open(src.file().path()).await.unwrap();
+            let progress = Arc::new(Progress::default());
+            let mut source = super::super::CountingSource {
+                inner: Payload::from(file),
+                progress: progress.clone(),
+                object: "gs://test-bucket/k".to_string(),
+            };
+
+            while let Some(chunk) = source.next().await {
+                chunk.unwrap();
+            }
+            source.seek(6).await.unwrap();
+            let rest = source.next().await.unwrap().unwrap();
+
+            assert_eq!(&rest[..], b"world");
+            assert_eq!(
+                progress.snapshot(),
+                Snapshot {
+                    total: 0,
+                    done: 11,
+                    rewinds: 1,
+                }
             );
         }
 
