@@ -1,33 +1,23 @@
 // standard crates
+use std::fmt;
+use std::future::Future;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
 // external crates
-use tokio::task::JoinHandle;
 use tokio::time::{Instant, MissedTickBehavior};
 use tracing::{info, warn};
 
-/// How often a [`Reporter`] logs a running transfer.
+/// How often [`track`] logs a running transfer.
 pub const REPORT_INTERVAL: Duration = Duration::from_secs(30);
 
-/// Bytes moved by a long-running transfer of a fixed `total` size, shared
-/// between the code that moves them and a [`Reporter`] that logs them. Counts
-/// describe what the transfer code has handed off, not what the remote end has
-/// acknowledged.
+/// Bytes moved by a transfer of a fixed `total` size. Counts describe what the
+/// transfer code has handed off, not what the remote end has acknowledged.
 #[derive(Debug)]
 pub struct Progress {
     total: u64,
     done: AtomicU64,
-    rewinds: AtomicU64,
-}
-
-/// A point-in-time copy of a [`Progress`].
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct Snapshot {
-    pub total: u64,
-    pub done: u64,
-    pub rewinds: u64,
 }
 
 impl Progress {
@@ -35,7 +25,6 @@ impl Progress {
         Self {
             total,
             done: AtomicU64::new(0),
-            rewinds: AtomicU64::new(0),
         }
     }
 
@@ -43,140 +32,169 @@ impl Progress {
         self.done.fetch_add(bytes, Ordering::Relaxed);
     }
 
-    /// Moves the position to `offset` and returns the previous position. A
-    /// move backwards counts as a rewind: the transfer is resending data.
+    /// Moves the position to `offset`, e.g. when the transfer resends from an
+    /// earlier byte, and returns the previous position.
     pub fn seek_to(&self, offset: u64) -> u64 {
-        let prev = self.done.swap(offset, Ordering::Relaxed);
-        if offset < prev {
-            self.rewinds.fetch_add(1, Ordering::Relaxed);
-        }
-        prev
+        self.done.swap(offset, Ordering::Relaxed)
     }
 
-    pub fn snapshot(&self) -> Snapshot {
-        Snapshot {
-            total: self.total,
-            done: self.done.load(Ordering::Relaxed),
-            rewinds: self.rewinds.load(Ordering::Relaxed),
-        }
+    pub fn total(&self) -> u64 {
+        self.total
+    }
+
+    pub fn done(&self) -> u64 {
+        self.done.load(Ordering::Relaxed)
     }
 }
 
-/// Logs a [`Progress`] every `interval` until it is finished or dropped. An
-/// interval with no progress, or with a rewind, logs a warning, so a stalled or
-/// retrying transfer shows up while it happens. Dropping an unfinished reporter
-/// (the transfer was cancelled, e.g. by a deadline) logs how far it got.
-pub struct Reporter {
+/// Runs `work` with a fresh [`Progress`] for a transfer of `total` bytes and
+/// logs it every `interval` until `work` returns, then logs the outcome. An
+/// interval without forward progress logs a warning, so a stalled transfer
+/// shows up while it is stalled. If this future is dropped before `work`
+/// returns (e.g. by a deadline), how far it got is logged as cancelled.
+pub async fn track<T, E, F, Fut>(
     label: String,
-    progress: Arc<Progress>,
-    started: Instant,
-    task: JoinHandle<()>,
-    finished: bool,
-}
-
-impl Reporter {
-    pub fn spawn(label: String, progress: Arc<Progress>, interval: Duration) -> Self {
-        let started = Instant::now();
-        let task = tokio::spawn(report_every(
-            label.clone(),
-            progress.clone(),
-            started,
-            interval,
-        ));
-        Self {
-            label,
-            progress,
-            started,
-            task,
-            finished: false,
-        }
-    }
-
-    /// Stops reporting and logs the final state of a transfer that returned.
-    pub fn finish(mut self, succeeded: bool) {
-        self.finished = true;
-        self.log_final(if succeeded { "completed" } else { "failed" });
-    }
-
-    fn log_final(&self, outcome: &str) {
-        let message = summary(outcome, self.progress.snapshot(), self.started.elapsed());
-        if outcome == "completed" {
-            info!("{}: {message}", self.label);
-        } else {
-            warn!("{}: {message}", self.label);
-        }
-    }
-}
-
-impl Drop for Reporter {
-    fn drop(&mut self) {
-        self.task.abort();
-        if !self.finished {
-            self.log_final("cancelled");
-        }
-    }
-}
-
-async fn report_every(
-    label: String,
-    progress: Arc<Progress>,
-    started: Instant,
+    total: u64,
     interval: Duration,
-) {
-    let mut ticker = tokio::time::interval_at(started + interval, interval);
+    work: F,
+) -> Result<T, E>
+where
+    F: FnOnce(Arc<Progress>) -> Fut,
+    Fut: Future<Output = Result<T, E>>,
+{
+    let progress = Arc::new(Progress::new(total));
+    let ending = Ending {
+        label,
+        progress: progress.clone(),
+        started: Instant::now(),
+        logged: false,
+    };
+    let mut work = std::pin::pin!(work(progress.clone()));
+    let mut ticker = tokio::time::interval_at(ending.started + interval, interval);
     ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
-    let mut prev = progress.snapshot();
-    loop {
-        ticker.tick().await;
-        let now = progress.snapshot();
-        let report = describe(prev, now, interval, started.elapsed());
-        if report.healthy {
-            info!("{label}: {}", report.message);
-        } else {
-            warn!("{label}: {}", report.message);
+    let mut prev = 0;
+    let result = loop {
+        tokio::select! {
+            result = &mut work => break result,
+            _ = ticker.tick() => {
+                let now = progress.done();
+                let report = describe(total, prev, now, interval, ending.started.elapsed());
+                if report.healthy {
+                    info!("{}: {}", ending.label, report.message);
+                } else {
+                    warn!("{}: {}", ending.label, report.message);
+                }
+                prev = now;
+            }
         }
-        prev = now;
+    };
+    ending.log(if result.is_ok() {
+        Outcome::Completed
+    } else {
+        Outcome::Failed
+    });
+    result
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Outcome {
+    Completed,
+    Failed,
+    Cancelled,
+}
+
+impl fmt::Display for Outcome {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Outcome::Completed => "completed",
+            Outcome::Failed => "failed",
+            Outcome::Cancelled => "cancelled",
+        })
+    }
+}
+
+/// Logs how a tracked transfer ended: once through [`Self::log`], or as
+/// cancelled when dropped without it.
+struct Ending {
+    label: String,
+    progress: Arc<Progress>,
+    started: Instant,
+    logged: bool,
+}
+
+impl Ending {
+    fn log(mut self, outcome: Outcome) {
+        self.logged = true;
+        self.write(outcome);
+    }
+
+    fn write(&self, outcome: Outcome) {
+        let progress = &self.progress;
+        let message = summary(
+            outcome,
+            progress.total(),
+            progress.done(),
+            self.started.elapsed(),
+        );
+        match outcome {
+            Outcome::Completed => info!("{}: {message}", self.label),
+            Outcome::Failed | Outcome::Cancelled => warn!("{}: {message}", self.label),
+        }
+    }
+}
+
+impl Drop for Ending {
+    fn drop(&mut self) {
+        if !self.logged {
+            self.write(Outcome::Cancelled);
+        }
     }
 }
 
 /// One periodic progress line. `healthy` is false when the interval made no
-/// progress or rewound.
+/// forward progress.
 #[derive(Debug, PartialEq, Eq)]
 struct Report {
     healthy: bool,
     message: String,
 }
 
-fn describe(prev: Snapshot, now: Snapshot, interval: Duration, elapsed: Duration) -> Report {
-    let position = position(now);
+fn describe(total: u64, prev: u64, now: u64, interval: Duration, elapsed: Duration) -> Report {
     let interval_text = duration(interval.as_secs());
-    if now.rewinds > prev.rewinds {
-        let rewinds = now.rewinds - prev.rewinds;
-        return Report {
-            healthy: false,
-            message: format!(
-                "rewound {rewinds} time(s) in the last {interval_text}; resending from {position}"
-            ),
-        };
+    if now <= prev {
+        return stalled(total, now, &interval_text, elapsed);
     }
-    if now.done <= prev.done {
-        return Report {
-            healthy: false,
-            message: format!(
-                "no progress in the last {interval_text}; {position} after {}",
-                duration(elapsed.as_secs())
-            ),
-        };
+    advancing(total, prev, now, interval, elapsed, &interval_text)
+}
+
+fn stalled(total: u64, now: u64, interval_text: &str, elapsed: Duration) -> Report {
+    Report {
+        healthy: false,
+        message: format!(
+            "no progress in the last {interval_text}; {} after {}",
+            position(total, now),
+            duration(elapsed.as_secs())
+        ),
     }
-    let recent = rate(now.done - prev.done, interval);
-    let average = rate(now.done, elapsed);
+}
+
+fn advancing(
+    total: u64,
+    prev: u64,
+    now: u64,
+    interval: Duration,
+    elapsed: Duration,
+    interval_text: &str,
+) -> Report {
+    let average = rate(now, elapsed);
     let mut message = format!(
-        "{position}; {}/s over the last {interval_text}, {}/s average",
-        mib(recent),
+        "{}; {}/s over the last {interval_text}, {}/s average",
+        position(total, now),
+        mib(rate(now - prev, interval)),
         mib(average)
     );
-    if now.total > now.done && average > 0 {
-        let eta = (now.total - now.done) / average;
+    if total > now && average > 0 {
+        let eta = (total - now) / average;
         message.push_str(&format!("; about {} left", duration(eta)));
     }
     Report {
@@ -185,26 +203,22 @@ fn describe(prev: Snapshot, now: Snapshot, interval: Duration, elapsed: Duration
     }
 }
 
-fn summary(outcome: &str, now: Snapshot, elapsed: Duration) -> String {
-    let mut message = format!(
+fn summary(outcome: Outcome, total: u64, done: u64, elapsed: Duration) -> String {
+    format!(
         "{outcome} after {}; {}, {}/s average",
         duration(elapsed.as_secs()),
-        position(now),
-        mib(rate(now.done, elapsed))
-    );
-    if now.rewinds > 0 {
-        message.push_str(&format!("; rewound {} time(s)", now.rewinds));
-    }
-    message
+        position(total, done),
+        mib(rate(done, elapsed))
+    )
 }
 
-/// `done of total (pct%) sent`, or just `done sent` when the total is unknown.
-fn position(now: Snapshot) -> String {
-    if now.total == 0 {
-        return format!("{} sent", mib(now.done));
+/// `done of total (pct%) sent`, or just `done sent` when the total is 0.
+fn position(total: u64, done: u64) -> String {
+    if total == 0 {
+        return format!("{} sent", mib(done));
     }
-    let pct = now.done as f64 * 100.0 / now.total as f64;
-    format!("{} of {} ({pct:.1}%) sent", mib(now.done), mib(now.total))
+    let pct = done as f64 * 100.0 / total as f64;
+    format!("{} of {} ({pct:.1}%) sent", mib(done), mib(total))
 }
 
 /// Bytes per second over `over`, or 0 for a zero-length span.
@@ -234,33 +248,18 @@ mod tests {
     use super::*;
 
     const MIB: u64 = 1024 * 1024;
-
-    fn snap(total: u64, done: u64, rewinds: u64) -> Snapshot {
-        Snapshot {
-            total,
-            done,
-            rewinds,
-        }
-    }
+    const INTERVAL: Duration = Duration::from_secs(30);
 
     mod progress {
         use super::*;
 
         #[test]
-        fn counts_bytes_and_rewinds() {
+        fn counts_bytes_and_seeks() {
             let progress = Progress::new(10);
             progress.add(4);
             progress.add(3);
             assert_eq!(progress.seek_to(2), 7);
-            assert_eq!(progress.snapshot(), snap(10, 2, 1));
-        }
-
-        #[test]
-        fn seeking_forward_is_not_a_rewind() {
-            let progress = Progress::new(0);
-            assert_eq!(progress.seek_to(0), 0);
-            assert_eq!(progress.seek_to(5), 0);
-            assert_eq!(progress.snapshot(), snap(0, 5, 0));
+            assert_eq!((progress.total(), progress.done()), (10, 2));
         }
     }
 
@@ -270,9 +269,10 @@ mod tests {
         #[test]
         fn progressing_reports_rates_and_eta() {
             let report = describe(
-                snap(100 * MIB, 10 * MIB, 0),
-                snap(100 * MIB, 40 * MIB, 0),
-                Duration::from_secs(30),
+                100 * MIB,
+                10 * MIB,
+                40 * MIB,
+                INTERVAL,
                 Duration::from_secs(40),
             );
             assert_eq!(
@@ -289,9 +289,10 @@ mod tests {
         #[test]
         fn no_progress_is_a_stall() {
             let report = describe(
-                snap(100 * MIB, 40 * MIB, 0),
-                snap(100 * MIB, 40 * MIB, 0),
-                Duration::from_secs(30),
+                100 * MIB,
+                40 * MIB,
+                40 * MIB,
+                INTERVAL,
                 Duration::from_secs(7200),
             );
             assert_eq!(
@@ -306,29 +307,31 @@ mod tests {
         }
 
         #[test]
-        fn a_rewind_is_reported() {
+        fn moving_backwards_is_not_progress() {
             let report = describe(
-                snap(100 * MIB, 40 * MIB, 0),
-                snap(100 * MIB, 32 * MIB, 1),
-                Duration::from_secs(30),
+                100 * MIB,
+                40 * MIB,
+                32 * MIB,
+                INTERVAL,
                 Duration::from_secs(60),
             );
             assert_eq!(
                 report,
                 Report {
                     healthy: false,
-                    message: "rewound 1 time(s) in the last 30s; resending from 32.0 MiB of \
-                              100.0 MiB (32.0%) sent"
+                    message: "no progress in the last 30s; 32.0 MiB of 100.0 MiB (32.0%) sent \
+                              after 1m00s"
                         .to_string(),
                 }
             );
         }
 
         #[test]
-        fn unknown_total_omits_percent_and_eta() {
+        fn zero_total_omits_percent_and_eta() {
             let report = describe(
-                snap(0, 0, 0),
-                snap(0, 3 * MIB, 0),
+                0,
+                0,
+                3 * MIB,
                 Duration::from_secs(3),
                 Duration::from_secs(3),
             );
@@ -347,61 +350,54 @@ mod tests {
         use super::*;
 
         #[test]
-        fn includes_rewinds_when_there_were_any() {
+        fn reports_outcome_position_and_rate() {
             assert_eq!(
-                summary("failed", snap(4 * MIB, 2 * MIB, 2), Duration::from_secs(2)),
-                "failed after 2s; 2.0 MiB of 4.0 MiB (50.0%) sent, 1.0 MiB/s average; \
-                 rewound 2 time(s)"
+                summary(Outcome::Failed, 4 * MIB, 2 * MIB, Duration::from_secs(2)),
+                "failed after 2s; 2.0 MiB of 4.0 MiB (50.0%) sent, 1.0 MiB/s average"
             );
         }
 
         #[test]
         fn zero_elapsed_has_zero_rate() {
             assert_eq!(
-                summary("completed", snap(0, 0, 0), Duration::ZERO),
+                summary(Outcome::Completed, 0, 0, Duration::ZERO),
                 "completed after 0s; 0.0 MiB sent, 0.0 MiB/s average"
             );
         }
     }
 
-    mod reporter {
+    mod track {
         use super::*;
 
-        // Runs one progressing and one stalled interval, then stops on finish.
+        #[tokio::test]
+        async fn returns_the_work_result_with_its_progress() {
+            let result = track("test".to_string(), 10, INTERVAL, |progress| async move {
+                progress.add(10);
+                Ok::<_, ()>((progress.total(), progress.done()))
+            })
+            .await;
+            assert_eq!(result, Ok((10, 10)));
+        }
+
+        // Runs one progressing and one stalled interval before the work fails.
         #[tokio::test(start_paused = true)]
-        async fn finishing_stops_the_task() {
-            let progress = Arc::new(Progress::new(10 * MIB));
-            let reporter = Reporter::spawn(
-                "test".to_string(),
-                progress.clone(),
-                Duration::from_secs(30),
-            );
-            let task = reporter.task.abort_handle();
-
-            progress.add(MIB);
-            tokio::time::sleep(Duration::from_secs(61)).await;
-            assert!(!task.is_finished());
-
-            reporter.finish(true);
-            tokio::task::yield_now().await;
-
-            assert!(task.is_finished());
+        async fn reports_while_the_work_runs() {
+            let result = track("test".to_string(), 10 * MIB, INTERVAL, |progress| async move {
+                progress.add(MIB);
+                tokio::time::sleep(Duration::from_secs(61)).await;
+                Err::<(), _>("failed")
+            })
+            .await;
+            assert_eq!(result, Err("failed"));
         }
 
         #[tokio::test(start_paused = true)]
-        async fn dropping_an_unfinished_reporter_stops_it() {
-            let progress = Arc::new(Progress::new(0));
-            let reporter = Reporter::spawn(
-                "test".to_string(),
-                progress.clone(),
-                Duration::from_secs(30),
-            );
-            let task = reporter.task.abort_handle();
-
-            drop(reporter);
-            tokio::task::yield_now().await;
-
-            assert!(task.is_finished());
+        async fn dropping_before_the_work_returns_cancels_it() {
+            let tracked = track("test".to_string(), 10, INTERVAL, |_| {
+                std::future::pending::<Result<(), ()>>()
+            });
+            let timed_out = tokio::time::timeout(Duration::from_secs(1), tracked).await;
+            assert!(timed_out.is_err());
         }
     }
 }

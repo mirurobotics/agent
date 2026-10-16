@@ -1,9 +1,8 @@
 // standard crates
-use std::sync::Arc;
 use std::time::Instant;
 
 // internal crates
-use crate::progress::{Progress, Reporter, REPORT_INTERVAL};
+use crate::progress::{track, REPORT_INTERVAL};
 use crate::s3::{errors, errors::NoSuchUploadErr, Object, S3Err, Source, Store, PART_SIZE};
 
 // external crates
@@ -72,13 +71,8 @@ impl Store {
     ) -> Result<Vec<CompletedPart>, S3Err> {
         let plan = Self::part_plan(src.size);
         let count = plan.len();
-        let progress = Arc::new(Progress::new(src.size));
-        let reporter = Reporter::spawn(
-            format!("upload: {}", src.file),
-            progress.clone(),
-            REPORT_INTERVAL,
-        );
-        let result: Result<Vec<CompletedPart>, S3Err> = async {
+        let label = format!("upload: {}", src.file);
+        track(label, src.size, REPORT_INTERVAL, |progress| async move {
             let mut parts: Vec<CompletedPart> = Vec::new();
             for (part_number, offset, len) in plan {
                 let part = match landed.get(&part_number) {
@@ -97,11 +91,9 @@ impl Store {
                 progress.add(len);
                 parts.push(part);
             }
-            Ok(parts)
-        }
-        .await;
-        reporter.finish(result.is_ok());
-        result
+            Ok::<_, S3Err>(parts)
+        })
+        .await
     }
 
     /// Lists every part already uploaded for `upload_id`, following pagination,

@@ -1,11 +1,10 @@
 // standard crates
 use std::collections::HashMap;
 use std::io::SeekFrom;
-use std::sync::Arc;
 
 // internal crates
 use crate::filesys::{errors::PathDoesNotExistErr, file::File, path::PathExt, FileSysErr};
-use crate::progress::{Progress, Reporter, REPORT_INTERVAL};
+use crate::progress::{track, REPORT_INTERVAL};
 use crate::trace;
 
 // external crates
@@ -187,13 +186,8 @@ impl Store {
         metadata: &HashMap<String, String>,
     ) -> Result<(), S3Err> {
         let size = src.size;
-        let progress = Arc::new(Progress::new(size));
-        let reporter = Reporter::spawn(
-            format!("upload: {}", src.file),
-            progress.clone(),
-            REPORT_INTERVAL,
-        );
-        let result: Result<(), S3Err> = async {
+        let label = format!("upload: {}", src.file);
+        track(label, size, REPORT_INTERVAL, |progress| async move {
             let body = ByteStream::from(src.read("put_object", dst, 0, size).await?);
             self.client
                 .put_object()
@@ -205,11 +199,9 @@ impl Store {
                 .await
                 .map_err(|e| errors::map_sdk_err("put_object", dst, e))?;
             progress.add(size);
-            Ok(())
-        }
-        .await;
-        reporter.finish(result.is_ok());
-        result
+            Ok::<(), S3Err>(())
+        })
+        .await
     }
 
     /// Streams an object's body to a destination file. A missing object maps to

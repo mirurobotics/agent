@@ -8,7 +8,7 @@ use crate::gcs::{
     errors::{self, is_not_found, map_gcs_err, BuildErr, ConnectionErr},
     Credentials, GcsErr, Object, StaticTokenCredentials,
 };
-use crate::progress::{Progress, Reporter, REPORT_INTERVAL};
+use crate::progress::{track, Progress, REPORT_INTERVAL};
 use crate::trace;
 
 // external crates
@@ -166,21 +166,19 @@ impl Store {
             .await
             .map_err(|e| errors::map_body_io_err("put_object", dst, &src, e))?
             .len();
-        let progress = Arc::new(Progress::new(size));
-        let reporter = Reporter::spawn(format!("upload: {src}"), progress.clone(), REPORT_INTERVAL);
-        let payload = CountingSource {
-            inner: Payload::from(file),
-            progress,
-            object: dst.to_string(),
-        };
-        let result = self
-            .data
-            .write_object(&resource_name, &dst.key, payload)
-            .set_metadata(metadata.clone())
-            .send_unbuffered()
-            .await;
-        reporter.finish(result.is_ok());
-        result.map_err(|e| map_gcs_err("put_object", dst, e))?;
+        track(format!("upload: {src}"), size, REPORT_INTERVAL, |progress| {
+            let payload = CountingSource {
+                inner: Payload::from(file),
+                progress,
+                object: dst.to_string(),
+            };
+            self.data
+                .write_object(&resource_name, &dst.key, payload)
+                .set_metadata(metadata.clone())
+                .send_unbuffered()
+        })
+        .await
+        .map_err(|e| map_gcs_err("put_object", dst, e))?;
         Ok(())
     }
 
@@ -351,7 +349,7 @@ mod tests {
         BuildErr, ConnectionErr, LocalIoErr, ObjectNotFoundErr, RequestFailedErr,
     };
     use miru_agent::gcs::{Credentials, GcsErr, Object, Store};
-    use miru_agent::progress::{Progress, Snapshot};
+    use miru_agent::progress::Progress;
 
     // external crates
     use axum::body::Bytes;
@@ -590,7 +588,7 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn counting_source_counts_reads_and_rewinds() {
+        async fn counting_source_counts_reads_and_seeks() {
             use google_cloud_storage::streaming_source::{Payload, Seek, StreamingSource};
 
             let src = temp_file_with(b"hello world").await;
@@ -605,18 +603,14 @@ mod tests {
             while let Some(chunk) = source.next().await {
                 chunk.unwrap();
             }
-            source.seek(6).await.unwrap();
-            let rest = source.next().await.unwrap().unwrap();
+            assert_eq!(progress.done(), 11);
 
+            source.seek(6).await.unwrap();
+            assert_eq!(progress.done(), 6);
+
+            let rest = source.next().await.unwrap().unwrap();
             assert_eq!(&rest[..], b"world");
-            assert_eq!(
-                progress.snapshot(),
-                Snapshot {
-                    total: 11,
-                    done: 11,
-                    rewinds: 1,
-                }
-            );
+            assert_eq!(progress.done(), 11);
         }
 
         #[tokio::test]
