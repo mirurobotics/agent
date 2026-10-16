@@ -48,16 +48,16 @@ impl Progress {
 }
 
 /// Runs `work` with a fresh [`Progress`] for a transfer of `total` bytes and
-/// logs it every `interval` until `work` returns, then logs the outcome. An
-/// interval without forward progress logs a warning, so a stalled transfer
-/// shows up while it is stalled. If this future is dropped before `work`
-/// returns (e.g. by a deadline), how far it got is logged as cancelled.
-pub async fn track<T, E, F, Fut>(
-    label: String,
-    total: u64,
-    interval: Duration,
-    work: F,
-) -> Result<T, E>
+/// logs it every [`REPORT_INTERVAL`] until `work` returns, then logs the
+/// outcome. If this future is dropped before `work` returns (e.g. by a
+/// deadline), how far it got is logged as cancelled.
+///
+/// `unit` is how many bytes `work` counts at a time when it only counts whole
+/// chunks (e.g. S3 parts), or 0 when it counts bytes as they flow. An interval
+/// without progress logs a warning, so a stalled transfer shows up while it is
+/// stalled; with a `unit`, the same interval is expected on a slow link and
+/// logs at info instead.
+pub async fn track<T, E, F, Fut>(label: String, total: u64, unit: u64, work: F) -> Result<T, E>
 where
     F: FnOnce(Arc<Progress>) -> Fut,
     Fut: Future<Output = Result<T, E>>,
@@ -69,24 +69,27 @@ where
         started: Instant::now(),
         logged: false,
     };
+    let mut intervals = Intervals {
+        total,
+        unit,
+        interval: REPORT_INTERVAL,
+        prev: 0,
+    };
     // Boxed so a caller's async state holds a pointer instead of inlining the
     // transfer's (deep SDK) future, which overflows rustc's layout query depth.
     let mut work = Box::pin(work(progress.clone()));
-    let mut ticker = tokio::time::interval_at(ending.started + interval, interval);
+    let mut ticker = tokio::time::interval_at(ending.started + REPORT_INTERVAL, REPORT_INTERVAL);
     ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
-    let mut prev = 0;
     let result = loop {
         tokio::select! {
             result = &mut work => break result,
             _ = ticker.tick() => {
-                let now = progress.done();
-                let report = describe(total, prev, now, interval, ending.started.elapsed());
+                let report = intervals.report(progress.done(), ending.started.elapsed());
                 if report.healthy {
                     info!("{}: {}", ending.label, report.message);
                 } else {
                     warn!("{}: {}", ending.label, report.message);
                 }
-                prev = now;
             }
         }
     };
@@ -153,30 +156,68 @@ impl Drop for Ending {
     }
 }
 
+/// Turns one progress reading per interval into a report line, comparing each
+/// reading with the one before it.
+struct Intervals {
+    total: u64,
+    unit: u64,
+    interval: Duration,
+    prev: u64,
+}
+
+impl Intervals {
+    fn report(&mut self, now: u64, elapsed: Duration) -> Report {
+        let report = describe(
+            self.total,
+            self.unit,
+            self.prev,
+            now,
+            self.interval,
+            elapsed,
+        );
+        self.prev = now;
+        report
+    }
+}
+
 /// One periodic progress line. `healthy` is false when the interval made no
-/// forward progress.
+/// progress that it should have.
 #[derive(Debug, PartialEq, Eq)]
 struct Report {
     healthy: bool,
     message: String,
 }
 
-fn describe(total: u64, prev: u64, now: u64, interval: Duration, elapsed: Duration) -> Report {
+fn describe(
+    total: u64,
+    unit: u64,
+    prev: u64,
+    now: u64,
+    interval: Duration,
+    elapsed: Duration,
+) -> Report {
     let interval_text = duration(interval.as_secs());
     if now <= prev {
-        return stalled(total, now, &interval_text, elapsed);
+        return stalled(total, unit, now, &interval_text, elapsed);
     }
     advancing(total, prev, now, interval, elapsed, &interval_text)
 }
 
-fn stalled(total: u64, now: u64, interval_text: &str, elapsed: Duration) -> Report {
+fn stalled(total: u64, unit: u64, now: u64, interval_text: &str, elapsed: Duration) -> Report {
+    let position = position(total, now);
+    let elapsed = duration(elapsed.as_secs());
+    if unit > 0 {
+        return Report {
+            healthy: true,
+            message: format!(
+                "no {} chunk completed in the last {interval_text}; {position} after {elapsed}",
+                mib(unit)
+            ),
+        };
+    }
     Report {
         healthy: false,
-        message: format!(
-            "no progress in the last {interval_text}; {} after {}",
-            position(total, now),
-            duration(elapsed.as_secs())
-        ),
+        message: format!("no progress in the last {interval_text}; {position} after {elapsed}"),
     }
 }
 
@@ -272,6 +313,7 @@ mod tests {
         fn progressing_reports_rates_and_eta() {
             let report = describe(
                 100 * MIB,
+                0,
                 10 * MIB,
                 40 * MIB,
                 INTERVAL,
@@ -292,6 +334,7 @@ mod tests {
         fn no_progress_is_a_stall() {
             let report = describe(
                 100 * MIB,
+                0,
                 40 * MIB,
                 40 * MIB,
                 INTERVAL,
@@ -312,6 +355,7 @@ mod tests {
         fn moving_backwards_is_not_progress() {
             let report = describe(
                 100 * MIB,
+                0,
                 40 * MIB,
                 32 * MIB,
                 INTERVAL,
@@ -329,8 +373,30 @@ mod tests {
         }
 
         #[test]
+        fn a_pending_chunk_is_not_a_stall() {
+            let report = describe(
+                100 * MIB,
+                8 * MIB,
+                40 * MIB,
+                40 * MIB,
+                INTERVAL,
+                Duration::from_secs(60),
+            );
+            assert_eq!(
+                report,
+                Report {
+                    healthy: true,
+                    message: "no 8.0 MiB chunk completed in the last 30s; 40.0 MiB of 100.0 MiB \
+                              (40.0%) sent after 1m00s"
+                        .to_string(),
+                }
+            );
+        }
+
+        #[test]
         fn zero_total_omits_percent_and_eta() {
             let report = describe(
+                0,
                 0,
                 0,
                 3 * MIB,
@@ -344,6 +410,41 @@ mod tests {
                     message: "3.0 MiB sent; 1.0 MiB/s over the last 3s, 1.0 MiB/s average"
                         .to_string(),
                 }
+            );
+        }
+    }
+
+    mod intervals {
+        use super::*;
+
+        #[test]
+        fn compares_each_reading_with_the_last() {
+            let mut intervals = Intervals {
+                total: 10 * MIB,
+                unit: 0,
+                interval: INTERVAL,
+                prev: 0,
+            };
+            let reports = [
+                intervals.report(3 * MIB, INTERVAL),
+                intervals.report(3 * MIB, INTERVAL * 2),
+            ];
+            assert_eq!(
+                reports,
+                [
+                    Report {
+                        healthy: true,
+                        message: "3.0 MiB of 10.0 MiB (30.0%) sent; 0.1 MiB/s over the last \
+                                  30s, 0.1 MiB/s average; about 1m10s left"
+                            .to_string(),
+                    },
+                    Report {
+                        healthy: false,
+                        message: "no progress in the last 30s; 3.0 MiB of 10.0 MiB (30.0%) \
+                                  sent after 1m00s"
+                            .to_string(),
+                    },
+                ]
             );
         }
     }
@@ -373,7 +474,7 @@ mod tests {
 
         #[tokio::test]
         async fn returns_the_work_result_with_its_progress() {
-            let result = track("test".to_string(), 10, INTERVAL, |progress| async move {
+            let result = track("test".to_string(), 10, 0, |progress| async move {
                 progress.add(10);
                 Ok::<_, ()>((progress.total(), progress.done()))
             })
@@ -381,26 +482,21 @@ mod tests {
             assert_eq!(result, Ok((10, 10)));
         }
 
-        // Runs one progressing and one stalled interval before the work fails.
+        // Covers the ticker wiring; `intervals` checks the report sequence.
         #[tokio::test(start_paused = true)]
         async fn reports_while_the_work_runs() {
-            let result = track(
-                "test".to_string(),
-                10 * MIB,
-                INTERVAL,
-                |progress| async move {
-                    progress.add(MIB);
-                    tokio::time::sleep(Duration::from_secs(61)).await;
-                    Err::<(), _>("failed")
-                },
-            )
+            let result = track("test".to_string(), 10 * MIB, 0, |progress| async move {
+                progress.add(MIB);
+                tokio::time::sleep(Duration::from_secs(61)).await;
+                Err::<(), _>("failed")
+            })
             .await;
             assert_eq!(result, Err("failed"));
         }
 
         #[tokio::test(start_paused = true)]
         async fn dropping_before_the_work_returns_cancels_it() {
-            let tracked = track("test".to_string(), 10, INTERVAL, |_| {
+            let tracked = track("test".to_string(), 10, 0, |_| {
                 std::future::pending::<Result<(), ()>>()
             });
             let timed_out = tokio::time::timeout(Duration::from_secs(1), tracked).await;

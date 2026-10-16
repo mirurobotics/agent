@@ -2,7 +2,7 @@
 use std::time::Instant;
 
 // internal crates
-use crate::progress::{track, REPORT_INTERVAL};
+use crate::progress::track;
 use crate::s3::{errors, errors::NoSuchUploadErr, Object, S3Err, Source, Store, PART_SIZE};
 
 // external crates
@@ -69,10 +69,12 @@ impl Store {
         upload_id: &str,
         landed: &std::collections::HashMap<i32, CompletedPart>,
     ) -> Result<Vec<CompletedPart>, S3Err> {
-        let plan = Self::part_plan(src.size);
+        let size = src.size;
+        let plan = Self::part_plan(size);
         let count = plan.len();
+        let unit = Self::part_size_for(size);
         let label = format!("upload: {}", src.file);
-        track(label, src.size, REPORT_INTERVAL, |progress| async move {
+        track(label, size, unit, |progress| async move {
             let mut parts: Vec<CompletedPart> = Vec::new();
             for (part_number, offset, len) in plan {
                 let part = match landed.get(&part_number) {

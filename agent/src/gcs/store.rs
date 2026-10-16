@@ -8,7 +8,7 @@ use crate::gcs::{
     errors::{self, is_not_found, map_gcs_err, BuildErr, ConnectionErr},
     Credentials, GcsErr, Object, StaticTokenCredentials,
 };
-use crate::progress::{track, Progress, REPORT_INTERVAL};
+use crate::progress::{track, Progress};
 use crate::trace;
 
 // external crates
@@ -134,7 +134,7 @@ impl Store {
     /// [`GcsErr::FileSysErr`] before any request is dispatched; any other
     /// failure to open the source is [`GcsErr::LocalIoErr`]. The GCS SDK
     /// chooses between simple and resumable transfer based on the payload size.
-    /// Progress is logged every [`REPORT_INTERVAL`] while the upload runs.
+    /// Progress is logged every 30 s while the upload runs.
     ///
     /// The upload itself carries no timeout — a single attempt spans the whole
     /// body, so no fixed bound fits arbitrary sizes. A silently dead connection
@@ -167,7 +167,7 @@ impl Store {
             .map_err(|e| errors::map_body_io_err("put_object", dst, &src, e))?
             .len();
         let label = format!("upload: {src}");
-        track(label, size, REPORT_INTERVAL, |progress| {
+        track(label, size, 0, |progress| {
             let payload = CountingSource {
                 inner: Payload::from(file),
                 progress,

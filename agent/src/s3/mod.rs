@@ -4,7 +4,7 @@ use std::io::SeekFrom;
 
 // internal crates
 use crate::filesys::{errors::PathDoesNotExistErr, file::File, path::PathExt, FileSysErr};
-use crate::progress::{track, REPORT_INTERVAL};
+use crate::progress::track;
 use crate::trace;
 
 // external crates
@@ -162,7 +162,7 @@ impl Store {
     /// ([`Self::put_singlepart`]); larger files go part-by-part through a
     /// stateless multipart upload ([`Self::put_multipart`]). Either way at most
     /// one part's bytes are held in memory at a time, and progress is logged
-    /// every [`REPORT_INTERVAL`] while the upload runs.
+    /// every 30 s while the upload runs.
     pub async fn put(
         &self,
         src: File,
@@ -187,7 +187,7 @@ impl Store {
     ) -> Result<(), S3Err> {
         let size = src.size;
         let label = format!("upload: {}", src.file);
-        track(label, size, REPORT_INTERVAL, |progress| async move {
+        track(label, size, size, |progress| async move {
             let body = ByteStream::from(src.read("put_object", dst, 0, size).await?);
             self.client
                 .put_object()
