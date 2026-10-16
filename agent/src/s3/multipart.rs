@@ -312,19 +312,25 @@ impl Store {
 mod tests {
     // standard crates
     use std::collections::HashMap;
+    use std::time::Duration;
 
     // internal crates
     use super::*;
     use crate::s3::tests::{
-        access_denied_resp, actual_shapes, obj, req, resp, resp_xml, shape, store_expecting,
-        store_with, temp_file_with, uri,
+        access_denied_resp, actual_shapes, obj, recorded_payload, req, resp, resp_xml, shape,
+        store_expecting, store_on, store_with, temp_file_with, uri,
     };
     use crate::test_utils::filesys::files as test_files;
     use miru_agent::errors::{Code, Error};
     use miru_agent::filesys::path::PathExt;
 
     // external crates
-    use aws_smithy_http_client::test_util::{ReplayEvent, StaticReplayClient};
+    use aws_smithy_http_client::test_util::{NeverClient, ReplayEvent, StaticReplayClient};
+    use aws_smithy_runtime_api::client::http::{
+        HttpClient, HttpConnector, HttpConnectorFuture, HttpConnectorSettings, SharedHttpConnector,
+    };
+    use aws_smithy_runtime_api::client::orchestrator::{HttpRequest, HttpResponse};
+    use aws_smithy_runtime_api::client::runtime_components::RuntimeComponents;
     use aws_smithy_types::body::SdkBody;
 
     const BUCKET: &str = "test-bucket";
@@ -779,10 +785,119 @@ mod tests {
                 ]
             );
             let requests = replay.actual_requests().collect::<Vec<_>>();
-            assert!(requests[1].body().bytes() == Some(&original[..PART_SIZE as usize]));
+            assert!(recorded_payload(requests[1]).await == original[..PART_SIZE as usize]);
             assert!(requests[2].body().bytes() == Some(&original[PART_SIZE as usize..]));
 
             tokio::fs::remove_file(&moved).await.unwrap();
+        }
+
+        /// Answers create after [`CREATE_DELAY`] and parts at once, never
+        /// answers complete, and accepts the abort.
+        #[derive(Clone, Debug)]
+        struct ScriptedClient;
+
+        const CREATE_DELAY: Duration = Duration::from_secs(20);
+
+        impl HttpConnector for ScriptedClient {
+            fn call(&self, request: HttpRequest) -> HttpConnectorFuture {
+                let reply = |r: http::Response<SdkBody>| Ok(HttpResponse::try_from(r).unwrap());
+                match (request.method(), request.uri().ends_with("?uploads")) {
+                    ("POST", true) => HttpConnectorFuture::new(async move {
+                        tokio::time::sleep(CREATE_DELAY).await;
+                        reply(create_resp())
+                    }),
+                    ("POST", false) => HttpConnectorFuture::new(std::future::pending()),
+                    ("PUT", _) => HttpConnectorFuture::ready(reply(upload_part_resp("\"e1\""))),
+                    _ => HttpConnectorFuture::ready(reply(resp(204, &[]))),
+                }
+            }
+        }
+
+        impl HttpClient for ScriptedClient {
+            fn http_connector(
+                &self,
+                _: &HttpConnectorSettings,
+                _: &RuntimeComponents,
+            ) -> SharedHttpConnector {
+                SharedHttpConnector::new(self.clone())
+            }
+        }
+
+        #[tokio::test(start_paused = true)]
+        async fn complete_budget_includes_create_time() {
+            let tf = temp_file_with(&[7u8; 1024]).await;
+            let src = source_of(&tf).await;
+            let store = store_on(ScriptedClient);
+            let start = Instant::now();
+
+            let err = store
+                .put_multipart(src, &obj("big.bin"), &HashMap::new())
+                .await
+                .unwrap_err();
+
+            // 20 s create + the 71 s left of the 91 s body budget. Starting the
+            // budget after create would end at 111 s.
+            assert!(matches!(err, S3Err::ConnectionErr(_)), "got {err:?}");
+            assert_eq!(start.elapsed(), body_attempt_timeout(1024));
+        }
+    }
+
+    /// Calls against a server that never answers end at their own limits with a
+    /// retryable error. Stall protection's window runs on the wall clock, which
+    /// barely moves while paused time races ahead, so only the limit ends them.
+    pub mod stalls {
+        use super::*;
+
+        #[tokio::test(start_paused = true)]
+        async fn stalled_upload_part_maps_to_connection_err() {
+            let store = store_on(NeverClient::new());
+            let start = Instant::now();
+
+            let err = store
+                .upload_part(&obj("big.bin"), UPLOAD_ID, 1, vec![0; 64 * 1024])
+                .await
+                .unwrap_err();
+
+            assert!(matches!(err, S3Err::ConnectionErr(_)), "got {err:?}");
+            assert!(err.is_network_conn_err());
+            assert_eq!(start.elapsed(), Duration::from_secs(91));
+        }
+
+        #[tokio::test(start_paused = true)]
+        async fn stalled_complete_maps_to_connection_err() {
+            let store = store_on(NeverClient::new());
+            let dst = obj("big.bin");
+            let part = CompletedPart::builder()
+                .part_number(1)
+                .e_tag("\"e1\"")
+                .build();
+            let start = Instant::now();
+
+            // Limit: the full body budget of a PART_SIZE + 1 object (219 s).
+            let err = store
+                .complete_multipart_upload(&dst, UPLOAD_ID, &[part], PART_SIZE + 1, start)
+                .await
+                .unwrap_err();
+
+            assert!(matches!(err, S3Err::ConnectionErr(_)), "got {err:?}");
+            assert!(err.is_network_conn_err());
+            assert_eq!(start.elapsed(), Duration::from_secs(219));
+        }
+
+        #[tokio::test(start_paused = true)]
+        async fn stalled_abort_gives_up_after_10s() {
+            let store = store_on(NeverClient::new());
+            let start = Instant::now();
+
+            let err = store
+                .abort_multipart_upload(&obj("big.bin"), UPLOAD_ID)
+                .await
+                .unwrap_err();
+
+            // Bodyless, so stall protection never applies: only the limit ends it.
+            assert!(matches!(err, S3Err::ConnectionErr(_)), "got {err:?}");
+            assert!(err.is_network_conn_err());
+            assert_eq!(start.elapsed(), ABORT_ATTEMPT_TIMEOUT);
         }
     }
 
@@ -1151,14 +1266,11 @@ mod tests {
                 "manifest carries part 2's etag"
             );
 
-            // Parts are sent as in-memory buffers, so their exact bytes are recorded:
-            // each part must carry its own file slice (right offset and length).
+            // Each part must carry its own file slice (right offset and length).
+            // Part 1 streams in frames, so it is decoded from the recorded body;
+            // the 1 KiB tail stays in memory.
             assert!(
-                requests[1]
-                    .body()
-                    .bytes()
-                    .expect("part 1 body is in-memory")
-                    == &big[..PART_SIZE as usize],
+                recorded_payload(requests[1]).await == big[..PART_SIZE as usize],
                 "part 1 must be the first PART_SIZE bytes of the source"
             );
             assert!(

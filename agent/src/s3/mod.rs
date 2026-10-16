@@ -371,21 +371,42 @@ impl Store {
 mod tests {
     // standard crates
     use std::collections::HashMap;
+    use std::time::Duration;
 
     // internal crates
+    use crate::s3::{
+        body::chunked, body_attempt_timeout, complete_attempt_timeout, ABORT_ATTEMPT_TIMEOUT,
+        PART_SIZE,
+    };
     use crate::test_utils::{
         error_harnesses::{assert_error, Expected},
         filesys::{files as test_files, missing_file},
     };
+    use miru_agent::data_uploads::upload::UploaderOptions;
     use miru_agent::errors::{Code, Error, HTTPCode};
     use miru_agent::filesys::file::File;
     use miru_agent::filesys::path::PathExt;
     use miru_agent::filesys::{files, FileSysErr, WriteOptions};
-    use miru_agent::s3::{Config, Credentials, Object, S3Err, Source, Store};
+    use miru_agent::s3::errors::map_sdk_err;
+    use miru_agent::s3::{http_client, Config, Credentials, Object, S3Err, Source, Store};
 
     // external crates
-    use aws_smithy_http_client::test_util::{ReplayEvent, StaticReplayClient};
+    use aws_sdk_s3::config::retry::RetryConfig;
+    use aws_sdk_s3::config::timeout::TimeoutConfig;
+    use aws_sdk_s3::config::StalledStreamProtectionConfig;
+    use aws_smithy_http_client::test_util::{NeverClient, ReplayEvent, StaticReplayClient};
+    use aws_smithy_runtime_api::client::http::{
+        HttpClient, HttpConnector, HttpConnectorFuture, HttpConnectorSettings, SharedHttpConnector,
+    };
+    use aws_smithy_runtime_api::client::orchestrator::{HttpRequest, HttpResponse};
+    use aws_smithy_runtime_api::client::result::ConnectorError;
+    use aws_smithy_runtime_api::client::runtime_components::{
+        RuntimeComponents, RuntimeComponentsBuilder,
+    };
     use aws_smithy_types::body::SdkBody;
+    use bytes::Bytes;
+    use http_body_util::BodyExt;
+    use tokio::time::Instant;
 
     const REGION: &str = "us-east-1";
     const BUCKET: &str = "test-bucket";
@@ -428,17 +449,24 @@ mod tests {
         }
     }
 
+    fn test_config() -> Config {
+        Config {
+            region: REGION.to_string(),
+            creds: test_credentials(),
+        }
+    }
+
+    /// Wires a `Store` to `client` in place of the HTTPS connector.
+    pub(super) fn store_on(client: impl HttpClient + 'static) -> Store {
+        Store::from_http_client(client, test_config())
+    }
+
     /// Wires a `Store` to a `StaticReplayClient` serving the given events, so the
     /// client's requests are matched against canned responses without touching the
     /// network.
     pub(super) fn store_with(events: Vec<ReplayEvent>) -> (Store, StaticReplayClient) {
         let replay = StaticReplayClient::new(events);
-        let cfg = Config {
-            region: REGION.to_string(),
-            creds: test_credentials(),
-        };
-        let store = Store::from_http_client(replay.clone(), cfg);
-        (store, replay)
+        (store_on(replay.clone()), replay)
     }
 
     /// Writes `bytes` to a fresh temp file and returns the guard (kept alive so
@@ -513,6 +541,108 @@ mod tests {
             .collect()
     }
 
+    /// The payload bytes a recorded request carried. Bodies over the frame size
+    /// stream, so the SDK sends them aws-chunked (`<hex len>[;ext]\r\n<data>\r\n`
+    /// chunks ending in a `0` chunk and trailers); those are replayed from the
+    /// retryable body and decoded.
+    pub(super) async fn recorded_payload(request: &HttpRequest) -> Vec<u8> {
+        if let Some(bytes) = request.body().bytes() {
+            return bytes.to_vec();
+        }
+        let wire = request
+            .body()
+            .try_clone()
+            .expect("request bodies are retryable")
+            .collect()
+            .await
+            .expect("recorded body replays")
+            .to_bytes();
+        let aws_chunked = request
+            .headers()
+            .get("content-encoding")
+            .is_some_and(|v| v.contains("aws-chunked"));
+        if !aws_chunked {
+            return wire.to_vec();
+        }
+        let mut payload = Vec::new();
+        let mut rest = &wire[..];
+        loop {
+            let header_end = rest
+                .windows(2)
+                .position(|w| w == b"\r\n")
+                .expect("chunk header");
+            let header = std::str::from_utf8(&rest[..header_end]).unwrap();
+            let size_hex = header.split(';').next().unwrap_or_default();
+            let size = usize::from_str_radix(size_hex, 16).unwrap();
+            if size == 0 {
+                return payload;
+            }
+            let data = &rest[header_end + 2..];
+            payload.extend_from_slice(&data[..size]);
+            rest = &data[size + 2..];
+        }
+    }
+
+    pub mod timeouts {
+        use super::*;
+
+        #[test]
+        fn call_limits_stay_under_uploader_backstop() {
+            const MIB: u64 = 1024 * 1024;
+            let secs = Duration::from_secs;
+            assert_eq!(body_attempt_timeout(0), secs(90));
+            assert_eq!(body_attempt_timeout(PART_SIZE), secs(218));
+            assert_eq!(complete_attempt_timeout(PART_SIZE + 1, secs(0)), secs(219));
+            assert_eq!(complete_attempt_timeout(1024 * MIB, secs(0)), secs(600));
+            assert_eq!(
+                complete_attempt_timeout(PART_SIZE + 1, secs(3600)),
+                secs(60)
+            );
+
+            let backstop = |len: u64| UploaderOptions::default().attempt_deadline(len);
+            // PutObject/UploadPart: the call limit after up to 30 s of backend create.
+            for len in [0, MIB, PART_SIZE] {
+                assert!(
+                    body_attempt_timeout(len) + secs(30) <= backstop(len),
+                    "len {len}"
+                );
+            }
+            // Multipart: 20 s backend create, then the S3 create and the parts at the
+            // minimum rate eat into complete's budget, and the abort follows. Once
+            // create + parts exceed `parts + 30 s`, complete's 60 s floor can
+            // overshoot the backstop; that is accepted and not covered here.
+            for len in [PART_SIZE + 1, 20 * MIB, 1024 * MIB] {
+                let parts = secs(len.div_ceil(64 * 1024));
+                for s3_create in [secs(0), secs(30)] {
+                    let spent = s3_create + parts;
+                    let complete = complete_attempt_timeout(len, spent);
+                    let total = secs(20) + spent + complete + ABORT_ATTEMPT_TIMEOUT;
+                    assert!(total <= backstop(len), "len {len}, create {s3_create:?}");
+                }
+            }
+        }
+
+        #[tokio::test(start_paused = true)]
+        async fn stalled_put_maps_to_connection_err() {
+            let len = 1024 * 1024;
+            let tf = temp_file_with(&vec![0u8; len]).await;
+            let src = Source::open(tf.to_file(), &obj("k")).await.unwrap();
+            let store = store_on(NeverClient::new());
+            let start = Instant::now();
+
+            let err = store
+                .put_singlepart(src, &obj("k"), &HashMap::new())
+                .await
+                .unwrap_err();
+
+            assert!(matches!(err, S3Err::ConnectionErr(_)), "got {err:?}");
+            assert!(err.is_network_conn_err());
+            // Ends at the call limit (106 s): stall protection's window runs on the
+            // wall clock, which barely moves while paused time races ahead.
+            assert_eq!(start.elapsed(), body_attempt_timeout(len as u64));
+        }
+    }
+
     pub mod construction {
         use super::*;
 
@@ -528,6 +658,100 @@ mod tests {
             };
             // Constructing must not panic or touch the network.
             let _store = Store::new(cfg);
+        }
+
+        #[tokio::test]
+        async fn build_sets_timeouts_and_stall_protection() {
+            let store = Store::new(test_config());
+            let config = store.client.config();
+
+            let timeouts = TimeoutConfig::builder()
+                .connect_timeout(Duration::from_secs(15))
+                .operation_timeout(Duration::from_secs(60))
+                .operation_attempt_timeout(Duration::from_secs(60))
+                .build();
+            assert_eq!(config.timeout_config(), Some(&timeouts));
+            let ssp = config
+                .stalled_stream_protection()
+                .expect("stall protection configured");
+            assert!(ssp.upload_enabled());
+            assert_eq!(ssp.grace_period(), Duration::from_secs(60));
+        }
+
+        #[tokio::test]
+        async fn http_client_builds_connector() {
+            let store = Store::build(test_config(), Some(http_client()), false);
+            assert!(store.client.config().http_client().is_some());
+
+            // The SDK calls the connector closure with settings and components
+            // only on a request; call it directly with both.
+            let components = RuntimeComponentsBuilder::for_tests()
+                .with_time_source(store.client.config().time_source())
+                .build()
+                .unwrap();
+            let settings = HttpConnectorSettings::builder()
+                .connect_timeout(Duration::from_secs(15))
+                .build();
+            let _connector = http_client().http_connector(&settings, &components);
+        }
+    }
+
+    pub mod stall_protection {
+        use super::*;
+
+        /// Takes the first request body frame, then never polls the body again
+        /// or answers.
+        #[derive(Clone, Debug)]
+        struct HangAfterFirstFrame;
+
+        impl HttpConnector for HangAfterFirstFrame {
+            fn call(&self, request: HttpRequest) -> HttpConnectorFuture {
+                let mut body = request.into_body();
+                HttpConnectorFuture::new(async move {
+                    let _ = body.frame().await;
+                    std::future::pending::<Result<HttpResponse, ConnectorError>>().await
+                })
+            }
+        }
+
+        impl HttpClient for HangAfterFirstFrame {
+            fn http_connector(
+                &self,
+                _: &HttpConnectorSettings,
+                _: &RuntimeComponents,
+            ) -> SharedHttpConnector {
+                SharedHttpConnector::new(self.clone())
+            }
+        }
+
+        #[tokio::test]
+        async fn chunked_body_trips_stall_protection() {
+            let store = store_on(HangAfterFirstFrame);
+            // A 1 s grace (instead of 60 s) and no retries keep the test short.
+            let fast_stall = StalledStreamProtectionConfig::enabled()
+                .upload_enabled(true)
+                .grace_period(Duration::from_secs(1))
+                .build();
+            let config = aws_sdk_s3::Config::builder()
+                .stalled_stream_protection(fast_stall)
+                .retry_config(RetryConfig::disabled());
+            let send = store
+                .client
+                .put_object()
+                .bucket(BUCKET)
+                .key("k")
+                .body(chunked(Bytes::from(vec![0u8; 256 * 1024])))
+                .customize()
+                .config_override(config)
+                .send();
+
+            // Well under the 60 s call limit, so only stall protection can end it.
+            let result = tokio::time::timeout(Duration::from_secs(30), send)
+                .await
+                .expect("stall protection ends the call");
+
+            let err = map_sdk_err("put_object", &obj("k"), result.unwrap_err());
+            assert!(matches!(err, S3Err::ConnectionErr(_)), "got {err:?}");
         }
     }
 

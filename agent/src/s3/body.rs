@@ -55,3 +55,95 @@ impl Body for ChunkedBytes {
         SizeHint::with_exact(self.remaining.len() as u64)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    // internal crates
+    use super::*;
+
+    // external crates
+    use http_body_util::BodyExt;
+
+    const KIB: usize = 1024;
+
+    /// Bytes with a period (251) that no frame size divides, so a dropped or
+    /// reordered frame cannot go unnoticed.
+    fn pattern(len: usize) -> Bytes {
+        Bytes::from((0..len).map(|i| (i % 251) as u8).collect::<Vec<u8>>())
+    }
+
+    /// Polls `body` to its end, returning each data frame.
+    async fn drain(body: &mut SdkBody) -> Vec<Bytes> {
+        let mut frames = Vec::new();
+        while let Some(frame) = body.frame().await {
+            frames.push(frame.unwrap().into_data().unwrap());
+        }
+        frames
+    }
+
+    fn lens(frames: &[Bytes]) -> Vec<usize> {
+        frames.iter().map(Bytes::len).collect()
+    }
+
+    #[test]
+    fn small_body_stays_in_memory() {
+        let input = pattern(FRAME_SIZE);
+
+        let body = chunked(input.clone()).into_inner();
+
+        assert_eq!(body.bytes(), Some(&input[..]));
+        assert!(!body.is_streaming());
+    }
+
+    #[tokio::test]
+    async fn large_body_yields_bounded_frames() {
+        let input = pattern(100 * KIB);
+        let mut body = chunked(input.clone()).into_inner();
+        assert!(body.bytes().is_none());
+
+        let frames = drain(&mut body).await;
+
+        assert_eq!(lens(&frames), vec![32 * KIB, 32 * KIB, 32 * KIB, 4 * KIB]);
+        assert_eq!(frames.concat(), input.to_vec());
+    }
+
+    #[tokio::test]
+    async fn one_byte_over_frame_size_streams() {
+        let input = pattern(FRAME_SIZE + 1);
+        let mut body = chunked(input.clone()).into_inner();
+        assert!(body.bytes().is_none());
+
+        let frames = drain(&mut body).await;
+
+        assert_eq!(lens(&frames), vec![FRAME_SIZE, 1]);
+        assert_eq!(frames.concat(), input.to_vec());
+    }
+
+    #[tokio::test]
+    async fn size_hint_is_exact_and_end_stream_tracks_remaining() {
+        let mut body = ChunkedBytes {
+            remaining: pattern(40 * KIB),
+        };
+        assert_eq!(body.size_hint().exact(), Some(40 * KIB as u64));
+        assert!(!body.is_end_stream());
+
+        body.frame().await.unwrap().unwrap();
+        assert_eq!(body.size_hint().exact(), Some(8 * KIB as u64));
+        assert!(!body.is_end_stream());
+
+        body.frame().await.unwrap().unwrap();
+        assert!(body.is_end_stream());
+        assert!(body.frame().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn retry_clone_replays_full_body() {
+        let input = pattern(100 * KIB);
+        let mut body = chunked(input.clone()).into_inner();
+        drain(&mut body).await;
+
+        let mut retry = body.try_clone().expect("chunked bodies are retryable");
+
+        assert_eq!(drain(&mut retry).await.concat(), input.to_vec());
+    }
+}

@@ -360,6 +360,15 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn default_carries_shared_s3_http_client() {
+        let transfer = SdkTransfer::default();
+
+        assert!(transfer.s3_http_client.is_some());
+        assert!(!transfer.s3_force_path_style);
+        assert!(transfer.gcs_endpoint.is_none());
+    }
+
+    #[tokio::test]
     async fn unknown_scheme_is_unsupported() {
         let creds = credentials("something-new", s3_credentials_json(), Value::Null);
         let err = SdkTransfer::default()

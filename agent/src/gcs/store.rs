@@ -309,8 +309,10 @@ mod tests {
     // standard crates
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
+    use std::time::Duration;
 
     // internal crates
+    use crate::gcs::progress::Limits;
     use crate::test_utils::{
         filesys::{dirs as test_dirs, files as test_files, missing_file},
         http_client::run_server,
@@ -396,6 +398,8 @@ mod tests {
         download_truncate: bool,
         /// If set, uploads respond with this status instead of 200 + Object JSON.
         upload_status: Option<StatusCode>,
+        /// If set, uploads respond this long after reading the whole request.
+        upload_delay: Option<Duration>,
     }
 
     fn bearer_present(headers: &HeaderMap) -> bool {
@@ -418,13 +422,20 @@ mod tests {
         [(axum::http::HeaderName, &'static str); 1],
         String,
     ) {
-        let mut r = rec.inner.lock().unwrap();
-        r.upload_hits += 1;
-        r.saw_bearer = r.saw_bearer || bearer_present(&headers);
-        r.upload_uri = uri.0.to_string();
-        r.upload_body = body.to_vec();
+        // The guard must drop before the delay: a handler future must be `Send`.
+        let (status, delay) = {
+            let mut r = rec.inner.lock().unwrap();
+            r.upload_hits += 1;
+            r.saw_bearer = r.saw_bearer || bearer_present(&headers);
+            r.upload_uri = uri.0.to_string();
+            r.upload_body = body.to_vec();
+            (r.upload_status, r.upload_delay)
+        };
+        if let Some(delay) = delay {
+            tokio::time::sleep(delay).await;
+        }
         let json_ct = [(axum::http::header::CONTENT_TYPE, "application/json")];
-        if let Some(status) = r.upload_status {
+        if let Some(status) = status {
             return (
                 status,
                 json_ct,
@@ -561,6 +572,29 @@ mod tests {
         }
 
         #[tokio::test]
+        async fn upload_multi_frame_body_intact() {
+            // 100 KiB spans several progress frames: re-chunking must neither
+            // drop nor reorder bytes. The period (251) divides no frame size.
+            let data: Vec<u8> = (0..100 * 1024).map(|i| (i % 251) as u8).collect();
+            let rec = HttpRecorder::default();
+            let store = http_store(rec.clone()).await;
+            let src = temp_file_with(&data).await;
+
+            store
+                .put(src.to_file(), &obj("artifacts/big.bin"), &HashMap::new())
+                .await
+                .unwrap();
+
+            let r = rec.inner.lock().unwrap();
+            assert!(
+                r.upload_body
+                    .windows(data.len())
+                    .any(|w| w == data.as_slice()),
+                "uploaded multipart body must contain the file bytes in order"
+            );
+        }
+
+        #[tokio::test]
         async fn upload_empty_file_succeeds() {
             // A 0-byte source still issues exactly one upload.
             let rec = HttpRecorder::default();
@@ -616,6 +650,54 @@ mod tests {
                     GcsErr::RequestFailedErr(e) => assert_eq!(e.status, Some(403)),
                     other => panic!("expected RequestFailedErr, got {other:?}"),
                 }
+            }
+        }
+
+        /// Real-time tests with short limits: the watchdog itself is covered
+        /// with paused time in `gcs::progress`.
+        pub mod progress {
+            use super::*;
+
+            #[tokio::test]
+            async fn slow_response_after_full_body_succeeds() {
+                // The server answers 3 s after reading the whole body: past
+                // `idle`, but `finalize` applies once the body has ended.
+                let rec = HttpRecorder::default();
+                rec.inner.lock().unwrap().upload_delay = Some(Duration::from_secs(3));
+                let store = http_store(rec.clone()).await;
+                let src = temp_file_with(b"payload").await;
+                let limits = Limits {
+                    idle: Duration::from_secs(2),
+                    finalize: Duration::from_secs(10),
+                };
+
+                store
+                    .put_with_limits(src.to_file(), &obj("slow.txt"), &HashMap::new(), limits)
+                    .await
+                    .unwrap();
+
+                assert_eq!(rec.inner.lock().unwrap().upload_hits, 1);
+            }
+
+            #[tokio::test]
+            async fn unanswered_upload_maps_to_connection_err() {
+                // Whichever bound fires first, the error is the same.
+                let rec = HttpRecorder::default();
+                rec.inner.lock().unwrap().upload_delay = Some(Duration::from_secs(3600));
+                let store = http_store(rec).await;
+                let src = temp_file_with(b"payload").await;
+                let limits = Limits {
+                    idle: Duration::from_millis(200),
+                    finalize: Duration::from_millis(500),
+                };
+
+                let err = store
+                    .put_with_limits(src.to_file(), &obj("hung.txt"), &HashMap::new(), limits)
+                    .await
+                    .unwrap_err();
+
+                assert!(matches!(err, GcsErr::ConnectionErr(_)), "got {err:?}");
+                assert!(err.is_network_conn_err());
             }
         }
 
