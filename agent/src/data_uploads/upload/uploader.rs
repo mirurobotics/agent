@@ -83,8 +83,9 @@ impl UploaderOptions {
     /// Stalls are caught first by the stores' own bounds (GCS's no-progress
     /// watchdog; S3 stalled-stream protection and per-call limits) and surface
     /// as uncounted network errors. Those bounds end before this deadline when
-    /// create takes ≤ 30 s (≤ 20 s for S3 multipart, whose best-effort abort
-    /// may add 10 s) and bytes move at ≥ `attempt_timeout_bytes_per_sec`.
+    /// the backend create call takes ≤ 30 s (≤ 20 s for S3 multipart, whose
+    /// best-effort abort may add 10 s) and bytes move at ≥
+    /// `attempt_timeout_bytes_per_sec`.
     pub fn attempt_deadline(&self, size: u64) -> Duration {
         let bps = self.attempt_timeout_bytes_per_sec.max(1);
         self.attempt_timeout_floor

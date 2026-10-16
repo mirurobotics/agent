@@ -458,9 +458,9 @@ mod tests {
 
     #[tokio::test]
     async fn s3_default_store_fails_offline_on_missing_file() {
-        // Default settings use the shared S3 builder without a transport override.
-        // Construction does no I/O and `put` stats the file before dispatching any
-        // request, so a missing local file fails fast offline.
+        // Default settings carry the shared `s3::http_client()`, whose connector is
+        // built lazily, so construction does no I/O and `put` stats the file before
+        // dispatching any request: a missing local file fails fast offline.
         let creds = credentials("s3", s3_credentials_json(), Value::Null);
         let missing = missing_file();
 

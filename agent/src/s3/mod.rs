@@ -64,11 +64,11 @@ pub(crate) fn body_attempt_timeout(len: u64) -> Duration {
     BODY_ATTEMPT_FLOOR + Duration::from_secs(len.div_ceil(MIN_UPLOAD_BYTES_PER_SEC))
 }
 
-/// `CompleteMultipartUpload` shares the attempt budget with the parts before
-/// it, so it gets the body budget the parts left.
-pub(crate) fn complete_attempt_timeout(size: u64, parts_elapsed: Duration) -> Duration {
+/// `CompleteMultipartUpload` shares the attempt budget with the S3 calls before
+/// it (create or list, then the parts), so it gets the body budget they left.
+pub(crate) fn complete_attempt_timeout(size: u64, elapsed: Duration) -> Duration {
     body_attempt_timeout(size)
-        .saturating_sub(parts_elapsed)
+        .saturating_sub(elapsed)
         .clamp(ATTEMPT_TIMEOUT, COMPLETE_ATTEMPT_TIMEOUT)
 }
 

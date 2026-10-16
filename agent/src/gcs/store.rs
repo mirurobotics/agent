@@ -27,8 +27,9 @@ use tokio::io::AsyncWriteExt as _;
 /// timeout, which is why `put`/`get` bound progress with idle windows instead.
 const CONTROL_ATTEMPT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
-/// Maximum time `get` or `put` may go without byte progress (including the wait
-/// for a response to start). Bounds *progress* rather than the whole transfer,
+/// Maximum time `get` or `put` may go without byte progress (for `get`, including
+/// the wait for the response to start; `put` waits up to [`FINALIZE_TIMEOUT`]
+/// after its last body byte). Bounds *progress* rather than the whole transfer,
 /// so it holds for arbitrarily large objects.
 const IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 

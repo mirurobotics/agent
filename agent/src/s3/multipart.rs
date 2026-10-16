@@ -28,9 +28,10 @@ impl Store {
         dst: &Object,
         metadata: &std::collections::HashMap<String, String>,
     ) -> Result<(), S3Err> {
+        let started = Instant::now();
         let upload_id = self.create_multipart_upload(dst, metadata).await?;
 
-        match self.exec_multipart_upload(&mut src, dst, &upload_id).await {
+        match self.exec_multipart_upload(&mut src, dst, &upload_id, started).await {
             Ok(()) => Ok(()),
             Err(err) => {
                 // Best-effort cleanup: don't mask the original error if the abort
@@ -211,14 +212,15 @@ impl Store {
     /// Uploads every part and completes the multipart upload. Split out from
     /// [`Self::put_multipart`] so a single `?` early-return path funnels through
     /// one abort site: any failure here propagates as one `Err` that
-    /// `put_multipart` catches to issue a best-effort abort.
+    /// `put_multipart` catches to issue a best-effort abort. `started` is when
+    /// `put_multipart` began, before the create call.
     async fn exec_multipart_upload(
         &self,
         src: &mut Source,
         dst: &Object,
         upload_id: &str,
+        started: Instant,
     ) -> Result<(), S3Err> {
-        let started = Instant::now();
         let parts = self
             .upload_parts(src, dst, upload_id, &std::collections::HashMap::new())
             .await?;
@@ -261,9 +263,9 @@ impl Store {
     }
 
     /// Completes a multipart upload from the `(part_number, etag)` pairs of the
-    /// landed parts. `size` is the object size and `started` when its parts
-    /// began uploading; together they bound this call (see
-    /// [`complete_attempt_timeout`]).
+    /// landed parts. `size` is the object size and `started` when the attempt's
+    /// first S3 call (create, or list on resume) began; together they bound
+    /// this call (see [`complete_attempt_timeout`]).
     async fn complete_multipart_upload(
         &self,
         obj: &Object,
