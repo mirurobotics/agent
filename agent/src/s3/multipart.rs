@@ -1,10 +1,15 @@
+// standard crates
+use std::time::Instant;
+
 // internal crates
+use crate::progress::track;
 use crate::s3::{errors, errors::NoSuchUploadErr, Object, S3Err, Source, Store, PART_SIZE};
 
 // external crates
 use aws_sdk_s3::operation::list_parts::ListPartsOutput;
 use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart};
+use tracing::debug;
 
 type UploadID = String;
 
@@ -64,18 +69,33 @@ impl Store {
         upload_id: &str,
         landed: &std::collections::HashMap<i32, CompletedPart>,
     ) -> Result<Vec<CompletedPart>, S3Err> {
-        let mut parts: Vec<CompletedPart> = Vec::new();
-        for (part_number, offset, len) in Self::part_plan(src.size) {
-            let part = match landed.get(&part_number) {
-                Some(existing) => existing.clone(),
-                None => {
-                    let buf = src.read("upload_part", dst, offset, len).await?;
-                    self.upload_part(dst, upload_id, part_number, buf).await?
-                }
-            };
-            parts.push(part);
-        }
-        Ok(parts)
+        let size = src.size;
+        let plan = Self::part_plan(size);
+        let count = plan.len();
+        let unit = Self::part_size_for(size);
+        let label = format!("upload: {}", src.file);
+        track(label, size, unit, |progress| async move {
+            let mut parts: Vec<CompletedPart> = Vec::new();
+            for (part_number, offset, len) in plan {
+                let part = match landed.get(&part_number) {
+                    Some(existing) => existing.clone(),
+                    None => {
+                        let started = Instant::now();
+                        let buf = src.read("upload_part", dst, offset, len).await?;
+                        let part = self.upload_part(dst, upload_id, part_number, buf).await?;
+                        let secs = started.elapsed().as_secs_f64();
+                        debug!(
+                            "s3: {dst}: part {part_number}/{count} ({len} B) sent in {secs:.1}s"
+                        );
+                        part
+                    }
+                };
+                progress.add(len);
+                parts.push(part);
+            }
+            Ok::<_, S3Err>(parts)
+        })
+        .await
     }
 
     /// Lists every part already uploaded for `upload_id`, following pagination,
