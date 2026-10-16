@@ -14,7 +14,7 @@ This plan lives in `agent/plans/` because every change is in the agent repo. Wor
 
 Today an upload attempt (create, transfer, confirm) has one deadline of 120 s plus one second per 64 KiB of file (about 4.6 h for 1 GiB, about 22.8 h for 5.4 GB). A connection that silently dies mid-upload is only noticed when that deadline expires, and the failure counts against the job's attempt budget. In the field, a 5.4 GB GCS upload stalled for about 9 h after a laptop suspend/resume, logged nothing, and only restarted (from byte 0) when the agent restarted.
 
-After this change, any upload request that makes no byte progress for 60 s (or, after the full body, gets no response within a bounded tail) is aborted and surfaces as the existing retryable network error (`GcsErr::ConnectionErr` or `S3Err::ConnectionErr`). The uploader already requeues network errors after a flat 10 s wait without counting an attempt. S3 also gets an explicit 15 s connect timeout, per-call time limits (SDK retries included) scaled to the body length and always shorter than the backstop, stalled-stream protection that actually works on uploads, and one long-lived HTTPS client shared by all uploads. The whole-attempt deadline stays unchanged as a backstop. Normal uploads behave exactly as before.
+After this change, any upload request that makes no byte progress for 60 s (or, after the full body, gets no response within a bounded tail) is aborted and surfaces as the existing retryable network error (`GcsErr::ConnectionErr` or `S3Err::ConnectionErr`). The uploader already requeues network errors after a flat 10 s wait without counting an attempt. S3 also gets an explicit 15 s connect timeout, per-call time limits (SDK retries included) scaled to the body length and at least 30 s under the backstop for the same size, stalled-stream protection that actually works on uploads, and one long-lived HTTPS client shared by all uploads. The whole-attempt deadline stays unchanged as a backstop. Uploads moving at or above the backstop's 64 KiB/s design rate are never cut short (see the Decision Log for the slow-link trade-off).
 
 Resuming a GCS resumable session or S3 multipart upload across agent attempts (so a retry does not restart from byte 0) is out of scope.
 
@@ -35,14 +35,14 @@ Resuming a GCS resumable session or S3 multipart upload across agent attempts (s
 - Decision: Only bytes handed to the HTTP stack count as GCS progress; `seek` (called by the SDK on every attempt and retry) does not tick (it only clears the end-of-body flag).
   Rationale: An SDK retry loop against a dead network must not keep the watchdog alive. SDK retries are capped at 3, so a healthy retry produces new bytes well inside 60 s.
   Date/Author: 2026-10-16 / plan author.
-- Decision: After the GCS source reports end of body, the watchdog waits up to `FINALIZE_TIMEOUT` (120 s) instead of the 60 s idle window; a `seek` after end of body (SDK retry) returns it to the idle window.
-  Rationale: After the last frame, hyper's write buffer and the kernel send buffer (up to ~4 MiB) drain with no ticks before GCS answers. A 60 s window would fail every attempt on slow links, and each retry restarts from byte 0, uncounted, until `max_job_age`. 120 s drains a full 4 MiB buffer at the backstop's 64 KiB/s minimum rate, and equals the backstop floor. Both GCS upload paths send an unknown-length (chunked) body, so hyper always polls the source to `None`.
+- Decision: After the GCS source reports end of body, the watchdog waits up to `FINALIZE_TIMEOUT` (90 s) instead of the 60 s idle window; a `seek` after end of body (SDK retry) returns it to the idle window.
+  Rationale: After the last frame, hyper's write buffer and the kernel send buffer (up to ~4 MiB) drain with no ticks before GCS answers. A 60 s window would fail every attempt on slow links, and each retry restarts from byte 0, uncounted, until `max_job_age`. 90 s drains a full 4 MiB buffer at the backstop's 64 KiB/s rate (64 s) with 26 s left for GCS to answer; because the window starts after the backend create RPC, it ends before the backstop whenever create took ≤ 30 s and the body was pulled at ≥ 64 KiB/s. 120 s would tie the backstop floor and lose to it for small files, turning a response stall into a counted `AttemptTimeoutErr`. Both GCS upload paths send an unknown-length (chunked) body, so hyper always polls the source to `None`.
   Date/Author: 2026-10-16 / plan author.
 - Decision: S3 bodies of 32 KiB or less stay single in-memory buffers. Only larger bodies use the chunked streaming body.
   Rationale: A body of one frame or less cannot benefit from stalled-stream protection, which needs several frames. Keeping small bodies in memory keeps the checksum-in-header wire format, so the existing small-body tests are unchanged.
   Date/Author: 2026-10-16 / plan author.
-- Decision: Each S3 call gets one time limit, set as both its operation timeout (all SDK attempts and backoff) and its attempt timeout: 60 s for bodyless calls, 10 min for `CompleteMultipartUpload`, and `60 s + 1 s per 64 KiB` of body for PutObject/UploadPart (188 s for an 8 MiB part). SDK retries stay on.
-  Rationale: SSP stops watching once the last frame is pulled, so a tail or response stall ends only at the limit. At the backstop's own 64 KiB/s rate with half its 120 s floor, the limit ends before `UploaderOptions::attempt_deadline` for the same size, as an uncounted `ConnectionErr`. Capping the whole operation stops up to 3 SDK attempts stacking past the backstop while keeping part-level SDK retries (fast 5xx, SSP trips) instead of restarting a multipart upload from byte 0. Completing a multipart upload can take minutes (AWS sends whitespace keepalives meanwhile).
+- Decision: Each S3 call gets one time limit, set as both its operation timeout (all SDK attempts and backoff) and its attempt timeout: 60 s for bodyless calls, `90 s + 1 s per 64 KiB` of body for PutObject/UploadPart (218 s for an 8 MiB part), and for `CompleteMultipartUpload` the same formula over the object size, capped at 10 min. SDK retries stay on.
+  Rationale: SSP stops watching once the last frame is pulled, so a tail or response stall ends only at the limit. The backstop is `120 s + 1 s per 64 KiB`; the 90 s floor leaves 30 s for the backend create RPC (3 × 10 s), so a stalled call ends first as an uncounted `ConnectionErr` (it can lose only if create itself retried, by ≤ 2 s of jitter, costing one counted, retried attempt). A tighter floor would loop slow-but-moving uploads uncounted until `max_job_age`; a looser one only risks a counted retry. Accepted cost: a single put moving below 64 KiB/s can now fail where the backstop's floor slack let it finish (8 MiB at ~33-38 KiB/s, 1 MiB at ~7.6-9.7 KiB/s). Capping the whole operation stops up to 3 SDK attempts stacking past the backstop while keeping part-level SDK retries (fast 5xx, SSP trips) instead of restarting a multipart upload from byte 0. Completing a large multipart upload can take minutes (AWS sends whitespace keepalives), hence the 10 min cap; the size formula keeps small completes below the backstop for the same size.
   Date/Author: 2026-10-16 / plan author.
 - Decision: The shared S3 client uses `aws_smithy_http_client::Builder::build_with_connector_fn` (public but `#[doc(hidden)]`) instead of the documented `build_https()`.
   Rationale: `build_https()` turns HTTP proxies off. The SDK default client that we replace honors `HTTP(S)_PROXY` from the environment, and builds itself through this same function. Dropping proxy support would silently break proxied devices. Cargo.lock pins the version.
@@ -65,7 +65,7 @@ GCS (`agent/src/gcs/`, coverage gate `.covgate` 88.00):
 - `store.rs` defines `CONTROL_ATTEMPT_TIMEOUT` (30 s, gRPC delete/exists) and `READ_IDLE_TIMEOUT` (60 s). `get` wraps the initial `send()` and every body `next()` in `tokio::time::timeout(READ_IDLE_TIMEOUT, ..)`; on expiry `idle_timeout_err` returns `GcsErr::ConnectionErr { msg: "no data received for 60s" }`. `put` (line ~139) opens the file with `tokio::fs::File::open` and calls `self.data.write_object(&resource_name, &dst.key, file).set_metadata(..).send_unbuffered()` with no timeout at all. Its doc comment says so, and points at the stale path `agent/src/upload/uploader.rs` (the real path is `agent/src/data_uploads/upload/uploader.rs`).
 - The comment on `CONTROL_ATTEMPT_TIMEOUT` says the client has "no TCP keepalive". That is accurate for the gRPC control client: `tonic` 0.14.6 `Endpoint` defaults to no connect timeout and no keepalive. The HTTP data client is different. It is a `reqwest` 0.13.4 client built by `google-cloud-gax-internal` 0.7.16 (`src/http.rs:85`), with keepalive 15 s ×3, `TCP_USER_TIMEOUT` 30 s on Linux only, and no connect timeout. The data-client SDK exposes no knob for a connect timeout or a custom HTTP client.
 - `google-cloud-storage` 1.17.0, module `google_cloud_storage::streaming_source`: trait `StreamingSource { type Error; async fn next(&mut self) -> Option<Result<bytes::Bytes, Self::Error>>; async fn size_hint(&self) -> Result<SizeHint, Self::Error> }`, trait `Seek { type Error; fn seek(&mut self, offset: u64) -> impl Future<Output = Result<(), Self::Error>> + Send }`, public `Payload<T>` and `FileSource`. `Payload::<FileSource>::from(tokio::fs::File)` reads 256 KiB per `next()` and reports an exact size hint. `impl<S: StreamingSource> From<S> for Payload<S>` lets any wrapper type plug into `write_object`. `send_unbuffered` requires the payload type to be `StreamingSource + Seek + Send + Sync + 'static`. Below 16 MiB it does one multipart POST; at or above 16 MiB it uses a resumable session (one PUT of the whole remaining body per attempt, `seek(offset)` before each). Both paths call `seek` before sending, and the body is pulled lazily as hyper writes.
-- Tests are inline in `store.rs` (`mod tests`, from line ~275). They use an axum mock (`crate::test_utils::http_client::run_server`, which binds 127.0.0.1:0) with an `HttpRecorder`, `upload_handler` (POST `/upload/storage/v1/b/{*rest}`) and `download_handler`, plus `Store::from_endpoint`. No test currently exercises `READ_IDLE_TIMEOUT` firing.
+- Tests are inline in `store.rs` (`mod tests`, from line ~275). They use an axum mock (`crate::test_utils::http_client::run_server`, which binds 127.0.0.1:0) with an `HttpRecorder`, `upload_handler` (POST `/upload/storage/v1/b/{*rest}`) and `download_handler`, plus `Store::from_endpoint`.
 
 S3 (`agent/src/s3/`, coverage gate 94.00; aws-sdk-s3 1.141.0, aws-smithy-runtime 1.13.1, aws-smithy-runtime-api 1.14.0, aws-smithy-types 1.6.2, aws-smithy-http-client 1.3.0):
 
@@ -111,7 +111,7 @@ The 32 KiB frames matter: hyper pulls the next frame only after buffering the pr
 Edit `agent/src/gcs/store.rs`:
 
 - Rename `READ_IDLE_TIMEOUT` to `IDLE_TIMEOUT`, documented as the maximum time `get` or `put` may go without byte progress. Update `get` and the `idle_timeout_err` doc to match.
-- Add `const FINALIZE_TIMEOUT: Duration = Duration::from_secs(120)` (doc: "longest wait after the last body byte for send buffers to drain and GCS to answer") and `const UPLOAD_LIMITS: Limits = Limits { idle: IDLE_TIMEOUT, finalize: FINALIZE_TIMEOUT }`.
+- Add `const FINALIZE_TIMEOUT: Duration = Duration::from_secs(90)` (doc: "longest wait after the last body byte for send buffers to drain and GCS to answer") and `const UPLOAD_LIMITS: Limits = Limits { idle: IDLE_TIMEOUT, finalize: FINALIZE_TIMEOUT }`.
 - Move `put`'s body into a private `async fn put_with_limits(&self, src: File, dst: &Object, metadata: &HashMap<String, String>, limits: Limits) -> Result<(), GcsErr>`; `put` becomes `self.put_with_limits(src, dst, metadata, UPLOAD_LIMITS).await` (tests call `put_with_limits` with millisecond limits). After opening the file:
 
       let (tx, rx) = tokio::sync::watch::channel(Progress::default());
@@ -127,7 +127,6 @@ Edit `agent/src/gcs/store.rs`:
   - Every request is bounded by progress: no body bytes accepted by the HTTP stack for `IDLE_TIMEOUT`, or no response within `FINALIZE_TIMEOUT` after the last body byte, aborts the call with a retryable `GcsErr::ConnectionErr`.
   - The idle window also covers connect/TLS (the SDK offers no connect-timeout knob) and SDK-internal retries and backoff.
   - Dropping the future orphans any resumable session (GCS expires it server-side); the caller's next attempt restarts from byte 0.
-  - `UploaderOptions::attempt_deadline` in `agent/src/data_uploads/upload/uploader.rs` remains only as a backstop.
 - Reword the `CONTROL_ATTEMPT_TIMEOUT` comment to say "the gRPC control client" explicitly (it has no connect timeout or keepalive). Add one line noting that the HTTP data client does have reqwest's TCP keepalive but no connect timeout, which is why `put`/`get` use idle windows.
 
 ### Milestone 2: S3 timeouts, stalled-stream protection, chunked bodies
@@ -169,15 +168,15 @@ Edit `agent/src/s3/mod.rs`:
 - Constants:
   - `CONNECT_TIMEOUT = 15 s`.
   - `ATTEMPT_TIMEOUT = 60 s` (bodyless calls).
-  - `STALL_GRACE = 60 s` (doc: "matches `gcs::store::IDLE_TIMEOUT`").
-  - `MIN_UPLOAD_BYTES_PER_SEC: u64 = 64 * 1024` (doc: "the uploader backstop's minimum rate, so a body call ends before `attempt_deadline` for its size").
-  - `pub(crate) COMPLETE_ATTEMPT_TIMEOUT = 600 s`.
+  - `BODY_ATTEMPT_FLOOR = 90 s` and `MIN_UPLOAD_BYTES_PER_SEC: u64 = 64 * 1024` (PutObject/UploadPart limit).
+  - `STALL_GRACE = 60 s` (longest a request body may go without progress).
+  - `COMPLETE_ATTEMPT_TIMEOUT = 600 s` (cap for `CompleteMultipartUpload`).
 - Helpers:
   - `fn timeout_config(limit: Duration) -> TimeoutConfig`: always sets `connect_timeout(CONNECT_TIMEOUT)`, `operation_timeout(limit)` and `operation_attempt_timeout(limit)`, so SDK retries and backoff fit inside the same limit (connector cache key is only (connect, read), so unaffected).
-  - `pub(crate) fn body_attempt_timeout(len: u64) -> Duration` (`ATTEMPT_TIMEOUT + len.div_ceil(MIN_UPLOAD_BYTES_PER_SEC)` seconds; 188 s for an 8 MiB part).
+  - `pub(crate) fn body_attempt_timeout(len: u64) -> Duration` (`BODY_ATTEMPT_FLOOR + len.div_ceil(MIN_UPLOAD_BYTES_PER_SEC)` seconds; 218 s for an 8 MiB part) and `pub(crate) fn complete_attempt_timeout(size: u64) -> Duration` (`body_attempt_timeout(size).min(COMPLETE_ATTEMPT_TIMEOUT)`).
   - `pub(crate) fn attempt_override(limit: Duration) -> aws_sdk_s3::config::Builder` (`aws_sdk_s3::Config::builder().timeout_config(timeout_config(limit))`).
 - `Store::build` adds `.timeout_config(timeout_config(ATTEMPT_TIMEOUT))` and `.stalled_stream_protection(StalledStreamProtectionConfig::enabled().upload_enabled(true).grace_period(STALL_GRACE).build())`.
-  - This bounds create, complete, abort, list, head, delete and the header phase of get, SDK retries included; the previously unbounded best-effort `abort_multipart_upload` is now capped at 60 s.
+  - This bounds create, abort, list, head, delete and the header phase of get, SDK retries included; the previously unbounded best-effort `abort_multipart_upload` is now capped at 60 s.
   - The grace period also applies to S3 downloads (was 5 s). That is acceptable and matches GCS.
 - `put_singlepart`:
   - Build the body with `body::chunked(Bytes::from(src.read(..)?))`.
@@ -187,12 +186,12 @@ Edit `agent/src/s3/mod.rs`:
 Edit `agent/src/s3/multipart.rs`:
 
 - `upload_part` takes the `Vec<u8>`, computes `len`, uses `body::chunked(Bytes::from(buf))`, and adds `.customize().config_override(attempt_override(body_attempt_timeout(len)))`.
-- `complete_multipart_upload` adds `.customize().config_override(attempt_override(COMPLETE_ATTEMPT_TIMEOUT))`.
+- `complete_multipart_upload` takes the object `size: u64` (`exec_multipart_upload` and `resume_multipart_upload` pass `src.size`) and adds `.customize().config_override(attempt_override(complete_attempt_timeout(size)))`.
 
 Edit `agent/src/data_uploads/upload/uploader.rs` doc comments only (no formula or value change):
 
 - `attempt_timeout_floor`, `attempt_timeout_bytes_per_sec` and `attempt_deadline` become a backstop that guarantees every attempt terminates.
-- Stalls are caught first by the stores — GCS's no-progress watchdog (`gcs::Store::put`), and for S3 stalled-stream protection plus per-call time limits sized below this backstop — which surface as uncounted network errors.
+- Stalls are caught first by the stores' own bounds (GCS's no-progress watchdog; S3 stalled-stream protection and per-call limits), sized to end before this deadline when create takes ≤ 30 s and bytes move at ≥ `attempt_timeout_bytes_per_sec`; they surface as uncounted network errors. Only this doc explains the ordering; store docs state just their own bounds.
 
 ### Milestone 3: shared S3 HTTPS client
 
@@ -243,18 +242,17 @@ All commands run from `/home/ben/miru/workbench5/repos/agent`. Never run cargo b
    - `progress_tracks_bytes_and_eof`: after draining, `*rx.borrow() == Progress { sent: total, eof: true }`; after `seek(0)` it equals `Progress { sent: total, eof: false }`.
 
    Watchdog tests under `#[tokio::test(start_paused = true)]` with pure futures and no sockets, using `Limits { idle: 60 s, finalize: 120 s }`:
-   - `fires_after_idle`: `std::future::pending()`, sender kept alive. It returns `GcsErr::ConnectionErr` whose `msg` is `"no upload progress for 60s"`, after exactly `IDLE` of virtual time, measured with `tokio::time::Instant`.
+   - `fires_after_idle`: `std::future::pending()`, sender kept alive. It returns `GcsErr::ConnectionErr` with `is_network_conn_err()` true, after exactly 60 s of virtual time, measured with `tokio::time::Instant`.
    - `keeps_waiting_while_progress_arrives`: a spawned task ticks every 30 s five times; the future resolves `Ok(42)` at 150 s, and the result is `Ok(42)`.
    - `returns_inner_result`: an immediate inner `Err(RequestFailedErr)` passes through unchanged.
-   - `dropped_sender_still_waits_full_window`: drop the sender; it fires `ConnectionErr` after `IDLE`, not immediately.
+   - `dropped_sender_still_waits_full_window`: drop the sender; it fires `ConnectionErr` after 60 s, not immediately.
    - `eof_switches_to_finalize_bound`: drain a `ProgressSource` to `None`; `watch_progress(pending(), ..)` fires `ConnectionErr` after exactly 120 s, not 60 s.
    - `seek_after_eof_restores_idle_bound`: drain to `None`; a spawned task calls `seek(0)` at 30 s; the watchdog fires at 90 s.
 
    In `agent/src/gcs/store.rs` tests:
-   - Add `upload_delay: Option<Duration>` and `download_stall: bool` to `HttpRecord`. `upload_handler` (its `Bytes` extractor has already read the body) sleeps for the delay before responding; `download_handler` awaits `std::future::pending::<()>()` when `download_stall` is set. Read the fields in a scoped block that drops the `MutexGuard` (not `Send`) before awaiting.
-   - `put::progress::slow_response_after_full_body_succeeds` (real time): `upload_delay = 600 ms`; call `store.put_with_limits(..)` with `Limits { idle: 200 ms, finalize: 5 s }`, assert `Ok`. Fails unless `put` wires its `ProgressSource` into the watchdog (without the end-of-body signal the 200 ms idle fires).
+   - Add `upload_delay: Option<Duration>` to `HttpRecord`. `upload_handler` (its `Bytes` extractor has already read the body) sleeps for the delay before responding. Read the field in a scoped block that drops the `MutexGuard` (not `Send`) before awaiting.
+   - `put::progress::slow_response_after_full_body_succeeds` (real time): `upload_delay = 3 s`; call `store.put_with_limits(..)` with `Limits { idle: 2 s, finalize: 10 s }`, assert `Ok`. Fails unless `put` wires its `ProgressSource` into the watchdog (without the end-of-body signal the 2 s idle fires during the 3 s delay; seconds of headroom absorb slow instrumented CI runs).
    - `put::progress::unanswered_upload_maps_to_connection_err` (real time): `upload_delay = 1 h`, `Limits { idle: 200 ms, finalize: 500 ms }`; assert `GcsErr::ConnectionErr` and `err.is_network_conn_err()`.
-   - `get::stall::stalled_download_maps_to_connection_err` (`start_paused = true`, `download_stall = true`): assert `GcsErr::ConnectionErr`, msg `"no data received for 60s"`, `is_network_conn_err()`. tokio may auto-advance to the 60 s timer before the request reaches the handler; either way `get`'s idle timeout is what fires.
    - Existing put/get tests stay unchanged.
 
 3. Commit Milestone 1:
@@ -279,8 +277,8 @@ All commands run from `/home/ben/miru/workbench5/repos/agent`. Never run cargo b
 
    In `agent/src/s3/mod.rs` tests:
    - `construction::build_sets_timeouts_and_stall_protection`: `Store::new(cfg)`, then read `store.client.config()`. `timeout_config()` has connect 15 s, operation 60 s and attempt 60 s. `stalled_stream_protection()` has `upload_enabled()` true and `grace_period()` 60 s. Use at most three asserts per variable, or compare whole values.
-   - `body_attempt_timeout_stays_under_uploader_backstop`: 0 bytes gives 60 s; `PART_SIZE` gives 188 s; for each of 0, 1 MiB and `PART_SIZE` the value is `<` `miru_agent::data_uploads::upload::uploader::UploaderOptions::default().attempt_deadline(len)`.
-   - `timeouts::stalled_put_maps_to_connection_err` (`start_paused = true`): `Store::from_http_client(NeverClient::new(), cfg)`, `put_singlepart` of a small file. Assert `S3Err::ConnectionErr` and `is_network_conn_err()`. Whether the attempt timeout or SSP fires first, both map to `ConnectionErr`. SSP's throughput clock is wall-clock, so under paused time the attempt timeout normally wins. Also assert virtual time elapsed (`tokio::time::Instant`) is at most `body_attempt_timeout(size)`, proving SDK retries don't stack past the limit.
+   - `call_limits_stay_under_uploader_backstop`: `body_attempt_timeout` gives 90 s for 0 bytes and 218 s for `PART_SIZE`; `complete_attempt_timeout` gives 219 s for `PART_SIZE + 1` and 600 s for 1 GiB. Each is `<` `miru_agent::data_uploads::upload::uploader::UploaderOptions::default().attempt_deadline(len)` for body sizes 0, 1 MiB, `PART_SIZE` and complete sizes `PART_SIZE + 1`, 30 MiB, 1 GiB.
+   - `timeouts::stalled_put_maps_to_connection_err` (`start_paused = true`): `Store::from_http_client(NeverClient::new(), cfg)`, `put_singlepart` of a 1 MiB file. Assert `S3Err::ConnectionErr` and `is_network_conn_err()`. `NeverClient` never polls the body, so SSP cannot fire. Assert virtual time elapsed (`tokio::time::Instant`) equals `body_attempt_timeout(1 MiB)` (106 s); that differs from the 60 s client default, so the test fails if the override is missing or SDK retries stack past it.
    - `stall_protection::chunked_body_trips_stall_protection`, in real time (not paused: SSP measures throughput with the wall-clock time source).
      - A test-only `HangAfterFirstFrame` client implements `aws_smithy_runtime_api::client::http::{HttpClient, HttpConnector}`. `call` moves the request body into a future that awaits one `frame()` and then `std::future::pending()`. `http_connector` returns `self.clone().into_shared()`, the same shape as `NeverClient`.
      - Build `Store::from_http_client(HangAfterFirstFrame, cfg)`. Send `store.client.put_object()` with `.body(body::chunked(256 KiB))`, using `.customize().config_override(aws_sdk_s3::Config::builder().stalled_stream_protection(StalledStreamProtectionConfig::enabled().upload_enabled(true).grace_period(Duration::from_secs(1)).build()).retry_config(RetryConfig::disabled()))`.
@@ -289,7 +287,8 @@ All commands run from `/home/ben/miru/workbench5/repos/agent`. Never run cargo b
      - If this proves unreliable, keep the attempt-timeout coverage, delete this test (the dev-dependency stays for Milestone 3's connector test), and record it in Surprises.
 
    In `agent/src/s3/multipart.rs` tests:
-   - `stalled_upload_part_maps_to_connection_err` (`start_paused = true`, `NeverClient`): call `store.upload_part(&obj, "upload-1", 1, vec![0u8; 64 * 1024])` directly and assert `ConnectionErr`.
+   - `stalled_upload_part_maps_to_connection_err` (`start_paused = true`, `NeverClient`): call `store.upload_part(&obj, "upload-1", 1, vec![0u8; 64 * 1024])` directly; assert `ConnectionErr` and elapsed virtual time equals `body_attempt_timeout(64 KiB)` (91 s).
+   - `stalled_complete_maps_to_connection_err` (`start_paused = true`, `NeverClient`): call `store.complete_multipart_upload(&obj, "upload-1", &[one CompletedPart], PART_SIZE + 1)`; assert `ConnectionErr` and elapsed virtual time equals `complete_attempt_timeout(PART_SIZE + 1)` (219 s).
    - Fix the two tests that read the 8 MiB part 1 with `.bytes()`: `path_replaced_after_open...` (~763) and `large_file_routes_to_multipart` (~1137). Part 1 is now an aws-chunked stream; part 2 (≤ 1 KiB) stays in memory and is unchanged.
      - Add a `pub(super) async fn recorded_payload(req: &HttpRequest) -> Vec<u8>` helper in `s3::tests`. It returns `body().bytes()` when present. Otherwise it `try_clone()`s the body, collects it with `http_body_util::BodyExt::collect`, and decodes aws-chunked framing: repeat `<hex-len>\r\n<data>\r\n` until a zero length.
      - In both tests assert `recorded_payload(&requests[1]).await` equals the first `PART_SIZE` bytes of the source.
@@ -315,7 +314,7 @@ All commands run from `/home/ben/miru/workbench5/repos/agent`. Never run cargo b
 
 11. Push and validate: `git push -u origin fix/eng-1303-upload-progress-timeouts`, then run `$preflight` and iterate until it reports CLEAN. Fix failures from CI logs (`gh run view --log-failed`), never by running checks locally. Update Progress, Surprises, Outcomes and move the plan to `plans/completed/` when done.
 
-Commits are signed by the repo's default git config; add no signing flags. Estimated total diff: about 600-700 lines, roughly 230 production and the rest tests.
+Commits are signed by the repo's default git config; add no signing flags. Estimated code and test diff (this plan file excluded): about 600-700 lines, roughly 235 production and the rest tests.
 
 ## Validation and Acceptance
 
@@ -330,15 +329,14 @@ The `$preflight` skill must report CLEAN (CI green on the pushed branch head) be
 
 Acceptance behaviors and the tests that prove them:
 
-- A GCS upload whose connection stops accepting bytes fails with `GcsErr::ConnectionErr` about 60 s after the last frame was taken (or 120 s after the full body if GCS never answers) instead of hanging for hours. Proved by the `progress.rs` watchdog tests (`fires_after_idle`, `dropped_sender_still_waits_full_window`, `eof_switches_to_finalize_bound`, `seek_after_eof_restores_idle_bound`) and `put::progress::unanswered_upload_maps_to_connection_err`.
+- A GCS upload whose connection stops accepting bytes fails with `GcsErr::ConnectionErr` about 60 s after the last frame was taken (or 90 s after the full body if GCS never answers) instead of hanging for hours. Proved by the `progress.rs` watchdog tests (`fires_after_idle`, `dropped_sender_still_waits_full_window`, `eof_switches_to_finalize_bound`, `seek_after_eof_restores_idle_bound`) and `put::progress::unanswered_upload_maps_to_connection_err`.
 - The uploader requeues that error after 10 s without counting an attempt. Proved by the existing `network_failures_do_not_consume_attempt_budget` and `network_failure_uses_flat_cooldown` together with the classification tests in `agent/src/data_uploads/upload/errors.rs`.
 - A slow but moving GCS upload is not cut off while bytes flow or while its buffered tail drains. Proved by `keeps_waiting_while_progress_arrives`, `rechunks_into_bounded_frames` and `put::progress::slow_response_after_full_body_succeeds`.
-- A stalled GCS download fails with "no data received for 60s". Proved by `get::stall::stalled_download_maps_to_connection_err`.
-- S3 PutObject/UploadPart requests that stall fail as `S3Err::ConnectionErr` before the uploader backstop: mid-stream within ~60 s of SSP grace (retried by the SDK inside the call's limit), otherwise at the call limit of 60 s + 1 s per 64 KiB. Proved by `stalled_put_maps_to_connection_err`, `stalled_upload_part_maps_to_connection_err`, `chunked_body_trips_stall_protection`, `body_attempt_timeout_stays_under_uploader_backstop` and `build_sets_timeouts_and_stall_protection`. S3 connects are bounded at 15 s.
+- S3 PutObject/UploadPart requests that stall fail as `S3Err::ConnectionErr` before the uploader backstop: mid-stream within ~60 s of SSP grace (retried by the SDK inside the call's limit), otherwise at the call limit of 90 s + 1 s per 64 KiB (complete: the same over the object size, capped at 10 min). Proved by `stalled_put_maps_to_connection_err`, `stalled_upload_part_maps_to_connection_err`, `stalled_complete_maps_to_connection_err`, `chunked_body_trips_stall_protection`, `call_limits_stay_under_uploader_backstop` and `build_sets_timeouts_and_stall_protection`. S3 connects are bounded at 15 s.
 - Normal uploads are unaffected: all existing GCS put/get and S3 put/multipart/get tests pass, with only the body-inspection change described in step 5.
 - `UploaderOptions::attempt_deadline` is unchanged and still fires as a counted backstop. Proved by the existing `attempt_deadline_formula` and `hung_attempt_times_out_and_is_retried`.
 - One S3 HTTPS client is created per `SdkTransfer` and passed to every store. Proved by `default_carries_shared_s3_http_client` and `http_client_builds_connector`.
 
 ## Idempotence and Recovery
 
-Every edit is a plain source change and is safe to reapply. `cargo update --workspace --offline` is idempotent. If it touches packages other than `miru-agent`, restore with `git checkout Cargo.lock` and rerun. Each milestone is one commit, so a failing milestone can be fixed with follow-up commits on the branch, or dropped with `git revert <sha>` without affecting earlier milestones. Milestone 3 is independent of Milestones 1-2 and can be reverted alone. If the paused-time download-stall test or a step 5 test is flaky, log it in Surprises and use step 5's fallback or drop the download-stall test; do not weaken the production timeouts to make a test pass. No data migrations or persistent state are involved. The uploader's on-disk queue format is untouched.
+Every edit is a plain source change and is safe to reapply. `cargo update --workspace --offline` is idempotent. If it touches packages other than `miru-agent`, restore with `git checkout Cargo.lock` and rerun. Each milestone is one commit, so a failing milestone can be fixed with follow-up commits on the branch, or dropped with `git revert <sha>` without affecting earlier milestones. Milestone 3 is independent of Milestones 1-2 and can be reverted alone. If a step 5 test is flaky, log it in Surprises and use step 5's fallback; do not weaken the production timeouts to make a test pass. No data migrations or persistent state are involved. The uploader's on-disk queue format is untouched.
