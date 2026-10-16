@@ -1,6 +1,6 @@
 // standard crates
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 // external crates
@@ -13,7 +13,7 @@ use tracing::{info, warn};
 /// code has handed off, not what the remote end has acknowledged.
 #[derive(Debug, Default)]
 pub struct Progress {
-    total: AtomicU64,
+    total: OnceLock<u64>,
     done: AtomicU64,
     rewinds: AtomicU64,
 }
@@ -27,8 +27,10 @@ pub struct Snapshot {
 }
 
 impl Progress {
+    /// Records the transfer's size. Only the first call takes effect: a
+    /// transfer's size is fixed once the file is open.
     pub fn set_total(&self, total: u64) {
-        self.total.store(total, Ordering::Relaxed);
+        let _ = self.total.set(total);
     }
 
     pub fn add(&self, bytes: u64) {
@@ -47,7 +49,7 @@ impl Progress {
 
     pub fn snapshot(&self) -> Snapshot {
         Snapshot {
-            total: self.total.load(Ordering::Relaxed),
+            total: self.total.get().copied().unwrap_or(0),
             done: self.done.load(Ordering::Relaxed),
             rewinds: self.rewinds.load(Ordering::Relaxed),
         }
@@ -246,6 +248,14 @@ mod tests {
             progress.add(3);
             assert_eq!(progress.seek_to(2), 7);
             assert_eq!(progress.snapshot(), snap(10, 2, 1));
+        }
+
+        #[test]
+        fn total_is_set_once() {
+            let progress = Progress::default();
+            progress.set_total(10);
+            progress.set_total(20);
+            assert_eq!(progress.snapshot(), snap(10, 0, 0));
         }
 
         #[test]
