@@ -120,7 +120,7 @@ impl Drop for Ending {
     }
 }
 
-fn summary(fn summary(outcome: Outcome, total: u64, sent: u64, elapsed: Duration) -> String {
+fn summary(outcome: Outcome, total: u64, sent: u64, elapsed: Duration) -> String {
     format!(
         "{outcome} after {}; {}, {}/s average",
         duration(elapsed.as_secs()),
