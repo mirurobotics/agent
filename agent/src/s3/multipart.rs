@@ -1,7 +1,9 @@
 // standard crates
+use std::sync::Arc;
 use std::time::Instant;
 
 // internal crates
+use crate::progress::{Progress, Reporter, REPORT_INTERVAL};
 use crate::s3::{errors, errors::NoSuchUploadErr, Object, S3Err, Source, Store, PART_SIZE};
 
 // external crates
@@ -68,28 +70,38 @@ impl Store {
         upload_id: &str,
         landed: &std::collections::HashMap<i32, CompletedPart>,
     ) -> Result<Vec<CompletedPart>, S3Err> {
-        self.progress.set_total(src.size);
         let plan = Self::part_plan(src.size);
         let count = plan.len();
-        let mut parts: Vec<CompletedPart> = Vec::new();
-        for (part_number, offset, len) in plan {
-            let part = match landed.get(&part_number) {
-                Some(existing) => existing.clone(),
-                None => {
-                    let started = Instant::now();
-                    let buf = src.read("upload_part", dst, offset, len).await?;
-                    let part = self.upload_part(dst, upload_id, part_number, buf).await?;
-                    let secs = started.elapsed().as_secs_f64();
-                    debug!(
-                        "s3: {dst}: part {part_number}/{count} ({len} bytes) uploaded in {secs:.1}s"
-                    );
-                    part
-                }
-            };
-            self.progress.add(len);
-            parts.push(part);
+        let progress = Arc::new(Progress::new(src.size));
+        let reporter = Reporter::spawn(
+            format!("upload: {}", src.file),
+            progress.clone(),
+            REPORT_INTERVAL,
+        );
+        let result: Result<Vec<CompletedPart>, S3Err> = async {
+            let mut parts: Vec<CompletedPart> = Vec::new();
+            for (part_number, offset, len) in plan {
+                let part = match landed.get(&part_number) {
+                    Some(existing) => existing.clone(),
+                    None => {
+                        let started = Instant::now();
+                        let buf = src.read("upload_part", dst, offset, len).await?;
+                        let part = self.upload_part(dst, upload_id, part_number, buf).await?;
+                        let secs = started.elapsed().as_secs_f64();
+                        debug!(
+                            "s3: {dst}: part {part_number}/{count} ({len} B) sent in {secs:.1}s"
+                        );
+                        part
+                    }
+                };
+                progress.add(len);
+                parts.push(part);
+            }
+            Ok(parts)
         }
-        Ok(parts)
+        .await;
+        reporter.finish(result.is_ok());
+        result
     }
 
     /// Lists every part already uploaded for `upload_id`, following pagination,
@@ -317,7 +329,6 @@ mod tests {
     use crate::test_utils::filesys::files as test_files;
     use miru_agent::errors::{Code, Error};
     use miru_agent::filesys::path::PathExt;
-    use miru_agent::progress::{Progress, Snapshot};
 
     // external crates
     use aws_smithy_http_client::test_util::{ReplayEvent, StaticReplayClient};
@@ -900,38 +911,6 @@ mod tests {
 
             // Both parts listed in order: part 1 reuses its landed etag, part 2 the fresh one.
             assert_complete_manifest(&replay, &[(1, "landed-1"), (2, "fresh-2")]);
-        }
-
-        // Landed parts count as done, so a resumed upload reports its true position.
-        #[tokio::test]
-        async fn resume_records_landed_and_uploaded_parts() {
-            let tf = two_part_file().await;
-            let src = source_of(&tf).await;
-            let (store, _replay) = store_with(vec![
-                ReplayEvent::new(
-                    list_parts_req(),
-                    list_parts_resp(&[(1, "\"landed-1\"", 8 * 1024 * 1024)], None),
-                ),
-                ReplayEvent::new(upload_part_req(2), upload_part_resp("\"fresh-2\"")),
-                ReplayEvent::new(complete_req(), complete_resp()),
-            ]);
-            let progress = std::sync::Arc::new(Progress::default());
-
-            store
-                .with_progress(progress.clone())
-                .resume_multipart_upload(src, &obj("big.bin"), UPLOAD_ID)
-                .await
-                .unwrap();
-
-            let size = 8 * 1024 * 1024 + 1024;
-            assert_eq!(
-                progress.snapshot(),
-                Snapshot {
-                    total: size,
-                    done: size,
-                    rewinds: 0,
-                }
-            );
         }
 
         #[tokio::test]

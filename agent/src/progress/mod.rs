@@ -1,6 +1,6 @@
 // standard crates
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 use std::time::Duration;
 
 // external crates
@@ -8,12 +8,16 @@ use tokio::task::JoinHandle;
 use tokio::time::{Instant, MissedTickBehavior};
 use tracing::{info, warn};
 
-/// Bytes moved by a long-running transfer, shared between the code that moves
-/// them and a [`Reporter`] that logs them. Counts describe what the transfer
-/// code has handed off, not what the remote end has acknowledged.
-#[derive(Debug, Default)]
+/// How often a [`Reporter`] logs a running transfer.
+pub const REPORT_INTERVAL: Duration = Duration::from_secs(30);
+
+/// Bytes moved by a long-running transfer of a fixed `total` size, shared
+/// between the code that moves them and a [`Reporter`] that logs them. Counts
+/// describe what the transfer code has handed off, not what the remote end has
+/// acknowledged.
+#[derive(Debug)]
 pub struct Progress {
-    total: OnceLock<u64>,
+    total: u64,
     done: AtomicU64,
     rewinds: AtomicU64,
 }
@@ -27,10 +31,12 @@ pub struct Snapshot {
 }
 
 impl Progress {
-    /// Records the transfer's size. Only the first call takes effect: a
-    /// transfer's size is fixed once the file is open.
-    pub fn set_total(&self, total: u64) {
-        let _ = self.total.set(total);
+    pub fn new(total: u64) -> Self {
+        Self {
+            total,
+            done: AtomicU64::new(0),
+            rewinds: AtomicU64::new(0),
+        }
     }
 
     pub fn add(&self, bytes: u64) {
@@ -49,7 +55,7 @@ impl Progress {
 
     pub fn snapshot(&self) -> Snapshot {
         Snapshot {
-            total: self.total.get().copied().unwrap_or(0),
+            total: self.total,
             done: self.done.load(Ordering::Relaxed),
             rewinds: self.rewinds.load(Ordering::Relaxed),
         }
@@ -242,8 +248,7 @@ mod tests {
 
         #[test]
         fn counts_bytes_and_rewinds() {
-            let progress = Progress::default();
-            progress.set_total(10);
+            let progress = Progress::new(10);
             progress.add(4);
             progress.add(3);
             assert_eq!(progress.seek_to(2), 7);
@@ -251,16 +256,8 @@ mod tests {
         }
 
         #[test]
-        fn total_is_set_once() {
-            let progress = Progress::default();
-            progress.set_total(10);
-            progress.set_total(20);
-            assert_eq!(progress.snapshot(), snap(10, 0, 0));
-        }
-
-        #[test]
         fn seeking_forward_is_not_a_rewind() {
-            let progress = Progress::default();
+            let progress = Progress::new(0);
             assert_eq!(progress.seek_to(0), 0);
             assert_eq!(progress.seek_to(5), 0);
             assert_eq!(progress.snapshot(), snap(0, 5, 0));
@@ -373,8 +370,7 @@ mod tests {
         // Runs one progressing and one stalled interval, then stops on finish.
         #[tokio::test(start_paused = true)]
         async fn finishing_stops_the_task() {
-            let progress = Arc::new(Progress::default());
-            progress.set_total(10 * MIB);
+            let progress = Arc::new(Progress::new(10 * MIB));
             let reporter = Reporter::spawn(
                 "test".to_string(),
                 progress.clone(),
@@ -394,7 +390,7 @@ mod tests {
 
         #[tokio::test(start_paused = true)]
         async fn dropping_an_unfinished_reporter_stops_it() {
-            let progress = Arc::new(Progress::default());
+            let progress = Arc::new(Progress::new(0));
             let reporter = Reporter::spawn(
                 "test".to_string(),
                 progress.clone(),

@@ -8,7 +8,7 @@ use crate::gcs::{
     errors::{self, is_not_found, map_gcs_err, BuildErr, ConnectionErr},
     Credentials, GcsErr, Object, StaticTokenCredentials,
 };
-use crate::progress::Progress;
+use crate::progress::{Progress, Reporter, REPORT_INTERVAL};
 use crate::trace;
 
 // external crates
@@ -39,7 +39,6 @@ const READ_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60
 pub struct Store {
     data: Storage,
     control: StorageControl,
-    progress: Arc<Progress>,
 }
 
 impl Store {
@@ -125,17 +124,7 @@ impl Store {
             }
         };
 
-        Ok(Self {
-            data,
-            control,
-            progress: Arc::default(),
-        })
-    }
-
-    /// Records the bytes [`Self::put`] hands to the SDK into `progress`.
-    pub fn with_progress(mut self, progress: Arc<Progress>) -> Self {
-        self.progress = progress;
-        self
+        Ok(Self { data, control })
     }
 
     /// Creates or overwrites an object by streaming a file off disk.
@@ -145,6 +134,7 @@ impl Store {
     /// [`GcsErr::FileSysErr`] before any request is dispatched; any other
     /// failure to open the source is [`GcsErr::LocalIoErr`]. The GCS SDK
     /// chooses between simple and resumable transfer based on the payload size.
+    /// Progress is logged every [`REPORT_INTERVAL`] while the upload runs.
     ///
     /// The upload itself carries no timeout — a single attempt spans the whole
     /// body, so no fixed bound fits arbitrary sizes. A silently dead connection
@@ -176,18 +166,21 @@ impl Store {
             .await
             .map_err(|e| errors::map_body_io_err("put_object", dst, &src, e))?
             .len();
-        self.progress.set_total(size);
+        let progress = Arc::new(Progress::new(size));
+        let reporter = Reporter::spawn(format!("upload: {src}"), progress.clone(), REPORT_INTERVAL);
         let payload = CountingSource {
             inner: Payload::from(file),
-            progress: self.progress.clone(),
+            progress,
             object: dst.to_string(),
         };
-        self.data
+        let result = self
+            .data
             .write_object(&resource_name, &dst.key, payload)
             .set_metadata(metadata.clone())
             .send_unbuffered()
-            .await
-            .map_err(|e| map_gcs_err("put_object", dst, e))?;
+            .await;
+        reporter.finish(result.is_ok());
+        result.map_err(|e| map_gcs_err("put_object", dst, e))?;
         Ok(())
     }
 
@@ -597,36 +590,12 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn upload_records_progress() {
-            let rec = HttpRecorder::default();
-            let progress = Arc::new(Progress::default());
-            let store = http_store(rec.clone())
-                .await
-                .with_progress(progress.clone());
-            let src = temp_file_with(b"hello world").await;
-
-            store
-                .put(src.to_file(), &obj("artifacts/hello.txt"), &HashMap::new())
-                .await
-                .unwrap();
-
-            assert_eq!(
-                progress.snapshot(),
-                Snapshot {
-                    total: 11,
-                    done: 11,
-                    rewinds: 0,
-                }
-            );
-        }
-
-        #[tokio::test]
         async fn counting_source_counts_reads_and_rewinds() {
             use google_cloud_storage::streaming_source::{Payload, Seek, StreamingSource};
 
             let src = temp_file_with(b"hello world").await;
             let file = tokio::fs::File::open(src.file().path()).await.unwrap();
-            let progress = Arc::new(Progress::default());
+            let progress = Arc::new(Progress::new(11));
             let mut source = super::super::CountingSource {
                 inner: Payload::from(file),
                 progress: progress.clone(),
@@ -643,7 +612,7 @@ mod tests {
             assert_eq!(
                 progress.snapshot(),
                 Snapshot {
-                    total: 0,
+                    total: 11,
                     done: 11,
                     rewinds: 1,
                 }

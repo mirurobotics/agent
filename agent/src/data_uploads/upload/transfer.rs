@@ -1,8 +1,6 @@
 // standard crates
 use std::collections::HashMap;
 use std::future::Future;
-use std::sync::Arc;
-use std::time::Duration;
 
 // internal crates
 use crate::data_uploads::upload::errors::{
@@ -10,7 +8,6 @@ use crate::data_uploads::upload::errors::{
 };
 use crate::filesys::File;
 use crate::gcs;
-use crate::progress::{Progress, Reporter};
 use crate::s3;
 use backend_api::models::upload_credentials::Scheme;
 use backend_api::models::{S3UploadCredentials, UploadCredentials, UploadDestination};
@@ -18,9 +15,6 @@ use backend_api::models::{S3UploadCredentials, UploadCredentials, UploadDestinat
 // external crates
 use chrono::{DateTime, Utc};
 use tracing::{info, warn};
-
-/// How often a running transfer logs its progress.
-const PROGRESS_INTERVAL: Duration = Duration::from_secs(30);
 
 /// The seam between the upload executor and the concrete cloud-storage SDKs.
 /// Given the vended downscoped credentials and the server-authorized
@@ -90,15 +84,12 @@ impl SdkTransfer {
         destination: &UploadDestination,
         file: &File,
         metadata: &HashMap<String, String>,
-        progress: &Arc<Progress>,
     ) -> Result<(), UploadErr> {
         let creds = credentials
             .s3_credentials
             .as_deref()
             .ok_or_else(|| executor_err(TransferErr::MissingS3Credentials))?;
-        let store = self
-            .s3_store(s3_config(creds))
-            .with_progress(progress.clone());
+        let store = self.s3_store(s3_config(creds));
         let object = s3::Object {
             bucket: destination.bucket_name.clone(),
             key: destination.object_key.clone(),
@@ -117,7 +108,6 @@ impl SdkTransfer {
         destination: &UploadDestination,
         file: &File,
         metadata: &HashMap<String, String>,
-        progress: &Arc<Progress>,
     ) -> Result<(), UploadErr> {
         let creds = credentials
             .gcs_credentials
@@ -128,8 +118,7 @@ impl SdkTransfer {
                 access_token: creds.access_token.clone(),
             })
             .await
-            .map_err(classified_executor_err)?
-            .with_progress(progress.clone());
+            .map_err(classified_executor_err)?;
         let object = gcs::Object {
             bucket: destination.bucket_name.clone(),
             key: destination.object_key.clone(),
@@ -172,26 +161,17 @@ impl ObjectTransfer for SdkTransfer {
                 warn!("upload: credentials for {file} have an unparseable expiry {expires_at:?}")
             }
         }
-
-        let progress = Arc::new(Progress::default());
-        let reporter = Reporter::spawn(
-            format!("upload: {file}"),
-            progress.clone(),
-            PROGRESS_INTERVAL,
-        );
-        let result = match credentials.scheme {
+        match credentials.scheme {
             Scheme::S3 => {
-                self.transfer_s3(credentials, destination, file, metadata, &progress)
+                self.transfer_s3(credentials, destination, file, metadata)
                     .await
             }
             Scheme::Gcs => {
-                self.transfer_gcs(credentials, destination, file, metadata, &progress)
+                self.transfer_gcs(credentials, destination, file, metadata)
                     .await
             }
             Scheme::SchemeUnknown => Err(executor_err(TransferErr::UnrecognizedScheme)),
-        };
-        reporter.finish(result.is_ok());
-        result
+        }
     }
 }
 
