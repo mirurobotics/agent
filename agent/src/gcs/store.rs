@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use crate::filesys::{errors::PathDoesNotExistErr, file::File, path::PathExt, FileSysErr};
 use crate::gcs::{
     errors::{self, is_not_found, map_gcs_err, BuildErr, ConnectionErr},
+    progress::{self, Limits, Progress, ProgressSource},
     Credentials, GcsErr, Object, StaticTokenCredentials,
 };
 use crate::trace;
@@ -14,19 +15,32 @@ use google_cloud_auth::credentials::{Credentials as GcsCredentials, EntityTag};
 use google_cloud_gax::retry_policy::RetryPolicyExt as _;
 use google_cloud_storage::client::{Storage, StorageControl};
 use google_cloud_storage::retry_policy::RetryableErrors;
+use google_cloud_storage::streaming_source::{FileSource, Payload};
 use http::HeaderValue;
 use tokio::io::AsyncWriteExt as _;
 
 /// Per-attempt timeout for the gRPC control-plane ops (delete/exists) — tiny
-/// metadata RPCs. Without it the underlying client has no request timeout, no
+/// metadata RPCs. Without it the gRPC control client has no request timeout, no
 /// connect timeout, and no TCP keepalive, so a silently dropped connection
 /// (NAT expiry, cellular drop) hangs the call forever.
+/// The HTTP data client does have reqwest's TCP keepalive but no connect
+/// timeout, which is why `put`/`get` bound progress with idle windows instead.
 const CONTROL_ATTEMPT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
-/// Maximum time `get` waits for the response to start or for the next body
-/// chunk. Bounds *progress* rather than the whole transfer, so it holds for
-/// arbitrarily large objects.
-const READ_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+/// Maximum time `get` or `put` may go without byte progress (for `get`, including
+/// the wait for the response to start; `put` waits up to [`FINALIZE_TIMEOUT`]
+/// after its last body byte). Bounds *progress* rather than the whole transfer,
+/// so it holds for arbitrarily large objects.
+const IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Longest wait after the last body byte for send buffers to drain and GCS to
+/// answer.
+const FINALIZE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(90);
+
+const UPLOAD_LIMITS: Limits = Limits {
+    idle: IDLE_TIMEOUT,
+    finalize: FINALIZE_TIMEOUT,
+};
 
 /// An async GCS client holding the HTTP data client ([`Storage`]) for uploads/downloads
 /// and the gRPC control client ([`StorageControl`]) for delete/exists.
@@ -129,18 +143,32 @@ impl Store {
     /// failure to open the source is [`GcsErr::LocalIoErr`]. The GCS SDK
     /// chooses between simple and resumable transfer based on the payload size.
     ///
-    /// The upload itself carries no timeout — a single attempt spans the whole
-    /// body, so no fixed bound fits arbitrary sizes. A silently dead connection
-    /// can stall this call; callers that need a bound must enforce their own
-    /// size-scaled deadline (e.g. `tokio::time::timeout`) around it. The
-    /// upload actor does exactly that: `Worker::attempt_upload` in
-    /// `agent/src/upload/uploader.rs` bounds every attempt with a
-    /// floor-plus-per-byte deadline (`UploaderOptions::attempt_deadline`).
+    /// Every request is bounded by progress, not size: no body bytes accepted by
+    /// the HTTP stack for [`IDLE_TIMEOUT`], or no response within
+    /// [`FINALIZE_TIMEOUT`] after the last body byte, aborts the call with a
+    /// retryable [`GcsErr::ConnectionErr`]. The idle window also covers
+    /// connect/TLS (the SDK offers no connect-timeout knob) and SDK-internal
+    /// retries and backoff.
+    ///
+    /// Dropping the future orphans any resumable session (GCS expires it
+    /// server-side); the caller's next attempt restarts from byte 0.
     pub async fn put(
         &self,
         src: File,
         dst: &Object,
         metadata: &HashMap<String, String>,
+    ) -> Result<(), GcsErr> {
+        self.put_with_limits(src, dst, metadata, UPLOAD_LIMITS)
+            .await
+    }
+
+    /// [`Self::put`] with explicit progress limits, so tests can use short ones.
+    async fn put_with_limits(
+        &self,
+        src: File,
+        dst: &Object,
+        metadata: &HashMap<String, String>,
+        limits: Limits,
     ) -> Result<(), GcsErr> {
         let resource_name = dst.resource_name();
         let file = tokio::fs::File::open(src.path()).await.map_err(|e| {
@@ -154,12 +182,17 @@ impl Store {
                 errors::map_body_io_err("put_object", dst, &src, e)
             }
         })?;
-        self.data
-            .write_object(&resource_name, &dst.key, file)
-            .set_metadata(metadata.clone())
-            .send_unbuffered()
-            .await
-            .map_err(|e| map_gcs_err("put_object", dst, e))?;
+        let (tx, rx) = tokio::sync::watch::channel(Progress::default());
+        let payload = ProgressSource::new(Payload::<FileSource>::from(file), tx);
+        let send = async {
+            self.data
+                .write_object(&resource_name, &dst.key, payload)
+                .set_metadata(metadata.clone())
+                .send_unbuffered()
+                .await
+                .map_err(|e| map_gcs_err("put_object", dst, e))
+        };
+        progress::watch_progress(send, rx, limits, dst).await?;
         Ok(())
     }
 
@@ -168,7 +201,7 @@ impl Store {
     pub async fn get(&self, src: &Object, dest: &File) -> Result<(), GcsErr> {
         let resource_name = src.resource_name();
         let send = self.data.read_object(&resource_name, &src.key).send();
-        let mut resp = match tokio::time::timeout(READ_IDLE_TIMEOUT, send)
+        let mut resp = match tokio::time::timeout(IDLE_TIMEOUT, send)
             .await
             .map_err(|_| Self::idle_timeout_err(src))?
         {
@@ -189,7 +222,7 @@ impl Store {
         // write on an unbuffered tokio File dispatches a blocking task —
         // buffer so multi-GB downloads don't pay one dispatch per frame.
         let mut writer = tokio::io::BufWriter::with_capacity(512 * 1024, file);
-        while let Some(chunk) = tokio::time::timeout(READ_IDLE_TIMEOUT, resp.next())
+        while let Some(chunk) = tokio::time::timeout(IDLE_TIMEOUT, resp.next())
             .await
             .map_err(|_| Self::idle_timeout_err(src))?
         {
@@ -253,12 +286,12 @@ impl Store {
         }
     }
 
-    /// A read made no progress within [`READ_IDLE_TIMEOUT`] — a silently dead
+    /// A `get` made no progress within [`IDLE_TIMEOUT`] — a silently dead
     /// connection, surfaced as a retryable network error.
     fn idle_timeout_err(src: &Object) -> GcsErr {
         GcsErr::ConnectionErr(ConnectionErr {
             object: src.clone(),
-            msg: format!("no data received for {}s", READ_IDLE_TIMEOUT.as_secs()),
+            msg: format!("no data received for {}s", IDLE_TIMEOUT.as_secs()),
             trace: trace!(),
         })
     }
@@ -277,8 +310,10 @@ mod tests {
     // standard crates
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
+    use std::time::Duration;
 
     // internal crates
+    use crate::gcs::progress::Limits;
     use crate::test_utils::{
         filesys::{dirs as test_dirs, files as test_files, missing_file},
         http_client::run_server,
@@ -364,6 +399,8 @@ mod tests {
         download_truncate: bool,
         /// If set, uploads respond with this status instead of 200 + Object JSON.
         upload_status: Option<StatusCode>,
+        /// If set, uploads respond this long after reading the whole request.
+        upload_delay: Option<Duration>,
     }
 
     fn bearer_present(headers: &HeaderMap) -> bool {
@@ -386,13 +423,20 @@ mod tests {
         [(axum::http::HeaderName, &'static str); 1],
         String,
     ) {
-        let mut r = rec.inner.lock().unwrap();
-        r.upload_hits += 1;
-        r.saw_bearer = r.saw_bearer || bearer_present(&headers);
-        r.upload_uri = uri.0.to_string();
-        r.upload_body = body.to_vec();
+        // The guard must drop before the delay: a handler future must be `Send`.
+        let (status, delay) = {
+            let mut r = rec.inner.lock().unwrap();
+            r.upload_hits += 1;
+            r.saw_bearer = r.saw_bearer || bearer_present(&headers);
+            r.upload_uri = uri.0.to_string();
+            r.upload_body = body.to_vec();
+            (r.upload_status, r.upload_delay)
+        };
+        if let Some(delay) = delay {
+            tokio::time::sleep(delay).await;
+        }
         let json_ct = [(axum::http::header::CONTENT_TYPE, "application/json")];
-        if let Some(status) = r.upload_status {
+        if let Some(status) = status {
             return (
                 status,
                 json_ct,
@@ -529,6 +573,29 @@ mod tests {
         }
 
         #[tokio::test]
+        async fn upload_multi_frame_body_intact() {
+            // 100 KiB spans several progress frames: re-chunking must neither
+            // drop nor reorder bytes. The period (251) divides no frame size.
+            let data: Vec<u8> = (0..100 * 1024).map(|i| (i % 251) as u8).collect();
+            let rec = HttpRecorder::default();
+            let store = http_store(rec.clone()).await;
+            let src = temp_file_with(&data).await;
+
+            store
+                .put(src.to_file(), &obj("artifacts/big.bin"), &HashMap::new())
+                .await
+                .unwrap();
+
+            let r = rec.inner.lock().unwrap();
+            assert!(
+                r.upload_body
+                    .windows(data.len())
+                    .any(|w| w == data.as_slice()),
+                "uploaded multipart body must contain the file bytes in order"
+            );
+        }
+
+        #[tokio::test]
         async fn upload_empty_file_succeeds() {
             // A 0-byte source still issues exactly one upload.
             let rec = HttpRecorder::default();
@@ -584,6 +651,54 @@ mod tests {
                     GcsErr::RequestFailedErr(e) => assert_eq!(e.status, Some(403)),
                     other => panic!("expected RequestFailedErr, got {other:?}"),
                 }
+            }
+        }
+
+        /// Real-time tests with short limits: the watchdog itself is covered
+        /// with paused time in `gcs::progress`.
+        pub mod progress {
+            use super::*;
+
+            #[tokio::test]
+            async fn slow_response_after_full_body_succeeds() {
+                // The server answers 3 s after reading the whole body: past
+                // `idle`, but `finalize` applies once the body has ended.
+                let rec = HttpRecorder::default();
+                rec.inner.lock().unwrap().upload_delay = Some(Duration::from_secs(3));
+                let store = http_store(rec.clone()).await;
+                let src = temp_file_with(b"payload").await;
+                let limits = Limits {
+                    idle: Duration::from_secs(2),
+                    finalize: Duration::from_secs(10),
+                };
+
+                store
+                    .put_with_limits(src.to_file(), &obj("slow.txt"), &HashMap::new(), limits)
+                    .await
+                    .unwrap();
+
+                assert_eq!(rec.inner.lock().unwrap().upload_hits, 1);
+            }
+
+            #[tokio::test]
+            async fn unanswered_upload_maps_to_connection_err() {
+                // Whichever bound fires first, the error is the same.
+                let rec = HttpRecorder::default();
+                rec.inner.lock().unwrap().upload_delay = Some(Duration::from_secs(3600));
+                let store = http_store(rec).await;
+                let src = temp_file_with(b"payload").await;
+                let limits = Limits {
+                    idle: Duration::from_millis(200),
+                    finalize: Duration::from_millis(500),
+                };
+
+                let err = store
+                    .put_with_limits(src.to_file(), &obj("hung.txt"), &HashMap::new(), limits)
+                    .await
+                    .unwrap_err();
+
+                assert!(matches!(err, GcsErr::ConnectionErr(_)), "got {err:?}");
+                assert!(err.is_network_conn_err());
             }
         }
 

@@ -3,6 +3,7 @@ use google_cloud_auth::credentials::{CacheableResource, CredentialsProvider, Ent
 use http::{Extensions, HeaderMap, HeaderValue};
 
 pub mod errors;
+mod progress;
 pub mod store;
 
 pub use errors::GcsErr;

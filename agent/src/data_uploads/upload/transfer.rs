@@ -40,11 +40,22 @@ pub trait ObjectTransfer: Send + Sync {
 /// simple vs resumable) with the vended OAuth2 bearer token for `gcs`. Optional
 /// transport settings feed the same store builders as the default HTTPS
 /// transport and cloud endpoints.
-#[derive(Default)]
 pub struct SdkTransfer {
     s3_http_client: Option<aws_sdk_s3::config::SharedHttpClient>,
     s3_force_path_style: bool,
     gcs_endpoint: Option<String>,
+}
+
+/// Builds the S3 HTTPS client once per transfer, which lives for the app's
+/// lifetime, so every upload shares its connection pool.
+impl Default for SdkTransfer {
+    fn default() -> Self {
+        Self {
+            s3_http_client: Some(s3::http_client()),
+            s3_force_path_style: false,
+            gcs_endpoint: None,
+        }
+    }
 }
 
 impl SdkTransfer {
@@ -93,8 +104,9 @@ impl SdkTransfer {
             bucket: destination.bucket_name.clone(),
             key: destination.object_key.clone(),
         };
-        store
-            .put(file.clone(), &object, metadata)
+        // Boxed to keep the uploader future's type shallow enough for rustc's
+        // query depth limit.
+        Box::pin(store.put(file.clone(), &object, metadata))
             .await
             .map_err(classified_executor_err)
     }
@@ -122,8 +134,9 @@ impl SdkTransfer {
             bucket: destination.bucket_name.clone(),
             key: destination.object_key.clone(),
         };
-        store
-            .put(file.clone(), &object, metadata)
+        // Boxed to keep the uploader future's type shallow enough for rustc's
+        // query depth limit.
+        Box::pin(store.put(file.clone(), &object, metadata))
             .await
             .map_err(classified_executor_err)
     }
@@ -349,6 +362,15 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn default_carries_shared_s3_http_client() {
+        let transfer = SdkTransfer::default();
+
+        assert!(transfer.s3_http_client.is_some());
+        assert!(!transfer.s3_force_path_style);
+        assert!(transfer.gcs_endpoint.is_none());
+    }
+
+    #[tokio::test]
     async fn unknown_scheme_is_unsupported() {
         let creds = credentials("something-new", s3_credentials_json(), Value::Null);
         let err = SdkTransfer::default()
@@ -447,9 +469,9 @@ mod tests {
 
     #[tokio::test]
     async fn s3_default_store_fails_offline_on_missing_file() {
-        // Default settings use the shared S3 builder without a transport override.
-        // Construction does no I/O and `put` stats the file before dispatching any
-        // request, so a missing local file fails fast offline.
+        // Default settings carry the shared `s3::http_client()`. Construction makes
+        // no network calls and `put` stats the file before dispatching any request,
+        // so a missing local file fails fast offline.
         let creds = credentials("s3", s3_credentials_json(), Value::Null);
         let missing = missing_file();
 

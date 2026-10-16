@@ -1,10 +1,14 @@
 // internal crates
-use crate::s3::{errors, errors::NoSuchUploadErr, Object, S3Err, Source, Store, PART_SIZE};
+use crate::s3::{
+    attempt_override, body, body_attempt_timeout, complete_attempt_timeout, errors,
+    errors::NoSuchUploadErr, Object, S3Err, Source, Store, ABORT_ATTEMPT_TIMEOUT, PART_SIZE,
+};
 
 // external crates
 use aws_sdk_s3::operation::list_parts::ListPartsOutput;
-use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart};
+use bytes::Bytes;
+use tokio::time::Instant;
 
 type UploadID = String;
 
@@ -24,9 +28,13 @@ impl Store {
         dst: &Object,
         metadata: &std::collections::HashMap<String, String>,
     ) -> Result<(), S3Err> {
+        let started = Instant::now();
         let upload_id = self.create_multipart_upload(dst, metadata).await?;
 
-        match self.exec_multipart_upload(&mut src, dst, &upload_id).await {
+        match self
+            .exec_multipart_upload(&mut src, dst, &upload_id, started)
+            .await
+        {
             Ok(()) => Ok(()),
             Err(err) => {
                 // Best-effort cleanup: don't mask the original error if the abort
@@ -49,9 +57,11 @@ impl Store {
         dst: &Object,
         upload_id: &str,
     ) -> Result<(), S3Err> {
+        let started = Instant::now();
         let landed = self.list_parts(dst, upload_id).await?;
         let parts = self.upload_parts(&mut src, dst, upload_id, &landed).await?;
-        self.complete_multipart_upload(dst, upload_id, &parts).await
+        self.complete_multipart_upload(dst, upload_id, &parts, src.size, started)
+            .await
     }
 
     /// Walks [`Self::part_plan`] in order. For each part number present in
@@ -206,17 +216,20 @@ impl Store {
     /// Uploads every part and completes the multipart upload. Split out from
     /// [`Self::put_multipart`] so a single `?` early-return path funnels through
     /// one abort site: any failure here propagates as one `Err` that
-    /// `put_multipart` catches to issue a best-effort abort.
+    /// `put_multipart` catches to issue a best-effort abort. `started` is when
+    /// `put_multipart` began, before the create call.
     async fn exec_multipart_upload(
         &self,
         src: &mut Source,
         dst: &Object,
         upload_id: &str,
+        started: Instant,
     ) -> Result<(), S3Err> {
         let parts = self
             .upload_parts(src, dst, upload_id, &std::collections::HashMap::new())
             .await?;
-        self.complete_multipart_upload(dst, upload_id, &parts).await
+        self.complete_multipart_upload(dst, upload_id, &parts, src.size, started)
+            .await
     }
 
     /// Uploads one part's bytes to S3 and returns the [`CompletedPart`]
@@ -228,7 +241,8 @@ impl Store {
         part_number: i32,
         buf: Vec<u8>,
     ) -> Result<CompletedPart, S3Err> {
-        let body = ByteStream::from(buf);
+        let len = buf.len() as u64;
+        let body = body::chunked(Bytes::from(buf));
 
         let output = self
             .client
@@ -238,6 +252,8 @@ impl Store {
             .upload_id(upload_id)
             .part_number(part_number)
             .body(body)
+            .customize()
+            .config_override(attempt_override(body_attempt_timeout(len)))
             .send()
             .await
             .map_err(|e| errors::map_sdk_err("upload_part", dst, e))?;
@@ -252,22 +268,29 @@ impl Store {
     }
 
     /// Completes a multipart upload from the `(part_number, etag)` pairs of the
-    /// landed parts.
+    /// landed parts. `size` is the object size and `started` when the attempt's
+    /// first S3 call (create, or list on resume) began; together they bound
+    /// this call (see [`complete_attempt_timeout`]).
     async fn complete_multipart_upload(
         &self,
         obj: &Object,
         upload_id: &str,
         parts: &[CompletedPart],
+        size: u64,
+        started: Instant,
     ) -> Result<(), S3Err> {
         let completed = CompletedMultipartUpload::builder()
             .set_parts(Some(parts.to_vec()))
             .build();
+        let limit = complete_attempt_timeout(size, started.elapsed());
         self.client
             .complete_multipart_upload()
             .bucket(&obj.bucket)
             .key(&obj.key)
             .upload_id(upload_id)
             .multipart_upload(completed)
+            .customize()
+            .config_override(attempt_override(limit))
             .send()
             .await
             .map_err(|e| errors::map_sdk_err("complete_multipart_upload", obj, e))?;
@@ -282,6 +305,8 @@ impl Store {
             .bucket(&obj.bucket)
             .key(&obj.key)
             .upload_id(upload_id)
+            .customize()
+            .config_override(attempt_override(ABORT_ATTEMPT_TIMEOUT))
             .send()
             .await
             .map_err(|e| errors::map_sdk_err("abort_multipart_upload", obj, e))?;
@@ -293,19 +318,25 @@ impl Store {
 mod tests {
     // standard crates
     use std::collections::HashMap;
+    use std::time::Duration;
 
     // internal crates
     use super::*;
     use crate::s3::tests::{
-        access_denied_resp, actual_shapes, obj, req, resp, resp_xml, shape, store_expecting,
-        store_with, temp_file_with, uri,
+        access_denied_resp, actual_shapes, obj, recorded_payload, req, resp, resp_xml, shape,
+        store_expecting, store_on, store_with, temp_file_with, uri,
     };
     use crate::test_utils::filesys::files as test_files;
     use miru_agent::errors::{Code, Error};
     use miru_agent::filesys::path::PathExt;
 
     // external crates
-    use aws_smithy_http_client::test_util::{ReplayEvent, StaticReplayClient};
+    use aws_smithy_http_client::test_util::{NeverClient, ReplayEvent, StaticReplayClient};
+    use aws_smithy_runtime_api::client::http::{
+        HttpClient, HttpConnector, HttpConnectorFuture, HttpConnectorSettings, SharedHttpConnector,
+    };
+    use aws_smithy_runtime_api::client::orchestrator::{HttpRequest, HttpResponse};
+    use aws_smithy_runtime_api::client::runtime_components::RuntimeComponents;
     use aws_smithy_types::body::SdkBody;
 
     const BUCKET: &str = "test-bucket";
@@ -760,10 +791,119 @@ mod tests {
                 ]
             );
             let requests = replay.actual_requests().collect::<Vec<_>>();
-            assert!(requests[1].body().bytes() == Some(&original[..PART_SIZE as usize]));
+            assert!(recorded_payload(requests[1]).await == original[..PART_SIZE as usize]);
             assert!(requests[2].body().bytes() == Some(&original[PART_SIZE as usize..]));
 
             tokio::fs::remove_file(&moved).await.unwrap();
+        }
+
+        /// Answers create after [`CREATE_DELAY`] and parts at once, never
+        /// answers complete, and accepts the abort.
+        #[derive(Clone, Debug)]
+        struct ScriptedClient;
+
+        const CREATE_DELAY: Duration = Duration::from_secs(20);
+
+        impl HttpConnector for ScriptedClient {
+            fn call(&self, request: HttpRequest) -> HttpConnectorFuture {
+                let reply = |r: http::Response<SdkBody>| Ok(HttpResponse::try_from(r).unwrap());
+                match (request.method(), request.uri().ends_with("?uploads")) {
+                    ("POST", true) => HttpConnectorFuture::new(async move {
+                        tokio::time::sleep(CREATE_DELAY).await;
+                        reply(create_resp())
+                    }),
+                    ("POST", false) => HttpConnectorFuture::new(std::future::pending()),
+                    ("PUT", _) => HttpConnectorFuture::ready(reply(upload_part_resp("\"e1\""))),
+                    _ => HttpConnectorFuture::ready(reply(resp(204, &[]))),
+                }
+            }
+        }
+
+        impl HttpClient for ScriptedClient {
+            fn http_connector(
+                &self,
+                _: &HttpConnectorSettings,
+                _: &RuntimeComponents,
+            ) -> SharedHttpConnector {
+                SharedHttpConnector::new(self.clone())
+            }
+        }
+
+        #[tokio::test(start_paused = true)]
+        async fn complete_budget_includes_create_time() {
+            let tf = temp_file_with(&[7u8; 1024]).await;
+            let src = source_of(&tf).await;
+            let store = store_on(ScriptedClient);
+            let start = Instant::now();
+
+            let err = store
+                .put_multipart(src, &obj("big.bin"), &HashMap::new())
+                .await
+                .unwrap_err();
+
+            // 20 s create + the 71 s left of the 91 s body budget. Starting the
+            // budget after create would end at 111 s.
+            assert!(matches!(err, S3Err::ConnectionErr(_)), "got {err:?}");
+            assert_eq!(start.elapsed(), body_attempt_timeout(1024));
+        }
+    }
+
+    /// Calls against a server that never answers end at their own limits with a
+    /// retryable error. Stall protection's window runs on the wall clock, which
+    /// barely moves while paused time races ahead, so only the limit ends them.
+    pub mod stalls {
+        use super::*;
+
+        #[tokio::test(start_paused = true)]
+        async fn stalled_upload_part_maps_to_connection_err() {
+            let store = store_on(NeverClient::new());
+            let start = Instant::now();
+
+            let err = store
+                .upload_part(&obj("big.bin"), UPLOAD_ID, 1, vec![0; 64 * 1024])
+                .await
+                .unwrap_err();
+
+            assert!(matches!(err, S3Err::ConnectionErr(_)), "got {err:?}");
+            assert!(err.is_network_conn_err());
+            assert_eq!(start.elapsed(), Duration::from_secs(91));
+        }
+
+        #[tokio::test(start_paused = true)]
+        async fn stalled_complete_maps_to_connection_err() {
+            let store = store_on(NeverClient::new());
+            let dst = obj("big.bin");
+            let part = CompletedPart::builder()
+                .part_number(1)
+                .e_tag("\"e1\"")
+                .build();
+            let start = Instant::now();
+
+            // Limit: the full body budget of a PART_SIZE + 1 object (219 s).
+            let err = store
+                .complete_multipart_upload(&dst, UPLOAD_ID, &[part], PART_SIZE + 1, start)
+                .await
+                .unwrap_err();
+
+            assert!(matches!(err, S3Err::ConnectionErr(_)), "got {err:?}");
+            assert!(err.is_network_conn_err());
+            assert_eq!(start.elapsed(), Duration::from_secs(219));
+        }
+
+        #[tokio::test(start_paused = true)]
+        async fn stalled_abort_gives_up_after_10s() {
+            let store = store_on(NeverClient::new());
+            let start = Instant::now();
+
+            let err = store
+                .abort_multipart_upload(&obj("big.bin"), UPLOAD_ID)
+                .await
+                .unwrap_err();
+
+            // Bodyless, so stall protection never applies: only the limit ends it.
+            assert!(matches!(err, S3Err::ConnectionErr(_)), "got {err:?}");
+            assert!(err.is_network_conn_err());
+            assert_eq!(start.elapsed(), ABORT_ATTEMPT_TIMEOUT);
         }
     }
 
@@ -1132,14 +1272,11 @@ mod tests {
                 "manifest carries part 2's etag"
             );
 
-            // Parts are sent as in-memory buffers, so their exact bytes are recorded:
-            // each part must carry its own file slice (right offset and length).
+            // Each part must carry its own file slice (right offset and length).
+            // Part 1 streams in frames, so it is decoded from the recorded body;
+            // the 1 KiB tail stays in memory.
             assert!(
-                requests[1]
-                    .body()
-                    .bytes()
-                    .expect("part 1 body is in-memory")
-                    == &big[..PART_SIZE as usize],
+                recorded_payload(requests[1]).await == big[..PART_SIZE as usize],
                 "part 1 must be the first PART_SIZE bytes of the source"
             );
             assert!(
