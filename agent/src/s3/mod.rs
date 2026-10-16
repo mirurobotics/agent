@@ -82,8 +82,8 @@ pub(crate) fn attempt_override(limit: Duration) -> aws_sdk_s3::config::Builder {
 /// SDK default client: rustls with aws-lc, proxy settings from the environment.
 pub fn http_client() -> SharedHttpClient {
     Builder::new().build_with_connector_fn(|settings, components| {
-        let mut conn = ConnectorBuilder::default()
-            .tls_provider(tls::Provider::Rustls(tls::rustls_provider::CryptoMode::AwsLc));
+        let provider = tls::Provider::Rustls(tls::rustls_provider::CryptoMode::AwsLc);
+        let mut conn = ConnectorBuilder::default().tls_provider(provider);
         conn.set_connector_settings(settings.cloned());
         if let Some(components) = components {
             conn.set_sleep_impl(components.sleep_impl());

@@ -105,7 +105,10 @@ pub(super) async fn watch_progress<T>(
     let sent = progress.borrow().sent;
     Err(GcsErr::ConnectionErr(ConnectionErr {
         object: obj.clone(),
-        msg: format!("no upload progress for {}s ({sent} bytes sent)", bound.as_secs()),
+        msg: format!(
+            "no upload progress for {}s ({sent} bytes sent)",
+            bound.as_secs()
+        ),
         trace: trace!(),
     }))
 }

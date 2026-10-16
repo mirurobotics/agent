@@ -277,6 +277,7 @@ impl Store {
         let completed = CompletedMultipartUpload::builder()
             .set_parts(Some(parts.to_vec()))
             .build();
+        let limit = complete_attempt_timeout(size, started.elapsed());
         self.client
             .complete_multipart_upload()
             .bucket(&obj.bucket)
@@ -284,7 +285,7 @@ impl Store {
             .upload_id(upload_id)
             .multipart_upload(completed)
             .customize()
-            .config_override(attempt_override(complete_attempt_timeout(size, started.elapsed())))
+            .config_override(attempt_override(limit))
             .send()
             .await
             .map_err(|e| errors::map_sdk_err("complete_multipart_upload", obj, e))?;
