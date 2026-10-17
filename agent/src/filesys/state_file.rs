@@ -51,15 +51,66 @@ where
         Ok(state_file)
     }
 
+    /// Opens `file`, starting from `default` when the file does not exist yet.
+    /// See [`Self::new_or_recover`] for how an unreadable file is handled.
     pub async fn new_with_default(file: File, default: ContentT) -> Result<Self, FileSysErr>
     where
         Self: Sized,
     {
-        let result = Self::new(file.clone()).await;
-        match result {
+        Self::new_or_recover(file, default, |_| None).await
+    }
+
+    /// Opens `file`, falling back to `default` only when that loses nothing:
+    ///
+    /// - **Missing file:** created with `default`.
+    /// - **Unparseable file** (truncated, or written by another agent version):
+    ///   the file is moved aside to `<name>.corrupt-<unix-ts>` so its contents
+    ///   survive for inspection, then recreated from whatever `salvage` can
+    ///   recover from its bytes, or from `default` if it recovers nothing.
+    /// - **Any other read error** (EIO, EACCES, ...): returned as-is and the
+    ///   file is left untouched. Overwriting it would silently discard state
+    ///   that may be perfectly intact once the error clears.
+    pub async fn new_or_recover(
+        file: File,
+        default: ContentT,
+        salvage: impl FnOnce(&[u8]) -> Option<ContentT>,
+    ) -> Result<Self, FileSysErr>
+    where
+        Self: Sized,
+    {
+        match Self::new(file.clone()).await {
             Ok(state_file) => Ok(state_file),
-            Err(_) => Self::create(file, &default, Overwrite::Allow).await,
+            Err(FileSysErr::PathDoesNotExistErr(_)) => {
+                Self::create(file, &default, Overwrite::Allow).await
+            }
+            Err(FileSysErr::ParseJSONErr(err)) => {
+                let bytes = files::read_bytes(&file).await?;
+                let aside = Self::move_aside(&file).await?;
+                let recovered = salvage(&bytes);
+                error!(
+                    "state file {file} could not be parsed ({err}); moved it to {aside} and \
+                     {}",
+                    if recovered.is_some() {
+                        "kept the entries that could be recovered"
+                    } else {
+                        "started from the default"
+                    }
+                );
+                let content = recovered.unwrap_or(default);
+                Self::create(file, &content, Overwrite::Allow).await
+            }
+            Err(err) => Err(err),
         }
+    }
+
+    /// Renames `file` to a timestamped `.corrupt-<unix-ts>` sibling.
+    async fn move_aside(file: &File) -> Result<File, FileSysErr> {
+        let ts = chrono::Utc::now().timestamp();
+        let aside = file
+            .parent()?
+            .file(&format!("{}.corrupt-{ts}", file.name()?));
+        files::move_to(file, &aside, Overwrite::Allow).await?;
+        Ok(aside)
     }
 
     pub async fn create(
