@@ -221,22 +221,6 @@ pub fn map_body_io_err(operation: &str, obj: &Object, file: &File, err: std::io:
     })
 }
 
-/// Maps a local `ByteStream` construction error (e.g. the file could not be
-/// opened or read) into [`S3Err::LocalIoErr`].
-pub fn map_bytestream_err(
-    operation: &str,
-    obj: &Object,
-    file: &File,
-    err: &ByteStreamError,
-) -> S3Err {
-    S3Err::LocalIoErr(LocalIoErr {
-        operation: operation.to_string(),
-        object: obj.clone(),
-        msg: format!("failed to open '{file}' for streaming: {err}"),
-        trace: crate::trace!(),
-    })
-}
-
 /// Maps an error reading the object body off the wire (connection reset, TLS
 /// drop, truncated body) into a retryable [`S3Err::ConnectionErr`].
 pub fn map_body_read_err(operation: &str, object: &Object, err: &ByteStreamError) -> S3Err {
@@ -393,21 +377,6 @@ mod tests {
             assert!(msg.contains("s3://bucket/key"));
             assert!(msg.contains(&file_path));
             assert!(msg.contains("no space left on device"));
-        }
-
-        #[test]
-        fn map_bytestream_err_maps_to_local_io_err() {
-            // A failure opening the local source file for streaming is also a
-            // terminal local I/O error.
-            let err = ByteStreamError::from(std::io::Error::other("permission denied"));
-            let file = File::new("/data/in.bin");
-            let file_path = file.to_string();
-            let mapped = map_bytestream_err("put_object", &object(), &file, &err);
-            assert!(matches!(mapped, S3Err::LocalIoErr(_)));
-            assert!(!mapped.is_network_conn_err());
-            let msg = mapped.to_string();
-            assert!(msg.contains("s3://bucket/key"));
-            assert!(msg.contains(&file_path));
         }
 
         #[test]
