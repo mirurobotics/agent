@@ -30,7 +30,7 @@ macro_rules! dispatch {
 }
 
 /// The IDs of `rules`, or an error if an ID repeats or a glob is invalid.
-fn validate_rules(rules: &[FileRule]) -> Result<HashSet<FileRuleID>, ScanErr> {
+pub(crate) fn validate_rules(rules: &[FileRule]) -> Result<HashSet<FileRuleID>, ScanErr> {
     let mut ids = HashSet::new();
     for rule in rules {
         if !ids.insert(rule.id.clone()) {
