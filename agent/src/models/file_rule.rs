@@ -58,6 +58,18 @@ pub struct FileRuleRetention {
     pub ttl_secs: u64,
 }
 
+impl FileRuleRetention {
+    /// Whether a file must be uploaded before it may be deleted. An absent
+    /// `require_upload` defaults to whether the rule uploads at all
+    /// (`rule_uploads`): the backend only omits the field on rules without an
+    /// upload block, so a rule that uploads but arrives without it (e.g. a
+    /// stale cached rule) keeps the safe behavior and never deletes a file
+    /// before it is uploaded.
+    pub fn requires_upload(&self, rule_uploads: bool) -> bool {
+        self.require_upload.unwrap_or(rule_uploads)
+    }
+}
+
 // ================================= FILE RULE ===================================== //
 pub type FileRuleID = String;
 pub type UploadCollectionID = String;

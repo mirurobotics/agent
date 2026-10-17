@@ -82,8 +82,9 @@ async fn retention_only_rule_enqueues_a_delete_job() {
     assert_eq!(deleter.recorded_calls(), [expected_job("b.log", 0)]);
 }
 
-// The backend omits require_upload when the rule has no upload block. That
-// absence is the same gate as false: the file is deletable at stability.
+// The backend omits require_upload when the rule has no upload block. On a
+// rule without uploads, that absence is the same gate as false: the file is
+// deletable at stability.
 #[tokio::test]
 async fn absent_require_upload_enqueues_a_delete_job() {
     let deleter = MockDeleter::new();
@@ -99,6 +100,26 @@ async fn absent_require_upload_enqueues_a_delete_job() {
     sink.on_stable_file(stable_file("f.log"), &rule).await;
 
     assert_eq!(deleter.recorded_calls(), [expected_job("f.log", 60)]);
+}
+
+// A rule that uploads but arrives without require_upload (e.g. a stale cached
+// rule) must not delete at stability: the file would be gone before it was
+// uploaded. The absence defaults to requiring the upload.
+#[tokio::test]
+async fn upload_rule_with_absent_require_upload_enqueues_nothing() {
+    let deleter = MockDeleter::new();
+    let sink = RetentionStableFileSink::new(deleter.clone());
+    let rule = rule(
+        Some(FileRuleUpload::default()),
+        Some(FileRuleRetention {
+            require_upload: None,
+            ttl_secs: 60,
+        }),
+    );
+
+    sink.on_stable_file(stable_file("g.log"), &rule).await;
+
+    assert_eq!(deleter.recorded_calls(), []);
 }
 
 // require_upload files become deletable at upload confirmation, not at
