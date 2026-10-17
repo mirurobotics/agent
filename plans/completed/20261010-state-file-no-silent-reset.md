@@ -17,7 +17,7 @@ Linear: ENG-1541 (File Uploads Tech Debt, M0 data-loss fixes). Also resolves the
 `SingleThreadStateFile::new_or_recover(file, default, salvage)`:
 
 - **Missing file:** create it with `default` (unchanged).
-- **Parse error:** move the file aside to `<name>.corrupt-<unix-ts>`, log at `error!`, then recreate it from `salvage(bytes)` or, if that recovers nothing, from `default`.
+- **Parse error:** copy the file aside to `<name>.corrupt-<unix-ms>` (never overwriting an earlier copy), log at `error!`, then atomically replace it with `salvage(bytes)` or, if that recovers nothing, `default`. The original stays in place until that write succeeds.
 - **Any other error:** return it and leave the file untouched. App state already degrades to running without persistence for that boot (fail-open), so the on-disk queue survives for the next boot.
 
 `new_with_default` is `new_or_recover` with a salvage that recovers nothing. For the queues, `QueueSnapshot::salvage` keeps every entry that still deserializes on its own and logs how many it dropped; `queue::open_snapshot_file` wires it in, and `App` uses it for `upload_queue.json` and `delete_queue.json`.

@@ -15,7 +15,7 @@ use tracing::{debug, error, info, trace, warn};
 // ========================= SINGLE THREADED STATE FILE =========================== //
 type SingleThreadTokenFile = SingleThreadStateFile<Token, Updates>;
 
-/// The `.corrupt-<ts>` siblings a recovery moved aside in `dir`.
+/// The `.corrupt-<ts>` siblings a recovery copied aside in `dir`.
 async fn corrupt_siblings(dir: &Dir) -> Vec<File> {
     let mut found = Vec::new();
     let mut entries = tokio::fs::read_dir(dir.path()).await.unwrap();
@@ -102,7 +102,7 @@ pub mod new_with_default {
             .unwrap();
         assert_eq!(state_file.read().as_ref(), &Token::default());
 
-        // the unparseable contents were moved aside, not destroyed
+        // the unparseable contents were copied aside, not destroyed
         let aside = corrupt_siblings(&dir).await;
         assert_eq!(aside.len(), 1, "{aside:?}");
         assert_eq!(files::read_string(&aside[0]).await.unwrap(), "invalid-data");
@@ -178,6 +178,32 @@ pub mod new_or_recover {
         assert_eq!(state_file.read().as_ref(), &expected);
         assert_eq!(files::read_json::<Token>(&file).await.unwrap(), expected);
         assert_eq!(corrupt_siblings(&dir).await.len(), 1);
+    }
+
+    // Each recovery keeps its own aside copy instead of overwriting an
+    // earlier one.
+    #[tokio::test]
+    async fn repeated_recoveries_keep_every_aside_copy() {
+        let dir = test_dirs::temp("testing").unwrap();
+        let file = dir.file("test-file");
+
+        for contents in ["first-bad", "second-bad"] {
+            files::write_string(&file, contents, WriteOptions::OVERWRITE_ATOMIC)
+                .await
+                .unwrap();
+            SingleThreadTokenFile::new_or_recover(file.clone(), Token::default(), |_| None)
+                .await
+                .unwrap();
+            // aside names use millisecond timestamps
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+
+        let mut kept = Vec::new();
+        for aside in corrupt_siblings(&dir).await {
+            kept.push(files::read_string(&aside).await.unwrap());
+        }
+        kept.sort();
+        assert_eq!(kept, vec!["first-bad", "second-bad"]);
     }
 
     // A missing file never consults `salvage`.

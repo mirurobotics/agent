@@ -64,9 +64,11 @@ where
     ///
     /// - **Missing file:** created with `default`.
     /// - **Unparseable file** (truncated, or written by another agent version):
-    ///   the file is moved aside to `<name>.corrupt-<unix-ts>` so its contents
-    ///   survive for inspection, then recreated from whatever `salvage` can
-    ///   recover from its bytes, or from `default` if it recovers nothing.
+    ///   the file is copied aside to `<name>.corrupt-<unix-ms>` so its contents
+    ///   survive for inspection, then atomically replaced with whatever
+    ///   `salvage` can recover from its bytes, or with `default` if it
+    ///   recovers nothing. The original stays in place until that write
+    ///   succeeds, so a failed write (e.g. ENOSPC) loses nothing.
     /// - **Any other read error** (EIO, EACCES, ...): returned as-is and the
     ///   file is left untouched. Overwriting it would silently discard state
     ///   that may be perfectly intact once the error clears.
@@ -85,10 +87,10 @@ where
             }
             Err(FileSysErr::ParseJSONErr(err)) => {
                 let bytes = files::read_bytes(&file).await?;
-                let aside = Self::move_aside(&file).await?;
+                let aside = Self::copy_aside(&file).await?;
                 let recovered = salvage(&bytes);
                 error!(
-                    "state file {file} could not be parsed ({err}); moved it to {aside} and \
+                    "state file {file} could not be parsed ({err}); copied it to {aside} and \
                      {}",
                     if recovered.is_some() {
                         "kept the entries that could be recovered"
@@ -103,13 +105,14 @@ where
         }
     }
 
-    /// Renames `file` to a timestamped `.corrupt-<unix-ts>` sibling.
-    async fn move_aside(file: &File) -> Result<File, FileSysErr> {
-        let ts = chrono::Utc::now().timestamp();
+    /// Copies `file` to a timestamped `.corrupt-<unix-ms>` sibling, keeping
+    /// its permissions. Never overwrites an earlier aside copy.
+    async fn copy_aside(file: &File) -> Result<File, FileSysErr> {
+        let ts = chrono::Utc::now().timestamp_millis();
         let aside = file
             .parent()?
             .file(&format!("{}.corrupt-{ts}", file.name()?));
-        files::move_to(file, &aside, Overwrite::Allow).await?;
+        files::copy_to(file, &aside, Overwrite::Deny).await?;
         Ok(aside)
     }
 

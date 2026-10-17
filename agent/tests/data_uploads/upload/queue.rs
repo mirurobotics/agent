@@ -74,7 +74,7 @@ mod wire {
 
     /// Pins the persisted wire format on the read side: an entry is
     /// `{id, job, attempts, next_attempt_at}` with the job's fields nested
-    /// rather than flattened. A snapshot that no longer parses is moved aside
+    /// rather than flattened. A snapshot that no longer parses is copied aside
     /// and only its still-parseable entries are kept, so a shape change would
     /// still drop a live user's queued jobs — this test is the guard.
     ///
