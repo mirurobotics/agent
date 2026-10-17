@@ -1,4 +1,5 @@
 // standard crates
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 // internal crates
@@ -12,7 +13,9 @@ use crate::test_utils::upload::{
     destination, make_job, pending_response, response_metadata, response_with_status,
     s3_credentials, token_manager,
 };
-use backend_api::models::{CreateUploadRequest, UploadSource, UploadStatus, UploadWithCredentials};
+use backend_api::models::{
+    CreateUploadRequest, Upload, UploadSource, UploadStatus, UploadWithCredentials,
+};
 use miru_agent::authn::errors::MockError as AuthnMockError;
 use miru_agent::authn::AuthnErr;
 use miru_agent::data_uploads::upload::executor::new_upl_request;
@@ -249,6 +252,84 @@ async fn confirm_4xx_failure_is_terminal() {
     let client = Arc::new(MockClient::default());
     client.set_create_upload(|| Ok(pending_response()));
     client.set_confirm_upload(|| Err(request_failed_err(422)));
+    let transfer = MockObjectTransfer::new();
+    let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone());
+
+    let err = executor.upload(&make_job("a.log")).await.unwrap_err();
+
+    assert!(err.is_terminal());
+}
+
+// ===== lost confirm response =====
+
+fn network_http_err() -> HTTPErr {
+    HTTPErr::MockErr(HttpMockErr {
+        is_network_conn_err: true,
+    })
+}
+
+/// A confirm script: the first send's response is lost (network error), and
+/// every later send answers with `retry`.
+fn lost_then(retry: fn() -> Result<Upload, HTTPErr>) -> impl Fn() -> Result<Upload, HTTPErr> {
+    let sends = AtomicUsize::new(0);
+    move || match sends.fetch_add(1, Ordering::SeqCst) {
+        0 => Err(network_http_err()),
+        _ => retry(),
+    }
+}
+
+// The backend committed the first confirm but its response was lost; the
+// retry finds the upload already confirmed and answers 409. The upload is
+// done, so the attempt succeeds and the job proceeds to its delete job.
+#[tokio::test]
+async fn lost_confirm_response_then_conflict_is_success() {
+    let client = Arc::new(MockClient::default());
+    client.set_create_upload(|| Ok(pending_response()));
+    client.set_confirm_upload(lost_then(|| Err(request_failed_err(409))));
+    let transfer = MockObjectTransfer::new();
+    let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone());
+
+    executor.upload(&make_job("a.log")).await.unwrap();
+
+    assert_eq!(client.call_count(Call::ConfirmUpload), 2);
+}
+
+// Today's backend answers a repeated confirm with 200 on the uploaded row.
+#[tokio::test]
+async fn lost_confirm_response_then_ok_is_success() {
+    let client = Arc::new(MockClient::default());
+    client.set_create_upload(|| Ok(pending_response()));
+    client.set_confirm_upload(lost_then(|| Ok(*uploaded_response().upload)));
+    let transfer = MockObjectTransfer::new();
+    let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone());
+
+    executor.upload(&make_job("a.log")).await.unwrap();
+
+    assert_eq!(client.call_count(Call::ConfirmUpload), 2);
+}
+
+// A 409 on the first send cannot be our own lost commit, so it stays a
+// terminal failure.
+#[tokio::test]
+async fn first_confirm_conflict_is_terminal() {
+    let client = Arc::new(MockClient::default());
+    client.set_create_upload(|| Ok(pending_response()));
+    client.set_confirm_upload(|| Err(request_failed_err(409)));
+    let transfer = MockObjectTransfer::new();
+    let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone());
+
+    let err = executor.upload(&make_job("a.log")).await.unwrap_err();
+
+    assert!(err.is_terminal());
+    assert_eq!(client.call_count(Call::ConfirmUpload), 1);
+}
+
+// Any other terminal status on a retried confirm still fails the attempt.
+#[tokio::test]
+async fn lost_confirm_response_then_other_4xx_is_terminal() {
+    let client = Arc::new(MockClient::default());
+    client.set_create_upload(|| Ok(pending_response()));
+    client.set_confirm_upload(lost_then(|| Err(request_failed_err(422))));
     let transfer = MockObjectTransfer::new();
     let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone());
 
