@@ -10,6 +10,7 @@ use crate::data_uploads::scan::{
     sink::StableFileSink,
     state::{RuleState, ScanSnapshotFile, ScannerSnapshot},
 };
+use crate::filesys::files;
 use crate::models::{Deployment, FileRule, FileRuleID};
 use crate::trace;
 
@@ -26,6 +27,21 @@ macro_rules! dispatch {
             error!($msg);
         }
     }};
+}
+
+/// The IDs of `rules`, or an error if an ID repeats or a glob is invalid.
+fn validate_rules(rules: &[FileRule]) -> Result<HashSet<FileRuleID>, ScanErr> {
+    let mut ids = HashSet::new();
+    for rule in rules {
+        if !ids.insert(rule.id.clone()) {
+            return Err(ScanErr::DuplicateFileRuleID(DuplicateFileRuleID {
+                file_rule_id: rule.id.clone(),
+                trace: trace!(),
+            }));
+        }
+        files::validate_glob(&rule.source.glob)?;
+    }
+    Ok(ids)
 }
 
 // ======================== SINGLE-THREADED IMPLEMENTATION ========================= //
@@ -151,16 +167,17 @@ impl SingleThreadScanner {
         deployment: Deployment,
         rules: Vec<FileRule>,
     ) -> Result<(), ScanErr> {
-        let mut deployed: HashSet<FileRuleID> = HashSet::new();
-        for rule in rules.iter() {
-            if deployed.contains(&rule.id) {
-                return Err(ScanErr::DuplicateFileRuleID(DuplicateFileRuleID {
-                    file_rule_id: rule.id.clone(),
-                    trace: trace!(),
-                }));
+        // Reject an invalid rule set whole, before touching any scanner, and
+        // deploy nothing. Running its valid rules, or keeping the previous
+        // deployment's rules, would upload and delete under a policy nobody
+        // approved.
+        let deployed = match validate_rules(&rules) {
+            Ok(deployed) => deployed,
+            Err(err) => {
+                self.clear_rules().await?;
+                return Err(err);
             }
-            deployed.insert(rule.id.clone());
-        }
+        };
 
         // Every rule gets a scanner, whether or not it uploads: a retention-only
         // rule still needs its glob walked and its files ledgered so the
@@ -1267,10 +1284,10 @@ mod tests {
     mod update_rules {
         use super::*;
 
-        // A rule set with two rules sharing one rule id is rejected BEFORE any
-        // state mutation.
+        // A rule set with two rules sharing one rule id is rejected whole, and
+        // the previous rules leave the deployed set.
         #[tokio::test]
-        async fn update_rules_duplicate_rule_id_errors() {
+        async fn update_rules_duplicate_rule_id_deploys_nothing() {
             let clock = Clock::new(1000);
             let scanner = spawn_scanner(&clock);
 
@@ -1292,9 +1309,11 @@ mod tests {
                 crate::data_uploads::scan::ScanErr::DuplicateFileRuleID(_)
             ));
 
-            // No state mutated: the existing active rule is untouched and the
-            // duplicate set was not applied.
+            // No scanner was created for the duplicate set, and the previous
+            // rule drains on the next tick.
             assert_eq!(active_rule_ids(&scanner).await, before);
+            scan_once(&scanner).await;
+            assert_eq!(active_rule_ids(&scanner).await, BTreeSet::new());
         }
 
         // Collection ids are no longer keys, so two rules may share one. Under the
@@ -1491,6 +1510,41 @@ mod tests {
                 active_rule_ids(&scanner).await,
                 BTreeSet::from(["current-rule".to_string()])
             );
+        }
+
+        // A rule set with one malformed glob is rejected whole: no rule from
+        // it deploys, and the previous rules leave the deployed set and drain.
+        #[tokio::test]
+        async fn update_rules_invalid_glob_deploys_nothing() {
+            let dir = test_dirs::temp("testing").unwrap();
+            let glob = mcap_glob(&dir);
+            let clock = Clock::new(1000);
+            let (scanner, sink) = spawn_scanner_with_sink(&clock);
+
+            deploy(&scanner, vec![upload_rule("old", &glob, 0)]).await;
+
+            let rules = vec![
+                upload_rule("new", &glob, 0),
+                upload_rule("bad", "/logs/[ab.log", 0),
+            ];
+            let err = scanner
+                .update_rules(deployment("d2"), rules)
+                .await
+                .unwrap_err();
+            assert!(matches!(
+                err,
+                crate::data_uploads::scan::ScanErr::FileSysErr(
+                    crate::filesys::FileSysErr::InvalidGlobErr(_)
+                )
+            ));
+
+            scan_once(&scanner).await;
+            assert_eq!(active_rule_ids(&scanner).await, BTreeSet::new());
+
+            write(&dir, "a.mcap", b"aaa").await;
+            scan_once(&scanner).await;
+            tick(&scanner, &clock, 1).await;
+            assert_eq!(sink.events(), vec![]);
         }
 
         // A re-push of the same rule must NOT swallow files that appeared since
