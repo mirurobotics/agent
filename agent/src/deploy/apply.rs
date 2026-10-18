@@ -1,5 +1,4 @@
 // internal crates
-use crate::data_uploads::scan::scanner as scan;
 use crate::deploy::{errors::*, filesys as dpl_filesys, fsm};
 use crate::disk;
 use crate::filesys;
@@ -285,22 +284,16 @@ async fn deploy(
     }
 }
 
-/// Rejects a deployment whose release carries a file rule set the scanner would
-/// refuse, before any config instance is written. A release missing from local
-/// storage has no rules to check.
+/// Rejects a deployment whose release carries an invalid file rule set, before
+/// any config instance is written. The sync stores a deployment's release and
+/// rules before applying it, so a missing release is an error.
 async fn validate_file_rules(
     storage: &Storage<'_>,
     deployment: &models::Deployment,
 ) -> Result<(), DeployErr> {
-    let release_id = deployment.release_id.clone();
-    let Some(release) = storage.releases.read_optional(release_id).await? else {
-        return Ok(());
-    };
-    let mut rules = Vec::with_capacity(release.file_rule_ids.len());
-    for id in &release.file_rule_ids {
-        rules.push(storage.file_rules.read(id.clone()).await?);
-    }
-    scan::validate_rules(&rules).map_err(|e| InvalidFileRulesErr {
+    let rules =
+        disk::file_rules_for_deployment(storage.releases, storage.file_rules, deployment).await?;
+    models::validate_rule_set(&rules).map_err(|e| InvalidFileRulesErr {
         deployment_id: deployment.id.clone(),
         reason: e.to_string(),
         trace: trace!(),

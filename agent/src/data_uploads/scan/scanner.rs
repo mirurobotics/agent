@@ -10,8 +10,7 @@ use crate::data_uploads::scan::{
     sink::StableFileSink,
     state::{RuleState, ScanSnapshotFile, ScannerSnapshot},
 };
-use crate::filesys::files;
-use crate::models::{Deployment, FileRule, FileRuleID};
+use crate::models::{validate_rule_set, Deployment, FileRule, FileRuleID};
 use crate::trace;
 
 // external crates
@@ -27,21 +26,6 @@ macro_rules! dispatch {
             error!($msg);
         }
     }};
-}
-
-/// The IDs of `rules`, or an error if an ID repeats or a glob is invalid.
-pub(crate) fn validate_rules(rules: &[FileRule]) -> Result<HashSet<FileRuleID>, ScanErr> {
-    let mut ids = HashSet::new();
-    for rule in rules {
-        if !ids.insert(rule.id.clone()) {
-            return Err(ScanErr::DuplicateFileRuleID(DuplicateFileRuleID {
-                file_rule_id: rule.id.clone(),
-                trace: trace!(),
-            }));
-        }
-        files::validate_glob(&rule.source.glob)?;
-    }
-    Ok(ids)
 }
 
 // ======================== SINGLE-THREADED IMPLEMENTATION ========================= //
@@ -171,11 +155,11 @@ impl SingleThreadScanner {
         // deploy nothing. Running its valid rules, or keeping the previous
         // deployment's rules, would upload and delete under a policy nobody
         // approved.
-        let deployed = match validate_rules(&rules) {
+        let deployed = match validate_rule_set(&rules) {
             Ok(deployed) => deployed,
             Err(err) => {
                 self.clear_rules().await?;
-                return Err(err);
+                return Err(err.into());
             }
         };
 
@@ -1306,7 +1290,9 @@ mod tests {
                 .unwrap_err();
             assert!(matches!(
                 err,
-                crate::data_uploads::scan::ScanErr::DuplicateFileRuleID(_)
+                crate::data_uploads::scan::ScanErr::InvalidFileRuleSet(
+                    crate::models::errors::InvalidFileRuleSetErr::DuplicateFileRuleID(_)
+                )
             ));
 
             // No scanner was created for the duplicate set, and the previous
@@ -1533,8 +1519,10 @@ mod tests {
                 .unwrap_err();
             assert!(matches!(
                 err,
-                crate::data_uploads::scan::ScanErr::FileSysErr(
-                    crate::filesys::FileSysErr::InvalidGlobErr(_)
+                crate::data_uploads::scan::ScanErr::InvalidFileRuleSet(
+                    crate::models::errors::InvalidFileRuleSetErr::InvalidGlob(
+                        crate::filesys::FileSysErr::InvalidGlobErr(_)
+                    )
                 )
             ));
 

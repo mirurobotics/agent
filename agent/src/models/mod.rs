@@ -21,6 +21,7 @@ pub use self::deployment::DplTarget;
 pub use self::device::Device;
 pub use self::device::DeviceStatus;
 pub use self::errors::ModelsErr;
+pub use self::file_rule::validate_rule_set;
 pub use self::file_rule::FileRule;
 pub use self::file_rule::FileRuleID;
 pub use self::file_rule::FileRuleRetention;

@@ -101,7 +101,17 @@ impl Fixture {
             .unwrap();
     }
 
+    /// Stores `deployment` and, unless one is already stored, an empty release
+    /// for it, as a sync would.
     async fn seed_deployment(&self, deployment: &Deployment) {
+        let release = Release {
+            id: deployment.release_id.clone(),
+            ..Default::default()
+        };
+        self.releases
+            .write_if_absent(release.id.clone(), release, |_, _| false)
+            .await
+            .unwrap();
         self.deployments
             .write(
                 deployment.id.clone(),
@@ -1924,6 +1934,30 @@ mod file_rule_validation {
         f.seed_release("rls-dup", &[rule.clone(), rule]).await;
         let (new_file, old_file) = seed_replacement(&f, "rls-dup").await;
         assert_rejected(&f, &new_file, &old_file).await;
+    }
+
+    #[tokio::test]
+    async fn missing_release_blocks_deployment() {
+        let f = Fixture::new().await;
+        let ci = make_cfg_inst(f.fixture_path("config.json"));
+        f.seed_cfg_inst(&ci, r#"{"a": 1}"#.into()).await;
+        let dpl = make_deployment(
+            "dpl-1",
+            DplTarget::Deployed,
+            DplActivity::Queued,
+            vec![ci.id.clone()],
+        );
+        // store the deployment without the release a sync would have stored
+        f.deployments
+            .write(dpl.id.clone(), dpl, |_, _| false, Overwrite::Allow)
+            .await
+            .unwrap();
+
+        let outcomes = f.apply().await.unwrap();
+        assert_eq!(outcomes.len(), 1);
+        assert_eq!(outcomes[0].deployment.error_status, DplErrStatus::Retrying);
+        assert!(matches!(outcomes[0].error, Some(DeployErr::DiskErr(_))));
+        assert!(!File::new(&ci.filepath).exists());
     }
 
     #[tokio::test]

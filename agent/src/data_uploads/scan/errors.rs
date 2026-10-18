@@ -1,19 +1,10 @@
 // internal crates
 use crate::errors::Trace;
-use crate::models::FileRuleID;
+use crate::models::errors::InvalidFileRuleSetErr;
 
 // reuse the actor-channel errors exactly as sync/errors.rs does
 pub type SendActorMessageErr = crate::cache::errors::SendActorMessageErr;
 pub type ReceiveActorMessageErr = crate::cache::errors::ReceiveActorMessageErr;
-
-#[derive(Debug, thiserror::Error)]
-#[error("duplicate file rule id in rule set: '{file_rule_id}'")]
-pub struct DuplicateFileRuleID {
-    pub file_rule_id: FileRuleID,
-    pub trace: Box<Trace>,
-}
-
-impl crate::errors::Error for DuplicateFileRuleID {}
 
 #[derive(Debug, thiserror::Error)]
 #[error("internal scan error: {message}")]
@@ -31,7 +22,7 @@ pub enum ScanErr {
     #[error(transparent)]
     ReceiveActorMessageErr(ReceiveActorMessageErr),
     #[error(transparent)]
-    DuplicateFileRuleID(DuplicateFileRuleID),
+    InvalidFileRuleSet(InvalidFileRuleSetErr),
     #[error(transparent)]
     InternalError(InternalError),
     #[error(transparent)]
@@ -52,6 +43,12 @@ impl From<ReceiveActorMessageErr> for ScanErr {
     }
 }
 
+impl From<InvalidFileRuleSetErr> for ScanErr {
+    fn from(e: InvalidFileRuleSetErr) -> Self {
+        Self::InvalidFileRuleSet(e)
+    }
+}
+
 impl From<crate::filesys::FileSysErr> for ScanErr {
     fn from(e: crate::filesys::FileSysErr) -> Self {
         Self::FileSysErr(e)
@@ -67,7 +64,7 @@ impl From<crate::cache::CacheErr> for ScanErr {
 crate::impl_error!(ScanErr {
     SendActorMessageErr,
     ReceiveActorMessageErr,
-    DuplicateFileRuleID,
+    InvalidFileRuleSet,
     InternalError,
     FileSysErr,
     CacheErr,
