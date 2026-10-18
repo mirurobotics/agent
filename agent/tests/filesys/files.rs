@@ -1214,6 +1214,23 @@ pub mod glob {
     }
 }
 
+pub mod validate_glob {
+    use super::*;
+
+    #[test]
+    fn valid_glob_is_ok() {
+        files::validate_glob("/logs/**/*.mcap").unwrap();
+    }
+
+    #[test]
+    fn invalid_glob_returns_error() {
+        assert!(matches!(
+            files::validate_glob("/logs/[ab.log").unwrap_err(),
+            FileSysErr::InvalidGlobErr { .. }
+        ));
+    }
+}
+
 pub mod metadata {
     use super::*;
 

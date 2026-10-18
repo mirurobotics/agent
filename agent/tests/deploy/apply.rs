@@ -7,7 +7,10 @@ use miru_agent::disk;
 #[cfg(unix)]
 use miru_agent::filesys::dirs;
 use miru_agent::filesys::{files, File, Overwrite, PathExt};
-use miru_agent::models::{ConfigInstance, Deployment, DplActivity, DplErrStatus, DplTarget};
+use miru_agent::models::{
+    ConfigInstance, Deployment, DplActivity, DplErrStatus, DplTarget, FileRule, FileRuleSource,
+    Release,
+};
 
 // external crates
 use chrono::TimeDelta;
@@ -18,6 +21,8 @@ struct Fixture {
     deployments: disk::Deployments,
     cfg_insts: disk::CfgInsts,
     cfg_inst_content: disk::CfgInstContent,
+    releases: disk::Releases,
+    file_rules: disk::FileRules,
     temp_dir: test_dirs::TempDir,
 }
 
@@ -37,11 +42,20 @@ impl Fixture {
             disk::CfgInstContent::spawn(16, resources_dir.subdir("content"), 1000)
                 .await
                 .unwrap();
+        let (releases, _) = disk::Releases::spawn(16, resources_dir.file("releases.json"), 1000)
+            .await
+            .unwrap();
+        let (file_rules, _) =
+            disk::FileRules::spawn(16, resources_dir.file("file_rules.json"), 1000)
+                .await
+                .unwrap();
 
         Self {
             deployments,
             cfg_insts,
             cfg_inst_content,
+            releases,
+            file_rules,
             temp_dir,
         }
     }
@@ -87,7 +101,17 @@ impl Fixture {
             .unwrap();
     }
 
+    /// Stores `deployment` and, unless one is already stored, an empty release
+    /// for it, as a sync would.
     async fn seed_deployment(&self, deployment: &Deployment) {
+        let release = Release {
+            id: deployment.release_id.clone(),
+            ..Default::default()
+        };
+        self.releases
+            .write_if_absent(release.id.clone(), release, |_, _| false)
+            .await
+            .unwrap();
         self.deployments
             .write(
                 deployment.id.clone(),
@@ -99,6 +123,30 @@ impl Fixture {
             .unwrap();
     }
 
+    /// Store `release_id` with `rules` as its file rule set.
+    async fn seed_release(&self, release_id: &str, rules: &[FileRule]) {
+        let release = Release {
+            id: release_id.to_string(),
+            file_rule_ids: rules.iter().map(|r| r.id.clone()).collect(),
+            ..Default::default()
+        };
+        self.releases
+            .write(release.id.clone(), release, |_, _| false, Overwrite::Allow)
+            .await
+            .unwrap();
+        for rule in rules {
+            self.file_rules
+                .write(
+                    rule.id.clone(),
+                    rule.clone(),
+                    |_, _| false,
+                    Overwrite::Allow,
+                )
+                .await
+                .unwrap();
+        }
+    }
+
     fn storage(&self) -> apply::Storage<'_> {
         apply::Storage {
             deployments: &self.deployments,
@@ -106,6 +154,8 @@ impl Fixture {
                 meta: &self.cfg_insts,
                 content: &self.cfg_inst_content,
             },
+            releases: &self.releases,
+            file_rules: &self.file_rules,
         }
     }
 
@@ -140,6 +190,17 @@ impl Fixture {
 fn make_cfg_inst(filepath: String) -> ConfigInstance {
     ConfigInstance {
         filepath,
+        ..Default::default()
+    }
+}
+
+fn make_file_rule(id: &str, glob: &str) -> FileRule {
+    FileRule {
+        id: id.to_string(),
+        source: FileRuleSource {
+            glob: glob.to_string(),
+            stability_window_secs: 0,
+        },
         ..Default::default()
     }
 }
@@ -1783,5 +1844,136 @@ mod ordering_and_composition {
             actual.id = String::new(); // normalize for comparison
             assert_eq!(actual, stale_expected);
         }
+    }
+}
+
+mod file_rule_validation {
+    use super::*;
+
+    /// Seeds a deployable target on `release_id` and an old deployed deployment
+    /// due for removal, returning the target's and the old deployment's files.
+    async fn seed_replacement(f: &Fixture, release_id: &str) -> (File, File) {
+        let ci_old = make_cfg_inst(f.fixture_path("old-config.json"));
+        f.seed_cfg_inst(&ci_old, r#"{"old": true}"#.into()).await;
+        f.seed_deployment(&make_deployment(
+            "dpl-old",
+            DplTarget::Deployed,
+            DplActivity::Queued,
+            vec![ci_old.id.clone()],
+        ))
+        .await;
+        f.apply().await.unwrap();
+        f.seed_deployment(&make_deployment(
+            "dpl-old",
+            DplTarget::Archived,
+            DplActivity::Deployed,
+            vec![ci_old.id.clone()],
+        ))
+        .await;
+
+        let ci_new = make_cfg_inst(f.fixture_path("new-config.json"));
+        f.seed_cfg_inst(&ci_new, r#"{"new": true}"#.into()).await;
+        let mut dpl = make_deployment(
+            "dpl-new",
+            DplTarget::Deployed,
+            DplActivity::Queued,
+            vec![ci_new.id.clone()],
+        );
+        dpl.release_id = release_id.to_string();
+        f.seed_deployment(&dpl).await;
+
+        (File::new(&ci_new.filepath), File::new(&ci_old.filepath))
+    }
+
+    async fn assert_rejected(f: &Fixture, new_file: &File, old_file: &File) {
+        let outcomes = f.apply().await.unwrap();
+
+        // the old deployment's removal is skipped because the deploy errored
+        assert_eq!(outcomes.len(), 1);
+        assert_eq!(
+            ComparableOutcome::from(&outcomes[0]),
+            ComparableOutcome {
+                id: "dpl-new".into(),
+                activity: DplActivity::Queued,
+                error_status: DplErrStatus::Retrying,
+                attempts: 1,
+                has_error: true,
+                has_wait: true,
+                in_cooldown: true,
+                transitioned: true,
+            }
+        );
+        assert!(matches!(
+            outcomes[0].error,
+            Some(DeployErr::InvalidFileRules(_))
+        ));
+        assert!(!new_file.exists(), "rejected config should not be written");
+        assert!(old_file.exists(), "old config should survive the rejection");
+    }
+
+    #[tokio::test]
+    async fn invalid_glob_rejects_deployment() {
+        let f = Fixture::new().await;
+        f.seed_release(
+            "rls-bad",
+            &[
+                make_file_rule("fr-ok", "/logs/*.log"),
+                make_file_rule("fr-bad", "/logs/[ab.log"),
+            ],
+        )
+        .await;
+        let (new_file, old_file) = seed_replacement(&f, "rls-bad").await;
+        assert_rejected(&f, &new_file, &old_file).await;
+    }
+
+    #[tokio::test]
+    async fn duplicate_rule_id_rejects_deployment() {
+        let f = Fixture::new().await;
+        // two release entries pointing at one stored rule repeat its ID
+        let rule = make_file_rule("fr-1", "/logs/*.log");
+        f.seed_release("rls-dup", &[rule.clone(), rule]).await;
+        let (new_file, old_file) = seed_replacement(&f, "rls-dup").await;
+        assert_rejected(&f, &new_file, &old_file).await;
+    }
+
+    #[tokio::test]
+    async fn missing_release_blocks_deployment() {
+        let f = Fixture::new().await;
+        let ci = make_cfg_inst(f.fixture_path("config.json"));
+        f.seed_cfg_inst(&ci, r#"{"a": 1}"#.into()).await;
+        let dpl = make_deployment(
+            "dpl-1",
+            DplTarget::Deployed,
+            DplActivity::Queued,
+            vec![ci.id.clone()],
+        );
+        // store the deployment without the release a sync would have stored
+        f.deployments
+            .write(dpl.id.clone(), dpl, |_, _| false, Overwrite::Allow)
+            .await
+            .unwrap();
+
+        let outcomes = f.apply().await.unwrap();
+        assert_eq!(outcomes.len(), 1);
+        assert_eq!(outcomes[0].deployment.error_status, DplErrStatus::Retrying);
+        assert!(matches!(outcomes[0].error, Some(DeployErr::DiskErr(_))));
+        assert!(!File::new(&ci.filepath).exists());
+    }
+
+    #[tokio::test]
+    async fn valid_rules_deploy() {
+        let f = Fixture::new().await;
+        f.seed_release("rls-ok", &[make_file_rule("fr-ok", "/logs/**/*.log")])
+            .await;
+        let (new_file, old_file) = seed_replacement(&f, "rls-ok").await;
+
+        let outcomes = f.apply().await.unwrap();
+        assert!(outcomes.iter().all(|o| o.error.is_none()));
+        assert_eq!(
+            outcomes[0].deployment.activity_status,
+            DplActivity::Deployed
+        );
+        assert!(new_file.exists(), "valid release config should be written");
+        assert!(!old_file.exists(), "old config should be removed");
     }
 }
