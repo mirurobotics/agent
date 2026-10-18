@@ -1,13 +1,6 @@
-// standard crates
-use std::collections::HashSet;
-
 // internal crates
 use backend_api::models as backend_client;
-use miru_agent::filesys::FileSysErr;
-use miru_agent::models::errors::InvalidFileRuleSetErr;
-use miru_agent::models::{
-    validate_rule_set, FileRule, FileRuleRetention, FileRuleSource, FileRuleUpload, Os,
-};
+use miru_agent::models::{FileRule, FileRuleRetention, FileRuleSource, FileRuleUpload, Os};
 
 // external crates
 use chrono::{DateTime, Utc};
@@ -304,57 +297,4 @@ fn retention_default() {
             ttl_secs: 0,
         }
     );
-}
-
-// ─── rule set validation ────────────────────────────────────────────────────
-
-fn rule_with_glob(id: &str, glob: &str) -> FileRule {
-    FileRule {
-        id: id.to_string(),
-        source: FileRuleSource {
-            glob: glob.to_string(),
-            stability_window_secs: 0,
-        },
-        ..Default::default()
-    }
-}
-
-#[test]
-fn validate_rule_set_returns_ids() {
-    let rules = vec![
-        rule_with_glob("a", "/logs/*.log"),
-        rule_with_glob("b", "/data/**/*.mcap"),
-    ];
-    let ids = validate_rule_set(&rules).unwrap();
-    assert_eq!(ids, HashSet::from(["a".to_string(), "b".to_string()]));
-}
-
-#[test]
-fn validate_rule_set_empty() {
-    assert!(validate_rule_set(&[]).unwrap().is_empty());
-}
-
-#[test]
-fn validate_rule_set_duplicate_id() {
-    let rules = vec![
-        rule_with_glob("a", "/logs/*.log"),
-        rule_with_glob("a", "/data/*.mcap"),
-    ];
-    let err = validate_rule_set(&rules).unwrap_err();
-    assert!(
-        matches!(err, InvalidFileRuleSetErr::DuplicateFileRuleID(ref e) if e.file_rule_id == "a")
-    );
-}
-
-#[test]
-fn validate_rule_set_invalid_glob() {
-    let rules = vec![
-        rule_with_glob("a", "/logs/*.log"),
-        rule_with_glob("b", "/logs/[ab.log"),
-    ];
-    let err = validate_rule_set(&rules).unwrap_err();
-    assert!(matches!(
-        err,
-        InvalidFileRuleSetErr::InvalidGlob(FileSysErr::InvalidGlobErr(_))
-    ));
 }

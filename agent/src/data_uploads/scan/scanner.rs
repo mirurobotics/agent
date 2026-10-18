@@ -10,7 +10,8 @@ use crate::data_uploads::scan::{
     sink::StableFileSink,
     state::{RuleState, ScanSnapshotFile, ScannerSnapshot},
 };
-use crate::models::{validate_rule_set, Deployment, FileRule, FileRuleID};
+use crate::filesys::files;
+use crate::models::{Deployment, FileRule, FileRuleID};
 use crate::trace;
 
 // external crates
@@ -26,6 +27,21 @@ macro_rules! dispatch {
             error!($msg);
         }
     }};
+}
+
+/// The IDs of `rules`, or an error if an ID repeats or a glob is invalid.
+pub(crate) fn validate_rules(rules: &[FileRule]) -> Result<HashSet<FileRuleID>, ScanErr> {
+    let mut ids = HashSet::new();
+    for rule in rules {
+        if !ids.insert(rule.id.clone()) {
+            return Err(ScanErr::DuplicateFileRuleID(DuplicateFileRuleID {
+                file_rule_id: rule.id.clone(),
+                trace: trace!(),
+            }));
+        }
+        files::validate_glob(&rule.source.glob)?;
+    }
+    Ok(ids)
 }
 
 // ======================== SINGLE-THREADED IMPLEMENTATION ========================= //
@@ -155,11 +171,11 @@ impl SingleThreadScanner {
         // deploy nothing. Running its valid rules, or keeping the previous
         // deployment's rules, would upload and delete under a policy nobody
         // approved.
-        let deployed = match validate_rule_set(&rules) {
+        let deployed = match validate_rules(&rules) {
             Ok(deployed) => deployed,
             Err(err) => {
                 self.clear_rules().await?;
-                return Err(err.into());
+                return Err(err);
             }
         };
 
@@ -1265,6 +1281,49 @@ mod tests {
         }
     }
 
+    mod validate_rules_fn {
+        use super::*;
+        use crate::data_uploads::scan::{scanner::validate_rules, ScanErr};
+
+        #[test]
+        fn returns_ids() {
+            let rules = vec![
+                upload_rule("a", "/logs/*.log", 0),
+                upload_rule("b", "/data/**/*.mcap", 0),
+            ];
+            let ids = validate_rules(&rules).unwrap();
+            assert_eq!(ids, HashSet::from(["a".to_string(), "b".to_string()]));
+        }
+
+        #[test]
+        fn empty() {
+            assert!(validate_rules(&[]).unwrap().is_empty());
+        }
+
+        #[test]
+        fn duplicate_id() {
+            let rules = vec![
+                upload_rule("a", "/logs/*.log", 0),
+                upload_rule("a", "/data/*.mcap", 0),
+            ];
+            let err = validate_rules(&rules).unwrap_err();
+            assert!(matches!(err, ScanErr::DuplicateFileRuleID(ref e) if e.file_rule_id == "a"));
+        }
+
+        #[test]
+        fn invalid_glob() {
+            let rules = vec![
+                upload_rule("a", "/logs/*.log", 0),
+                upload_rule("b", "/logs/[ab.log", 0),
+            ];
+            let err = validate_rules(&rules).unwrap_err();
+            assert!(matches!(
+                err,
+                ScanErr::FileSysErr(crate::filesys::FileSysErr::InvalidGlobErr(_))
+            ));
+        }
+    }
+
     mod update_rules {
         use super::*;
 
@@ -1290,9 +1349,7 @@ mod tests {
                 .unwrap_err();
             assert!(matches!(
                 err,
-                crate::data_uploads::scan::ScanErr::InvalidFileRuleSet(
-                    crate::models::errors::InvalidFileRuleSetErr::DuplicateFileRuleID(_)
-                )
+                crate::data_uploads::scan::ScanErr::DuplicateFileRuleID(_)
             ));
 
             // No scanner was created for the duplicate set, and the previous
@@ -1519,10 +1576,8 @@ mod tests {
                 .unwrap_err();
             assert!(matches!(
                 err,
-                crate::data_uploads::scan::ScanErr::InvalidFileRuleSet(
-                    crate::models::errors::InvalidFileRuleSetErr::InvalidGlob(
-                        crate::filesys::FileSysErr::InvalidGlobErr(_)
-                    )
+                crate::data_uploads::scan::ScanErr::FileSysErr(
+                    crate::filesys::FileSysErr::InvalidGlobErr(_)
                 )
             ));
 

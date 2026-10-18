@@ -1,4 +1,5 @@
 // internal crates
+use crate::data_uploads::scan::scanner as scan;
 use crate::deploy::{errors::*, filesys as dpl_filesys, fsm};
 use crate::disk;
 use crate::filesys;
@@ -293,7 +294,7 @@ async fn validate_file_rules(
 ) -> Result<(), DeployErr> {
     let rules =
         disk::file_rules_for_deployment(storage.releases, storage.file_rules, deployment).await?;
-    models::validate_rule_set(&rules).map_err(|e| InvalidFileRulesErr {
+    scan::validate_rules(&rules).map_err(|e| InvalidFileRulesErr {
         deployment_id: deployment.id.clone(),
         reason: e.to_string(),
         trace: trace!(),

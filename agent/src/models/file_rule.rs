@@ -1,14 +1,6 @@
-// standard crates
-use std::collections::HashSet;
-
 // internal crates
 use crate::deserialize_error;
-use crate::filesys::files;
-use crate::models::{
-    errors::{DuplicateFileRuleIDErr, InvalidFileRuleSetErr},
-    Os,
-};
-use crate::trace;
+use crate::models::Os;
 use backend_api::models as backend_client;
 
 // external crates
@@ -171,23 +163,4 @@ impl<'de> Deserialize<'de> for FileRule {
             }),
         })
     }
-}
-
-// =============================== FILE RULE SET =================================== //
-/// The IDs of `rules`, or an error if an ID repeats or a glob does not compile.
-/// The agent applies a rule set whole or not at all, so one bad rule rejects it.
-pub fn validate_rule_set(rules: &[FileRule]) -> Result<HashSet<FileRuleID>, InvalidFileRuleSetErr> {
-    let mut ids = HashSet::with_capacity(rules.len());
-    for rule in rules {
-        if !ids.insert(rule.id.clone()) {
-            return Err(InvalidFileRuleSetErr::DuplicateFileRuleID(
-                DuplicateFileRuleIDErr {
-                    file_rule_id: rule.id.clone(),
-                    trace: trace!(),
-                },
-            ));
-        }
-        files::validate_glob(&rule.source.glob).map_err(InvalidFileRuleSetErr::InvalidGlob)?;
-    }
-    Ok(ids)
 }

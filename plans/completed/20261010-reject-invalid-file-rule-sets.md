@@ -30,8 +30,8 @@ Deploying nothing stops uploads and deletions alike. Files stay on disk until a 
 ## The Change
 
 - New `files::validate_glob(pattern)` compiles a pattern with the same parser as `files::glob`, without walking the filesystem, and returns `FileSysErr::InvalidGlobErr` if it is invalid. Both share `compile_glob`.
-- New `models::validate_rule_set(rules)` (in `models/file_rule.rs`) returns the rule IDs, or `InvalidFileRuleSetErr` (`DuplicateFileRuleID` or `InvalidGlob`). It replaces the scanner's `DuplicateFileRuleID` error.
-- `update_rules` runs `validate_rule_set` first. On error it calls `clear_rules` (clears `deployed`, persists, logs) and returns the error. Otherwise it behaves as before.
+- New `validate_rules(rules)` in the scanner returns the rule IDs, or `DuplicateFileRuleID` / `InvalidGlobErr`. The deploy step calls it too.
+- `update_rules` runs `validate_rules` first. On error it calls `clear_rules` (clears `deployed`, persists, logs) and returns the error. Otherwise it behaves as before.
 - Duplicate rule IDs now also clear the deployed set instead of leaving the previous rules running.
 
 ### Rejecting the deployment (M3)
@@ -49,7 +49,7 @@ The error is deliberately not terminal. The production retry policy never reache
 - `update_rules_invalid_glob_deploys_nothing`: deploys `old`, then pushes `[new, bad (/logs/[ab.log)]`. The update returns `InvalidGlobErr`, `old` is pruned on the next tick, no scanner is created for `new`, and a newly written file is never reported.
 - `update_rules_duplicate_rule_id_deploys_nothing`: same outcome for a duplicate rule ID.
 - `filesys::files::validate_glob`: valid and invalid patterns.
-- `models::file_rule`: `validate_rule_set` on valid, empty, duplicate-ID and bad-glob sets.
+- `scanner::tests::validate_rules_fn`: valid, empty, duplicate-ID and bad-glob sets.
 - `deploy::apply::file_rule_validation`: a release with a bad glob or a repeated rule ID leaves the target `Retrying` with `InvalidFileRules`, writes none of its config, and keeps the old deployment's config; a missing release leaves it retrying; a valid release deploys and removes the old config.
 - `cargo test --package miru-agent`, `scripts/lint.sh`.
 
