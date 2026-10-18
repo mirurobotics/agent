@@ -1,3 +1,6 @@
+// standard crates
+use std::collections::HashSet;
+
 // internal crates
 use backend_api::models as backend_client;
 use miru_agent::filesys::FileSysErr;
@@ -5,9 +8,6 @@ use miru_agent::models::errors::InvalidFileRuleSetErr;
 use miru_agent::models::{
     validate_rule_set, FileRule, FileRuleRetention, FileRuleSource, FileRuleUpload, Os,
 };
-
-// standard crates
-use std::collections::HashSet;
 
 // external crates
 use chrono::{DateTime, Utc};

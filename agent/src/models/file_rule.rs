@@ -4,8 +4,10 @@ use std::collections::HashSet;
 // internal crates
 use crate::deserialize_error;
 use crate::filesys::files;
-use crate::models::errors::{DuplicateFileRuleIDErr, InvalidFileRuleSetErr};
-use crate::models::Os;
+use crate::models::{
+    errors::{DuplicateFileRuleIDErr, InvalidFileRuleSetErr},
+    Os,
+};
 use crate::trace;
 use backend_api::models as backend_client;
 
