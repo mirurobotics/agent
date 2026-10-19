@@ -228,3 +228,31 @@ pub mod auth_layout {
         assert_eq!(file.to_string(), under_root(&["auth", "token.json"]));
     }
 }
+
+pub mod calibrations_layout {
+    use super::*;
+
+    #[test]
+    fn root_dir() {
+        let layout = Layout::default();
+        let calibrations = layout.calibrations();
+        assert_eq!(calibrations.root.to_string(), under_root(&["calibrations"]));
+    }
+
+    #[test]
+    fn queue_file() {
+        let layout = Layout::default();
+        let file = layout.calibrations().queue();
+        assert_eq!(
+            file.to_string(),
+            under_root(&["calibrations", "queue.json"])
+        );
+    }
+
+    #[test]
+    fn content_dir() {
+        let layout = Layout::default();
+        let dir = layout.calibrations().content();
+        assert_eq!(dir.to_string(), under_root(&["calibrations", "content"]));
+    }
+}

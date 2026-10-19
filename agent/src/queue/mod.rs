@@ -4,8 +4,8 @@ pub mod errors;
 use std::collections::VecDeque;
 
 // internal crates
-pub use self::errors::QueueFullErr;
-use crate::filesys::state_file::SingleThreadStateFile;
+pub use self::errors::{EnqueueErr, QueueFullErr};
+use crate::filesys::{state_file::SingleThreadStateFile, FileSysErr};
 use crate::models::Patch;
 
 // external crates
@@ -110,6 +110,11 @@ impl<J: QueueJob> Queue<J> {
         entry.job.due_at() <= now && entry.next_attempt_at.is_none_or(|at| at <= now)
     }
 
+    /// The queued entries, oldest enqueue first. Never mutates or persists.
+    pub fn iter(&self) -> impl Iterator<Item = &QueueEntry<J>> {
+        self.entries.iter()
+    }
+
     pub fn count_ready(&self, now: DateTime<Utc>) -> usize {
         self.entries
             .iter()
@@ -171,6 +176,36 @@ impl<J: QueueJob> Queue<J> {
         Ok(())
     }
 
+    /// Push a new job at the tail, like [`Self::enqueue`], but admit it only
+    /// once the snapshot holding it is on disk. A failed write rolls the entry
+    /// back and returns the error, so memory never holds an entry that a
+    /// restart would lose. Use it when the caller promises durability to
+    /// someone else. Returns the new entry's id.
+    pub async fn enqueue_durable(&mut self, job: J) -> Result<Uuid, EnqueueErr> {
+        self.verify_capacity(&job).await?;
+        let id = Uuid::new_v4();
+        self.entries.push_back(QueueEntry {
+            id,
+            job,
+            attempts: 0,
+            next_attempt_at: None,
+        });
+        if let Err(err) = self.try_persist().await {
+            self.remove_impl(id);
+            warn!(
+                "{label}: failed to persist {label} queue; rejecting job: {err}",
+                label = J::LABEL
+            );
+            return Err(EnqueueErr::FileSysErr(err));
+        }
+        info!(
+            "{}: job enqueued; queue length {}",
+            J::LABEL,
+            self.entries.len()
+        );
+        Ok(id)
+    }
+
     /// Drop the entry with `id` and persist the shortened queue. This is the
     /// only point at which a job leaves durable storage, so call it only once
     /// the worker has resolved the entry. Unknown ids are ignored.
@@ -226,15 +261,22 @@ impl<J: QueueJob> Queue<J> {
         warn!("{}: pulled {reset} deadline(s) back to {horizon}", J::LABEL);
     }
 
-    /// The sole writer to disk. Called by every mutator as its last act.
-    async fn persist(&mut self) {
+    /// The sole writer to disk. A queue without a snapshot file has nothing
+    /// to write and always succeeds.
+    async fn try_persist(&mut self) -> Result<(), FileSysErr> {
         let Some(snapshot_file) = self.snapshot_file.as_mut() else {
-            return;
+            return Ok(());
         };
         let snapshot = QueueSnapshot {
             entries: self.entries.iter().cloned().collect(),
         };
-        if let Err(err) = snapshot_file.patch(snapshot).await {
+        snapshot_file.patch(snapshot).await
+    }
+
+    /// Called by every best-effort mutator as its last act: a failed write is
+    /// logged and the in-memory queue stays authoritative.
+    async fn persist(&mut self) {
+        if let Err(err) = self.try_persist().await {
             warn!(
                 "{label}: failed to persist {label} queue: {err}",
                 label = J::LABEL

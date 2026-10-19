@@ -17,7 +17,9 @@
 // internal crates
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::filesys::{dirs, files, Dir, File, PathExt, WriteOptions};
-use miru_agent::queue::{Queue, QueueEntry, QueueJob, QueueSnapshot, QueueSnapshotFile};
+use miru_agent::queue::{
+    EnqueueErr, Queue, QueueEntry, QueueJob, QueueSnapshot, QueueSnapshotFile,
+};
 
 // external crates
 use chrono::{DateTime, TimeDelta, Utc};
@@ -65,6 +67,11 @@ async fn on_disk<J: QueueJob>(path: &File) -> Vec<J> {
         .iter()
         .map(|entry| entry.job.clone())
         .collect()
+}
+
+/// The queued jobs in queue order, read through [`Queue::iter`].
+fn queued<J: QueueJob>(queue: &Queue<J>) -> Vec<J> {
+    queue.iter().map(|entry| entry.job.clone()).collect()
 }
 
 fn jobs<J: QueueJob>(make: fn(&str) -> J, stems: &[&str]) -> Vec<J> {
@@ -266,6 +273,81 @@ pub mod cases {
 
             enqueue(&mut queue, make("a.log")).await;
             assert_eq!(queue.len(), 1);
+        }
+    }
+
+    // ---------------------------- enqueue_durable -------------------------------- //
+
+    /// The durable admission path: the entry counts only once it is on disk.
+    pub mod enqueue_durable {
+        use super::*;
+
+        pub async fn persists_and_returns_the_entry_id<J: QueueJob>(
+            tmp: &str,
+            make: fn(&str) -> J,
+        ) {
+            let (_dir, path) = temp_path(tmp);
+
+            let id = {
+                let mut queue = Queue::<J>::from_snapshot(DEFAULT_CAPACITY, open::<J>(&path).await);
+                let id = queue.enqueue_durable(make("a.log")).await.unwrap();
+                assert_eq!(queue.next_ready(now()).unwrap().id, id);
+                id
+            };
+
+            let reloaded = Queue::<J>::from_snapshot(DEFAULT_CAPACITY, open::<J>(&path).await);
+            let entry = reloaded.next_ready(now()).unwrap();
+            assert_eq!(entry.id, id);
+            assert_eq!(entry.job, make("a.log"));
+        }
+
+        pub async fn persist_failure_rolls_back<J: QueueJob>(tmp: &str, make: fn(&str) -> J) {
+            let (_dir, path) = temp_path(tmp);
+            let mut queue = Queue::<J>::from_snapshot(DEFAULT_CAPACITY, open::<J>(&path).await);
+            enqueue(&mut queue, make("a.log")).await;
+
+            // make the snapshot path unwritable: a DIRECTORY now sits there.
+            files::delete(&path).await.unwrap();
+            dirs::create(&Dir::new(path.path().clone())).await.unwrap();
+
+            let err = queue.enqueue_durable(make("b.log")).await.unwrap_err();
+            assert!(matches!(err, EnqueueErr::FileSysErr(_)), "{err:?}");
+            assert_eq!(queued(&queue), jobs(make, &["a.log"]));
+        }
+
+        pub async fn full_queue_rejects_with_queue_full_err<J: QueueJob>(make: fn(&str) -> J) {
+            let mut queue = Queue::<J>::new(1);
+            queue.enqueue_durable(make("a.log")).await.unwrap();
+
+            let err = queue.enqueue_durable(make("b.log")).await.unwrap_err();
+            assert!(matches!(err, EnqueueErr::QueueFullErr(_)), "{err:?}");
+            assert_eq!(queue.len(), 1);
+        }
+
+        pub async fn without_a_snapshot_file_succeeds<J: QueueJob>(make: fn(&str) -> J) {
+            let mut queue = Queue::<J>::new(DEFAULT_CAPACITY);
+            queue.enqueue_durable(make("a.log")).await.unwrap();
+            queue.enqueue_durable(make("b.log")).await.unwrap();
+
+            assert_eq!(drain(&mut queue).await, jobs(make, &["a.log", "b.log"]));
+        }
+    }
+
+    // --------------------------------- iter -------------------------------------- //
+
+    pub mod iter {
+        use super::*;
+
+        pub async fn yields_entries_in_queue_order_without_mutating<J: QueueJob>(
+            make: fn(&str) -> J,
+        ) {
+            let mut queue = Queue::<J>::new(DEFAULT_CAPACITY);
+            for name in ["a.log", "b.log"] {
+                enqueue(&mut queue, make(name)).await;
+            }
+
+            assert_eq!(queued(&queue), jobs(make, &["a.log", "b.log"]));
+            assert_eq!(queue.len(), 2);
         }
     }
 
@@ -679,6 +761,17 @@ macro_rules! queue_suite {
                     capacity_rejects_a_duplicate_job,
                     full_queue_rejects_with_queue_full_err,
                 ],
+            },
+            enqueue_durable {
+                disk: [persists_and_returns_the_entry_id, persist_failure_rolls_back],
+                mem: [
+                    full_queue_rejects_with_queue_full_err,
+                    without_a_snapshot_file_succeeds,
+                ],
+            },
+            iter {
+                disk: [],
+                mem: [yields_entries_in_queue_order_without_mutating],
             },
             next_ready {
                 disk: [leaves_the_entry_on_disk_until_removed],

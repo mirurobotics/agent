@@ -24,3 +24,24 @@ impl QueueFullErr {
         }
     }
 }
+
+/// Returned by [`super::Queue::enqueue_durable`]: either the queue is full or
+/// the snapshot holding the new entry could not be written.
+#[derive(Debug, thiserror::Error)]
+pub enum EnqueueErr {
+    #[error(transparent)]
+    QueueFullErr(QueueFullErr),
+    #[error(transparent)]
+    FileSysErr(crate::filesys::FileSysErr),
+}
+
+impl From<QueueFullErr> for EnqueueErr {
+    fn from(e: QueueFullErr) -> Self {
+        Self::QueueFullErr(e)
+    }
+}
+
+crate::impl_error!(EnqueueErr {
+    QueueFullErr,
+    FileSysErr,
+});

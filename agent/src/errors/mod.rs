@@ -11,6 +11,7 @@ pub enum Code {
     ResourceNotFound,
     CursorExpired,
     MalformedCursor,
+    CalibrationBufferFull,
     BackendError(String),
 }
 
@@ -21,6 +22,7 @@ impl Code {
             Self::ResourceNotFound => "resource_not_found",
             Self::CursorExpired => "cursor_expired",
             Self::MalformedCursor => "malformed_cursor",
+            Self::CalibrationBufferFull => "calibration_buffer_full",
             Self::BackendError(code) => code,
         }
     }
