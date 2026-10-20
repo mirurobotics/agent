@@ -4,7 +4,7 @@
 
 // internal crates
 use crate::test_utils::filesys::dirs as test_dirs;
-use miru_agent::calibrations::{self, CalibrationJob, CalibrationsErr, Report};
+use miru_agent::calibrations::{self, CalibrationsErr, Job, Report};
 use miru_agent::disk::layout::CalibrationsLayout;
 use miru_agent::errors::{Code, Error, HTTPCode};
 use miru_agent::filesys::PathExt;
@@ -16,7 +16,7 @@ use serde_json::json;
 
 fn report(slug: &str) -> Report {
     Report {
-        job: CalibrationJob {
+        job: Job {
             component_slug: slug.to_string(),
             role: None,
             aspect: None,

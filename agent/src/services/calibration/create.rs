@@ -1,5 +1,5 @@
 // internal crates
-use crate::calibrations::{CalibrationJob, Report, Uploader};
+use crate::calibrations::{Job, Report, Uploader};
 use crate::disk;
 use crate::services::errors::ServiceErr;
 
@@ -37,7 +37,7 @@ pub async fn create(
         .await?
         .map(|deployment| deployment.id);
     let report = Report {
-        job: CalibrationJob {
+        job: Job {
             component_slug: params.component_slug,
             role: params.role,
             aspect: params.aspect,

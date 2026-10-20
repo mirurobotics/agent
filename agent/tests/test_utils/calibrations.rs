@@ -3,7 +3,7 @@
 
 // internal crates
 use crate::test_utils::filesys::dirs::TempDir;
-use miru_agent::calibrations::{CalibrationJob, Report};
+use miru_agent::calibrations::{Job, Report};
 use miru_agent::disk::layout::CalibrationsLayout;
 
 // external crates
@@ -18,7 +18,7 @@ pub fn received_at() -> DateTime<Utc> {
 /// A sendable report told apart from others by its `component_slug`.
 pub fn report(slug: &str) -> Report {
     Report {
-        job: CalibrationJob {
+        job: Job {
             component_slug: slug.to_string(),
             role: None,
             aspect: None,

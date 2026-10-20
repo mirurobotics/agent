@@ -65,7 +65,7 @@ impl<C: ClientI, T: TokenManagerExt> Sender for HttpSender<C, T> {
 }
 
 /// The backend request for `report`. `reported_at` is the agent's receive
-/// time, [`crate::calibrations::CalibrationJob::calibrated_at`]. Content that
+/// time, [`crate::calibrations::Job::calibrated_at`]. Content that
 /// is not a `{ format, data }` instance content is an [`InvalidReportErr`].
 pub fn new_request(report: &Report) -> Result<CreateCalibrationRequest, CalibrationsErr> {
     let content = InstanceContent::deserialize(&report.content).map_err(|e| InvalidReportErr {

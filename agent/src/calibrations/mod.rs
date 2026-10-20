@@ -10,7 +10,7 @@ pub mod uploader;
 pub use self::errors::{
     CalibrationBufferFullErr, CalibrationTooLargeErr, CalibrationsErr, InvalidReportErr, TokenErr,
 };
-pub use self::job::{CalibrationJob, Queue, QueueEntry, QueueSnapshot, QueueSnapshotFile};
+pub use self::job::{Job, Queue, QueueEntry, QueueSnapshot, QueueSnapshotFile};
 pub use self::queue::{open, DirQueue, Report, DEFAULT_OPTIONS};
 pub use self::sender::{HttpSender, Sender};
 pub use self::uploader::{Uploader, UploaderArgs, UploaderOptions};

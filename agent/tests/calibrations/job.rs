@@ -1,10 +1,10 @@
-//! The calibration queue: the generic suite instantiated for `CalibrationJob`,
+//! The calibration queue: the generic suite instantiated for `Job`,
 //! plus the on-disk wire pin for `calibrations/queue.json`.
 
 // internal crates
 use crate::queue::queue_suite;
 use crate::test_utils::filesys::dirs as test_dirs;
-use miru_agent::calibrations::{CalibrationJob, Queue, QueueSnapshot, QueueSnapshotFile};
+use miru_agent::calibrations::{Job, Queue, QueueSnapshot, QueueSnapshotFile};
 use miru_agent::filesys::{files, File, WriteOptions};
 use miru_agent::queue::{DirQueueJob, QueueJob};
 
@@ -13,8 +13,8 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 /// A deterministic calibration job, due the moment it arrives.
-fn calibration_job(name: &str) -> CalibrationJob {
-    CalibrationJob {
+fn calibration_job(name: &str) -> Job {
+    Job {
         component_slug: name.to_string(),
         role: Some("aligner-1".to_string()),
         aspect: Some("pose".to_string()),
@@ -41,10 +41,24 @@ fn due_at_is_min_utc() {
 }
 
 #[test]
-fn name_is_the_component_and_time() {
+fn name_is_the_component_role_aspect_and_time() {
     assert_eq!(
-        QueueJob::name(&calibration_job("arm")),
-        "calibration of arm received at 1970-01-01T00:16:40+00:00"
+        "calibration of arm (role aligner-1) (aspect pose) received at 1970-01-01T00:16:40+00:00",
+        QueueJob::name(&calibration_job("arm"))
+    );
+}
+
+#[test]
+fn name_leaves_out_a_missing_role_and_aspect() {
+    let job = Job {
+        role: None,
+        aspect: None,
+        ..calibration_job("arm")
+    };
+
+    assert_eq!(
+        "calibration of arm received at 1970-01-01T00:16:40+00:00",
+        QueueJob::name(&job)
     );
 }
 
@@ -103,7 +117,7 @@ mod wire {
         let queue = Queue::from_snapshot(8, open(&path).await);
 
         let job = queue.next_ready(Utc::now()).unwrap().job;
-        let expected = CalibrationJob {
+        let expected = Job {
             role: None,
             aspect: None,
             serial_number: None,

@@ -1,15 +1,15 @@
 // internal crates
-use crate::calibrations::{errors::CalibrationsErr, job::CalibrationJob};
+use crate::calibrations::{errors::CalibrationsErr, job::Job};
 use crate::disk::layout::CalibrationsLayout;
 use crate::queue;
 
 /// The calibration queue: accepted reports kept on disk until each reaches
 /// Miru. See [`queue::DirQueue`] for the durability rules.
-pub type DirQueue = queue::DirQueue<CalibrationJob, serde_json::Value>;
+pub type DirQueue = queue::DirQueue<Job, serde_json::Value>;
 
 /// A calibration as intake hands it to the queue, and the on-disk shape of
 /// `content/<entry id>.json`.
-pub type Report = queue::Item<CalibrationJob, serde_json::Value>;
+pub type Report = queue::Item<Job, serde_json::Value>;
 
 /// At most 1,000 reports of up to 2 MiB each (2 GiB at worst). Miru accepts
 /// up to 1 MiB of calibration data, and 2 MiB leaves room for its JSON

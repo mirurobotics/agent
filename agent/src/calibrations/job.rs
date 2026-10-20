@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 /// content itself lives in the report file named by the queue entry's id
 /// (see [`crate::queue::DirQueue`]).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct CalibrationJob {
+pub struct Job {
     pub component_slug: String,
     #[serde(default)]
     pub role: Option<String>,
@@ -26,7 +26,7 @@ pub struct CalibrationJob {
     pub calibrated_at: DateTime<Utc>,
 }
 
-impl queue::QueueJob for CalibrationJob {
+impl queue::QueueJob for Job {
     const LABEL: &'static str = "calibration";
 
     /// A calibration is uploadable the moment it is queued.
@@ -35,24 +35,27 @@ impl queue::QueueJob for CalibrationJob {
     }
 
     fn name(&self) -> String {
-        format!(
-            "calibration of {} received at {}",
-            self.component_slug,
-            self.calibrated_at.to_rfc3339()
-        )
+        let mut name = format!("calibration of {}", self.component_slug);
+        if let Some(role) = &self.role {
+            name.push_str(&format!(" (role {role})"));
+        }
+        if let Some(aspect) = &self.aspect {
+            name.push_str(&format!(" (aspect {aspect})"));
+        }
+        format!("{name} received at {}", self.calibrated_at.to_rfc3339())
     }
 }
 
-impl DirQueueJob for CalibrationJob {
+impl DirQueueJob for Job {
     fn received_at(&self) -> DateTime<Utc> {
         self.calibrated_at
     }
 }
 
-pub type Queue = queue::Queue<CalibrationJob>;
+pub type Queue = queue::Queue<Job>;
 
-pub type QueueEntry = queue::QueueEntry<CalibrationJob>;
+pub type QueueEntry = queue::QueueEntry<Job>;
 
-pub type QueueSnapshot = queue::QueueSnapshot<CalibrationJob>;
+pub type QueueSnapshot = queue::QueueSnapshot<Job>;
 
-pub type QueueSnapshotFile = queue::QueueSnapshotFile<CalibrationJob>;
+pub type QueueSnapshotFile = queue::QueueSnapshotFile<Job>;

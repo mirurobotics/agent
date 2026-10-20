@@ -8,7 +8,7 @@ use std::time::Duration;
 use crate::mocks::calibration_sender::{MockCalibrationSender, Step};
 use crate::test_utils::calibrations::layout;
 use crate::test_utils::filesys::dirs as test_dirs;
-use miru_agent::calibrations::{self, CalibrationJob, Report, Uploader, UploaderArgs};
+use miru_agent::calibrations::{self, Job, Report, Uploader, UploaderArgs};
 use miru_agent::disk::{self, Layout};
 use miru_agent::errors::{Error, HTTPCode};
 use miru_agent::models::{Deployment, DplActivity};
@@ -112,7 +112,7 @@ async fn accepted_while_offline() {
     let created = fixture.create(params()).await.unwrap();
 
     assert_eq!(created, Created { reported_at: now() });
-    let expected = CalibrationJob {
+    let expected = Job {
         component_slug: "arm".to_string(),
         role: Some("left".to_string()),
         aspect: Some("pose".to_string()),
