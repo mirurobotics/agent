@@ -222,13 +222,14 @@ where
     /// Enqueues the delete job for a confirmed upload whose retention requires
     /// the upload. Retention that does not require it was already enqueued at
     /// stability by the retention sink, so enqueueing here too would book a
-    /// second delete-queue slot and hash the file twice. Upload jobs only exist
-    /// for rules that upload, so an absent `require_upload` defaults to true.
+    /// second delete-queue slot and hash the file twice.
     async fn enqueue_delete_job(&mut self, entry: &QueueEntry) {
         let Some(retention) = &entry.job.retention else {
             return;
         };
-        if !retention.requires_upload(true) {
+        // Same gate as the retention sink: only `require_upload: true` waits
+        // for the upload; everything else was enqueued at stability.
+        if !retention.require_upload.unwrap_or(false) {
             return;
         }
 
