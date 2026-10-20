@@ -128,8 +128,10 @@ pub mod new_with_default {
     }
 
     // A read error that clears while retrying (here: a directory at the path
-    // is replaced by a valid file) reads the file instead of failing.
-    #[tokio::test]
+    // is replaced by a valid file) reads the file instead of failing. Time is
+    // paused, so the fix runs at 10 ms, strictly between the first read and
+    // the first retry at 50 ms.
+    #[tokio::test(start_paused = true)]
     async fn transient_read_error_is_retried() {
         let dir = test_dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
@@ -144,7 +146,7 @@ pub mod new_with_default {
         let fixer = tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
             tokio::fs::remove_dir(blocker.path()).await.unwrap();
-            files::write_json(&fix_file, &fix_token, WriteOptions::default())
+            files::write_json(&fix_file, &fix_token, WriteOptions::OVERWRITE_ATOMIC)
                 .await
                 .unwrap();
         });
