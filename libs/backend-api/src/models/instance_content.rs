@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 pub struct InstanceContent {
     #[serde(rename = "format")]
     pub format: models::InstanceFormat,
-    /// The configuration values associated with the config instance.
+    /// The content's values, serialized in `format`.
     #[serde(rename = "data")]
     pub data: String,
 }
