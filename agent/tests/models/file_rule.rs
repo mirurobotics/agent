@@ -299,3 +299,14 @@ fn retention_default() {
         }
     );
 }
+
+#[test]
+fn requires_upload() {
+    for (require_upload, expected) in [(Some(true), true), (Some(false), false), (None, false)] {
+        let retention = FileRuleRetention {
+            require_upload,
+            ttl_secs: 0,
+        };
+        assert_eq!(retention.requires_upload(), expected, "{require_upload:?}");
+    }
+}
