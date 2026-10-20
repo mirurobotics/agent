@@ -14,6 +14,8 @@
 //! This file itself contains no tests: only the fixtures, the generic cases,
 //! and the macro.
 
+pub mod dir;
+
 // internal crates
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::filesys::{dirs, files, Dir, File, PathExt, WriteOptions};

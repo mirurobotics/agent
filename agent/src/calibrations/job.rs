@@ -1,16 +1,15 @@
 // internal crates
-use crate::buffer::BufferJob;
-use crate::queue;
+use crate::queue::{self, DirQueueJob};
 
 // external crates
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-/// One buffered calibration report, as the upload worker will send it to Miru.
+/// One queued calibration report, as the upload worker will send it to Miru.
 /// Everything here is captured at intake, so an upload hours later still
 /// reports the deployment and time the calibration was taken under. The
 /// content itself lives in the report file named by the queue entry's id
-/// (see [`crate::buffer::Buffer`]).
+/// (see [`crate::queue::DirQueue`]).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CalibrationJob {
     pub component_slug: String,
@@ -30,7 +29,7 @@ pub struct CalibrationJob {
 impl queue::QueueJob for CalibrationJob {
     const LABEL: &'static str = "calibration";
 
-    /// A calibration is uploadable the moment it is buffered.
+    /// A calibration is uploadable the moment it is queued.
     fn due_at(&self) -> DateTime<Utc> {
         DateTime::<Utc>::MIN_UTC
     }
@@ -44,7 +43,7 @@ impl queue::QueueJob for CalibrationJob {
     }
 }
 
-impl BufferJob for CalibrationJob {
+impl DirQueueJob for CalibrationJob {
     fn received_at(&self) -> DateTime<Utc> {
         self.calibrated_at
     }

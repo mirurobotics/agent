@@ -1,6 +1,5 @@
 pub mod app;
 pub mod authn;
-pub mod buffer;
 pub mod cache;
 pub mod calibrations;
 pub mod cli;

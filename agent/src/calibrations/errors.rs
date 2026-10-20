@@ -1,13 +1,13 @@
 // internal crates
-use crate::buffer::{BufferErr, BufferFullErr, ItemTooLargeErr};
 use crate::errors::{Code, HTTPCode};
+use crate::queue::{DirQueueErr, ItemTooLargeErr, QueueFullErr};
 
-/// The calibration buffer is at its report cap: 507
+/// The calibration queue is at its report cap: 507
 /// `calibration_buffer_full`. Nothing was written and nothing already
-/// buffered was dropped; the caller should retry once uploads drain it.
+/// queued was dropped; the caller should retry once uploads drain it.
 #[derive(Debug, thiserror::Error)]
 #[error(transparent)]
-pub struct CalibrationBufferFullErr(pub BufferFullErr);
+pub struct CalibrationBufferFullErr(pub QueueFullErr);
 
 impl crate::errors::Error for CalibrationBufferFullErr {
     fn code(&self) -> Code {
@@ -20,7 +20,7 @@ impl crate::errors::Error for CalibrationBufferFullErr {
 
     fn params(&self) -> Option<serde_json::Value> {
         Some(serde_json::json!({
-            "max_reports": self.0.max_items,
+            "max_reports": self.0.capacity,
         }))
     }
 }
@@ -50,27 +50,27 @@ impl crate::errors::Error for CalibrationTooLargeErr {
 #[derive(Debug, thiserror::Error)]
 pub enum CalibrationsErr {
     #[error(transparent)]
-    BufferFullErr(CalibrationBufferFullErr),
+    QueueFullErr(CalibrationBufferFullErr),
     #[error(transparent)]
     TooLargeErr(CalibrationTooLargeErr),
     #[error(transparent)]
-    BufferErr(BufferErr),
+    QueueErr(DirQueueErr),
 }
 
-/// A full buffer becomes the calibration-specific 507 and an oversized report
-/// the 413; every other buffer error passes through unchanged.
-impl From<BufferErr> for CalibrationsErr {
-    fn from(e: BufferErr) -> Self {
+/// A full queue becomes the calibration-specific 507 and an oversized report
+/// the 413; every other queue error passes through unchanged.
+impl From<DirQueueErr> for CalibrationsErr {
+    fn from(e: DirQueueErr) -> Self {
         match e {
-            BufferErr::BufferFullErr(full) => Self::BufferFullErr(CalibrationBufferFullErr(full)),
-            BufferErr::ItemTooLargeErr(large) => Self::TooLargeErr(CalibrationTooLargeErr(large)),
-            other => Self::BufferErr(other),
+            DirQueueErr::QueueFullErr(full) => Self::QueueFullErr(CalibrationBufferFullErr(full)),
+            DirQueueErr::ItemTooLargeErr(large) => Self::TooLargeErr(CalibrationTooLargeErr(large)),
+            other => Self::QueueErr(other),
         }
     }
 }
 
 crate::impl_error!(CalibrationsErr {
-    BufferFullErr,
+    QueueFullErr,
     TooLargeErr,
-    BufferErr,
+    QueueErr,
 });
