@@ -12,6 +12,7 @@ pub enum Code {
     CursorExpired,
     MalformedCursor,
     CalibrationBufferFull,
+    CalibrationTooLarge,
     BackendError(String),
 }
 
@@ -23,6 +24,7 @@ impl Code {
             Self::CursorExpired => "cursor_expired",
             Self::MalformedCursor => "malformed_cursor",
             Self::CalibrationBufferFull => "calibration_buffer_full",
+            Self::CalibrationTooLarge => "calibration_too_large",
             Self::BackendError(code) => code,
         }
     }

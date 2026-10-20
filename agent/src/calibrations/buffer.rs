@@ -11,10 +11,12 @@ pub type Buffer = buffer::Buffer<CalibrationJob, serde_json::Value>;
 /// `content/<entry id>.json`.
 pub type Report = buffer::Item<CalibrationJob, serde_json::Value>;
 
-/// At most 1,000 reports or 256 MiB of report files.
+/// At most 1,000 reports of up to 2 MiB each (2 GiB at worst). Miru accepts
+/// up to 1 MiB of calibration data, and 2 MiB leaves room for its JSON
+/// escaping and the job metadata in the same file.
 pub const DEFAULT_OPTIONS: buffer::BufferOptions = buffer::BufferOptions {
     max_items: 1000,
-    max_bytes: 256 * 1024 * 1024,
+    max_item_bytes: 2 * 1024 * 1024,
 };
 
 /// Open the calibration buffer at `layout`, creating it when absent.

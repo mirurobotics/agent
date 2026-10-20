@@ -33,9 +33,12 @@ fn layout(dir: &test_dirs::TempDir) -> CalibrationsLayout {
 }
 
 #[test]
-fn default_options_are_1000_reports_or_256_mib() {
+fn default_options_are_1000_reports_of_2_mib() {
     assert_eq!(calibrations::DEFAULT_OPTIONS.max_items, 1000);
-    assert_eq!(calibrations::DEFAULT_OPTIONS.max_bytes, 256 * 1024 * 1024);
+    assert_eq!(
+        calibrations::DEFAULT_OPTIONS.max_item_bytes,
+        2 * 1024 * 1024
+    );
 }
 
 #[tokio::test]
@@ -63,7 +66,7 @@ async fn a_full_buffer_is_507_calibration_buffer_full() {
     let dir = test_dirs::temp("calibration_buffer_test").unwrap();
     let options = BufferOptions {
         max_items: 1,
-        max_bytes: 1024,
+        max_item_bytes: 1024,
     };
     let mut buffer = calibrations::open(&layout(&dir), options).await.unwrap();
     buffer.enqueue(report("arm")).await.unwrap();
@@ -74,10 +77,28 @@ async fn a_full_buffer_is_507_calibration_buffer_full() {
     assert!(matches!(err.code(), Code::CalibrationBufferFull));
     assert_eq!(err.code().as_str(), "calibration_buffer_full");
     assert_eq!(err.http_status(), HTTPCode::INSUFFICIENT_STORAGE);
-    assert_eq!(
-        err.params(),
-        Some(json!({ "max_reports": 1, "max_bytes": 1024 }))
-    );
+    assert_eq!(err.params(), Some(json!({ "max_reports": 1 })));
+}
+
+#[tokio::test]
+async fn an_oversized_report_is_413_calibration_too_large() {
+    let dir = test_dirs::temp("calibration_buffer_test").unwrap();
+    let options = BufferOptions {
+        max_items: 10,
+        max_item_bytes: 100,
+    };
+    let mut buffer = calibrations::open(&layout(&dir), options).await.unwrap();
+    let mut big = report("arm");
+    big.content = json!({ "format": "text", "data": "x".repeat(200) });
+
+    let err = CalibrationsErr::from(buffer.enqueue(big).await.unwrap_err());
+
+    assert!(matches!(err, CalibrationsErr::TooLargeErr(_)), "{err:?}");
+    assert!(matches!(err.code(), Code::CalibrationTooLarge));
+    assert_eq!(err.code().as_str(), "calibration_too_large");
+    assert_eq!(err.http_status(), HTTPCode::PAYLOAD_TOO_LARGE);
+    assert_eq!(err.params(), Some(json!({ "max_bytes": 100 })));
+    assert!(buffer.is_empty());
 }
 
 #[tokio::test]

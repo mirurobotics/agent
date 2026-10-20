@@ -61,9 +61,9 @@ All source lives under `agent/src/`. The binary entry point is `main.rs`.
 
 `queue` — the generic persisted job queue. Type `Queue<J: QueueJob>` is a FIFO with entry ids, attempt counts, `next_attempt_at` backoff and a capacity limit, saved as an atomically written JSON snapshot. The upload and retention workers in `data_uploads/` each instantiate it with their own job type.
 
-`buffer` — the generic durable buffer. Type `Buffer<J: BufferJob, C>` keeps a FIFO `queue::Queue` of job metadata in a queue file and each item's content in its own `<entry id>.json` file, capped by item count and bytes. It never evicts: when full it rejects new items with `BufferFullErr`. An item is accepted only once its file and queue entry are both on disk. Startup deletes item files with no queue entry, drops entries whose file is missing, and rebuilds an unparseable or missing queue from the item files.
+`buffer` — the generic durable buffer. Type `Buffer<J: BufferJob, C>` keeps a FIFO `queue::Queue` of job metadata in a queue file and each item's content in its own `<entry id>.json` file, capped by item count and by each item file's size (`ItemTooLargeErr`). It never evicts: when full it rejects new items with `BufferFullErr`. An item is accepted only once its file and queue entry are both on disk. Startup deletes item files with no queue entry, drops entries whose file is missing, and rebuilds an unparseable or missing queue from the item files.
 
-`calibrations/` — calibration reports accepted from the Device API. `calibrations::Buffer` is `buffer::Buffer<CalibrationJob, serde_json::Value>` at `calibrations/queue.json` and `calibrations/content/`, capped at 1,000 reports or 256 MiB. `CalibrationsErr` maps a full buffer to 507 `calibration_buffer_full`.
+`calibrations/` — calibration reports accepted from the Device API. `calibrations::Buffer` is `buffer::Buffer<CalibrationJob, serde_json::Value>` at `calibrations/queue.json` and `calibrations/content/`, capped at 1,000 reports of up to 2 MiB each. `CalibrationsErr` maps a full buffer to 507 `calibration_buffer_full` and an oversized report to 413 `calibration_too_large`.
 
 `services/` — domain service layer. Submodules: `device` (device status sync), `deployment` (deployment management), `file_rule` (cached file-rule lookup), `git_commit` (commit tracking), `release` (release management).
 
