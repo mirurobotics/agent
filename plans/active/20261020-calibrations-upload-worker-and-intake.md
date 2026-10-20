@@ -28,11 +28,12 @@ After the final slice, a running agent has `<data>/calibrations/` (default `/var
 - [x] Slice 2 `buffer-park` (2026-10-20): `Buffer::park`, plus a `move_failure_keeps_the_entry` test for the rename error path.
 - [x] Slice 3 `calibrations-shared-buffer-and-sender` (2026-10-20): token errors are wrapped in a never-terminal `TokenErr` (see Decision Log); fixtures in `agent/tests/test_utils/calibrations.rs`.
 - [x] Slice 4 `calibrations-upload-worker` (2026-10-20): `workers/calibrations.rs`, `mocks/calibration_sender.rs`, `SleepController::attempted_sleeps`; 17 worker tests.
-- [ ] Slice 5 `calibration-intake-service`.
+- [x] Slice 5 `calibration-intake-service` (2026-10-20): `services/calibration/` at 100% region coverage, so its `.covgate` is `100.00`.
 - [ ] Slice 6 `calibrations-wiring`.
 
 ## Surprises & Discoveries
 
+- `serde_json` stops at 128 levels of nesting, while Go's `encoding/json` allows 10,000, so intake rejects json data nested deeper than 128 levels that Miru would accept. Accepted as an edge case; lifting it needs serde_json's `unbounded_depth` feature.
 - `AuthnErr` forwards `is_terminal()` to its inner `HTTPErr`, so a token request Miru answers with, say, 403 is "terminal". Passed through unchanged, that would make the worker park every buffered report while token issuance fails. Evidence: `crate::impl_error!(AuthnErr { .., HTTPErr, .. })` in `agent/src/authn/errors.rs`.
 
 ## Decision Log
@@ -50,6 +51,7 @@ After the final slice, a running agent has `<data>/calibrations/` (default `/var
 - Decision: If the buffer fails to open at boot, `AppState::calibrations` is `None`, the error is logged, the worker isn't spawned and the agent still boots (fail-open, like the uploader and deleter), so a bad calibrations directory can't block config deployment. The future route will answer with an error while it is `None`. Date/Author: 2026-10-20, plan author.
 - Decision: The sender's token failures are `CalibrationsErr::TokenErr(TokenErr(AuthnErr))` rather than a bare `AuthnErr` variant. `TokenErr` keeps `is_network_conn_err()` but is never terminal, so only a rejection of the report itself (an HTTP 4xx on `POST /calibrations`, or an unsendable report) parks it. Date/Author: 2026-10-20, implementer.
 - Decision: The worker drops (removes) a queue entry whose report file is missing, since there is nothing to send or park and leaving it at the head would block every later report until restart. A report file that fails to parse is parked (terminal `InvalidReportErr`), and any other read error is a counted retry. The private `Outcome` is `Resolved | Retry { network }`: sent, parked and dropped all reset the streak, and only the logs tell them apart. Date/Author: 2026-10-20, implementer.
+- Decision: `ServiceErr::CalibrationsErr` holds a `Box<CalibrationsErr>`, because the unboxed variant grows `ServiceErr` to 128 bytes and trips clippy's `result_large_err` across `server/`. The size and syntax failures of `content.data` name the field `content.data`; a `content` that isn't a `{ format, data }` object names `content`. Date/Author: 2026-10-20, implementer.
 - Decision: Each send is one HTTP request (no `http::with_retry`); the worker's backoff is the only retry loop. If parking fails, the report is kept and handled like a counted retry. Date/Author: 2026-10-20, plan author.
 
 ## Outcomes & Retrospective
@@ -221,7 +223,7 @@ Tests in `agent/tests/workers/calibrations.rs` (declared in `agent/tests/workers
 - `pub fn params(p: &CreateParams) -> Result<(), InvalidRequestErr>`, which checks in Miru's order: `component_slug` (slug); `role` and `aspect` when present (slug); `serial_number` when present (no NUL, `chars().count() <= 255`); then `content`. For `content`, `InstanceContent::deserialize(&p.content)` must succeed (field `content`), the format must not be `InstanceFormatUnknown` (field `content.format`), `1 <= data.len() <= MAX_CONTENT_BYTES` (field `content.data`), and json data must parse (field `content.data`).
 - A private `fn invalid(field, reason) -> InvalidRequestErr` builder.
 
-`agent/src/services/calibration/create.rs` (new): `CreateParams`, `Created` and `create`. `create` runs `validate::params(&params)?`. It takes the deployment id from `disk::deployments::find_deployed(deployments).await?.map(|d| d.id)`, builds a `Report` whose `CalibrationJob` has `calibrated_at: now` and whose content is the caller's value unchanged, calls `buffer.enqueue(report).await?` (which wakes the worker), and returns `Created { reported_at: now }`. `now` is a parameter, so tests control time; the future route passes `Utc::now()`. `agent/src/services/calibration/mod.rs`: `mod create; pub mod validate; pub use create::*;`. Add `pub mod calibration;` to `agent/src/services/mod.rs`, add `agent/src/services/calibration/.covgate` containing `95.00`, and list `calibration` among the `services/` submodules in `ARCHITECTURE.md`.
+`agent/src/services/calibration/create.rs` (new): `CreateParams`, `Created` and `create`. `create` runs `validate::params(&params)?`. It takes the deployment id from `disk::deployments::find_deployed(deployments).await?.map(|d| d.id)`, builds a `Report` whose `CalibrationJob` has `calibrated_at: now` and whose content is the caller's value unchanged, calls `buffer.enqueue(report).await?` (which wakes the worker), and returns `Created { reported_at: now }`. `now` is a parameter, so tests control time; the future route passes `Utc::now()`. `agent/src/services/calibration/mod.rs`: `mod create; pub mod validate; pub use create::*;`. Add `pub mod calibration;` to `agent/src/services/mod.rs`, add `agent/src/services/calibration/.covgate` (measured: `100.00`), and list `calibration` among the `services/` submodules in `ARCHITECTURE.md`.
 
 Tests in `agent/tests/services/calibration/{mod.rs, validate.rs, create.rs}` (declare `pub mod calibration;` in `agent/tests/services/mod.rs`). Assert each error through `code().as_str() == "invalid_request"`, `http_status() == 422` and `params() == Some(json!({"field": ..}))`.
 

@@ -1,6 +1,8 @@
 // internal crates
 use crate::cache;
+use crate::calibrations::CalibrationsErr;
 use crate::disk::DiskErr;
+use crate::errors::{Code, HTTPCode, Trace};
 use crate::events;
 use crate::filesys;
 use crate::http;
@@ -16,6 +18,30 @@ pub struct FileRulesNotExpandedErr {
 }
 
 impl crate::errors::Error for FileRulesNotExpandedErr {}
+
+/// A request field fails validation: 422 `invalid_request`, with the field's
+/// name in `params.field`.
+#[derive(Debug, thiserror::Error)]
+#[error("invalid {field}: {reason}")]
+pub struct InvalidRequestErr {
+    pub field: &'static str,
+    pub reason: String,
+    pub trace: Box<Trace>,
+}
+
+impl crate::errors::Error for InvalidRequestErr {
+    fn code(&self) -> Code {
+        Code::InvalidRequest
+    }
+
+    fn http_status(&self) -> HTTPCode {
+        HTTPCode::UNPROCESSABLE_ENTITY
+    }
+
+    fn params(&self) -> Option<serde_json::Value> {
+        Some(serde_json::json!({ "field": self.field }))
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum ServiceErr {
@@ -35,6 +61,11 @@ pub enum ServiceErr {
     SyncErr(sync::SyncErr),
     #[error(transparent)]
     FileRulesNotExpanded(FileRulesNotExpandedErr),
+    #[error(transparent)]
+    InvalidRequestErr(InvalidRequestErr),
+    /// Boxed so `ServiceErr` stays under clippy's `result_large_err` limit.
+    #[error(transparent)]
+    CalibrationsErr(Box<CalibrationsErr>),
 }
 
 impl From<cache::CacheErr> for ServiceErr {
@@ -85,6 +116,18 @@ impl From<FileRulesNotExpandedErr> for ServiceErr {
     }
 }
 
+impl From<InvalidRequestErr> for ServiceErr {
+    fn from(e: InvalidRequestErr) -> Self {
+        Self::InvalidRequestErr(e)
+    }
+}
+
+impl From<CalibrationsErr> for ServiceErr {
+    fn from(e: CalibrationsErr) -> Self {
+        Self::CalibrationsErr(Box::new(e))
+    }
+}
+
 crate::impl_error!(ServiceErr {
     CacheErr,
     EventsErr,
@@ -94,4 +137,6 @@ crate::impl_error!(ServiceErr {
     HTTPErr,
     SyncErr,
     FileRulesNotExpanded,
+    InvalidRequestErr,
+    CalibrationsErr,
 });

@@ -12,7 +12,7 @@ use miru_agent::http::request;
 use miru_agent::http::HTTPErr;
 
 /// Number of variants in errors::Code; keep in sync so every arm has a test case.
-const EXPECTED_CODE_VARIANTS: usize = 6;
+const EXPECTED_CODE_VARIANTS: usize = 7;
 
 #[test]
 fn test_code_as_str() {
@@ -25,6 +25,7 @@ fn test_code_as_str() {
             errors::Code::CalibrationBufferFull,
             "calibration_buffer_full",
         ),
+        (errors::Code::InvalidRequest, "invalid_request"),
         (
             errors::Code::BackendError("custom_code".to_string()),
             "custom_code",
@@ -45,6 +46,7 @@ fn test_code_as_str() {
             | errors::Code::CursorExpired
             | errors::Code::MalformedCursor
             | errors::Code::CalibrationBufferFull
+            | errors::Code::InvalidRequest
             | errors::Code::BackendError(_) => {}
         }
         assert_eq!(code.as_str(), *expected, "Code::{:?}", code);

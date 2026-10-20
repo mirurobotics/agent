@@ -65,7 +65,7 @@ All source lives under `agent/src/`. The binary entry point is `main.rs`.
 
 `calibrations/` — calibration reports accepted from the Device API. `calibrations::Buffer` is `buffer::Buffer<CalibrationJob, serde_json::Value>` at `calibrations/queue.json` and `calibrations/content/`, capped at 1,000 reports or 256 MiB. `CalibrationsErr` maps a full buffer to 507 `calibration_buffer_full`. `SharedBuffer` is the buffer intake and the upload worker share (a mutex never held across a network call, plus a wake-up intake sends after each accepted report); reports Miru permanently rejects are parked in `calibrations/failed/`. `HttpSender` (behind the `Sender` seam) sends one report as a single `POST /calibrations`, mapping the job's `calibrated_at` to `reported_at`; a token failure is never terminal.
 
-`services/` — domain service layer. Submodules: `device` (device status sync), `deployment` (deployment management), `file_rule` (cached file-rule lookup), `git_commit` (commit tracking), `release` (release management).
+`services/` — domain service layer. Submodules: `calibration` (calibration intake: validates a report against Miru's rules, stamps the receive time and deployed deployment, buffers it and wakes the upload worker; works offline), `device` (device status sync), `deployment` (deployment management), `file_rule` (cached file-rule lookup), `git_commit` (commit tracking), `release` (release management).
 
 `cache` — file-system-backed cache with TTL. Used for caching backend responses.
 

@@ -1,4 +1,5 @@
 pub mod backend;
+pub mod calibration;
 pub mod deployment;
 pub mod device;
 pub mod errors;
