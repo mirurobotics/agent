@@ -160,6 +160,26 @@ async fn queue_on_disk(fixture: &Fixture) -> Vec<String> {
         .collect()
 }
 
+/// A directory with a file in it at `path`, so neither a rename onto it nor a
+/// file delete of it can succeed, even as root.
+async fn block_with_a_dir(path: &File) {
+    let dir = Dir::new(path.path().clone());
+    dirs::create(&dir).await.unwrap();
+    files::write_string(&dir.file("keep"), "x", WriteOptions::OVERWRITE_ATOMIC)
+        .await
+        .unwrap();
+}
+
+/// Content whose serialization always fails.
+#[derive(Debug, Deserialize)]
+struct Unserializable;
+
+impl Serialize for Unserializable {
+    fn serialize<S: serde::Serializer>(&self, _: S) -> Result<S::Ok, S::Error> {
+        Err(serde::ser::Error::custom("refuses to serialize"))
+    }
+}
+
 pub mod open {
     use super::*;
 
@@ -471,6 +491,52 @@ pub mod open {
     }
 
     #[tokio::test]
+    async fn an_unreadable_queue_that_cannot_be_set_aside_fails_the_open() {
+        let fixture = Fixture::new();
+        {
+            let mut queue = fixture.open().await;
+            enqueue_all(&mut queue, &["a"]).await;
+        }
+        files::write_string(
+            &fixture.queue_file(),
+            "{not json",
+            WriteOptions::OVERWRITE_ATOMIC,
+        )
+        .await
+        .unwrap();
+        block_with_a_dir(&fixture.root.file("queue.json.corrupt")).await;
+
+        let result = fixture.try_open().await;
+
+        assert!(matches!(result, Err(DirQueueErr::FileSysErr(_))));
+        let raw = files::read_string(&fixture.queue_file()).await.unwrap();
+        assert_eq!(raw, "{not json");
+    }
+
+    #[tokio::test]
+    async fn an_unreadable_item_that_cannot_be_set_aside_does_not_fail_the_open() {
+        let fixture = Fixture::new();
+        fixture.open().await;
+        files::delete(&fixture.queue_file()).await.unwrap();
+        let broken = Uuid::new_v4();
+        files::write_string(
+            &fixture.item_file(broken),
+            "{not json",
+            WriteOptions::OVERWRITE_ATOMIC,
+        )
+        .await
+        .unwrap();
+        let aside = fixture.content().file(&format!("{broken}.json.corrupt"));
+        block_with_a_dir(&aside).await;
+
+        let queue = fixture.open().await;
+
+        // it is never queued; without a queue entry, cleanup then removes it
+        assert!(queue.is_empty());
+        assert!(queue_on_disk(&fixture).await.is_empty());
+    }
+
+    #[tokio::test]
     async fn fails_when_the_queue_root_is_a_file() {
         let fixture = Fixture::new();
         files::write_string(
@@ -639,6 +705,29 @@ pub mod enqueue {
     }
 
     #[tokio::test]
+    async fn serialize_failure_rejects_and_writes_nothing() {
+        let fixture = Fixture::new();
+        let mut queue = DirQueue::<TestJob, Unserializable>::open(
+            fixture.queue_file(),
+            fixture.content(),
+            OPTIONS,
+        )
+        .await
+        .unwrap();
+
+        let item = Item {
+            job: job("a", 1000),
+            content: Unserializable,
+        };
+        let err = queue.enqueue(item).await.unwrap_err();
+
+        assert!(matches!(err, DirQueueErr::SerializeItemErr(_)), "{err:?}");
+        assert!(queue.is_empty());
+        assert!(content_files(&fixture).await.is_empty());
+        assert!(queue_on_disk(&fixture).await.is_empty());
+    }
+
+    #[tokio::test]
     async fn item_file_write_failure_rejects() {
         let fixture = Fixture::new();
         let mut queue = fixture.open().await;
@@ -676,6 +765,22 @@ pub mod remove {
         assert!(!fixture.item_file(ids[0]).exists());
         assert!(fixture.item_file(ids[1]).exists());
         assert_eq!(queue_on_disk(&fixture).await, strings(&["b"]));
+    }
+
+    #[tokio::test]
+    async fn an_item_file_that_cannot_be_deleted_still_drops_the_entry() {
+        let fixture = Fixture::new();
+        let mut queue = fixture.open().await;
+        let ids = enqueue_all(&mut queue, &["a"]).await;
+        let file = fixture.item_file(ids[0]);
+        files::delete(&file).await.unwrap();
+        block_with_a_dir(&file).await;
+
+        let removed = queue.remove(ids[0]).await.unwrap();
+
+        assert_eq!(removed.job.name, "a");
+        assert!(queue.is_empty());
+        assert!(queue_on_disk(&fixture).await.is_empty());
     }
 
     #[tokio::test]
