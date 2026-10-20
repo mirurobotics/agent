@@ -13,8 +13,9 @@
 use std::time::Duration;
 
 // internal crates
+use crate::cooldown::retry;
 use crate::disk::errors::DiskErr;
-use crate::filesys::{self, files, retry::retry, Atomic, Overwrite, WriteOptions};
+use crate::filesys::{self, files, Atomic, FileSysErr, Overwrite, WriteOptions};
 
 // external crates
 use secrecy::{ExposeSecret, SecretString};
@@ -61,6 +62,6 @@ pub async fn write(file: &filesys::File, port: u16, token: &SecretString) -> Res
 
 /// Remove the discovery file; a missing file is not an error.
 pub async fn remove(file: &filesys::File) -> Result<(), DiskErr> {
-    retry(RETRY_DELAYS, |_| true, || files::delete(file)).await?;
+    retry(RETRY_DELAYS, |_: &FileSysErr| true, || files::delete(file)).await?;
     Ok(())
 }

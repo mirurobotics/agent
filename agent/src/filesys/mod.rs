@@ -4,7 +4,6 @@ pub mod errors;
 pub mod file;
 pub mod files;
 pub mod path;
-pub mod retry;
 pub mod state_file;
 
 // internal crates

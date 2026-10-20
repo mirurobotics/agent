@@ -3,7 +3,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 // internal crates
-use crate::filesys::{errors::*, file::File, files, retry, Atomic, Overwrite, WriteOptions};
+use crate::cooldown;
+use crate::filesys::{errors::*, file::File, files, Atomic, Overwrite, WriteOptions};
 use crate::models::Patch;
 use crate::trace;
 
@@ -105,7 +106,7 @@ where
                 FileSysErr::PathDoesNotExistErr(_) | FileSysErr::ParseJSONErr(_)
             )
         };
-        retry::retry(&READ_RETRY_DELAYS, retryable, || Self::new(file.clone())).await
+        cooldown::retry(&READ_RETRY_DELAYS, retryable, || Self::new(file.clone())).await
     }
 
     /// Copies `file` to a timestamped `.corrupt-<unix-ms>` sibling, keeping

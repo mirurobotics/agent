@@ -1,5 +1,10 @@
+pub mod retry;
+
 // standard crates
 use std::cmp::min;
+
+// internal crates
+pub use self::retry::retry;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Backoff {
