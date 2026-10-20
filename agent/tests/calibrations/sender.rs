@@ -7,11 +7,11 @@ use std::sync::Arc;
 use crate::mocks::http_client::{Call, MockClient};
 use crate::mocks::stub_token_manager::StubTokenManager;
 use crate::test_utils::calibrations::{received_at, report};
-use backend_api::models::{InstanceContent, InstanceFormat};
+use backend_api::models::{Calibration, InstanceContent, InstanceFormat};
 use miru_agent::authn::{errors::MockError as AuthnMockErr, AuthnErr};
 use miru_agent::calibrations::{sender::new_request, CalibrationsErr, HttpSender, Report, Sender};
 use miru_agent::errors::Error;
-use miru_agent::http::errors::{HTTPErr, MockErr, RequestFailed};
+use miru_agent::http::errors::{HTTPErr, MockErr, RequestFailed, UnmarshalJSONErr};
 use miru_agent::http::request::Params;
 
 // external crates
@@ -140,6 +140,27 @@ pub mod send {
 
         assert!(matches!(err, CalibrationsErr::HTTPErr(_)), "{err:?}");
         assert!(err.is_terminal());
+        assert_eq!(client.call_count(Call::CreateCalibration), 1);
+    }
+
+    #[tokio::test]
+    async fn an_accepted_report_with_an_unparseable_response_is_sent() {
+        // a response body is parsed only after a 2xx, so Miru stored the
+        // report; resending it would store it again
+        let client = Arc::new(MockClient::default());
+        client.set_create_calibration(|| {
+            Err(HTTPErr::UnmarshalJSONErr(UnmarshalJSONErr {
+                request: Params::get("http://mock/calibrations").meta().unwrap(),
+                source: serde_json::from_str::<Calibration>("{}").unwrap_err(),
+                trace: miru_agent::trace!(),
+            }))
+        });
+
+        sender(&client, StubTokenManager::ok("tok"))
+            .send(&report("arm"))
+            .await
+            .unwrap();
+
         assert_eq!(client.call_count(Call::CreateCalibration), 1);
     }
 

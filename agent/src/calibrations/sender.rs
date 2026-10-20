@@ -8,12 +8,13 @@ use crate::calibrations::{
     buffer::Report,
     errors::{CalibrationsErr, InvalidReportErr},
 };
-use crate::http::{self, ClientI};
+use crate::http::{self, ClientI, HTTPErr};
 use crate::trace;
 use backend_api::models::{CreateCalibrationRequest, InstanceContent};
 
 // external crates
 use serde::Deserialize;
+use tracing::warn;
 
 /// The seam between the upload worker and Miru.
 ///
@@ -50,8 +51,16 @@ impl<C: ClientI, T: TokenManagerExt> Sender for HttpSender<C, T> {
             payload: &payload,
             token: &token.token,
         };
-        http::calibrations::create(self.http_client.as_ref(), params).await?;
-        Ok(())
+        match http::calibrations::create(self.http_client.as_ref(), params).await {
+            Ok(_) => Ok(()),
+            // only a 2xx response body is parsed, so Miru has stored the
+            // report; retrying would store it again on every attempt
+            Err(HTTPErr::UnmarshalJSONErr(e)) => {
+                warn!("calibrations: Miru accepted a report but its response could not be parsed: {e}");
+                Ok(())
+            }
+            Err(e) => Err(e.into()),
+        }
     }
 }
 
