@@ -866,15 +866,13 @@ mod retention_producer {
     }
 
     // require_upload: false files were already enqueued at stability by the
-    // retention sink; the confirm-time enqueue is a same-path duplicate, which
-    // the queue permits and the sweep resolves harmlessly. Any retention on a
-    // confirmed upload produces a delete job.
+    // retention sink, so the confirm path must not book a second delete job.
     #[tokio::test]
-    async fn unrequired_retention_also_enqueues_a_delete_job() {
+    async fn unrequired_retention_enqueues_nothing() {
         let (mock, mut started_rx) = MockUploadExecutor::new();
         mock.push_step(MockStep::Ok);
         let deleter = MockDeleter::new();
-        let (uploader, handle, _sleeps, clock) = spawn_with_test_clock_and_deleter(
+        let (uploader, handle, _sleeps, _clock) = spawn_with_test_clock_and_deleter(
             mock.clone(),
             deleter.clone(),
             UploaderOptions::default(),
@@ -891,11 +889,7 @@ mod retention_producer {
 
         timed(uploader.shutdown()).await.unwrap();
         timed(handle).await.unwrap();
-        let confirmed_at = *clock.lock().unwrap();
-        assert_eq!(
-            deleter.recorded_calls(),
-            [expected_delete_job(&job, confirmed_at)]
-        );
+        assert_eq!(deleter.recorded_calls(), []);
     }
 
     #[tokio::test]
