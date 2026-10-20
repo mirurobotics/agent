@@ -721,6 +721,21 @@ pub mod requeue {
         assert_eq!(waiting.attempts, 3);
         assert!(buffer.read(ids[0]).await.is_ok());
     }
+
+    #[tokio::test]
+    async fn an_entry_that_was_removed_is_ignored() {
+        let fixture = Fixture::new();
+        let mut buffer = fixture.open().await;
+        let ids = enqueue_all(&mut buffer, &["a", "b"]).await;
+        let stale = buffer.next_ready(now()).unwrap();
+        buffer.remove(ids[0]).await.unwrap();
+
+        buffer.requeue(stale).await;
+
+        assert_eq!(names(&buffer), strings(&["b"]));
+        assert_eq!(queue_on_disk(&fixture).await, strings(&["b"]));
+        assert!(!fixture.item_file(ids[0]).exists());
+    }
 }
 
 pub mod read {
