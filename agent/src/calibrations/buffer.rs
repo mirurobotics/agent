@@ -88,9 +88,9 @@ pub struct Buffer {
 }
 
 impl Buffer {
-    /// Load the buffer from `layout`, creating it when absent. An unreadable
-    /// `queue.json` is set aside as `queue.json.corrupt` and the queue rebuilt
-    /// from the report files. Report files with no queue entry are deleted,
+    /// Load the buffer from `layout`, creating it when absent. A missing
+    /// `queue.json` is rebuilt from the report files, and an unreadable one is
+    /// set aside as `queue.json.corrupt` and rebuilt the same way. Report files with no queue entry are deleted,
     /// and queue entries with no report file are dropped.
     pub async fn open(
         layout: &CalibrationsLayout,
@@ -307,16 +307,17 @@ async fn report_files(content_dir: &Dir) -> Result<Vec<(Uuid, File)>, Calibratio
         .collect())
 }
 
-/// Open `queue.json`, creating it when absent. An existing snapshot that
-/// cannot be read is never silently replaced: it is set aside and the queue
-/// is rebuilt from the report files.
+/// Open `queue.json`. A missing snapshot is rebuilt from the report files
+/// (empty on first boot), so report files are never deleted for want of a
+/// queue. An existing snapshot that cannot be read is never silently
+/// replaced: it is set aside and the queue is rebuilt the same way.
 async fn load_snapshot(
     file: &File,
     content_dir: &Dir,
 ) -> Result<QueueSnapshotFile, CalibrationsErr> {
     if !file.exists() {
-        let empty = QueueSnapshot::default();
-        return Ok(QueueSnapshotFile::create(file.clone(), &empty, Overwrite::Allow).await?);
+        let snapshot = rebuild_snapshot(content_dir).await?;
+        return Ok(QueueSnapshotFile::create(file.clone(), &snapshot, Overwrite::Allow).await?);
     }
     let err = match QueueSnapshotFile::new(file.clone()).await {
         Ok(snapshot_file) => return Ok(snapshot_file),

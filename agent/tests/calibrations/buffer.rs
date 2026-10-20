@@ -360,6 +360,23 @@ pub mod open {
     }
 
     #[tokio::test]
+    async fn rebuilds_a_missing_queue_from_the_report_files() {
+        let fixture = Fixture::new();
+        let ids = {
+            let mut buffer = fixture.open().await;
+            enqueue_all(&mut buffer, &["a"]).await
+        };
+        files::delete(&fixture.queue_file()).await.unwrap();
+
+        let buffer = fixture.open().await;
+
+        assert_eq!(names(&buffer), strings(&["a"]));
+        assert_eq!(buffer.next_ready(now()).unwrap().id, ids[0]);
+        assert!(fixture.report_file(ids[0]).exists());
+        assert_eq!(queue_on_disk(&fixture).await, strings(&["a"]));
+    }
+
+    #[tokio::test]
     async fn loads_a_backlog_over_a_lowered_cap() {
         let fixture = Fixture::new();
         {
