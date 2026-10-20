@@ -19,6 +19,7 @@ pub mod network;
 pub mod platform;
 pub mod privilege;
 pub mod provisioning;
+pub mod queue;
 pub mod s3;
 pub mod server;
 pub mod services;

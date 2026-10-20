@@ -1,7 +1,7 @@
 //! The upload queue: the generic suite instantiated for `upload::Job`, plus
 //! the on-disk wire pin for `upload_queue.json`.
 //!
-//! Queue *behavior* is written once in `agent/tests/data_uploads/queue.rs` and
+//! Queue *behavior* is written once in `agent/tests/queue/mod.rs` and
 //! run here via `queue_suite!` against this worker's job type. What cannot live
 //! there is the wire pin below: the generic suite is parameterized over the job
 //! type and so cannot spell a concrete payload, but the bytes on disk are a
@@ -9,11 +9,11 @@
 //! would wipe a real queue rather than fail.
 
 // internal crates
-use crate::data_uploads::queue::queue_suite;
+use crate::queue::queue_suite;
 use crate::test_utils::filesys::{abs_path, dirs as test_dirs};
-use miru_agent::data_uploads::queue::QueueJob;
 use miru_agent::data_uploads::upload::{Job, Queue, QueueEntry, QueueSnapshot, QueueSnapshotFile};
 use miru_agent::filesys::{files, File, WriteOptions};
+use miru_agent::queue::QueueJob;
 
 // external crates
 use chrono::{DateTime, Utc};

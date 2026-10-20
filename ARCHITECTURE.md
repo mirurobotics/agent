@@ -59,6 +59,8 @@ All source lives under `agent/src/`. The binary entry point is `main.rs`.
 
 `data_uploads/` — parent module for the file-upload pipeline. Submodule `scan` watches rule-configured directories and emits stable files to sinks (the `StableFileSink` seam in `scan/sink.rs`); submodule `upload` queues and executes uploads to object storage. The drivers that schedule the scanner live in `workers/` (`scan.rs`, `sync_scan_bridge.rs`), not here.
 
+`queue` — the generic persisted job queue. Type `Queue<J: QueueJob>` is a FIFO with entry ids, attempt counts, `next_attempt_at` backoff and a capacity limit, saved as an atomically written JSON snapshot. The upload and retention workers in `data_uploads/` each instantiate it with their own job type.
+
 `services/` — domain service layer. Submodules: `device` (device status sync), `deployment` (deployment management), `file_rule` (cached file-rule lookup), `git_commit` (commit tracking), `release` (release management).
 
 `cache` — file-system-backed cache with TTL. Used for caching backend responses.
