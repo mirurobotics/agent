@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 // internal crates
-use crate::filesys::{errors::*, file::File, files, Atomic, Overwrite, WriteOptions};
+use crate::filesys::{errors::*, file::File, files, retry, Atomic, Overwrite, WriteOptions};
 use crate::models::Patch;
 use crate::trace;
 
@@ -14,7 +14,7 @@ use tokio::sync::{
     oneshot,
 };
 use tokio::task::JoinHandle;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 macro_rules! dispatch {
     ($op:expr, $respond_to:expr, $msg:expr) => {{
@@ -99,24 +99,13 @@ where
     /// [`Self::new`], retrying errors other than "missing" and "unparseable"
     /// after each of [`READ_RETRY_DELAYS`].
     async fn new_with_retry(file: &File) -> Result<Self, FileSysErr> {
-        let mut delays = READ_RETRY_DELAYS.iter();
-        loop {
-            match Self::new(file.clone()).await {
-                Err(err)
-                    if !matches!(
-                        err,
-                        FileSysErr::PathDoesNotExistErr(_) | FileSysErr::ParseJSONErr(_)
-                    ) =>
-                {
-                    let Some(delay) = delays.next() else {
-                        return Err(err);
-                    };
-                    warn!("reading state file {file} failed ({err}); retrying in {delay:?}");
-                    tokio::time::sleep(*delay).await;
-                }
-                result => return result,
-            }
-        }
+        let retryable = |err: &FileSysErr| {
+            !matches!(
+                err,
+                FileSysErr::PathDoesNotExistErr(_) | FileSysErr::ParseJSONErr(_)
+            )
+        };
+        retry::retry(&READ_RETRY_DELAYS, retryable, || Self::new(file.clone())).await
     }
 
     /// Copies `file` to a timestamped `.corrupt-<unix-ms>` sibling, keeping
