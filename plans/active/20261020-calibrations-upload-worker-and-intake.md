@@ -27,7 +27,7 @@ After the final slice, a running agent has `<data>/calibrations/` (default `/var
 - [x] Slice 1 `calibrations-buffer` (PR #324, already open): generic `buffer::Buffer` and `calibrations::Buffer`.
 - [x] Slice 2 `buffer-park` (2026-10-20): `Buffer::park`, plus a `move_failure_keeps_the_entry` test for the rename error path.
 - [x] Slice 3 `calibrations-shared-buffer-and-sender` (2026-10-20): token errors are wrapped in a never-terminal `TokenErr` (see Decision Log); fixtures in `agent/tests/test_utils/calibrations.rs`.
-- [ ] Slice 4 `calibrations-upload-worker`.
+- [x] Slice 4 `calibrations-upload-worker` (2026-10-20): `workers/calibrations.rs`, `mocks/calibration_sender.rs`, `SleepController::attempted_sleeps`; 17 worker tests.
 - [ ] Slice 5 `calibration-intake-service`.
 - [ ] Slice 6 `calibrations-wiring`.
 
@@ -49,6 +49,7 @@ After the final slice, a running agent has `<data>/calibrations/` (default `/var
 - Decision: An error reading the deployments cache fails intake (500) rather than stamping `deployment_id: None`, so a broken cache never silently drops the association. No deployed deployment is fine and stamps `None`. Date/Author: 2026-10-20, plan author.
 - Decision: If the buffer fails to open at boot, `AppState::calibrations` is `None`, the error is logged, the worker isn't spawned and the agent still boots (fail-open, like the uploader and deleter), so a bad calibrations directory can't block config deployment. The future route will answer with an error while it is `None`. Date/Author: 2026-10-20, plan author.
 - Decision: The sender's token failures are `CalibrationsErr::TokenErr(TokenErr(AuthnErr))` rather than a bare `AuthnErr` variant. `TokenErr` keeps `is_network_conn_err()` but is never terminal, so only a rejection of the report itself (an HTTP 4xx on `POST /calibrations`, or an unsendable report) parks it. Date/Author: 2026-10-20, implementer.
+- Decision: The worker drops (removes) a queue entry whose report file is missing, since there is nothing to send or park and leaving it at the head would block every later report until restart. A report file that fails to parse is parked (terminal `InvalidReportErr`), and any other read error is a counted retry. The private `Outcome` is `Resolved | Retry { network }`: sent, parked and dropped all reset the streak, and only the logs tell them apart. Date/Author: 2026-10-20, implementer.
 - Decision: Each send is one HTTP request (no `http::with_retry`); the worker's backoff is the only retry loop. If parking fails, the report is kept and handled like a counted retry. Date/Author: 2026-10-20, plan author.
 
 ## Outcomes & Retrospective
