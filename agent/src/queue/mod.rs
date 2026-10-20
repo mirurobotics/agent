@@ -161,49 +161,45 @@ impl<J: QueueJob> Queue<J> {
     /// enqueue is rejected with [`QueueFullErr`] and nothing is persisted.
     pub async fn enqueue(&mut self, job: J) -> Result<(), QueueFullErr> {
         self.verify_capacity(&job).await?;
-        self.entries.push_back(QueueEntry {
-            id: Uuid::new_v4(),
-            job,
-            attempts: 0,
-            next_attempt_at: None,
-        });
+        self.push_new(Uuid::new_v4(), job);
         self.persist().await;
-        info!(
-            "{}: job enqueued; queue length {}",
-            J::LABEL,
-            self.entries.len()
-        );
+        self.log_enqueued();
         Ok(())
     }
 
     /// Push a new job at the tail, like [`Self::enqueue`], but admit it only
     /// once the snapshot holding it is on disk. A failed write rolls the entry
-    /// back and returns the error, so memory never holds an entry that a
-    /// restart would lose. Use it when the caller promises durability to
-    /// someone else. The caller supplies a fresh `id` (for example to name a
-    /// file it writes before the entry); reusing a queued id is a caller bug.
+    /// back and returns the error for the caller to report, so memory never
+    /// holds an entry that a restart would lose. Use it when the caller
+    /// promises durability to someone else. The caller supplies a fresh `id`
+    /// (for example to name a file it writes before the entry); reusing a
+    /// queued id is a caller bug.
     pub async fn enqueue_durable(&mut self, id: Uuid, job: J) -> Result<(), EnqueueErr> {
         self.verify_capacity(&job).await?;
+        self.push_new(id, job);
+        if let Err(err) = self.try_persist().await {
+            self.remove_impl(id);
+            return Err(EnqueueErr::FileSysErr(err));
+        }
+        self.log_enqueued();
+        Ok(())
+    }
+
+    fn push_new(&mut self, id: Uuid, job: J) {
         self.entries.push_back(QueueEntry {
             id,
             job,
             attempts: 0,
             next_attempt_at: None,
         });
-        if let Err(err) = self.try_persist().await {
-            self.remove_impl(id);
-            warn!(
-                "{label}: failed to persist {label} queue; rejecting job: {err}",
-                label = J::LABEL
-            );
-            return Err(EnqueueErr::FileSysErr(err));
-        }
+    }
+
+    fn log_enqueued(&self) {
         info!(
             "{}: job enqueued; queue length {}",
             J::LABEL,
             self.entries.len()
         );
-        Ok(())
     }
 
     /// Drop the entry with `id` and persist the shortened queue. This is the

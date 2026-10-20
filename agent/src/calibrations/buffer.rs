@@ -215,10 +215,9 @@ impl Buffer {
         Err(CalibrationsErr::BufferFullErr(err))
     }
 
+    /// Count a report file. Entry ids are unique, so each is tracked once.
     fn track(&mut self, id: Uuid, bytes: u64) {
-        if let Some(old) = self.sizes.insert(id, bytes) {
-            self.used_bytes = self.used_bytes.saturating_sub(old);
-        }
+        self.sizes.insert(id, bytes);
         self.used_bytes = self.used_bytes.saturating_add(bytes);
     }
 
@@ -323,9 +322,7 @@ async fn load_snapshot(
         Ok(snapshot_file) => return Ok(snapshot_file),
         Err(err) => err,
     };
-    let aside = file
-        .parent()?
-        .file(&format!("{}{CORRUPT_EXT}", file.name()?));
+    let aside = corrupt_path(file);
     error!("calibration: queue snapshot {file} is unreadable; moving it to {aside} and rebuilding from the report files: {err}");
     files::move_to(file, &aside, Overwrite::Allow).await?;
     let snapshot = rebuild_snapshot(content_dir).await;
@@ -356,12 +353,15 @@ async fn rebuild_snapshot(content_dir: &Dir) -> QueueSnapshot {
     QueueSnapshot { entries }
 }
 
+/// `file` with [`CORRUPT_EXT`] appended to its name.
+fn corrupt_path(file: &File) -> File {
+    let mut path = file.path().clone().into_os_string();
+    path.push(CORRUPT_EXT);
+    File::new(path)
+}
+
 async fn set_aside(file: &File) {
-    let aside = match (file.parent(), file.name()) {
-        (Ok(dir), Ok(name)) => dir.file(&format!("{name}{CORRUPT_EXT}")),
-        _ => return,
-    };
-    if let Err(err) = files::move_to(file, &aside, Overwrite::Allow).await {
+    if let Err(err) = files::move_to(file, &corrupt_path(file), Overwrite::Allow).await {
         warn!("calibration: failed to set aside report file {file}: {err}");
     }
 }
