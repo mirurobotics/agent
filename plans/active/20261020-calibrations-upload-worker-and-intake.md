@@ -26,14 +26,14 @@ After the final slice, a running agent has `<data>/calibrations/` (default `/var
 
 - [x] Slice 1 `calibrations-buffer` (PR #324, already open): generic `buffer::Buffer` and `calibrations::Buffer`.
 - [x] Slice 2 `buffer-park` (2026-10-20): `Buffer::park`, plus a `move_failure_keeps_the_entry` test for the rename error path.
-- [x] Slice 3 `calibrations-shared-buffer-and-sender` (2026-10-20): token errors are wrapped in a never-terminal `TokenErr` (see Decision Log); fixtures in `agent/tests/test_utils/calibrations.rs`.
-- [x] Slice 4 `calibrations-upload-worker` (2026-10-20): `workers/calibrations.rs`, `mocks/calibration_sender.rs`, `SleepController::attempted_sleeps`; 17 worker tests.
+- [x] Slice 3 `calibrations-sender` (2026-10-20): token errors are wrapped in a never-terminal `TokenErr` (see Decision Log); fixtures in `agent/tests/test_utils/calibrations.rs`.
+- [x] Slice 4 `calibrations-uploader` (2026-10-20): `calibrations/uploader.rs`, `mocks/calibration_sender.rs`, `SleepController::attempted_sleeps`; 25 uploader tests.
 - [x] Slice 5 `calibration-intake-service` (2026-10-20): `services/calibration/` at 100% region coverage, so its `.covgate` is `100.00`.
-- [x] Slice 6 `calibrations-wiring` (2026-10-20): the worker joins are moved into `ShutdownManager::join_upload_workers` to keep `shutdown_impl` under 50 lines; extra test `app::run::runs_without_calibrations_when_the_buffer_cannot_open`.
+- [x] Slice 6 `calibrations-wiring` (2026-10-20): extra test `app::run::runs_without_calibrations_when_the_buffer_cannot_open`.
+- [x] Review rework (2026-10-20, review of #331): intake validation dropped; the `SharedBuffer` (mutex plus `Notify`) and the `workers/calibrations.rs` driver were replaced by the `calibrations::Uploader` actor, which owns the buffer.
 
 ## Surprises & Discoveries
 
-- Intake's json check deserializes into `serde::de::IgnoredAny`, which serde_json handles with its iterative syntax-only `ignore_value`: there is no 128-level nesting limit and no number range check (evidence: `accepts_deeply_nested_json`). Go's `encoding/json` stops at 10,000 levels, so json nested deeper than that is accepted at intake and parked when Miru rejects it. Accepted as an edge case.
 - `AuthnErr` forwards `is_terminal()` to its inner `HTTPErr`, so a token request Miru answers with, say, 403 is "terminal". Passed through unchanged, that would make the worker park every buffered report while token issuance fails. Evidence: `crate::impl_error!(AuthnErr { .., HTTPErr, .. })` in `agent/src/authn/errors.rs`.
 
 ## Decision Log
@@ -43,10 +43,9 @@ After the final slice, a running agent has `<data>/calibrations/` (default `/var
 - Decision: A report Miru rejects with a terminal 4xx is parked: its item file moves to `<data>/calibrations/failed/<entry id>.json`, its queue entry is dropped, and an error is logged. Parking is a generic `buffer::Buffer::park`, not calibration code. Date/Author: 2026-10-20, user brief.
 - Decision: Retry with the data-upload backoff values (10 s base, ×2 growth, 1 h cap). Network errors wait a flat 10 s and do not grow the backoff; 5xx, 401, 408, 429 and other non-terminal errors grow it. Reports are never dropped for age or attempt count; the buffer cap (intake answers 507 when full) is the backstop. Rationale: the agent promised the caller durability. Date/Author: 2026-10-20, plan author.
 - Decision: On a retryable failure the report stays at the head of the buffer and the worker waits out the backoff, instead of calling `Buffer::requeue` (which moves the entry to the tail and stamps a per-entry deadline). Rationale: the brief also requires FIFO draining, and per-entry requeue would let every other ready report fire its own failing request while Miru is down (a burst of up to 1,000 requests every 10 s). Holding the head gives strict FIFO and one request per backoff interval. The backoff streak is in memory only, so a restart retries at once. Date/Author: 2026-10-20, plan author.
-- Decision: Intake and the worker share the buffer through `calibrations::SharedBuffer` (a `tokio::sync::Mutex<Buffer>` plus a `tokio::sync::Notify` wake-up), not a new actor. The worker never holds the lock across the HTTP call, so intake never waits on the network. Rationale: an actor would add a command enum, handle and send/receive errors (~150 lines) for no extra safety, since the buffer has exactly two users. Date/Author: 2026-10-20, plan author.
-- Decision: "Reconnect" is `sync::syncer::SyncEvent::SyncSuccess` from `SyncerExt::subscribe`. The poller and backend sync requests over MQTT (`workers/mqtt.rs`) both drive syncs, and a successful sync proves Miru is reachable. A `SyncSuccess` ends any backoff wait. Date/Author: 2026-10-20, plan author.
+- Decision: The buffer is owned by one actor, `calibrations::Uploader`, in the style of `data_uploads::upload::Uploader`: intake sends it `Enqueue` over `mpsc` with a `oneshot` reply, and the actor uploads reports itself. While a send or a backoff is in flight it `select!`s on that and its command channel, so intake is answered at once and never waits on the network. Rationale: no lock, one owner, and the same pattern as data uploads; an earlier revision shared a `Mutex<Buffer>` plus a `Notify` wake-up. Date/Author: 2026-10-20, user (review of #331).
+- Decision: "Reconnect" is `sync::syncer::SyncEvent::SyncSuccess` from `SyncerExt::subscribe`. The poller and backend sync requests over MQTT (`workers/mqtt.rs`) both drive syncs, and a successful sync proves Miru is reachable. A `SyncSuccess` ends any backoff wait. `AppState` subscribes and hands the receiver to the uploader, so the actor needs no syncer. Date/Author: 2026-10-20, plan author.
 - Decision: Intake does no validation of its own; Miru is the only judge, and a report it rejects is parked in `failed/` by the worker. Rationale: the checks duplicated Miru's rules, and the user preferred silent parking until a report-status endpoint exists over keeping two copies of the rules in sync. Date/Author: 2026-10-20, user (review of #331).
-- Decision: Content is checked by deserializing it into `backend_api::models::InstanceContent`; `format` must be `json`, `yaml`, `jsonc`, `xml` or `text` (`InstanceFormatUnknown` is rejected), and `data` must be 1 to 1,048,576 bytes (Miru measures `len(data)`; empty is rejected). Miru also rejects json, jsonc and yaml data that doesn't parse. Intake checks json with `serde_json`; the agent has no yaml or jsonc parser and no new crates are added, so those two rely on the worker parking Miru's terminal rejection. The caller's JSON value is buffered unchanged. Date/Author: 2026-10-20, from Miru's source.
 - Decision: An error reading the deployments cache fails intake (500) rather than stamping `deployment_id: None`, so a broken cache never silently drops the association. No deployed deployment is fine and stamps `None`. Date/Author: 2026-10-20, plan author.
 - Decision: If the buffer fails to open at boot, `AppState::calibrations` is `None`, the error is logged, the worker isn't spawned and the agent still boots (fail-open, like the uploader and deleter), so a bad calibrations directory can't block config deployment. The future route will answer with an error while it is `None`. Date/Author: 2026-10-20, plan author.
 - Decision: The sender's token failures are `CalibrationsErr::TokenErr(TokenErr(AuthnErr))` rather than a bare `AuthnErr` variant. `TokenErr` keeps `is_network_conn_err()` but is never terminal, so only a rejection of the report itself (an HTTP 4xx on `POST /calibrations`, or an unsendable report) parks it. Date/Author: 2026-10-20, implementer.
@@ -87,7 +86,7 @@ Existing pieces this plan builds on:
 
 ## Interfaces and Dependencies
 
-No new crates. `tokio::sync::{Mutex, Notify}` are already available (the `sync` feature is enabled through `tokio-stream`). New public items:
+No new crates. New public items:
 
     // agent/src/buffer/dir.rs (slice 2)
     impl<J: BufferJob, C> Buffer<J, C> {
@@ -96,18 +95,6 @@ No new crates. `tokio::sync::{Mutex, Notify}` are already available (the `sync` 
 
     // agent/src/disk/layout.rs (slice 3)
     impl CalibrationsLayout { pub fn failed(&self) -> filesys::Dir; } // <root>/failed
-
-    // agent/src/calibrations/shared.rs (slice 3)
-    #[derive(Clone)] pub struct SharedBuffer { buffer: Arc<Mutex<Buffer>>, failed: Dir, wake: Arc<Notify> }
-    impl SharedBuffer {
-        pub async fn open(layout: &CalibrationsLayout, options: BufferOptions) -> Result<Self, CalibrationsErr>;
-        pub fn new(buffer: Buffer, failed: Dir) -> Self;
-        pub async fn enqueue(&self, report: Report) -> Result<Uuid, CalibrationsErr>; // wakes on success
-        pub async fn lock(&self) -> tokio::sync::MutexGuard<'_, Buffer>;
-        pub fn failed_dir(&self) -> &Dir;
-        pub async fn woken(&self); // resolves after an enqueue since the last time it resolved
-    }
-    impl std::fmt::Debug for SharedBuffer { /* "SharedBuffer { failed: .. }" */ }
 
     // agent/src/calibrations/sender.rs (slice 3)
     pub trait Sender: Send + Sync {
@@ -121,13 +108,20 @@ No new crates. `tokio::sync::{Mutex, Notify}` are already available (the `sync` 
     InvalidReportErr(InvalidReportErr), // { reason: String, trace }; is_terminal() == true
     HTTPErr(http::HTTPErr),
     TokenErr(TokenErr),                 // TokenErr(pub authn::AuthnErr); never terminal
+    SendActorMessageErr(..), ReceiveActorMessageErr(..) // slice 4, the cache module's actor errors
 
-    // agent/src/workers/calibrations.rs (slice 4)
-    #[derive(Debug, Clone)] pub struct Options { pub backoff: cooldown::Backoff } // default 10 / 2 / 3600
-    pub async fn run<S: Sender, Y: SyncerExt, F, Fut>(
-        options: &Options, buffer: &SharedBuffer, sender: &S, syncer: &Y,
-        sleep_fn: F, shutdown_signal: Pin<Box<impl Future<Output = ()> + Send + 'static>>,
-    ) where F: Fn(Duration) -> Fut, Fut: Future<Output = ()> + Send;
+    // agent/src/calibrations/uploader.rs (slice 4)
+    #[derive(Debug, Clone)] pub struct UploaderOptions { pub backoff: cooldown::Backoff } // default 10 / 2 / 3600
+    pub struct UploaderArgs<S, F> { pub buffer: Buffer, pub failed: Dir, pub sender: Arc<S>,
+        pub events: Option<watch::Receiver<SyncEvent>>, pub options: UploaderOptions, pub sleep_fn: F }
+    #[derive(Debug)] pub struct Uploader { .. } // handle; the actor owns the buffer
+    impl Uploader {
+        pub fn spawn<S: Sender + 'static, F, Fut>(buffer_size: usize, args: UploaderArgs<S, F>) -> (Self, JoinHandle<()>)
+            where F: Fn(Duration) -> Fut + Send + 'static, Fut: Future<Output = ()> + Send + 'static;
+        pub async fn enqueue(&self, report: Report) -> Result<Uuid, CalibrationsErr>; // a full buffer is the 507
+        pub async fn len(&self) -> Result<usize, CalibrationsErr>;
+        pub async fn shutdown(&self) -> Result<(), CalibrationsErr>;
+    }
 
     // agent/src/services/errors.rs (slice 5)
     ServiceErr::CalibrationsErr(Box<calibrations::CalibrationsErr>)
@@ -136,11 +130,12 @@ No new crates. `tokio::sync::{Mutex, Notify}` are already available (the `sync` 
     pub struct CreateParams { pub component_slug: String, pub role: Option<String>, pub aspect: Option<String>,
                               pub serial_number: Option<String>, pub content: serde_json::Value }
     pub struct Created { pub reported_at: DateTime<Utc> }
-    pub async fn create(buffer: &SharedBuffer, deployments: &disk::Deployments,
+    pub async fn create(uploader: &Uploader, deployments: &disk::Deployments,
                         params: CreateParams, now: DateTime<Utc>) -> Result<Created, ServiceErr>;
 
     // agent/src/app/state.rs (slice 6)
-    AppState { pub calibrations: Option<calibrations::SharedBuffer>, .. }
+    AppState { pub calibrations: Option<Arc<calibrations::Uploader>>, .. }
+    ServerErr::CalibrationsErr(Box<calibrations::CalibrationsErr>)
 
 ## Plan of Work
 
@@ -150,10 +145,10 @@ Each milestone is one slice: it merges on its own with CI green, depends only on
 |---|------|-------|--------|-----------|
 | 1 | `calibrations-buffer` | Generic `buffer::Buffer` and `calibrations::Buffer` (exists: PR #324) | 1,870 | none |
 | 2 | `buffer-park` | Generic `Buffer::park` moves an item aside and drops its entry | 140 | 1 |
-| 3 | `calibrations-shared-buffer-and-sender` | `failed/` layout, `SharedBuffer`, `Sender`/`HttpSender`, error variants | 400 | 1 |
-| 4 | `calibrations-upload-worker` | `workers/calibrations.rs` drain loop, backoff, park, reconnect, shutdown | 450 | 2, 3 |
-| 5 | `calibration-intake-service` | `services::calibration::create`: stamp and buffer, no validation | 200 | 3 |
-| 6 | `calibrations-wiring` | Open the buffer in `AppState`, spawn and join the worker, docs | 150 | 4, 5 |
+| 3 | `calibrations-sender` | `failed/` layout, `Sender`/`HttpSender`, error variants | 340 | 1 |
+| 4 | `calibrations-uploader` | `calibrations::Uploader` actor: owns the buffer, serves intake, drains, backs off, parks, shuts down | 1,000 | 2, 3 |
+| 5 | `calibration-intake-service` | `services::calibration::create`: stamp and enqueue, no validation | 220 | 4 |
+| 6 | `calibrations-wiring` | `AppState` opens the buffer, spawns the uploader and stops it on shutdown; docs | 150 | 4, 5 |
 
 ### Milestone 2: `buffer-park`
 
@@ -166,70 +161,56 @@ Tests, in a new `pub mod park` in `agent/tests/buffer/mod.rs`, using the file's 
 - `unknown_id_is_none`: returns `Ok(None)`; `len` unchanged; `dest_dir` not created.
 - `failure_keeps_the_entry`: a regular file occupies the `dest_dir` path, so park returns `Err`. `len`, `used_bytes` and `content/<a>.json` are unchanged.
 
-### Milestone 3: `calibrations-shared-buffer-and-sender`
+### Milestone 3: `calibrations-sender`
 
 `agent/src/disk/layout.rs`: add `CalibrationsLayout::failed()` returning `self.root.subdir("failed")`, and extend `calibrations_layout` in `agent/tests/disk/layout.rs` with a `failed_dir` assertion (`under_root(&["calibrations", "failed"])`).
 
-`agent/src/calibrations/shared.rs` (new): `SharedBuffer` as in Interfaces. `open` calls `calibrations::open(layout, options)` and `new(buffer, layout.failed())`. `enqueue` locks, calls `Buffer::enqueue`, converts the error with `CalibrationsErr::from` (so a full buffer stays the 507), and calls `wake.notify_one()` only on success. `Notify` keeps one permit when nobody is waiting, so a wake sent while the worker is busy is not lost. `woken` is `self.wake.notified().await`. The hand-written `Debug` prints `failed` and uses `finish_non_exhaustive()`, because `Buffer` has no `Debug` and `AppState` derives it.
+`agent/src/calibrations/sender.rs` (new): the `Sender` trait, with a doc comment on cancel safety. The uploader drops an in-flight `send` on shutdown, and the report stays buffered and is re-sent next boot (it may be stored twice). `new_request` maps the job's fields one-to-one, sets `reported_at` to `calibrated_at.to_rfc3339()`, and deserializes `report.content` with `InstanceContent::deserialize(&report.content)`. A failure becomes `InvalidReportErr`. `HttpSender::send` runs `new_request(report)?`, then `self.token_mngr.get_token().await?`, then a single `http::calibrations::create(..).await?`, and returns `Ok(())`.
 
-`agent/src/calibrations/sender.rs` (new): the `Sender` trait, with a doc comment on cancel safety. The worker drops an in-flight `send` on shutdown, and the report stays buffered and is re-sent next boot (it may be stored twice). `new_request` maps the job's fields one-to-one, sets `reported_at` to `calibrated_at.to_rfc3339()`, and deserializes `report.content` with `InstanceContent::deserialize(&report.content)`. A failure becomes `InvalidReportErr`. `HttpSender::send` runs `new_request(report)?`, then `self.token_mngr.get_token().await?`, then a single `http::calibrations::create(..).await?`, and returns `Ok(())`.
+`agent/src/calibrations/errors.rs`: add `InvalidReportErr { reason: String, trace: Box<Trace> }` with `is_terminal() -> true`. Add the variants `InvalidReportErr`, `HTTPErr` and `AuthnErr` to `CalibrationsErr`, with `From` impls and entries in `impl_error!`. `agent/src/calibrations/mod.rs`: `pub mod sender;` and re-export `Sender`, `HttpSender` and `InvalidReportErr`. `agent/tests/mocks/http_client.rs`: add `set_create_calibration(f)`, mirroring `set_confirm_upload`. `ARCHITECTURE.md`: extend the `calibrations/` paragraph.
 
-`agent/src/calibrations/errors.rs`: add `InvalidReportErr { reason: String, trace: Box<Trace> }` with `is_terminal() -> true`. Add the variants `InvalidReportErr`, `HTTPErr` and `AuthnErr` to `CalibrationsErr`, with `From` impls and entries in `impl_error!`. `agent/src/calibrations/mod.rs`: `pub mod sender; pub mod shared;` and re-export `SharedBuffer`, `Sender`, `HttpSender` and `InvalidReportErr`. `agent/tests/mocks/http_client.rs`: add `set_create_calibration(f)`, mirroring `set_confirm_upload`. `ARCHITECTURE.md`: extend the `calibrations/` paragraph.
+Tests (`calibrations/.covgate` is 100%, so cover every branch), in `agent/tests/calibrations/sender.rs`, declared in `agent/tests/calibrations/mod.rs`:
 
-Tests (`calibrations/.covgate` is 100%, so cover every branch), in `agent/tests/calibrations/shared.rs` and `sender.rs`, both declared in `agent/tests/calibrations/mod.rs`:
-
-- shared: `open_uses_the_calibrations_layout` (`content/` exists; `failed_dir() == layout.failed()`). `enqueue_buffers_and_wakes` (`woken()` resolves within a 5 s timeout; `lock().await.len() == 1`). `a_wake_before_waiting_is_kept` (enqueue first, then `woken()` resolves). `a_full_buffer_is_507_and_does_not_wake` (options `max_items: 1`; second enqueue gives `CalibrationsErr::BufferFullErr`; after draining the first permit, a second `woken()` does not resolve within 50 ms). `debug_names_the_type`.
 - sender: `new_request_maps_the_job` (all optional fields set; `reported_at` equals `calibrated_at.to_rfc3339()`; content equals the parsed `InstanceContent`). `new_request_omits_absent_fields` (serialized JSON has no `deployment_id`, `role`, `aspect` or `serial_number` keys). `new_request_rejects_unparseable_content` (content `{"offset": 1}` gives `InvalidReportErr`, `is_terminal()`). `send_posts_one_request_with_the_token` (`MockClient` and `StubTokenManager::ok("tok")`: exactly one `Call::CreateCalibration` request, token `tok`, body containing `"reported_at"`). `send_passes_a_422_through_as_terminal`. `send_reports_a_network_error` (`MockErr { is_network_conn_err: true }`). `send_returns_a_token_error` (`StubTokenManager::err`, no request made). `send_rejects_unparseable_content_before_any_request`.
 
-### Milestone 4: `calibrations-upload-worker`
+### Milestone 4: `calibrations-uploader`
 
-`agent/src/workers/calibrations.rs` (new; add `pub mod calibrations;` to `agent/src/workers/mod.rs`). Structure, keeping each function under 50 lines:
+`agent/src/calibrations/uploader.rs` (new; `pub mod uploader;` and re-export `Uploader`, `UploaderArgs` and `UploaderOptions` in `calibrations/mod.rs`). It follows `data_uploads/upload/uploader.rs`: a private `Worker` owns the receiver, the `Buffer`, the `failed` dir, `Arc<S>`, the optional sync-event receiver, the options, `sleep_fn` and the backoff streak. Each function stays under 50 lines.
 
-- `Options` with `Default` `backoff: cooldown::Backoff { base_secs: 10, growth_factor: 2, max_secs: 3600 }`. The comment says these mirror `UploaderOptions::default().backoff`.
-- `enum Outcome { Sent, Parked, Retry { network: bool } }` and a private `struct Streak(u32)` with `fn next_wait(&mut self, outcome: &Outcome, backoff: &cooldown::Backoff) -> Option<Duration>`. `Sent` and `Parked` reset the streak to 0 and return `None`. `Retry { network: true }` returns `base_secs` and leaves the streak unchanged. `Retry { network: false }` increments the streak and returns `cooldown::calc(backoff, streak - 1)`, which never exceeds `max_secs`.
-- `pub async fn run(..)`: `tokio::select!` the pinned shutdown future against `run_impl(..)`, logging `"calibrations: upload worker shutdown complete"`, exactly like `workers/poller.rs`. A shutdown drops any in-flight send; the report is never removed before Miru's 200.
-- `run_impl`: subscribe to the syncer (`Some(rx)`, or on error log and use `None`, as in the poller), then loop. `match attempt_next(buffer, sender).await`: on `Some(outcome)`, if `streak.next_wait(..)` is `Some(wait)`, call `back_off(wait, &sleep_fn, &mut events)`. On `None` (nothing buffered), call `idle(buffer, &mut events)`.
-- `attempt_next`: under the lock, take `next_ready(Utc::now())?` and `read_report(&guard, id)`, then release the lock. Map a `FileSysErr::ParseJSONErr` from `Buffer::read` to `CalibrationsErr::InvalidReportErr`, because a corrupt file can never be sent. Without the lock, `sender.send(&report)`. Then `resolve(buffer, id, result)`.
-- `resolve`: re-lock. On `Ok`, `remove(id)` and log `info` → `Sent`. On `Err(e)` with `e.is_terminal()`, call `park(id, buffer.failed_dir())`. If that succeeds, log `error!("calibrations: Miru rejected report {id}; parked as failed/{id}.json: {e}")` → `Parked`. If parking fails, log the error → `Retry { network: false }`. Otherwise log `warn` → `Retry { network: e.is_network_conn_err() }`. The entry stays at the head.
-- `back_off`: pin `sleep_fn(wait)` once, then loop `tokio::select!` over the sleep (return) and `next_sync_event(events)`. `Some(SyncEvent::SyncSuccess)` returns early (reconnect). Other events continue. `None` logs, sets `*events = None` and continues. The sleep is never restarted, so intake activity can't extend a backoff.
-- `idle`: `tokio::select!` over `buffer.woken()` and `next_sync_event(events)` (handling `None` as above), then return.
+- `UploaderOptions` with `Default` `backoff: cooldown::Backoff { base_secs: 10, growth_factor: 2, max_secs: 3600 }`, mirroring `upload::UploaderOptions::default().backoff`.
+- `enum Command { Enqueue { report: Box<Report>, respond_to }, Len { respond_to }, Shutdown { respond_to } }`. A closed channel counts as shutdown.
+- `Outcome { Resolved, Retry { network: bool } }` and `struct Streak(u32)` with `next_wait`: `Resolved` resets to 0 and returns `None`; a network retry returns `base_secs` and leaves the streak; any other retry increments it and returns `cooldown::calc(backoff, streak - 1)`.
+- `run`: loop on `buffer.next_ready(Utc::now())`. With a report, `attempt(id)`; with none, `idle()`. Stop on `Flow::Shutdown`.
+- `upload(id)`: `buffer.read(id)`. A missing file drops the entry; a `ParseJSONErr` becomes `InvalidReportErr` (terminal); other read errors retry. The send runs as an owned future (cloned `Arc<S>` and the read report) through `serve_until`, which `select!`s it against the command channel. `None` means a shutdown arrived; the report stays buffered.
+- `resolve(id, result)`: `Ok` removes it. A terminal error parks it in `failed/`; a failed park retries without the network flag. Any other error retries, keeping the entry at the head.
+- `back_off(wait)`: pin `sleep_fn(wait)` once, then `select!` the sleep, commands, and sync events. `SyncSuccess` ends it early; an ended stream sets `events = None`. The sleep is never restarted, so intake can't extend it.
+- `idle()`: `select!` a command or a sync event.
+- The `Uploader` handle: `spawn`, `enqueue`, `len` and `shutdown` round-trip through `send_command`, mapping a closed channel to `SendActorMessageErr` and a dropped reply to `ReceiveActorMessageErr` (new `CalibrationsErr` variants, aliases of the cache module's types).
 
-`agent/tests/mocks/calibration_sender.rs` (new; declare it in `agent/tests/mocks/mod.rs`): `MockCalibrationSender`, modeled on `MockUploadExecutor`. It has a scripted `VecDeque<Step>` (`Ok`, `Terminal` = `RequestFailed` 422, `Server` = `RequestFailed` 500, `Network` = `MockErr { is_network_conn_err: true }`, `Hang(oneshot::Receiver<()>)`), and when the script is empty it returns `Ok`. It records each report's `component_slug` and signals an unbounded `started` channel on every call.
+`agent/tests/mocks/calibration_sender.rs` (new; declared in `agent/tests/mocks/mod.rs`): `MockCalibrationSender`, a scripted `VecDeque<Step>` (`Ok`, `Terminal` = 422, `Server` = 500, `Network`, `Hang(oneshot::Receiver<()>)`; an empty script succeeds). It records each sent report and signals an unbounded `started` channel on every call.
 
-Tests in `agent/tests/workers/calibrations.rs` (declared in `agent/tests/workers/mod.rs`). Each test uses a temp-dir `SharedBuffer`, `MockSyncer`, `SleepController::sleep_fn()`, a pending or oneshot shutdown future, and wraps waits in a 60 s hang guard:
-
-- `drains_reports_buffered_before_start_in_order`: enqueue `a`, `b` and `c`, then spawn. The sends are `[a, b, c]`, then the buffer is empty and `content/` has no files.
-- `intake_wakes_an_idle_worker`: spawn on an empty buffer, then `enqueue(a)`, and `a` is sent.
-- `offline_then_online_uploads_in_order`: script `Network`, then default `Ok`. Enqueue `a` and `b`. After the first send, `await_sleep()` sees 10 s and the buffer still holds `[a, b]`. Send `SyncSuccess` without releasing the sleep. The sends become `[a, a, b]` and the buffer is empty.
-- `retryable_errors_back_off_within_bounds`: script nine `Server` steps. Release each sleep, and the requested sleeps are `[10, 20, 40, 80, 160, 320, 640, 1280, 2560]`. Then script two more, and they are `3600` and `3600` (capped). Separately, three `Network` steps sleep `[10, 10, 10]`.
-- `a_success_resets_the_backoff`: `Server`, `Ok` (`a`), `Server` (`b`) give sleeps `[10, 10]`.
-- `terminal_rejection_is_parked_not_retried`: script `Terminal`, enqueue `a` with id `ia`. `failed/<ia>.json` exists, the buffer is empty and there was one send. Then enqueue `b`: `b` is sent and `a` is never re-sent.
-- `an_unreadable_report_is_parked_without_sending`: enqueue `a`, overwrite `content/<id>.json` with `not json`, and spawn. The file is in `failed/` and there were zero sends.
-- `shutdown_mid_upload_keeps_the_report_for_replay`: script `Hang`, enqueue `a`, await `started`, fire shutdown, and the join completes. A reopened `SharedBuffer::open` on the same layout still holds `a`. A second `run` with `Ok` sends `a` again (two sends in total). This is the crash-replay case; dedup is out of scope.
-- `drains_without_a_syncer_subscription`: `set_subscribe_fail(true)`, enqueue `a`, and `a` is sent. A variant calls `drop_transmitter()` mid-backoff, and the worker still finishes the sleep and retries.
+Tests in `agent/tests/calibrations/uploader.rs`, with a 60 s hang guard. The harness opens the buffer itself, so a test can enqueue into it or damage its files before `spawn_with(buffer)`. Sync events come from a `watch` channel the harness holds. Cases: drain order of reports buffered before start; intake wakes an idle uploader; intake is answered during an in-flight send and during a backoff (which it doesn't extend); a full buffer is 507; offline then `SyncSuccess` resumes in order; other events don't end a wait; idle events are ignored; backoff `[10, 20, …, 2560, 3600, 3600]`; network waits a flat 10 s; a success resets the streak; terminal rejections and unreadable files are parked; a missing file is dropped; a failed park and a read error retry; shutdown mid-send and mid-backoff keep the report for the next boot; dropping every handle stops the actor; commands after shutdown fail with `SendActorMessageErr`, and one queued behind shutdown fails with `ReceiveActorMessageErr`; an abandoned reply doesn't stop the actor; no events, or an ended stream, still drains.
 
 ### Milestone 5: `calibration-intake-service`
 
 `agent/src/services/errors.rs`: add the `ServiceErr` variant `CalibrationsErr(Box<CalibrationsErr>)` with its `From` impl and `impl_error!` entry.
 
-`agent/src/services/calibration/create.rs` (new): `CreateParams`, `Created` and `create`. Intake does not validate (see Decision Log). `create` takes the deployment id from `disk::deployments::find_deployed(deployments).await?.map(|d| d.id)`, builds a `Report` whose `CalibrationJob` has `calibrated_at: now` and whose content is the caller's value unchanged, calls `buffer.enqueue(report).await?` (which wakes the worker), and returns `Created { reported_at: now }`. `now` is a parameter, so tests control time; the future route passes `Utc::now()`. `agent/src/services/calibration/mod.rs`: `mod create; pub use create::*;`. Add `pub mod calibration;` to `agent/src/services/mod.rs`, add `agent/src/services/calibration/.covgate` (measured: `100.00`), and list `calibration` among the `services/` submodules in `ARCHITECTURE.md`.
+`agent/src/services/calibration/create.rs` (new): `CreateParams`, `Created` and `create`. Intake does not validate (see Decision Log). `create` takes the deployment id from `disk::deployments::find_deployed(deployments).await?.map(|d| d.id)`, builds a `Report` whose `CalibrationJob` has `calibrated_at: now` and whose content is the caller's value unchanged, calls `uploader.enqueue(report).await?`, and returns `Created { reported_at: now }`. `now` is a parameter, so tests control time; the future route passes `Utc::now()`. `agent/src/services/calibration/mod.rs`: `mod create; pub use create::*;`. Add `pub mod calibration;` to `agent/src/services/mod.rs`, add `agent/src/services/calibration/.covgate` (measured: `100.00`), and list `calibration` among the `services/` submodules in `ARCHITECTURE.md`.
 
 Tests in `agent/tests/services/calibration/{mod.rs, create.rs}` (declare `pub mod calibration;` in `agent/tests/services/mod.rs`):
 
-- create: `accepted_while_offline` (no HTTP client exists in the call; returns `reported_at == now`; the buffered job has `calibrated_at == now` and the caller's content). `stamps_the_current_deployment` (a `Deployed` deployment `dpl_1` in a temp `Deployments` store gives `deployment_id == Some("dpl_1")`). `no_deployment_is_fine` (`None`). `wakes_the_worker` (`woken()` resolves). `buffer_full_is_507` (`code().as_str() == "calibration_buffer_full"`, status 507).
+- create (an `Uploader` over a temp buffer and `MockCalibrationSender`): `accepted_while_offline` (no HTTP client exists in the call; returns `reported_at == now`; the uploaded job has `calibrated_at == now` and the caller's content). `stamps_the_current_deployment` (a `Deployed` deployment `dpl_1` in a temp `Deployments` store gives `deployment_id == Some("dpl_1")`). `no_deployment_is_fine` (`None`). `a_deployments_cache_error_fails_intake` (500, nothing enqueued). `buffer_full_is_507` (the first upload hangs so the report stays buffered; (`code().as_str() == "calibration_buffer_full"`, status 507).
 
 ### Milestone 6: `calibrations-wiring`
 
-`agent/src/app/state.rs`: add the field `pub calibrations: Option<calibrations::SharedBuffer>`. Add `async fn init_calibrations(layout: &disk::Layout) -> Option<calibrations::SharedBuffer>`, which calls `SharedBuffer::open(&layout.calibrations(), calibrations::DEFAULT_OPTIONS)` and on error logs `error!("failed to open the calibration buffer; calibrations are unavailable until restart: {e}")` and returns `None`. Call it in `AppState::init` after the data-upload actors. `AppState::shutdown` is unchanged: the buffer has no actor, and the worker is joined before the app state.
-
-`agent/src/app/run.rs`: add `init_calibration_upload_worker(app_state, shutdown_manager, shutdown_rx)`, called from `init_data_upload_workers`. It returns `Ok(())` when `app_state.calibrations` is `None`. Otherwise it spawns `workers::calibrations::run(&Options::default(), &buffer, &HttpSender::new(app_state.http_client.clone(), app_state.token_mngr.clone()), app_state.syncer.as_ref(), tokio::time::sleep, shutdown future)` and registers the handle as the new `ShutdownManager` field `calibration_upload_worker_handle` (initialized to `None`). In `ShutdownManager::shutdown`, join it right after the delete driver and before the app state, with the label `"calibration upload"`. Update `ARCHITECTURE.md`: list the worker under `workers/`, and add it to the shutdown-order notes.
+`agent/src/app/state.rs`: add the field `pub calibrations: Option<Arc<calibrations::Uploader>>`. Add `init_calibrations(layout, http_client, token_mngr, &syncer)`, which opens `calibrations::open(&layout.calibrations(), DEFAULT_OPTIONS)`; on error it logs `"failed to open the calibration buffer; calibrations are unavailable until restart: {e}"` and returns `(None, None)` (fail-open). Otherwise it subscribes to the syncer (logging and passing `None` on error), and spawns the `Uploader` with an `HttpSender`, `layout.failed()`, default options and `tokio::time::sleep`. Its join handle joins the others in the state's shutdown future. `AppState::shutdown` stops the uploader first, since it uses the token manager and HTTP client and nothing depends on it. `agent/src/server/errors.rs`: add `ServerErr::CalibrationsErr(Box<CalibrationsErr>)` with its `From` impl. `agent/src/app/run.rs` is unchanged. Update `ARCHITECTURE.md`.
 
 Tests in `agent/tests/app/state.rs`, module `init`:
 
-- `calibration_buffer_opened`: `state.calibrations.is_some()` and `<data>/calibrations/content` exists.
-- `calibrations_degrade_when_buffer_path_unwritable`: a regular file at `layout.calibrations().root` path gives `state.calibrations.is_none()`, init succeeds and shutdown succeeds.
+- `calibration_uploader_spawned`: `state.calibrations` is `Some`, its `len()` is 0, and `<data>/calibrations/content` exists.
+- `calibrations_degrade_when_buffer_path_unwritable`: a regular file at `layout.calibrations().root` gives `state.calibrations.is_none()`; init and shutdown succeed.
 
-The existing `agent/tests/app/run.rs` start/shutdown tests (`shutdown_signal_received` and others) now exercise spawning and joining the worker.
+`agent/tests/app/run.rs` adds `runs_without_calibrations_when_the_buffer_cannot_open`; the existing start/shutdown tests exercise spawning and stopping the uploader.
 
 ## Concrete Steps
 

@@ -1,4 +1,4 @@
-//! Calibration intake: stamp a report and buffer it for the upload worker.
+//! Calibration intake: stamp a report and buffer it for upload.
 //! Reports aren't checked against Miru's rules here; one Miru rejects is
 //! parked by the upload worker.
 

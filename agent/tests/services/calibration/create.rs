@@ -1,13 +1,15 @@
-//! Calibration intake: stamping, buffering and waking, all offline.
+//! Calibration intake: stamping and buffering, all offline.
 
 // standard crates
+use std::sync::Arc;
 use std::time::Duration;
 
 // internal crates
+use crate::mocks::calibration_sender::{MockCalibrationSender, Step};
 use crate::test_utils::calibrations::layout;
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::buffer::BufferOptions;
-use miru_agent::calibrations::{self, CalibrationJob, SharedBuffer};
+use miru_agent::calibrations::{self, CalibrationJob, Report, Uploader, UploaderArgs};
 use miru_agent::disk::{self, Layout};
 use miru_agent::errors::{Error, HTTPCode};
 use miru_agent::models::{Deployment, DplActivity};
@@ -17,10 +19,13 @@ use miru_agent::services::ServiceErr;
 // external crates
 use chrono::{DateTime, Utc};
 use serde_json::json;
+use tokio::sync::{mpsc, oneshot};
 
 struct Fixture {
     _dir: test_dirs::TempDir,
-    buffer: SharedBuffer,
+    uploader: Uploader,
+    sender: Arc<MockCalibrationSender>,
+    started: mpsc::UnboundedReceiver<()>,
     deployments: disk::Deployments,
 }
 
@@ -31,14 +36,28 @@ impl Fixture {
 
     async fn with_options(options: BufferOptions) -> Self {
         let dir = test_dirs::temp("calibration_service_test").unwrap();
-        let buffer = SharedBuffer::open(&layout(&dir), options).await.unwrap();
+        let calibrations_layout = layout(&dir);
+        let (sender, started) = MockCalibrationSender::new();
+        let args = UploaderArgs {
+            buffer: calibrations::open(&calibrations_layout, options)
+                .await
+                .unwrap(),
+            failed: calibrations_layout.failed(),
+            sender: sender.clone(),
+            events: None,
+            options: Default::default(),
+            sleep_fn: tokio::time::sleep,
+        };
+        let (uploader, _) = Uploader::spawn(64, args);
         let layout = Layout::new(dir.to_dir());
         let (deployments, _) = disk::Deployments::spawn(64, layout.deployments(), 1000)
             .await
             .unwrap();
         Self {
             _dir: dir,
-            buffer,
+            uploader,
+            sender,
+            started,
             deployments,
         }
     }
@@ -57,19 +76,16 @@ impl Fixture {
     }
 
     async fn create(&self, params: CreateParams) -> Result<Created, ServiceErr> {
-        calibration::create(&self.buffer, &self.deployments, params, now()).await
+        calibration::create(&self.uploader, &self.deployments, params, now()).await
     }
 
-    /// The buffered jobs, oldest first.
-    async fn buffered(&self) -> Vec<CalibrationJob> {
-        self.buffer.lock().await.jobs()
-    }
-
-    /// The oldest buffered report's content.
-    async fn head_content(&self) -> serde_json::Value {
-        let guard = self.buffer.lock().await;
-        let entry = guard.next_ready(now()).unwrap();
-        guard.read(entry.id).await.unwrap().content
+    /// The report the uploader sends first.
+    async fn uploaded(&mut self) -> Report {
+        tokio::time::timeout(Duration::from_secs(5), self.started.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        self.sender.reports().remove(0)
     }
 }
 
@@ -91,7 +107,7 @@ fn params() -> CreateParams {
 #[tokio::test]
 async fn accepted_while_offline() {
     // no HTTP client exists here: intake never talks to Miru
-    let fixture = Fixture::new().await;
+    let mut fixture = Fixture::new().await;
 
     let created = fixture.create(params()).await.unwrap();
 
@@ -104,30 +120,31 @@ async fn accepted_while_offline() {
         deployment_id: None,
         calibrated_at: now(),
     };
-    assert_eq!(fixture.buffered().await, [expected]);
-    assert_eq!(fixture.head_content().await, params().content);
+    let uploaded = fixture.uploaded().await;
+    assert_eq!(uploaded.job, expected);
+    assert_eq!(uploaded.content, params().content);
 }
 
 #[tokio::test]
 async fn stamps_the_current_deployment() {
-    let fixture = Fixture::new().await;
+    let mut fixture = Fixture::new().await;
     fixture.deploy("dpl_0", DplActivity::Archived).await;
     fixture.deploy("dpl_1", DplActivity::Deployed).await;
 
     fixture.create(params()).await.unwrap();
 
-    let buffered = fixture.buffered().await;
-    assert_eq!(buffered[0].deployment_id.as_deref(), Some("dpl_1"));
+    let uploaded = fixture.uploaded().await;
+    assert_eq!(uploaded.job.deployment_id.as_deref(), Some("dpl_1"));
 }
 
 #[tokio::test]
 async fn no_deployment_is_fine() {
-    let fixture = Fixture::new().await;
+    let mut fixture = Fixture::new().await;
     fixture.deploy("dpl_0", DplActivity::Queued).await;
 
     fixture.create(params()).await.unwrap();
 
-    assert_eq!(fixture.buffered().await[0].deployment_id, None);
+    assert_eq!(fixture.uploaded().await.job.deployment_id, None);
 }
 
 #[tokio::test]
@@ -139,18 +156,8 @@ async fn a_deployments_cache_error_fails_intake() {
 
     assert!(matches!(err, ServiceErr::DiskErr(_)), "{err:?}");
     assert_eq!(err.http_status(), HTTPCode::INTERNAL_SERVER_ERROR);
-    assert!(fixture.buffered().await.is_empty());
-}
-
-#[tokio::test]
-async fn wakes_the_worker() {
-    let fixture = Fixture::new().await;
-
-    fixture.create(params()).await.unwrap();
-
-    tokio::time::timeout(Duration::from_secs(5), fixture.buffer.woken())
-        .await
-        .unwrap();
+    assert_eq!(fixture.uploader.len().await.unwrap(), 0);
+    assert!(fixture.sender.sent().is_empty());
 }
 
 #[tokio::test]
@@ -160,6 +167,9 @@ async fn buffer_full_is_507() {
         ..calibrations::DEFAULT_OPTIONS
     };
     let fixture = Fixture::with_options(options).await;
+    // the first report stays buffered while its upload hangs
+    let (_hold, hang) = oneshot::channel();
+    fixture.sender.push(Step::Hang(hang));
     fixture.create(params()).await.unwrap();
 
     let err = fixture.create(params()).await.unwrap_err();
@@ -167,5 +177,5 @@ async fn buffer_full_is_507() {
     assert!(matches!(err, ServiceErr::CalibrationsErr(_)), "{err:?}");
     assert_eq!(err.code().as_str(), "calibration_buffer_full");
     assert_eq!(err.http_status(), HTTPCode::INSUFFICIENT_STORAGE);
-    assert_eq!(fixture.buffered().await.len(), 1);
+    assert_eq!(fixture.uploader.len().await.unwrap(), 1);
 }

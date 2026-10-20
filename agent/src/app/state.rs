@@ -36,8 +36,9 @@ pub struct AppState {
     pub uploader: Arc<upload::Uploader>,
     pub token_mngr: Arc<authn::TokenManager>,
     pub event_hub: events::EventHub,
-    /// The calibration buffer, or `None` when it failed to open at boot.
-    pub calibrations: Option<calibrations::SharedBuffer>,
+    /// The calibration uploader, or `None` when its buffer failed to open at
+    /// boot.
+    pub calibrations: Option<Arc<calibrations::Uploader>>,
 }
 
 impl AppState {
@@ -86,11 +87,13 @@ impl AppState {
         // initialize the data upload pipeline (deleter, uploader, scanner)
         let (deleter, uploader, scanner, data_upload_handles) =
             Self::init_data_uploads(layout, http_client.clone(), token_mngr.clone()).await?;
-        let calibrations = init_calibrations(layout).await;
+        let (calibrations, calibrations_handle) =
+            init_calibrations(layout, http_client.clone(), token_mngr.clone(), &syncer).await;
 
         let shutdown_handle = async move {
             let mut handles = vec![token_mngr_handle, syncer_handle, event_hub_handle];
             handles.extend(data_upload_handles);
+            handles.extend(calibrations_handle);
 
             futures::future::join(futures::future::join_all(handles), storage_handle).await;
         };
@@ -245,7 +248,16 @@ impl AppState {
     pub async fn shutdown(&self) -> Result<(), server::ServerErr> {
         let mut first_err: Option<server::ServerErr> = None;
 
-        // shutdown the uploader first: it depends on nothing else in the app. The
+        // shutdown the calibration uploader first: it uses the token manager and
+        // the http client, and nothing depends on it
+        if let Some(calibrations) = &self.calibrations {
+            if let Err(e) = calibrations.shutdown().await {
+                tracing::error!("failed to shutdown calibration uploader: {e}");
+                first_err.get_or_insert(e.into());
+            }
+        }
+
+        // shutdown the uploader next: it depends on nothing else in the app. The
         // scanner's upload sink may still enqueue into the stopped uploader if a
         // scan tick races this shutdown; the sink logs a warn and the tick
         // completes, so ordering stays safe.
@@ -297,21 +309,46 @@ impl AppState {
     }
 }
 
-/// Open the calibration buffer. A failure is logged and leaves calibrations
-/// unavailable (fail-open, like the uploader and deleter), so a bad
-/// calibrations directory can't block config deployment. The buffer has no
-/// actor, so [`AppState::shutdown`] has nothing to stop.
-async fn init_calibrations(layout: &disk::Layout) -> Option<calibrations::SharedBuffer> {
-    let options = calibrations::DEFAULT_OPTIONS;
-    match calibrations::SharedBuffer::open(&layout.calibrations(), options).await {
-        Ok(buffer) => Some(buffer),
+/// Open the calibration buffer and spawn its uploader. An open failure is
+/// logged and leaves calibrations unavailable (fail-open, like the uploader
+/// and deleter), so a bad calibrations directory can't block config
+/// deployment.
+async fn init_calibrations(
+    layout: &disk::Layout,
+    http_client: Arc<http::Client>,
+    token_mngr: Arc<authn::TokenManager>,
+    syncer: &sync::Syncer,
+) -> (
+    Option<Arc<calibrations::Uploader>>,
+    Option<tokio::task::JoinHandle<()>>,
+) {
+    let layout = layout.calibrations();
+    let buffer = match calibrations::open(&layout, calibrations::DEFAULT_OPTIONS).await {
+        Ok(buffer) => buffer,
         Err(e) => {
             tracing::error!(
                 "failed to open the calibration buffer; calibrations are unavailable until restart: {e}"
             );
+            return (None, None);
+        }
+    };
+    let events = match syncer.subscribe().await {
+        Ok(events) => Some(events),
+        Err(e) => {
+            tracing::error!("calibrations: no syncer events, so no early retry on reconnect: {e}");
             None
         }
-    }
+    };
+    let args = calibrations::UploaderArgs {
+        buffer,
+        failed: layout.failed(),
+        sender: Arc::new(calibrations::HttpSender::new(http_client, token_mngr)),
+        events,
+        options: calibrations::UploaderOptions::default(),
+        sleep_fn: tokio::time::sleep,
+    };
+    let (uploader, handle) = calibrations::Uploader::spawn(64, args);
+    (Some(Arc::new(uploader)), Some(handle))
 }
 
 async fn setup_auth_files(

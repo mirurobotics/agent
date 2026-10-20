@@ -1,6 +1,7 @@
 // internal crates
 use crate::authn;
 use crate::cache;
+use crate::calibrations;
 use crate::crypt;
 use crate::data_uploads::{retention, scan, upload};
 use crate::disk::DiskErr;
@@ -93,6 +94,8 @@ pub enum ServerErr {
     AuthnErr(authn::AuthnErr),
     #[error(transparent)]
     CacheErr(cache::CacheErr),
+    #[error(transparent)]
+    CalibrationsErr(Box<calibrations::CalibrationsErr>),
     #[error(transparent)]
     CryptErr(crypt::CryptErr),
     #[error(transparent)]
@@ -189,6 +192,12 @@ impl From<sync::SyncErr> for ServerErr {
     }
 }
 
+impl From<calibrations::CalibrationsErr> for ServerErr {
+    fn from(e: calibrations::CalibrationsErr) -> Self {
+        Self::CalibrationsErr(Box::new(e))
+    }
+}
+
 impl From<upload::UploadErr> for ServerErr {
     fn from(e: upload::UploadErr) -> Self {
         Self::UploadErr(Box::new(e))
@@ -202,6 +211,7 @@ crate::impl_error!(ServerErr {
     EventsErr,
     AuthnErr,
     CacheErr,
+    CalibrationsErr,
     CryptErr,
     FileSysErr,
     HTTPErr,

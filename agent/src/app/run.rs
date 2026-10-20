@@ -9,7 +9,6 @@ use crate::app::{
     state::AppState,
 };
 use crate::authn::{self, TokenManagerExt};
-use crate::calibrations::HttpSender;
 use crate::data_uploads::scan;
 use crate::disk::{self, Layout};
 use crate::filesys;
@@ -19,7 +18,7 @@ use crate::server::unix::serve;
 use crate::server::{self, auth::BearerToken, errors::*, tcp};
 use crate::trace;
 use crate::workers::{
-    calibrations as calibration_worker, mqtt, poller, sync_scan_bridge,
+    mqtt, poller, sync_scan_bridge,
     token_refresh::{run_token_refresh_worker, TokenRefreshWorkerOptions},
 };
 
@@ -146,7 +145,6 @@ async fn init_data_upload_workers(
         shutdown_tx.subscribe(),
     )
     .await?;
-    init_calibration_upload_worker(app_state, shutdown_manager, shutdown_tx.subscribe())?;
 
     Ok(())
 }
@@ -357,39 +355,6 @@ async fn init_delete_worker(
     Ok(())
 }
 
-/// Spawn the calibration upload worker, unless the calibration buffer failed
-/// to open at boot.
-fn init_calibration_upload_worker(
-    app_state: &Arc<AppState>,
-    shutdown_manager: &mut ShutdownManager,
-    mut shutdown_rx: broadcast::Receiver<()>,
-) -> Result<(), ServerErr> {
-    let Some(buffer) = app_state.calibrations.clone() else {
-        return Ok(());
-    };
-    info!("Initializing calibration upload worker...");
-    let sender = HttpSender::new(app_state.http_client.clone(), app_state.token_mngr.clone());
-    let syncer = app_state.syncer.clone();
-    let handle = tokio::spawn(async move {
-        calibration_worker::run(
-            &calibration_worker::Options::default(),
-            &buffer,
-            &sender,
-            syncer.as_ref(),
-            tokio::time::sleep,
-            Box::pin(async move {
-                let _ = shutdown_rx.recv().await;
-            }),
-        )
-        .await;
-    });
-    shutdown_manager.register_handle(
-        |mgr| &mut mgr.calibration_upload_worker_handle,
-        "calibration_upload_worker_handle",
-        handle,
-    )
-}
-
 // the local device API is served over a unix socket (unix only) and, when
 // enabled, over loopback tcp (all platforms)
 async fn init_local_api_servers(
@@ -503,7 +468,6 @@ struct ShutdownManager {
     scan_worker_handle: Option<JoinHandle<()>>,
     sync_scan_bridge_worker_handle: Option<JoinHandle<()>>,
     delete_worker_handle: Option<JoinHandle<()>>,
-    calibration_upload_worker_handle: Option<JoinHandle<()>>,
 }
 
 impl ShutdownManager {
@@ -521,7 +485,6 @@ impl ShutdownManager {
             scan_worker_handle: None,
             sync_scan_bridge_worker_handle: None,
             delete_worker_handle: None,
-            calibration_upload_worker_handle: None,
         }
     }
 
@@ -656,10 +619,32 @@ impl ShutdownManager {
             }
         }
 
-        // 5-8. data-upload and calibration workers
-        self.join_upload_workers(&mut first_err).await;
+        // 5. scan driver worker
+        join_worker(
+            self.scan_worker_handle.take(),
+            "scan driver",
+            &mut first_err,
+        )
+        .await;
 
-        // 9. app state
+        // 6. sync-scan bridge worker
+        join_worker(
+            self.sync_scan_bridge_worker_handle.take(),
+            "sync-scan bridge",
+            &mut first_err,
+        )
+        .await;
+
+        // 7. delete driver worker (must join before app state shutdown so no
+        // sweeps race the deleter actor's shutdown)
+        join_worker(
+            self.delete_worker_handle.take(),
+            "delete driver",
+            &mut first_err,
+        )
+        .await;
+
+        // 8. app state
         self.shutdown_app_state(&mut first_err).await;
 
         match first_err {
@@ -669,34 +654,6 @@ impl ShutdownManager {
                 Ok(())
             }
         }
-    }
-
-    /// Join the scan driver, sync-scan bridge, delete driver and calibration
-    /// upload workers, in that order.
-    async fn join_upload_workers(&mut self, first_err: &mut Option<ServerErr>) {
-        // 5. scan driver worker
-        join_worker(self.scan_worker_handle.take(), "scan driver", first_err).await;
-
-        // 6. sync-scan bridge worker
-        join_worker(
-            self.sync_scan_bridge_worker_handle.take(),
-            "sync-scan bridge",
-            first_err,
-        )
-        .await;
-
-        // 7. delete driver worker (must join before app state shutdown so no
-        // sweeps race the deleter actor's shutdown)
-        join_worker(self.delete_worker_handle.take(), "delete driver", first_err).await;
-
-        // 8. calibration upload worker (joined before app state shutdown, which
-        // stops the token manager and storage it uses)
-        join_worker(
-            self.calibration_upload_worker_handle.take(),
-            "calibration upload",
-            first_err,
-        )
-        .await;
     }
 
     async fn shutdown_app_state(&mut self, first_err: &mut Option<ServerErr>) {

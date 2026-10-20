@@ -63,9 +63,9 @@ All source lives under `agent/src/`. The binary entry point is `main.rs`.
 
 `buffer` — the generic durable buffer. Type `Buffer<J: BufferJob, C>` keeps a FIFO `queue::Queue` of job metadata in a queue file and each item's content in its own `<entry id>.json` file, capped by item count and bytes. It never evicts: when full it rejects new items with `BufferFullErr`. An item is accepted only once its file and queue entry are both on disk. Startup deletes item files with no queue entry, drops entries whose file is missing, and rebuilds an unparseable or missing queue from the item files. `Buffer::park` moves an item that can never be resolved out to a separate directory (e.g. `failed/`) and drops its entry; `open` never reads that directory.
 
-`calibrations/` — calibration reports accepted from the Device API. `calibrations::Buffer` is `buffer::Buffer<CalibrationJob, serde_json::Value>` at `calibrations/queue.json` and `calibrations/content/`, capped at 1,000 reports or 256 MiB. `CalibrationsErr` maps a full buffer to 507 `calibration_buffer_full`. `SharedBuffer` is the buffer intake and the upload worker share (a mutex never held across a network call, plus a wake-up intake sends after each accepted report); reports Miru permanently rejects are parked in `calibrations/failed/`. `HttpSender` (behind the `Sender` seam) sends one report as a single `POST /calibrations`, mapping the job's `calibrated_at` to `reported_at`; a token failure is never terminal, and a 2xx whose body cannot be parsed counts as sent.
+`calibrations/` — calibration reports accepted from the Device API. `calibrations::Buffer` is `buffer::Buffer<CalibrationJob, serde_json::Value>` at `calibrations/queue.json` and `calibrations/content/`, capped at 1,000 reports or 256 MiB. `CalibrationsErr` maps a full buffer to 507 `calibration_buffer_full`. `Uploader` is an actor that owns the buffer: intake sends it reports, and it uploads them to Miru one at a time, oldest first, serving intake during an upload or a backoff so intake never waits on the network. It backs off while Miru is unreachable or failing, retries at once when a sync succeeds, and parks reports Miru permanently rejects in `calibrations/failed/`. `AppState` spawns it only when the buffer opened at boot (`AppState::calibrations`). `HttpSender` (behind the `Sender` seam) sends one report as a single `POST /calibrations`, mapping the job's `calibrated_at` to `reported_at`; a token failure is never terminal, and a 2xx whose body cannot be parsed counts as sent.
 
-`services/` — domain service layer. Submodules: `calibration` (calibration intake: stamps the receive time and deployed deployment, buffers it and wakes the upload worker; works offline. It does not check reports against Miru's rules, so one Miru rejects is parked by the upload worker), `device` (device status sync), `deployment` (deployment management), `file_rule` (cached file-rule lookup), `git_commit` (commit tracking), `release` (release management).
+`services/` — domain service layer. Submodules: `calibration` (calibration intake: stamps the receive time and deployed deployment and hands the report to the calibration uploader; works offline. It does not check reports against Miru's rules, so one Miru rejects is parked by the uploader), `device` (device status sync), `deployment` (deployment management), `file_rule` (cached file-rule lookup), `git_commit` (commit tracking), `release` (release management).
 
 `cache` — file-system-backed cache with TTL. Used for caching backend responses.
 
@@ -81,8 +81,7 @@ All source lives under `agent/src/`. The binary entry point is `main.rs`.
 
 ### Background workers
 
-`workers/` — long-running tasks, including:
-- `calibrations` — uploads buffered calibration reports to Miru, oldest first; backs off while Miru is unreachable or failing and retries at once when a sync succeeds. Spawned only when the calibration buffer opened at boot (`AppState::calibrations`).
+`workers/` — three long-running tasks:
 - `mqtt` — subscribes to MQTT topics, triggers sync on events.
 - `poller` — periodic backend sync on a timer.
 - `token_refresh` — rotates JWT before expiry.
@@ -101,7 +100,7 @@ All workers receive a broadcast shutdown signal and clean up gracefully.
 
 - **Provision and runtime are mutually exclusive.** `main.rs` picks one path at startup. They share no runtime state; provision writes the files that runtime later reads.
 - **All backend HTTP goes through `http::Client`.** No module uses raw reqwest. The client handles retry logic and attaches auth headers.
-- **Shutdown ordering matters.** Syncer shuts down before storage (it writes during sync). Token manager shuts down last. This is enforced in `AppState::shutdown()`. `ShutdownManager` joins every worker, including the calibration upload worker (which uses the token manager), before `AppState::shutdown()`.
+- **Shutdown ordering matters.** Syncer shuts down before storage (it writes during sync). Token manager shuts down last. This is enforced in `AppState::shutdown()`. The calibration uploader (which uses the token manager) is stopped first.
 - **Generated code is never hand-edited.** `libs/backend-api` and `libs/device-api` are overwritten on regeneration.
 - **Tests exercise ordinary production behavior.** `cargo test` needs no custom feature or logging environment; production algorithms and client construction are identical in normal and test builds, and tests control dependencies and time. Test layout conventions live in `AGENTS.md` § Testing.
 - **The agent has no direct database.** All persistence is file-based via `disk::Layout`. The backend owns the database.

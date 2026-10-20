@@ -4,6 +4,9 @@ use crate::buffer::{BufferErr, BufferFullErr};
 use crate::errors::{Code, HTTPCode, Trace};
 use crate::http::HTTPErr;
 
+pub type SendActorMessageErr = crate::cache::errors::SendActorMessageErr;
+pub type ReceiveActorMessageErr = crate::cache::errors::ReceiveActorMessageErr;
+
 /// The calibration buffer is at its report or byte cap: 507
 /// `calibration_buffer_full`. Nothing was written and nothing already
 /// buffered was dropped; the caller should retry once uploads drain it.
@@ -69,6 +72,10 @@ pub enum CalibrationsErr {
     HTTPErr(HTTPErr),
     #[error(transparent)]
     TokenErr(TokenErr),
+    #[error(transparent)]
+    SendActorMessageErr(SendActorMessageErr),
+    #[error(transparent)]
+    ReceiveActorMessageErr(ReceiveActorMessageErr),
 }
 
 /// A full buffer becomes the calibration-specific 507; every other buffer
@@ -106,4 +113,6 @@ crate::impl_error!(CalibrationsErr {
     InvalidReportErr,
     HTTPErr,
     TokenErr,
+    SendActorMessageErr,
+    ReceiveActorMessageErr,
 });

@@ -292,13 +292,13 @@ pub mod init {
     }
 
     #[tokio::test]
-    async fn calibration_buffer_opened() {
+    async fn calibration_uploader_spawned() {
         let env = TestEnv::valid().await;
 
         let (state, state_handle) = env.init().await.unwrap();
 
-        let buffer = state.calibrations.as_ref().expect("calibration buffer");
-        assert!(buffer.lock().await.is_empty());
+        let uploader = state.calibrations.as_ref().expect("calibration uploader");
+        assert_eq!(uploader.len().await.unwrap(), 0);
         assert!(env.layout.calibrations().content().exists());
         state.shutdown().await.unwrap();
         state_handle.await;

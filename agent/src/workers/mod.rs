@@ -7,7 +7,6 @@ use crate::sync::syncer::SyncEvent;
 // external crates
 use tokio::sync::watch;
 
-pub mod calibrations;
 pub mod delete;
 pub mod mqtt;
 pub mod poller;
@@ -17,7 +16,9 @@ pub mod token_refresh;
 
 /// Wait for the next sync event. A missing subscription remains pending so
 /// workers can disable this branch without preventing their other work.
-async fn next_sync_event(subscriber: &mut Option<watch::Receiver<SyncEvent>>) -> Option<SyncEvent> {
+pub(crate) async fn next_sync_event(
+    subscriber: &mut Option<watch::Receiver<SyncEvent>>,
+) -> Option<SyncEvent> {
     let Some(subscriber) = subscriber.as_mut() else {
         return future::pending().await;
     };
