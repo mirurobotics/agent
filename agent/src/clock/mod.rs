@@ -102,17 +102,14 @@ impl Clock {
             raw: self.raw_now(),
         };
         let previous = self.write_anchor(anchor);
-        let offset = server - anchor.raw;
-        if offset.abs() > TRUST_TOLERANCE && previous.is_none() {
+        // computed up front: arguments of a disabled log macro never run
+        let offset_secs = (server - anchor.raw).num_seconds();
+        if offset_secs.abs() > TRUST_TOLERANCE.num_seconds() && previous.is_none() {
             warn!(
-                "clock: wall clock differs from the backend by {}s; using backend time",
-                offset.num_seconds()
+                "clock: wall clock differs from the backend by {offset_secs}s; using backend time"
             );
         } else {
-            debug!(
-                "clock: backend time {server}, offset {}s",
-                offset.num_seconds()
-            );
+            debug!("clock: backend time {server}, offset {offset_secs}s");
         }
     }
 
