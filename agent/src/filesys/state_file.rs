@@ -26,9 +26,8 @@ macro_rules! dispatch {
     }};
 }
 
-/// Waits before each retry of a state file read that failed for a reason other
-/// than "missing" or "unparseable" (e.g. a transient EIO). Bounded so a
-/// permanent error (e.g. EACCES) delays boot by at most their sum.
+/// Waits between retries of a state file read that failed for a reason other
+/// than "missing" or "unparseable" (e.g. a transient EIO).
 const READ_RETRY_DELAYS: [Duration; 3] = [
     Duration::from_millis(50),
     Duration::from_millis(250),
@@ -62,20 +61,13 @@ where
         Ok(state_file)
     }
 
-    /// Opens `file`, falling back to `default` only when that loses nothing:
+    /// Opens `file`:
     ///
-    /// - **Missing file:** created with `default`.
-    /// - **Unparseable file** (truncated, or written by another agent version):
-    ///   the file is copied aside to `<name>.corrupt-<unix-ms>` so its contents
-    ///   survive for inspection, then atomically replaced with `default`. The
-    ///   original stays in place until that write succeeds, so a failed write
-    ///   (e.g. ENOSPC) loses nothing.
-    /// - **Any other read error** (EIO, EACCES, ...): the read is retried a
-    ///   few times (see [`READ_RETRY_DELAYS`]). If it still fails, the error
-    ///   is returned to the caller and the file is not modified. Overwriting
-    ///   it would silently discard state that may be intact once the error
-    ///   clears; callers decide how to run without it (the queues run
-    ///   without persistence for that boot).
+    /// - **Missing:** created with `default`.
+    /// - **Unparseable:** copied aside to `<name>.corrupt-<unix-ms>`, then
+    ///   atomically replaced with `default`.
+    /// - **Other read error:** retried per [`READ_RETRY_DELAYS`], then returned
+    ///   with the file left untouched.
     pub async fn new_with_default(file: File, default: ContentT) -> Result<Self, FileSysErr>
     where
         Self: Sized,
