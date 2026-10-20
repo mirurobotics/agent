@@ -17,7 +17,7 @@ pub struct CreateUploadRequest {
     /// Source-side details of the file on the device.
     #[serde(rename = "source")]
     pub source: Box<models::UploadSource>,
-    /// The digest of the file being uploaded.
+    /// The SHA-256 digest of the file being uploaded, formatted as `sha256:` followed by 64 lowercase hex characters. Any other format is rejected with a 400.
     #[serde(rename = "digest")]
     pub digest: String,
     /// The size of the file in bytes.

@@ -400,15 +400,7 @@ pub async fn set_permissions(
 pub fn glob(pattern: &str) -> Result<Vec<File>, FileSysErr> {
     let mut matches = Vec::new();
 
-    let paths = glob::glob(pattern).map_err(|e| {
-        FileSysErr::InvalidGlobErr(InvalidGlobErr {
-            pattern: pattern.to_string(),
-            source: Box::new(e),
-            trace: trace!(),
-        })
-    })?;
-
-    for entry in paths {
+    for entry in compile_glob(pattern)? {
         let path = match entry {
             Ok(path) => path,
             Err(_) => continue,
@@ -420,6 +412,22 @@ pub fn glob(pattern: &str) -> Result<Vec<File>, FileSysErr> {
     }
 
     Ok(matches)
+}
+
+/// Checks that `pattern` is a glob [`glob`] accepts, without walking the
+/// filesystem. An invalid pattern returns [`FileSysErr::InvalidGlobErr`].
+pub fn validate_glob(pattern: &str) -> Result<(), FileSysErr> {
+    compile_glob(pattern).map(drop)
+}
+
+fn compile_glob(pattern: &str) -> Result<glob::Paths, FileSysErr> {
+    glob::glob(pattern).map_err(|e| {
+        FileSysErr::InvalidGlobErr(InvalidGlobErr {
+            pattern: pattern.to_string(),
+            source: Box::new(e),
+            trace: trace!(),
+        })
+    })
 }
 
 pub async fn metadata(file: &File) -> Result<Metadata, FileSysErr> {

@@ -28,10 +28,15 @@ pub fn make_cfg_inst(args: CfgInstArgs) -> backend_api::models::ConfigInstance {
     }
 }
 
+/// Builds a queued deployment with an expanded, rule-less release, as the
+/// backend returns it.
 pub fn make_deployment(id: &str, cfg_inst_args: Vec<CfgInstArgs>) -> BackendDeployment {
     let cfg_insts: Vec<_> = cfg_inst_args.into_iter().map(make_cfg_inst).collect();
+    let release_id = format!("{id}_rel");
     BackendDeployment {
         id: id.to_string(),
+        release: Some(Box::new(make_backend_release(&release_id, None))),
+        release_id,
         activity_status: BackendActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_QUEUED,
         target_status: BackendTargetStatus::DEPLOYMENT_TARGET_STATUS_DEPLOYED,
         config_instances: Some(cfg_insts),
