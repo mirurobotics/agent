@@ -40,6 +40,8 @@ impl<'a> Storage<'a> {
                 meta: self.cfg_insts.meta,
                 content: self.cfg_insts.content,
             },
+            releases: self.releases,
+            file_rules: self.file_rules,
         }
     }
 }

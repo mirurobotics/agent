@@ -92,6 +92,16 @@ pub struct WriteAccessDeniedErr {
 impl crate::errors::Error for WriteAccessDeniedErr {}
 
 #[derive(Debug, thiserror::Error)]
+#[error("deployment '{deployment_id}' has an invalid file rule set: {reason}")]
+pub struct InvalidFileRulesErr {
+    pub deployment_id: String,
+    pub reason: String,
+    pub trace: Box<Trace>,
+}
+
+impl crate::errors::Error for InvalidFileRulesErr {}
+
+#[derive(Debug, thiserror::Error)]
 pub enum DeployErr {
     #[error(transparent)]
     BackupAccessDenied(BackupAccessDeniedErr),
@@ -103,6 +113,8 @@ pub enum DeployErr {
     EmptyConfigInstances(EmptyConfigInstancesErr),
     #[error(transparent)]
     InvalidDeploymentTarget(InvalidDeploymentTargetErr),
+    #[error(transparent)]
+    InvalidFileRules(InvalidFileRulesErr),
     #[error(transparent)]
     CacheErr(cache::CacheErr),
     #[error(transparent)]
@@ -144,6 +156,12 @@ impl From<EmptyConfigInstancesErr> for DeployErr {
 impl From<InvalidDeploymentTargetErr> for DeployErr {
     fn from(e: InvalidDeploymentTargetErr) -> Self {
         Self::InvalidDeploymentTarget(e)
+    }
+}
+
+impl From<InvalidFileRulesErr> for DeployErr {
+    fn from(e: InvalidFileRulesErr) -> Self {
+        Self::InvalidFileRules(e)
     }
 }
 
@@ -189,6 +207,7 @@ crate::impl_error!(DeployErr {
     DuplicateFilepath,
     EmptyConfigInstances,
     InvalidDeploymentTarget,
+    InvalidFileRules,
     CacheErr,
     FileSysErr,
     PathNotAllowed,
