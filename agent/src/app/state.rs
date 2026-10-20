@@ -36,9 +36,7 @@ pub struct AppState {
     pub uploader: Arc<upload::Uploader>,
     pub token_mngr: Arc<authn::TokenManager>,
     pub event_hub: events::EventHub,
-    /// The calibration uploader, or `None` when its queue failed to open at
-    /// boot.
-    pub calibrations: Option<Arc<calibrations::Uploader>>,
+    pub calibrations: Arc<calibrations::Uploader>,
 }
 
 impl AppState {
@@ -93,7 +91,7 @@ impl AppState {
         let shutdown_handle = async move {
             let mut handles = vec![token_mngr_handle, syncer_handle, event_hub_handle];
             handles.extend(data_upload_handles);
-            handles.extend(calibrations_handle);
+            handles.push(calibrations_handle);
 
             futures::future::join(futures::future::join_all(handles), storage_handle).await;
         };
@@ -250,11 +248,9 @@ impl AppState {
 
         // shutdown the calibration uploader first: it uses the token manager and
         // the http client, and nothing depends on it
-        if let Some(calibrations) = &self.calibrations {
-            if let Err(e) = calibrations.shutdown().await {
-                tracing::error!("failed to shutdown calibration uploader: {e}");
-                first_err.get_or_insert(e.into());
-            }
+        if let Err(e) = self.calibrations.shutdown().await {
+            tracing::error!("failed to shutdown calibration uploader: {e}");
+            first_err.get_or_insert(e.into());
         }
 
         // shutdown the uploader next: it depends on nothing else in the app. The
@@ -309,27 +305,25 @@ impl AppState {
     }
 }
 
-/// Open the calibration queue and spawn its uploader. An open failure is
-/// logged and leaves calibrations unavailable (fail-open, like the uploader
-/// and deleter), so a bad calibrations directory can't block config
-/// deployment.
+/// Open the calibration queue and spawn its uploader. A queue that fails to
+/// open is replaced by an in-memory one, so calibrations run without
+/// persistence (fail-open, like the uploader and deleter) and a bad
+/// calibrations directory can't block config deployment.
 async fn init_calibrations(
     layout: &disk::Layout,
     http_client: Arc<http::Client>,
     token_mngr: Arc<authn::TokenManager>,
     syncer: &sync::Syncer,
-) -> (
-    Option<Arc<calibrations::Uploader>>,
-    Option<tokio::task::JoinHandle<()>>,
-) {
+) -> (Arc<calibrations::Uploader>, tokio::task::JoinHandle<()>) {
     let layout = layout.calibrations();
-    let queue = match calibrations::open(&layout, calibrations::DEFAULT_OPTIONS).await {
+    let options = calibrations::DEFAULT_OPTIONS;
+    let queue = match calibrations::open(&layout, options).await {
         Ok(queue) => queue,
         Err(e) => {
             tracing::error!(
-                "failed to open the calibration queue; calibrations are unavailable until restart: {e}"
+                "failed to open the calibration queue; calibrations will run without persistence, so reports still queued at a restart are lost: {e}"
             );
-            return (None, None);
+            calibrations::DirQueue::in_memory(options)
         }
     };
     let events = match syncer.subscribe().await {
@@ -348,7 +342,7 @@ async fn init_calibrations(
         sleep_fn: tokio::time::sleep,
     };
     let (uploader, handle) = calibrations::Uploader::spawn(64, args);
-    (Some(Arc::new(uploader)), Some(handle))
+    (Arc::new(uploader), handle)
 }
 
 async fn setup_auth_files(

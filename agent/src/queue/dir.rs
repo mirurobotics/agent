@@ -1,10 +1,13 @@
 // standard crates
-use std::collections::HashSet;
-use std::marker::PhantomData;
+use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::str::FromStr;
 
 // internal crates
-use crate::filesys::{dirs, files, Dir, File, FileSysErr, Overwrite, PathExt, WriteOptions};
+use crate::filesys::{
+    dirs, errors::PathDoesNotExistErr, files, Dir, File, FileSysErr, Overwrite, PathExt,
+    WriteOptions,
+};
 use crate::queue::{
     errors::{DirQueueErr, ItemTooLargeErr, QueueFullErr, SerializeItemErr},
     item::Item,
@@ -48,19 +51,30 @@ pub struct DirQueueOptions {
 /// cache, the queue never evicts: when full it rejects new items. Disk use is
 /// bounded by `max_items` times `max_item_bytes`.
 ///
+/// [`DirQueue::in_memory`] is the fallback for when the queue can't be opened
+/// on disk: the same queue, with nothing persisted, so it is empty after a
+/// restart.
+///
 /// The queue is single-owner (`&mut self`); callers that share it wrap it.
 pub struct DirQueue<J: DirQueueJob, C> {
     queue: Queue<J>,
-    content_dir: Dir,
+    content: Content<J, C>,
     max_items: usize,
     max_item_bytes: u64,
-    _content: PhantomData<C>,
+}
+
+/// Where the items' content lives.
+enum Content<J, C> {
+    /// One item file per queue entry.
+    Dir(Dir),
+    /// In memory only, lost on restart.
+    Memory(HashMap<Uuid, Item<J, C>>),
 }
 
 impl<J, C> DirQueue<J, C>
 where
     J: DirQueueJob,
-    C: Serialize + DeserializeOwned,
+    C: Clone + Serialize + DeserializeOwned,
 {
     /// Load the queue, creating it when absent. A missing `queue_file` is
     /// rebuilt from the item files, and an unparseable one is set aside with
@@ -75,14 +89,23 @@ where
         let snapshot_file = load_snapshot::<J, C>(&queue_file, &content_dir).await?;
         let mut queue = Self {
             queue: Queue::from_snapshot(options.max_items, snapshot_file),
-            content_dir,
+            content: Content::Dir(content_dir.clone()),
             max_items: options.max_items,
             max_item_bytes: options.max_item_bytes,
-            _content: PhantomData,
         };
-        queue.reconcile().await?;
+        queue.reconcile(&content_dir).await?;
         info!("{} queue loaded: {} item(s)", J::LABEL, queue.len());
         Ok(queue)
+    }
+
+    /// An empty queue that keeps everything in memory, with the same caps.
+    pub fn in_memory(options: DirQueueOptions) -> Self {
+        Self {
+            queue: Queue::new(options.max_items),
+            content: Content::Memory(HashMap::new()),
+            max_items: options.max_items,
+            max_item_bytes: options.max_item_bytes,
+        }
     }
 
     // ================ Accessors ================ //
@@ -110,31 +133,42 @@ where
         self.queue.earliest_next_attempt()
     }
 
-    /// Read the item file of the queue entry `id`.
+    /// Read the item of the queue entry `id`. An unknown id is
+    /// [`FileSysErr::PathDoesNotExistErr`], in memory as on disk.
     pub async fn read(&self, id: Uuid) -> Result<Item<J, C>, DirQueueErr> {
-        Ok(files::read_json::<Item<J, C>>(&self.item_file(id)).await?)
+        match &self.content {
+            Content::Dir(dir) => Ok(files::read_json(&item_file(dir, id)).await?),
+            Content::Memory(items) => items.get(&id).cloned().ok_or_else(|| not_found(id)),
+        }
     }
 
     // ================ Mutators ================ //
 
     /// Queue `item` durably. On success the item file and its queue entry are
-    /// both on disk. On any error nothing is queued: a full queue returns
+    /// both on disk (or both in memory, for [`Self::in_memory`]). On any error nothing is queued: a full queue returns
     /// [`QueueFullErr`] rather than dropping an older item, and an item file
     /// over `max_item_bytes` returns [`ItemTooLargeErr`]. Returns
     /// the new queue entry's id, which also names its item file.
     pub async fn enqueue(&mut self, item: Item<J, C>) -> Result<Uuid, DirQueueErr> {
         let id = Uuid::new_v4();
-        let file = self.item_file(id);
         self.verify_capacity(item.job.name())?;
         let bytes = serialize_item(id, &item)?;
         self.verify_item_size(bytes.len() as u64)?;
-
-        // content first: a crash before the queue entry lands leaves only an
-        // orphan file, which the next open removes
-        files::write_bytes(&file, &bytes, WriteOptions::OVERWRITE_ATOMIC).await?;
-        if let Err(err) = self.queue.enqueue_durable(id, item.job).await {
-            delete_item_file::<J>(&file).await;
-            return Err(err.into());
+        match &mut self.content {
+            Content::Dir(dir) => {
+                let file = item_file(dir, id);
+                // content first: a crash before the queue entry lands leaves
+                // only an orphan file, which the next open removes
+                files::write_bytes(&file, &bytes, WriteOptions::OVERWRITE_ATOMIC).await?;
+                if let Err(err) = self.queue.enqueue_durable(id, item.job).await {
+                    delete_item_file::<J>(&file).await;
+                    return Err(err.into());
+                }
+            }
+            Content::Memory(items) => {
+                self.queue.enqueue_durable(id, item.job.clone()).await?;
+                items.insert(id, item);
+            }
         }
         Ok(id)
     }
@@ -145,7 +179,10 @@ where
     /// ignored.
     pub async fn remove(&mut self, id: Uuid) -> Option<QueueEntry<J>> {
         let entry = self.queue.remove(id).await?;
-        delete_item_file::<J>(&self.item_file(id)).await;
+        match &mut self.content {
+            Content::Dir(dir) => delete_item_file::<J>(&item_file(dir, id)).await,
+            Content::Memory(items) => drop(items.remove(&id)),
+        }
         Some(entry)
     }
 
@@ -155,8 +192,9 @@ where
     /// a crash between the two steps leaves an entry without a file, which the
     /// next [`Self::open`] drops, while the parked copy survives; removing the
     /// entry first would leave an orphan that `open` deletes. `open` never
-    /// looks inside `dest_dir`. Unknown ids return `Ok(None)` and touch
-    /// nothing. On an error the entry and its item file are unchanged.
+    /// looks inside `dest_dir`. An in-memory item is written there instead.
+    /// Unknown ids return `Ok(None)` and touch nothing. On an error the entry
+    /// and its item are unchanged.
     pub async fn park(
         &mut self,
         id: Uuid,
@@ -166,12 +204,19 @@ where
             return Ok(None);
         }
         dirs::create_if_absent(dest_dir).await?;
-        files::move_to(
-            &self.item_file(id),
-            &item_file(dest_dir, id),
-            Overwrite::Allow,
-        )
-        .await?;
+        let dest = item_file(dest_dir, id);
+        match &mut self.content {
+            Content::Dir(dir) => {
+                files::move_to(&item_file(dir, id), &dest, Overwrite::Allow).await?
+            }
+            Content::Memory(items) => {
+                if let Some(item) = items.get(&id) {
+                    let bytes = serialize_item(id, item)?;
+                    files::write_bytes(&dest, &bytes, WriteOptions::OVERWRITE_ATOMIC).await?;
+                    items.remove(&id);
+                }
+            }
+        }
         Ok(self.queue.remove(id).await)
     }
 
@@ -191,10 +236,6 @@ where
     }
 
     // ================ Internals ================ //
-
-    fn item_file(&self, id: Uuid) -> File {
-        item_file(&self.content_dir, id)
-    }
 
     fn is_queued(&self, id: Uuid) -> bool {
         self.queue.iter().any(|entry| entry.id == id)
@@ -229,10 +270,10 @@ where
     /// failed listing fails the open, since acting on it would drop every
     /// entry. Problems with single files are logged, never fatal: a file that
     /// cannot be cleaned up now is retried on the next open.
-    async fn reconcile(&mut self) -> Result<(), DirQueueErr> {
+    async fn reconcile(&mut self, content_dir: &Dir) -> Result<(), DirQueueErr> {
         let queued: HashSet<Uuid> = self.queue.iter().map(|entry| entry.id).collect();
         let mut found = HashSet::new();
-        for (id, file) in item_files(&self.content_dir).await? {
+        for (id, file) in item_files(content_dir).await? {
             if !queued.contains(&id) {
                 warn!(
                     "{}: removing item file {file} with no queue entry",
@@ -263,7 +304,19 @@ where
 }
 
 fn item_file(content_dir: &Dir, id: Uuid) -> File {
-    content_dir.file(&format!("{}{ITEM_EXT}", id.hyphenated()))
+    content_dir.file(&item_name(id))
+}
+
+fn item_name(id: Uuid) -> String {
+    format!("{}{ITEM_EXT}", id.hyphenated())
+}
+
+/// The error for an id with no item, matching a missing item file.
+fn not_found(id: Uuid) -> DirQueueErr {
+    DirQueueErr::FileSysErr(FileSysErr::PathDoesNotExistErr(PathDoesNotExistErr {
+        path: PathBuf::from(item_name(id)),
+        trace: trace!(),
+    }))
 }
 
 fn serialize_item<J: QueueJob, C: Serialize>(

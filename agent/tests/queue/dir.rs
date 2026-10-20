@@ -171,7 +171,7 @@ async fn block_with_a_dir(path: &File) {
 }
 
 /// Content whose serialization always fails.
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 struct Unserializable;
 
 impl Serialize for Unserializable {
@@ -967,5 +967,143 @@ pub mod read {
         let err = queue.read(Uuid::new_v4()).await.unwrap_err();
 
         assert!(matches!(err, DirQueueErr::FileSysErr(_)), "{err:?}");
+    }
+}
+
+pub mod in_memory {
+    use super::*;
+    use miru_agent::filesys::FileSysErr;
+
+    fn queue() -> TestQueue {
+        TestQueue::in_memory(OPTIONS)
+    }
+
+    fn is_not_found(err: &DirQueueErr) -> bool {
+        matches!(
+            err,
+            DirQueueErr::FileSysErr(FileSysErr::PathDoesNotExistErr(_))
+        )
+    }
+
+    #[tokio::test]
+    async fn starts_empty() {
+        let queue = queue();
+
+        assert!(queue.is_empty());
+        assert_eq!(queue.next_ready(now()), None);
+    }
+
+    #[tokio::test]
+    async fn keeps_items_in_fifo_order() {
+        let mut queue = queue();
+        let ids = enqueue_all(&mut queue, &["a", "b"]).await;
+
+        assert_eq!(queue.read(ids[0]).await.unwrap(), item("a"));
+        assert_eq!(queue.read(ids[1]).await.unwrap(), item("b"));
+        assert_eq!(drain(&mut queue).await, strings(&["a", "b"]));
+    }
+
+    #[tokio::test]
+    async fn remove_drops_the_item() {
+        let mut queue = queue();
+        let ids = enqueue_all(&mut queue, &["a"]).await;
+
+        queue.remove(ids[0]).await.unwrap();
+
+        assert!(queue.is_empty());
+        let err = queue.read(ids[0]).await.unwrap_err();
+        assert!(is_not_found(&err), "{err:?}");
+    }
+
+    #[tokio::test]
+    async fn read_of_an_unknown_entry_is_not_found() {
+        let err = queue().read(Uuid::new_v4()).await.unwrap_err();
+
+        assert!(is_not_found(&err), "{err:?}");
+    }
+
+    #[tokio::test]
+    async fn rejects_at_the_item_cap() {
+        let options = DirQueueOptions {
+            max_items: 1,
+            ..OPTIONS
+        };
+        let mut queue = TestQueue::in_memory(options);
+        enqueue_all(&mut queue, &["a"]).await;
+
+        let err = queue.enqueue(item("b")).await.unwrap_err();
+
+        assert!(matches!(err, DirQueueErr::QueueFullErr(_)), "{err:?}");
+        assert_eq!(names(&queue), strings(&["a"]));
+    }
+
+    #[tokio::test]
+    async fn rejects_an_item_over_the_size_cap() {
+        let options = DirQueueOptions {
+            max_item_bytes: 200,
+            ..OPTIONS
+        };
+        let mut queue = TestQueue::in_memory(options);
+
+        let err = queue.enqueue(item_of_size("a", 201)).await.unwrap_err();
+
+        assert!(matches!(err, DirQueueErr::ItemTooLargeErr(_)), "{err:?}");
+        assert!(queue.is_empty());
+    }
+
+    #[tokio::test]
+    async fn serialize_failure_rejects() {
+        let mut queue = DirQueue::<TestJob, Unserializable>::in_memory(OPTIONS);
+        let item = Item {
+            job: job("a", 1000),
+            content: Unserializable,
+        };
+
+        let err = queue.enqueue(item).await.unwrap_err();
+
+        assert!(matches!(err, DirQueueErr::SerializeItemErr(_)), "{err:?}");
+        assert!(queue.is_empty());
+    }
+
+    #[tokio::test]
+    async fn park_writes_the_item_to_disk() {
+        let fixture = Fixture::new();
+        let failed = fixture.root.subdir("failed");
+        let mut queue = queue();
+        let ids = enqueue_all(&mut queue, &["a", "b"]).await;
+
+        let parked = queue.park(ids[0], &failed).await.unwrap().unwrap();
+
+        assert_eq!(parked.id, ids[0]);
+        assert_eq!(names(&queue), strings(&["b"]));
+        let file = failed.file(&format!("{}.json", ids[0]));
+        let written: TestItem = files::read_json(&file).await.unwrap();
+        assert_eq!(written, item("a"));
+        assert!(is_not_found(&queue.read(ids[0]).await.unwrap_err()));
+    }
+
+    #[tokio::test]
+    async fn park_failure_keeps_the_item() {
+        let fixture = Fixture::new();
+        let failed = fixture.root.subdir("failed");
+        let mut queue = queue();
+        let ids = enqueue_all(&mut queue, &["a"]).await;
+        // a directory where the parked file should land
+        block_with_a_dir(&failed.file(&format!("{}.json", ids[0]))).await;
+
+        let err = queue.park(ids[0], &failed).await.unwrap_err();
+
+        assert!(matches!(err, DirQueueErr::FileSysErr(_)), "{err:?}");
+        assert_eq!(queue.read(ids[0]).await.unwrap(), item("a"));
+        assert_eq!(queue.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn park_of_an_unknown_id_is_none() {
+        let fixture = Fixture::new();
+        let failed = fixture.root.subdir("failed");
+        let mut queue = queue();
+
+        assert!(queue.park(Uuid::new_v4(), &failed).await.unwrap().is_none());
     }
 }

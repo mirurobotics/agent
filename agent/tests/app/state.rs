@@ -4,7 +4,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 // internal crates
-use crate::test_utils::filesys::dirs as test_dirs;
+use crate::test_utils::{calibrations::report, filesys::dirs as test_dirs};
 use miru_agent::app::state::AppState;
 use miru_agent::authn::{Token, TokenManagerExt};
 use miru_agent::data_uploads::retention::DeleterExt;
@@ -297,15 +297,14 @@ pub mod init {
 
         let (state, state_handle) = env.init().await.unwrap();
 
-        let uploader = state.calibrations.as_ref().expect("calibration uploader");
-        assert_eq!(uploader.len().await.unwrap(), 0);
+        assert_eq!(state.calibrations.len().await.unwrap(), 0);
         assert!(env.layout.calibrations().content().exists());
         state.shutdown().await.unwrap();
         state_handle.await;
     }
 
     #[tokio::test]
-    async fn calibrations_degrade_when_queue_path_unwritable() {
+    async fn calibrations_run_in_memory_when_queue_path_unwritable() {
         let env = TestEnv::valid().await;
         // a regular file where the calibrations directory should be
         files::write_string(
@@ -318,8 +317,9 @@ pub mod init {
 
         let (state, state_handle) = env.init().await.unwrap();
 
-        // fail-open: the agent boots without calibrations
-        assert!(state.calibrations.is_none());
+        // fail-open: calibrations run without persistence
+        state.calibrations.enqueue(report("arm")).await.unwrap();
+        assert!(!env.layout.calibrations().content().exists());
         state.shutdown().await.unwrap();
         state_handle.await;
     }
