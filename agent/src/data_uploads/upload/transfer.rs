@@ -13,7 +13,8 @@ use backend_api::models::upload_credentials::Scheme;
 use backend_api::models::{S3UploadCredentials, UploadCredentials, UploadDestination};
 
 // external crates
-use tracing::info;
+use chrono::{DateTime, Utc};
+use tracing::{info, warn};
 
 /// The seam between the upload executor and the concrete cloud-storage SDKs.
 /// Given the vended downscoped credentials and the server-authorized
@@ -151,6 +152,15 @@ impl ObjectTransfer for SdkTransfer {
             "upload: transferring file {} via scheme {:?} to bucket {} key {}",
             file, credentials.scheme, destination.bucket_name, destination.object_key
         );
+        let expires_at = &credentials.expires_at;
+        match minutes_until(expires_at, Utc::now()) {
+            Some(minutes) => {
+                info!("upload: credentials for {file} expire in {minutes} min ({expires_at})")
+            }
+            None => {
+                warn!("upload: credentials for {file} have an unparseable expiry {expires_at:?}")
+            }
+        }
         match credentials.scheme {
             Scheme::S3 => {
                 self.transfer_s3(credentials, destination, file, metadata)
@@ -163,6 +173,13 @@ impl ObjectTransfer for SdkTransfer {
             Scheme::SchemeUnknown => Err(executor_err(TransferErr::UnrecognizedScheme)),
         }
     }
+}
+
+/// Minutes from `now` until the RFC 3339 instant `expires_at`, negative once it
+/// has passed. `None` when `expires_at` does not parse.
+fn minutes_until(expires_at: &str, now: DateTime<Utc>) -> Option<i64> {
+    let at = DateTime::parse_from_rfc3339(expires_at).ok()?;
+    Some((at.with_timezone(&Utc) - now).num_minutes())
 }
 
 /// Maps vended S3 session credentials into an [`s3::Config`]. Kept separate so
@@ -185,7 +202,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     // internal crates
-    use super::s3_config;
+    use super::{minutes_until, s3_config};
     use crate::test_utils::{
         filesys::{files as test_files, missing_file},
         http_client::run_server,
@@ -586,6 +603,16 @@ mod tests {
             ),
             ("us-east-1", "AKIA_TEST", "secret", "session")
         );
+    }
+
+    #[test]
+    fn minutes_until_counts_down_to_expiry() {
+        let now = chrono::DateTime::parse_from_rfc3339("2021-01-01T00:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        assert_eq!(minutes_until("2021-01-01T01:00:00Z", now), Some(60));
+        assert_eq!(minutes_until("2020-12-31T23:30:00Z", now), Some(-30));
+        assert_eq!(minutes_until("not a time", now), None);
     }
 
     #[tokio::test]

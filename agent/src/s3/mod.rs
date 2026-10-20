@@ -4,6 +4,7 @@ use std::io::SeekFrom;
 
 // internal crates
 use crate::filesys::{errors::PathDoesNotExistErr, file::File, path::PathExt, FileSysErr};
+use crate::progress::track;
 use crate::trace;
 
 // external crates
@@ -160,7 +161,8 @@ impl Store {
     /// Files at or below [`PART_SIZE`] go through one `PutObject`
     /// ([`Self::put_singlepart`]); larger files go part-by-part through a
     /// stateless multipart upload ([`Self::put_multipart`]). Either way at most
-    /// one part's bytes are held in memory at a time.
+    /// one part's bytes are held in memory at a time, and progress is logged
+    /// every 30 s while the upload runs.
     pub async fn put(
         &self,
         src: File,
@@ -184,17 +186,22 @@ impl Store {
         metadata: &HashMap<String, String>,
     ) -> Result<(), S3Err> {
         let size = src.size;
-        let body = ByteStream::from(src.read("put_object", dst, 0, size).await?);
-        self.client
-            .put_object()
-            .bucket(&dst.bucket)
-            .key(&dst.key)
-            .body(body)
-            .set_metadata((!metadata.is_empty()).then(|| metadata.clone()))
-            .send()
-            .await
-            .map_err(|e| errors::map_sdk_err("put_object", dst, e))?;
-        Ok(())
+        let label = format!("upload: {}", src.file);
+        track(label, size, size, |progress| async move {
+            let body = ByteStream::from(src.read("put_object", dst, 0, size).await?);
+            self.client
+                .put_object()
+                .bucket(&dst.bucket)
+                .key(&dst.key)
+                .body(body)
+                .set_metadata((!metadata.is_empty()).then(|| metadata.clone()))
+                .send()
+                .await
+                .map_err(|e| errors::map_sdk_err("put_object", dst, e))?;
+            progress.add(size);
+            Ok::<(), S3Err>(())
+        })
+        .await
     }
 
     /// Streams an object's body to a destination file. A missing object maps to

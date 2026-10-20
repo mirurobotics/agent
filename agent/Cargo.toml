@@ -15,6 +15,7 @@ aws-sdk-s3 = { workspace = true }
 aws-lc-rs = { workspace = true }
 axum = { workspace = true }
 base64 = { workspace = true }
+bytes = { workspace = true }
 chrono = { workspace = true }
 futures = { workspace = true }
 glob = { workspace = true }

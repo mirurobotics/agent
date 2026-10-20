@@ -1,5 +1,6 @@
 // standard crates
 use std::collections::HashMap;
+use std::sync::Arc;
 
 // internal crates
 use crate::filesys::{errors::PathDoesNotExistErr, file::File, path::PathExt, FileSysErr};
@@ -7,6 +8,7 @@ use crate::gcs::{
     errors::{self, is_not_found, map_gcs_err, BuildErr, ConnectionErr},
     Credentials, GcsErr, Object, StaticTokenCredentials,
 };
+use crate::progress::{track, Progress};
 use crate::trace;
 
 // external crates
@@ -14,8 +16,12 @@ use google_cloud_auth::credentials::{Credentials as GcsCredentials, EntityTag};
 use google_cloud_gax::retry_policy::RetryPolicyExt as _;
 use google_cloud_storage::client::{Storage, StorageControl};
 use google_cloud_storage::retry_policy::RetryableErrors;
+use google_cloud_storage::streaming_source::{
+    FileSource, Payload, Seek, SizeHint, StreamingSource,
+};
 use http::HeaderValue;
 use tokio::io::AsyncWriteExt as _;
+use tracing::warn;
 
 /// Per-attempt timeout for the gRPC control-plane ops (delete/exists) — tiny
 /// metadata RPCs. Without it the underlying client has no request timeout, no
@@ -128,6 +134,7 @@ impl Store {
     /// [`GcsErr::FileSysErr`] before any request is dispatched; any other
     /// failure to open the source is [`GcsErr::LocalIoErr`]. The GCS SDK
     /// chooses between simple and resumable transfer based on the payload size.
+    /// Progress is logged every 30 s while the upload runs.
     ///
     /// The upload itself carries no timeout — a single attempt spans the whole
     /// body, so no fixed bound fits arbitrary sizes. A silently dead connection
@@ -154,12 +161,25 @@ impl Store {
                 errors::map_body_io_err("put_object", dst, &src, e)
             }
         })?;
-        self.data
-            .write_object(&resource_name, &dst.key, file)
-            .set_metadata(metadata.clone())
-            .send_unbuffered()
+        let size = file
+            .metadata()
             .await
-            .map_err(|e| map_gcs_err("put_object", dst, e))?;
+            .map_err(|e| errors::map_body_io_err("put_object", dst, &src, e))?
+            .len();
+        let label = format!("upload: {src}");
+        track(label, size, 0, |progress| {
+            let payload = CountingSource {
+                inner: Payload::from(file),
+                progress,
+                object: dst.to_string(),
+            };
+            self.data
+                .write_object(&resource_name, &dst.key, payload)
+                .set_metadata(metadata.clone())
+                .send_unbuffered()
+        })
+        .await
+        .map_err(|e| map_gcs_err("put_object", dst, e))?;
         Ok(())
     }
 
@@ -272,6 +292,45 @@ impl Store {
     }
 }
 
+/// The SDK's file source, counting the bytes the SDK reads into `progress` and
+/// logging when the SDK seeks back to resend data within one upload.
+struct CountingSource {
+    inner: Payload<FileSource>,
+    progress: Arc<Progress>,
+    object: String,
+}
+
+impl StreamingSource for CountingSource {
+    type Error = std::io::Error;
+
+    async fn next(&mut self) -> Option<Result<bytes::Bytes, Self::Error>> {
+        let chunk = self.inner.next().await;
+        if let Some(Ok(bytes)) = &chunk {
+            self.progress.add(bytes.len() as u64);
+        }
+        chunk
+    }
+
+    async fn size_hint(&self) -> Result<SizeHint, Self::Error> {
+        self.inner.size_hint().await
+    }
+}
+
+impl Seek for CountingSource {
+    type Error = std::io::Error;
+
+    async fn seek(&mut self, offset: u64) -> Result<(), Self::Error> {
+        let prev = self.progress.seek_to(offset);
+        if offset < prev {
+            warn!(
+                "gcs: resending {} from byte {offset} after reading {prev} bytes",
+                self.object
+            );
+        }
+        self.inner.seek(offset).await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     // standard crates
@@ -291,6 +350,7 @@ mod tests {
         BuildErr, ConnectionErr, LocalIoErr, ObjectNotFoundErr, RequestFailedErr,
     };
     use miru_agent::gcs::{Credentials, GcsErr, Object, Store};
+    use miru_agent::progress::Progress;
 
     // external crates
     use axum::body::Bytes;
@@ -526,6 +586,32 @@ mod tests {
                     .any(|w| w == b"hello world"),
                 "uploaded multipart body must contain the file bytes"
             );
+        }
+
+        #[tokio::test]
+        async fn counting_source_counts_reads_and_seeks() {
+            use google_cloud_storage::streaming_source::{Payload, Seek, StreamingSource};
+
+            let src = temp_file_with(b"hello world").await;
+            let file = tokio::fs::File::open(src.file().path()).await.unwrap();
+            let progress = Arc::new(Progress::new(11));
+            let mut source = super::super::CountingSource {
+                inner: Payload::from(file),
+                progress: progress.clone(),
+                object: "gs://test-bucket/k".to_string(),
+            };
+
+            while let Some(chunk) = source.next().await {
+                chunk.unwrap();
+            }
+            assert_eq!(progress.sent(), 11);
+
+            source.seek(6).await.unwrap();
+            assert_eq!(progress.sent(), 6);
+
+            let rest = source.next().await.unwrap().unwrap();
+            assert_eq!(&rest[..], b"world");
+            assert_eq!(progress.sent(), 11);
         }
 
         #[tokio::test]

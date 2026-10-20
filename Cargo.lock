@@ -2676,6 +2676,7 @@ dependencies = [
  "axum 0.8.9",
  "backend-api",
  "base64 0.22.1",
+ "bytes",
  "chrono",
  "device-api",
  "futures",
