@@ -6,7 +6,7 @@ use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
 // internal crates
-use crate::clock::http_date::parse_http_date;
+use crate::clock::http_date::{parse_age, parse_http_date};
 
 // external crates
 use chrono::{DateTime, TimeDelta, Utc};
@@ -105,13 +105,20 @@ impl Clock {
         }
     }
 
-    /// Records the backend's time from an HTTP `Date` header value. Values
-    /// that do not parse are ignored.
-    pub fn observe_date_header(&self, value: &str) {
-        match parse_http_date(value) {
-            Some(server) => self.observe_server_time(server),
-            None => debug!("clock: ignoring unparseable Date header {value:?}"),
-        }
+    /// Records the backend's time from a response's HTTP `Date` header. If a
+    /// cache served the response, its `Age` header says how long ago the
+    /// backend stamped that `Date`, so the age is added back. A `Date` that does
+    /// not parse is ignored; an `Age` that does not parse counts as zero.
+    pub fn observe_date_header(&self, date: &str, age: Option<&str>) {
+        let Some(server) = parse_http_date(date) else {
+            debug!("clock: ignoring unparseable Date header {date:?}");
+            return;
+        };
+        let age = age.and_then(parse_age).unwrap_or_default();
+        let server = server
+            .checked_add_signed(age)
+            .unwrap_or(DateTime::<Utc>::MAX_UTC);
+        self.observe_server_time(server);
     }
 
     /// The backend's time now, or `None` if the agent has not heard from the

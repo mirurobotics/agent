@@ -25,12 +25,17 @@ fn router() -> Router {
         .route("/bad-json", get(mock::bad_json))
         .route("/fixed-date", get(fixed_date))
         .route("/bad-date", get(bad_date))
+        .route("/cached-date", get(cached_date))
 }
 
 const FIXED_DATE: &str = "Tue, 20 Oct 2026 02:58:04 GMT";
 
 async fn fixed_date() -> ([(header::HeaderName, &'static str); 1], &'static str) {
     ([(header::DATE, FIXED_DATE)], "ok")
+}
+
+async fn cached_date() -> ([(header::HeaderName, &'static str); 2], &'static str) {
+    ([(header::DATE, FIXED_DATE), (header::AGE, "600")], "ok")
 }
 
 async fn bad_date() -> ([(header::HeaderName, &'static str); 1], &'static str) {
@@ -252,6 +257,16 @@ pub mod clock {
         let client = http::Client::new(&server.base_url).unwrap();
         get(&client, &server.base_url, "/bad-date").await;
         assert_eq!(client.clock().trusted_now(), None);
+    }
+
+    #[tokio::test]
+    async fn a_cached_response_adds_its_age() {
+        let server = mock::run_server(router()).await;
+        let client = http::Client::new(&server.base_url).unwrap();
+        get(&client, &server.base_url, "/cached-date").await;
+        let trusted = client.clock().trusted_now().unwrap();
+        let expected = Utc.with_ymd_and_hms(2026, 10, 20, 3, 8, 4).unwrap();
+        assert!(trusted >= expected && trusted - expected < chrono::TimeDelta::seconds(5));
     }
 
     #[tokio::test]

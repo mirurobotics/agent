@@ -122,17 +122,19 @@ impl Client {
         }
     }
 
-    /// Records the response's `Date` header, error statuses included, but only
-    /// when the response came from the backend. A request to any other host,
-    /// or a redirect to one, must not set the agent's time.
+    /// Records the response's `Date` header (and `Age`, if a cache served it),
+    /// error statuses included, but only when the response came from the
+    /// backend. A request to any other host, or a redirect to one, must not set
+    /// the agent's time.
     fn observe_backend_date(&self, response: &reqwest::Response) {
         if !self.is_backend(response.url()) {
             return;
         }
-        if let Some(date) = response.headers().get(reqwest::header::DATE) {
-            if let Ok(date) = date.to_str() {
-                self.clock.observe_date_header(date);
-            }
+        let headers = response.headers();
+        let header = |name| headers.get(name).and_then(|v| v.to_str().ok());
+        if let Some(date) = header(reqwest::header::DATE) {
+            self.clock
+                .observe_date_header(date, header(reqwest::header::AGE));
         }
     }
 

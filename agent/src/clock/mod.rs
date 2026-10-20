@@ -17,5 +17,5 @@
 pub mod http_date;
 pub mod trusted;
 
-pub use self::http_date::parse_http_date;
+pub use self::http_date::{parse_age, parse_http_date};
 pub use self::trusted::{Clock, TRUST_TOLERANCE};

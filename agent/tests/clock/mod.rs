@@ -189,17 +189,59 @@ pub mod date_header {
     }
 
     #[test]
+    fn parses_age_seconds() {
+        assert_eq!(clock::parse_age("0"), Some(TimeDelta::zero()));
+        assert_eq!(clock::parse_age(" 120 "), Some(TimeDelta::seconds(120)));
+    }
+
+    #[test]
+    fn rejects_bad_ages() {
+        assert_eq!(clock::parse_age("-5"), None);
+        assert_eq!(clock::parse_age("1.5"), None);
+        assert_eq!(clock::parse_age("soon"), None);
+        assert_eq!(clock::parse_age(&i64::MAX.to_string()), None);
+    }
+
+    #[test]
     fn observe_records_a_valid_header() {
         let fake = Fake::new(epoch());
         fake.clock
-            .observe_date_header("Tue, 20 Oct 2026 02:58:04 GMT");
+            .observe_date_header("Tue, 20 Oct 2026 02:58:04 GMT", None);
         assert_eq!(fake.clock.trusted_now(), Some(real()));
+    }
+
+    #[test]
+    fn observe_adds_a_cached_responses_age() {
+        let fake = Fake::new(epoch());
+        fake.clock
+            .observe_date_header("Tue, 20 Oct 2026 02:58:04 GMT", Some("300"));
+        assert_eq!(
+            fake.clock.trusted_now(),
+            Some(real() + TimeDelta::seconds(300))
+        );
+    }
+
+    #[test]
+    fn observe_treats_a_bad_age_as_zero() {
+        let fake = Fake::new(epoch());
+        fake.clock
+            .observe_date_header("Tue, 20 Oct 2026 02:58:04 GMT", Some("soon"));
+        assert_eq!(fake.clock.trusted_now(), Some(real()));
+    }
+
+    #[test]
+    fn observe_clamps_an_age_past_the_end_of_time() {
+        let fake = Fake::new(epoch());
+        let max_secs = (TimeDelta::MAX.num_seconds()).to_string();
+        fake.clock
+            .observe_date_header("Tue, 20 Oct 2026 02:58:04 GMT", Some(&max_secs));
+        assert_eq!(fake.clock.trusted_now(), Some(DateTime::<Utc>::MAX_UTC));
     }
 
     #[test]
     fn observe_ignores_an_invalid_header() {
         let fake = Fake::new(epoch());
-        fake.clock.observe_date_header("yesterday");
+        fake.clock.observe_date_header("yesterday", Some("10"));
         assert_eq!(fake.clock.trusted_now(), None);
     }
 }
