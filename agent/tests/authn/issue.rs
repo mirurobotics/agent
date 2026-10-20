@@ -310,6 +310,10 @@ mod wrong_system_clock {
     /// A backend that, like the real one, rejects a JWT whose `exp` has passed
     /// by its own clock.
     fn backend(calls: Arc<AtomicUsize>) -> Router {
+        backend_with(calls, false)
+    }
+
+    fn backend_with(calls: Arc<AtomicUsize>, reject_all: bool) -> Router {
         Router::new().route(
             "/devices/token",
             post(move |headers: HeaderMap| {
@@ -323,7 +327,7 @@ mod wrong_system_clock {
                         &base64::decode_bytes_url_safe_no_pad(payload).unwrap(),
                     )
                     .unwrap();
-                    if payload["exp"].as_i64().unwrap() < Utc::now().timestamp() {
+                    if reject_all || payload["exp"].as_i64().unwrap() < Utc::now().timestamp() {
                         return Err(StatusCode::UNAUTHORIZED);
                     }
                     Ok(Json(TokenResponse {
@@ -353,6 +357,19 @@ mod wrong_system_clock {
             .unwrap();
 
         assert_eq!(token.token, "issued-token");
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn a_second_rejection_is_returned_without_further_retries() {
+        let (_dir, private_key_file, public_key_file) = generate_keys().await;
+        let calls = Arc::new(AtomicUsize::new(0));
+        let server = mock::run_server(backend_with(calls.clone(), true)).await;
+        let client = client_with_system_clock(&server.base_url, DateTime::UNIX_EPOCH);
+
+        let result = issue_token(&client, &private_key_file, &public_key_file).await;
+
+        assert!(matches!(result, Err(AuthnErr::HTTPErr(_))));
         assert_eq!(calls.load(Ordering::SeqCst), 2);
     }
 
