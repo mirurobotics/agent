@@ -28,7 +28,7 @@ fn payload() -> CreateCalibrationRequest {
             format: InstanceFormat::INSTANCE_FORMAT_JSON,
             data: r#"{"fx":1.0}"#.to_string(),
         }),
-        reported_at: Some("2026-10-19T12:00:00Z".to_string()),
+        reported_at: "2026-10-19T12:00:00Z".to_string(),
     }
 }
 

@@ -29,13 +29,13 @@ pub struct CreateCalibrationRequest {
     /// The calibration's content, at most 1 MiB.
     #[serde(rename = "content")]
     pub content: Box<models::InstanceContent>,
-    /// When the calibration was reported to the agent on the device. The agent may upload it much later, for example after an outage, so Miru stores this time with the calibration, separately from `created_at`. Defaults to the time Miru records the calibration.
-    #[serde(rename = "reported_at", skip_serializing_if = "Option::is_none")]
-    pub reported_at: Option<String>,
+    /// When the calibration was reported to the agent on the device. The agent may upload it much later, for example after an outage, so Miru stores this time with the calibration, separately from `created_at`.
+    #[serde(rename = "reported_at")]
+    pub reported_at: String,
 }
 
 impl CreateCalibrationRequest {
-    pub fn new(component_slug: String, content: models::InstanceContent) -> CreateCalibrationRequest {
+    pub fn new(component_slug: String, content: models::InstanceContent, reported_at: String) -> CreateCalibrationRequest {
         CreateCalibrationRequest {
             deployment_id: None,
             component_slug,
@@ -43,7 +43,7 @@ impl CreateCalibrationRequest {
             serial_number: None,
             aspect: None,
             content: Box::new(content),
-            reported_at: None,
+            reported_at,
         }
     }
 }
