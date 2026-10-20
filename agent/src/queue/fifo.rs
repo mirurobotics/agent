@@ -109,7 +109,7 @@ impl<J: QueueJob> Queue<J> {
     /// enqueue is rejected with [`QueueFullErr`] and nothing is persisted.
     pub async fn enqueue(&mut self, job: J) -> Result<(), QueueFullErr> {
         self.verify_capacity(&job).await?;
-        self.push_new(Uuid::new_v4(), job);
+        self.push(Uuid::new_v4(), job);
         self.persist().await;
         self.log_enqueued();
         Ok(())
@@ -124,7 +124,7 @@ impl<J: QueueJob> Queue<J> {
     /// queued id is a caller bug.
     pub async fn enqueue_durable(&mut self, id: Uuid, job: J) -> Result<(), EnqueueErr> {
         self.verify_capacity(&job).await?;
-        self.push_new(id, job);
+        self.push(id, job);
         if let Err(err) = self.try_persist().await {
             self.remove_impl(id);
             return Err(EnqueueErr::FileSysErr(err));
@@ -133,7 +133,7 @@ impl<J: QueueJob> Queue<J> {
         Ok(())
     }
 
-    fn push_new(&mut self, id: Uuid, job: J) {
+    fn push(&mut self, id: Uuid, job: J) {
         self.entries.push_back(QueueEntry {
             id,
             job,
