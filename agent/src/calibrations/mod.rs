@@ -8,7 +8,9 @@ pub mod sender;
 pub mod uploader;
 
 pub use self::buffer::{open, Buffer, Report, DEFAULT_OPTIONS};
-pub use self::errors::{CalibrationBufferFullErr, CalibrationsErr, InvalidReportErr, TokenErr};
+pub use self::errors::{
+    CalibrationBufferFullErr, CalibrationTooLargeErr, CalibrationsErr, InvalidReportErr, TokenErr,
+};
 pub use self::job::{CalibrationJob, Queue, QueueEntry, QueueSnapshot, QueueSnapshotFile};
 pub use self::sender::{HttpSender, Sender};
 pub use self::uploader::{Uploader, UploaderArgs, UploaderOptions};

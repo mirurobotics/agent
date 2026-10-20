@@ -42,7 +42,7 @@ type TestItem = Item<TestJob, Value>;
 
 const OPTIONS: BufferOptions = BufferOptions {
     max_items: 1000,
-    max_bytes: 256 * 1024 * 1024,
+    max_item_bytes: 1024 * 1024,
 };
 
 fn now() -> DateTime<Utc> {
@@ -165,7 +165,6 @@ pub mod open {
 
         assert!(buffer.is_empty());
         assert_eq!(buffer.len(), 0);
-        assert_eq!(buffer.used_bytes(), 0);
         assert!(fixture.queue_file().exists());
         assert!(fixture.content().exists());
         assert!(queue_on_disk(&fixture).await.is_empty());
@@ -174,16 +173,14 @@ pub mod open {
     #[tokio::test]
     async fn survives_a_restart() {
         let fixture = Fixture::new();
-        let (ids, used) = {
+        let ids = {
             let mut buffer = fixture.open().await;
-            let ids = enqueue_all(&mut buffer, &["a", "b", "c"]).await;
-            (ids, buffer.used_bytes())
+            enqueue_all(&mut buffer, &["a", "b", "c"]).await
         };
 
         let mut buffer = fixture.open().await;
 
         assert_eq!(names(&buffer), strings(&["a", "b", "c"]));
-        assert_eq!(buffer.used_bytes(), used);
         assert_eq!(buffer.next_ready(now()).unwrap().id, ids[0]);
         let file = buffer.read(ids[1]).await.unwrap();
         assert_eq!(file.job, item("b").job);
@@ -251,10 +248,6 @@ pub mod open {
 
         assert_eq!(names(&buffer), strings(&["a", "c"]));
         assert_eq!(queue_on_disk(&fixture).await, strings(&["a", "c"]));
-        assert_eq!(
-            buffer.used_bytes(),
-            serialized_len(&item("a")) + serialized_len(&item("c"))
-        );
     }
 
     #[tokio::test]
@@ -519,7 +512,6 @@ pub mod enqueue {
         assert_eq!(queue_on_disk(&fixture).await, strings(&["a"]));
         let entries: Value = files::read_json(&fixture.queue_file()).await.unwrap();
         assert_eq!(entries["entries"][0]["id"], id.to_string());
-        assert_eq!(buffer.used_bytes(), raw.len() as u64);
     }
 
     #[tokio::test]
@@ -566,47 +558,60 @@ pub mod enqueue {
     }
 
     #[tokio::test]
-    async fn rejects_at_the_byte_cap() {
+    async fn rejects_an_item_over_the_size_cap() {
         let fixture = Fixture::new();
         let options = BufferOptions {
             max_items: 100,
-            max_bytes: 1000,
+            max_item_bytes: 1000,
         };
         let mut buffer = fixture.open_with(options).await;
-        buffer.enqueue(item_of_size("a", 600)).await.unwrap();
         // exactly at the cap is accepted
-        buffer.enqueue(item_of_size("b", 400)).await.unwrap();
-        assert_eq!(buffer.used_bytes(), 1000);
+        buffer.enqueue(item_of_size("a", 1000)).await.unwrap();
 
-        let err = buffer.enqueue(item_of_size("c", 300)).await.unwrap_err();
+        let err = buffer.enqueue(item_of_size("b", 1001)).await.unwrap_err();
 
-        let BufferErr::BufferFullErr(err) = err else {
-            panic!("expected BufferFullErr, got {err:?}");
+        let BufferErr::ItemTooLargeErr(err) = err else {
+            panic!("expected ItemTooLargeErr, got {err:?}");
         };
-        assert_eq!(
-            (err.bytes, err.max_bytes, err.item_bytes),
-            (1000, 1000, 300)
-        );
-        assert_eq!(content_files(&fixture).await.len(), 2);
-        assert_eq!(names(&buffer), strings(&["a", "b"]));
+        assert_eq!((err.item_bytes, err.max_item_bytes), (1001, 1000));
+        assert_eq!(content_files(&fixture).await.len(), 1);
+        assert_eq!(names(&buffer), strings(&["a"]));
+        assert_eq!(queue_on_disk(&fixture).await, strings(&["a"]));
     }
 
     #[tokio::test]
     async fn accepts_again_once_a_report_is_removed() {
         let fixture = Fixture::new();
         let options = BufferOptions {
-            max_items: 100,
-            max_bytes: 1000,
+            max_items: 1,
+            ..OPTIONS
         };
         let mut buffer = fixture.open_with(options).await;
-        buffer.enqueue(item_of_size("a", 600)).await.unwrap();
-        assert!(buffer.enqueue(item_of_size("b", 600)).await.is_err());
+        buffer.enqueue(item("a")).await.unwrap();
+        assert!(buffer.enqueue(item("b")).await.is_err());
 
         let entry = buffer.next_ready(now()).unwrap();
         buffer.remove(entry.id).await.unwrap();
 
-        buffer.enqueue(item_of_size("b", 600)).await.unwrap();
-        assert_eq!(buffer.used_bytes(), 600);
+        buffer.enqueue(item("b")).await.unwrap();
+        assert_eq!(names(&buffer), strings(&["b"]));
+    }
+
+    #[tokio::test]
+    async fn keeps_an_item_over_a_lowered_size_cap() {
+        let fixture = Fixture::new();
+        {
+            let mut buffer = fixture.open().await;
+            buffer.enqueue(item_of_size("a", 2000)).await.unwrap();
+        }
+        let options = BufferOptions {
+            max_item_bytes: 1000,
+            ..OPTIONS
+        };
+
+        let buffer = fixture.open_with(options).await;
+
+        assert_eq!(names(&buffer), strings(&["a"]));
     }
 
     #[tokio::test]
@@ -614,7 +619,6 @@ pub mod enqueue {
         let fixture = Fixture::new();
         let mut buffer = fixture.open().await;
         buffer.enqueue(item("a")).await.unwrap();
-        let used = buffer.used_bytes();
 
         // make queue.json unwritable: a DIRECTORY now sits there
         files::delete(&fixture.queue_file()).await.unwrap();
@@ -627,7 +631,6 @@ pub mod enqueue {
         assert!(matches!(err, BufferErr::EnqueueErr(_)), "{err:?}");
         assert_eq!(content_files(&fixture).await.len(), 1);
         assert_eq!(names(&buffer), strings(&["a"]));
-        assert_eq!(buffer.used_bytes(), used);
     }
 
     #[tokio::test]
@@ -668,7 +671,6 @@ pub mod remove {
         assert!(!fixture.item_file(ids[0]).exists());
         assert!(fixture.item_file(ids[1]).exists());
         assert_eq!(queue_on_disk(&fixture).await, strings(&["b"]));
-        assert_eq!(buffer.used_bytes(), serialized_len(&item("b")));
     }
 
     #[tokio::test]
@@ -701,7 +703,6 @@ pub mod park {
         assert_eq!((parked.id, parked.job.name), (ids[0], "a".to_string()));
         assert_eq!(names(&buffer), strings(&["b"]));
         assert_eq!(queue_on_disk(&fixture).await, strings(&["b"]));
-        assert_eq!(buffer.used_bytes(), serialized_len(&item("b")));
         let moved = failed(&fixture).file(&format!("{}.json", ids[0]));
         let moved: TestItem = files::read_json(&moved).await.unwrap();
         assert_eq!(moved, item("a"));
@@ -742,7 +743,6 @@ pub mod park {
         let fixture = Fixture::new();
         let mut buffer = fixture.open().await;
         let ids = enqueue_all(&mut buffer, &["a"]).await;
-        let used = buffer.used_bytes();
         // a regular file where the destination directory should be
         files::write_string(
             &File::new(failed(&fixture).path().clone()),
@@ -756,7 +756,6 @@ pub mod park {
 
         assert!(matches!(err, BufferErr::FileSysErr(_)), "{err:?}");
         assert_eq!(buffer.len(), 1);
-        assert_eq!(buffer.used_bytes(), used);
         assert_eq!(queue_on_disk(&fixture).await, strings(&["a"]));
         assert!(fixture.item_file(ids[0]).exists());
     }

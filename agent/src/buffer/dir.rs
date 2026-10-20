@@ -1,11 +1,11 @@
 // standard crates
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::marker::PhantomData;
 use std::str::FromStr;
 
 // internal crates
 use crate::buffer::{
-    errors::{BufferErr, BufferFullErr, SerializeItemErr},
+    errors::{BufferErr, BufferFullErr, ItemTooLargeErr, SerializeItemErr},
     job::{BufferJob, Item},
 };
 use crate::filesys::{dirs, files, Dir, File, FileSysErr, Overwrite, PathExt, WriteOptions};
@@ -31,8 +31,8 @@ const CORRUPT_EXT: &str = ".corrupt";
 pub struct BufferOptions {
     /// The most items the buffer holds at once.
     pub max_items: usize,
-    /// The most item-file bytes the buffer holds at once.
-    pub max_bytes: u64,
+    /// The largest item file the buffer accepts, in bytes.
+    pub max_item_bytes: u64,
 }
 
 /// A FIFO of accepted items that survives agent restarts until each one is
@@ -44,17 +44,15 @@ pub struct BufferOptions {
 /// both are on disk: the item file is written first and the queue entry
 /// second, so a crash between the two leaves an orphan file that the next
 /// [`Buffer::open`] removes, never a queue entry without content. Unlike a
-/// cache, the buffer never evicts: when full it rejects new items.
+/// cache, the buffer never evicts: when full it rejects new items. Disk use is
+/// bounded by `max_items` times `max_item_bytes`.
 ///
 /// The buffer is single-owner (`&mut self`); callers that share it wrap it.
 pub struct Buffer<J: BufferJob, C> {
     queue: Queue<J>,
     content_dir: Dir,
     max_items: usize,
-    max_bytes: u64,
-    /// Item-file size per queue entry id.
-    sizes: HashMap<Uuid, u64>,
-    used_bytes: u64,
+    max_item_bytes: u64,
     _content: PhantomData<C>,
 }
 
@@ -78,18 +76,11 @@ where
             queue: Queue::from_snapshot(options.max_items, snapshot_file),
             content_dir,
             max_items: options.max_items,
-            max_bytes: options.max_bytes,
-            sizes: HashMap::new(),
-            used_bytes: 0,
+            max_item_bytes: options.max_item_bytes,
             _content: PhantomData,
         };
         buffer.reconcile().await?;
-        info!(
-            "{} buffer loaded: {} item(s), {} byte(s)",
-            J::LABEL,
-            buffer.len(),
-            buffer.used_bytes
-        );
+        info!("{} buffer loaded: {} item(s)", J::LABEL, buffer.len());
         Ok(buffer)
     }
 
@@ -101,11 +92,6 @@ where
 
     pub fn is_empty(&self) -> bool {
         self.queue.is_empty()
-    }
-
-    /// Bytes held by the buffered item files.
-    pub fn used_bytes(&self) -> u64 {
-        self.used_bytes
     }
 
     /// The buffered items' jobs, oldest first.
@@ -131,15 +117,16 @@ where
     // ================ Mutators ================ //
 
     /// Buffer `item` durably. On success the item file and its queue entry are
-    /// both on disk. On any error nothing is buffered, and a full buffer
-    /// returns [`BufferFullErr`] rather than dropping an older item. Returns
+    /// both on disk. On any error nothing is buffered: a full buffer returns
+    /// [`BufferFullErr`] rather than dropping an older item, and an item file
+    /// over `max_item_bytes` returns [`ItemTooLargeErr`]. Returns
     /// the new queue entry's id, which also names its item file.
     pub async fn enqueue(&mut self, item: Item<J, C>) -> Result<Uuid, BufferErr> {
         let id = Uuid::new_v4();
         let file = self.item_file(id);
+        self.verify_capacity()?;
         let bytes = serialize_item(id, &item)?;
-        let item_bytes = bytes.len() as u64;
-        self.verify_capacity(item_bytes)?;
+        self.verify_item_size(bytes.len() as u64)?;
 
         // content first: a crash before the queue entry lands leaves only an
         // orphan file, which the next open removes
@@ -148,7 +135,6 @@ where
             delete_item_file::<J>(&file).await;
             return Err(err.into());
         }
-        self.track(id, item_bytes);
         Ok(id)
     }
 
@@ -159,7 +145,6 @@ where
     pub async fn remove(&mut self, id: Uuid) -> Option<QueueEntry<J>> {
         let entry = self.queue.remove(id).await?;
         delete_item_file::<J>(&self.item_file(id)).await;
-        self.untrack(id);
         Some(entry)
     }
 
@@ -176,7 +161,7 @@ where
         id: Uuid,
         dest_dir: &Dir,
     ) -> Result<Option<QueueEntry<J>>, BufferErr> {
-        if !self.sizes.contains_key(&id) {
+        if !self.is_buffered(id) {
             return Ok(None);
         }
         dirs::create_if_absent(dest_dir).await?;
@@ -186,16 +171,14 @@ where
             Overwrite::Allow,
         )
         .await?;
-        let entry = self.queue.remove(id).await;
-        self.untrack(id);
-        Ok(entry)
+        Ok(self.queue.remove(id).await)
     }
 
     /// Move `entry` to the tail with its updated attempt count and deadline.
     /// An entry that is no longer buffered (already removed, or stale) is
     /// ignored, so it can't come back without its item file.
     pub async fn requeue(&mut self, entry: QueueEntry<J>) {
-        if !self.sizes.contains_key(&entry.id) {
+        if !self.is_buffered(entry.id) {
             warn!(
                 "{}: ignoring requeue of {}, which is not buffered",
                 J::LABEL,
@@ -212,45 +195,48 @@ where
         item_file(&self.content_dir, id)
     }
 
-    fn verify_capacity(&self, item_bytes: u64) -> Result<(), BufferErr> {
+    fn is_buffered(&self, id: Uuid) -> bool {
+        self.queue.iter().any(|entry| entry.id == id)
+    }
+
+    fn verify_capacity(&self) -> Result<(), BufferErr> {
         let items = self.queue.len();
-        let over_bytes = self.used_bytes.saturating_add(item_bytes) > self.max_bytes;
-        if items < self.max_items && !over_bytes {
+        if items < self.max_items {
             return Ok(());
         }
         let err = BufferFullErr {
             label: J::LABEL,
-            item_bytes,
             items,
             max_items: self.max_items,
-            bytes: self.used_bytes,
-            max_bytes: self.max_bytes,
             trace: trace!(),
         };
         warn!("{err}");
         Err(BufferErr::BufferFullErr(err))
     }
 
-    /// Count an item file. Entry ids are unique, so each is tracked once.
-    fn track(&mut self, id: Uuid, bytes: u64) {
-        self.sizes.insert(id, bytes);
-        self.used_bytes = self.used_bytes.saturating_add(bytes);
-    }
-
-    fn untrack(&mut self, id: Uuid) {
-        if let Some(bytes) = self.sizes.remove(&id) {
-            self.used_bytes = self.used_bytes.saturating_sub(bytes);
+    fn verify_item_size(&self, item_bytes: u64) -> Result<(), BufferErr> {
+        if item_bytes <= self.max_item_bytes {
+            return Ok(());
         }
+        let err = ItemTooLargeErr {
+            label: J::LABEL,
+            item_bytes,
+            max_item_bytes: self.max_item_bytes,
+            trace: trace!(),
+        };
+        warn!("{err}");
+        Err(BufferErr::ItemTooLargeErr(err))
     }
 
-    /// Make the queue and the content directory agree: size every item file
-    /// that has a queue entry, delete the ones that do not, and drop queue
-    /// entries whose file is gone. A failed listing fails the open, since
+    /// Make the queue and the content directory agree: delete item files that
+    /// have no queue entry, and drop queue entries whose file is gone. Files
+    /// already buffered are kept even if they exceed a lowered size cap. A failed listing fails the open, since
     /// acting on it would drop every entry. Problems with single files are
     /// logged, never fatal: a file that cannot be cleaned up now is retried on
     /// the next open.
     async fn reconcile(&mut self) -> Result<(), BufferErr> {
         let queued: HashSet<Uuid> = self.queue.iter().map(|entry| entry.id).collect();
+        let mut found = HashSet::new();
         for (id, file) in item_files(&self.content_dir).await? {
             if !queued.contains(&id) {
                 warn!(
@@ -260,19 +246,13 @@ where
                 delete_item_file::<J>(&file).await;
                 continue;
             }
-            // the file is listed, so it exists even if it cannot be sized now;
-            // count it as empty rather than drop its entry
-            let bytes = files::size(&file).await.unwrap_or_else(|err| {
-                error!("{}: failed to size item file {file}: {err}", J::LABEL);
-                0
-            });
-            self.track(id, bytes);
+            found.insert(id);
         }
 
         let missing: Vec<QueueEntry<J>> = self
             .queue
             .iter()
-            .filter(|entry| !self.sizes.contains_key(&entry.id))
+            .filter(|entry| !found.contains(&entry.id))
             .cloned()
             .collect();
         for entry in missing {

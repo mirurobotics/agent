@@ -179,3 +179,22 @@ async fn buffer_full_is_507() {
     assert_eq!(err.http_status(), HTTPCode::INSUFFICIENT_STORAGE);
     assert_eq!(fixture.uploader.len().await.unwrap(), 1);
 }
+
+#[tokio::test]
+async fn an_oversized_report_is_413() {
+    let options = BufferOptions {
+        max_item_bytes: 100,
+        ..calibrations::DEFAULT_OPTIONS
+    };
+    let fixture = Fixture::with_options(options).await;
+    let mut big = params();
+    big.content = json!({ "format": "text", "data": "x".repeat(200) });
+
+    let err = fixture.create(big).await.unwrap_err();
+
+    assert!(matches!(err, ServiceErr::CalibrationsErr(_)), "{err:?}");
+    assert_eq!(err.code().as_str(), "calibration_too_large");
+    assert_eq!(err.http_status(), HTTPCode::PAYLOAD_TOO_LARGE);
+    assert_eq!(fixture.uploader.len().await.unwrap(), 0);
+    assert!(fixture.sender.sent().is_empty());
+}

@@ -331,7 +331,8 @@ impl Uploader {
     }
 
     /// Buffer `report` durably. A full buffer is the 507
-    /// [`CalibrationsErr::BufferFullErr`].
+    /// [`CalibrationsErr::BufferFullErr`], and a report over the size cap the
+    /// 413 [`CalibrationsErr::TooLargeErr`].
     pub async fn enqueue(&self, report: Report) -> Result<Uuid, CalibrationsErr> {
         self.send_command("enqueue", |respond_to| Command::Enqueue {
             report: Box::new(report),
