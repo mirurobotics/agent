@@ -255,4 +255,11 @@ pub mod calibrations_layout {
         let dir = layout.calibrations().content();
         assert_eq!(dir.to_string(), under_root(&["calibrations", "content"]));
     }
+
+    #[test]
+    fn failed_dir() {
+        let layout = Layout::default();
+        let dir = layout.calibrations().failed();
+        assert_eq!(dir.to_string(), under_root(&["calibrations", "failed"]));
+    }
 }

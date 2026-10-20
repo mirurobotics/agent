@@ -26,14 +26,14 @@ After the final slice, a running agent has `<data>/calibrations/` (default `/var
 
 - [x] Slice 1 `calibrations-buffer` (PR #324, already open): generic `buffer::Buffer` and `calibrations::Buffer`.
 - [x] Slice 2 `buffer-park` (2026-10-20): `Buffer::park`, plus a `move_failure_keeps_the_entry` test for the rename error path.
-- [ ] Slice 3 `calibrations-shared-buffer-and-sender`.
+- [x] Slice 3 `calibrations-shared-buffer-and-sender` (2026-10-20): token errors are wrapped in a never-terminal `TokenErr` (see Decision Log); fixtures in `agent/tests/test_utils/calibrations.rs`.
 - [ ] Slice 4 `calibrations-upload-worker`.
 - [ ] Slice 5 `calibration-intake-service`.
 - [ ] Slice 6 `calibrations-wiring`.
 
 ## Surprises & Discoveries
 
-(Add entries as work proceeds.)
+- `AuthnErr` forwards `is_terminal()` to its inner `HTTPErr`, so a token request Miru answers with, say, 403 is "terminal". Passed through unchanged, that would make the worker park every buffered report while token issuance fails. Evidence: `crate::impl_error!(AuthnErr { .., HTTPErr, .. })` in `agent/src/authn/errors.rs`.
 
 ## Decision Log
 
@@ -48,6 +48,7 @@ After the final slice, a running agent has `<data>/calibrations/` (default `/var
 - Decision: Content is checked by deserializing it into `backend_api::models::InstanceContent`; `format` must be `json`, `yaml`, `jsonc`, `xml` or `text` (`InstanceFormatUnknown` is rejected), and `data` must be 1 to 1,048,576 bytes (Miru measures `len(data)`; empty is rejected). Miru also rejects json, jsonc and yaml data that doesn't parse. Intake checks json with `serde_json`; the agent has no yaml or jsonc parser and no new crates are added, so those two rely on the worker parking Miru's terminal rejection. The caller's JSON value is buffered unchanged. Date/Author: 2026-10-20, from Miru's source.
 - Decision: An error reading the deployments cache fails intake (500) rather than stamping `deployment_id: None`, so a broken cache never silently drops the association. No deployed deployment is fine and stamps `None`. Date/Author: 2026-10-20, plan author.
 - Decision: If the buffer fails to open at boot, `AppState::calibrations` is `None`, the error is logged, the worker isn't spawned and the agent still boots (fail-open, like the uploader and deleter), so a bad calibrations directory can't block config deployment. The future route will answer with an error while it is `None`. Date/Author: 2026-10-20, plan author.
+- Decision: The sender's token failures are `CalibrationsErr::TokenErr(TokenErr(AuthnErr))` rather than a bare `AuthnErr` variant. `TokenErr` keeps `is_network_conn_err()` but is never terminal, so only a rejection of the report itself (an HTTP 4xx on `POST /calibrations`, or an unsendable report) parks it. Date/Author: 2026-10-20, implementer.
 - Decision: Each send is one HTTP request (no `http::with_retry`); the worker's backoff is the only retry loop. If parking fails, the report is kept and handled like a counted retry. Date/Author: 2026-10-20, plan author.
 
 ## Outcomes & Retrospective
@@ -113,7 +114,7 @@ No new crates. `tokio::sync::{Mutex, Notify}` are already available (the `sync` 
     // agent/src/calibrations/errors.rs (slice 3): new variants of CalibrationsErr
     InvalidReportErr(InvalidReportErr), // { reason: String, trace }; is_terminal() == true
     HTTPErr(http::HTTPErr),
-    AuthnErr(authn::AuthnErr),
+    TokenErr(TokenErr),                 // TokenErr(pub authn::AuthnErr); never terminal
 
     // agent/src/workers/calibrations.rs (slice 4)
     #[derive(Debug, Clone)] pub struct Options { pub backoff: cooldown::Backoff } // default 10 / 2 / 3600
