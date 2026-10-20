@@ -210,8 +210,11 @@ pub mod arc_delegation {
 pub mod clock {
     use super::*;
 
-    use chrono::{TimeZone, Utc};
+    // internal crates
     use miru_agent::clock::Clock;
+
+    // external crates
+    use chrono::{TimeZone, Utc};
 
     async fn get(client: &http::Client, base_url: &str, path: &str) {
         let url = format!("{base_url}{path}");
@@ -248,6 +251,23 @@ pub mod clock {
         let server = mock::run_server(router()).await;
         let client = http::Client::new(&server.base_url).unwrap();
         get(&client, &server.base_url, "/bad-date").await;
+        assert_eq!(client.clock().trusted_now(), None);
+    }
+
+    #[tokio::test]
+    async fn ignores_the_date_from_a_non_backend_host() {
+        let backend = mock::run_server(router()).await;
+        let other = mock::run_server(router()).await;
+        let client = http::Client::new(&backend.base_url).unwrap();
+        get(&client, &other.base_url, "/fixed-date").await;
+        assert_eq!(client.clock().trusted_now(), None);
+    }
+
+    #[tokio::test]
+    async fn ignores_the_date_when_the_base_url_does_not_parse() {
+        let server = mock::run_server(router()).await;
+        let client = http::Client::new("not a url").unwrap();
+        get(&client, &server.base_url, "/fixed-date").await;
         assert_eq!(client.clock().trusted_now(), None);
     }
 

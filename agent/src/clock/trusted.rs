@@ -20,13 +20,16 @@ pub const TRUST_TOLERANCE: TimeDelta = TimeDelta::seconds(60);
 type RawFn = Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>;
 type MonoFn = Arc<dyn Fn() -> Instant + Send + Sync>;
 
-/// A reading of the backend's time paired with the monotonic instant it was
-/// taken at, plus the wall clock at that moment.
+/// One reading of the backend's time, with what the agent's own clocks said
+/// at the same moment.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Anchor {
-    server: DateTime<Utc>,
-    at: Instant,
-    raw: DateTime<Utc>,
+    /// The backend's time, from its `Date` header.
+    backend_time: DateTime<Utc>,
+    /// The monotonic instant the reading was taken.
+    observed_at: Instant,
+    /// The robot's wall clock when the reading was taken.
+    wall_clock: DateTime<Utc>,
 }
 
 /// The agent's shared clock. Cheap to clone; clones share the backend anchor.
@@ -86,13 +89,13 @@ impl Clock {
     /// replace earlier ones.
     pub fn observe_server_time(&self, server: DateTime<Utc>) {
         let anchor = Anchor {
-            server,
-            at: self.instant(),
-            raw: self.raw_now(),
+            backend_time: server,
+            observed_at: self.instant(),
+            wall_clock: self.raw_now(),
         };
         let previous = self.write_anchor(anchor);
         // computed up front: arguments of a disabled log macro never run
-        let offset_secs = (server - anchor.raw).num_seconds();
+        let offset_secs = (server - anchor.wall_clock).num_seconds();
         if offset_secs.abs() > TRUST_TOLERANCE.num_seconds() && previous.is_none() {
             warn!(
                 "clock: wall clock differs from the backend by {offset_secs}s; using backend time"
@@ -115,11 +118,11 @@ impl Clock {
     /// backend in this process.
     pub fn trusted_now(&self) -> Option<DateTime<Utc>> {
         let anchor = self.read_anchor()?;
-        let elapsed = self.instant().saturating_duration_since(anchor.at);
+        let elapsed = self.instant().saturating_duration_since(anchor.observed_at);
         let elapsed = TimeDelta::from_std(elapsed).unwrap_or(TimeDelta::MAX);
         Some(
             anchor
-                .server
+                .backend_time
                 .checked_add_signed(elapsed)
                 .unwrap_or(DateTime::<Utc>::MAX_UTC),
         )
@@ -128,7 +131,7 @@ impl Clock {
     /// How far ahead of the wall clock the backend was at the latest reading,
     /// or `None` before the first reading.
     pub fn offset(&self) -> Option<TimeDelta> {
-        self.read_anchor().map(|a| a.server - a.raw)
+        self.read_anchor().map(|a| a.backend_time - a.wall_clock)
     }
 
     /// Whether the wall clock currently agrees with the backend's time to

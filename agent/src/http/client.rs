@@ -17,6 +17,9 @@ use tokio::time::timeout;
 pub struct Client {
     client: reqwest::Client,
     base_url: String,
+    /// `base_url` parsed, so responses can be checked against the backend's
+    /// origin before their `Date` header is trusted.
+    backend_url: Option<reqwest::Url>,
     headers: request::Headers,
     clock: Clock,
 }
@@ -74,8 +77,8 @@ impl Client {
         Self::with_clock(base_url, Clock::new())
     }
 
-    /// A client that records the backend's time from every response into
-    /// `clock`.
+    /// A client that records the backend's time into `clock` from every
+    /// response that comes from `base_url`'s origin.
     pub fn with_clock(base_url: &str, clock: Clock) -> Result<Self, HTTPErr> {
         let client = reqwest::Client::builder().build().map_err(|e| {
             HTTPErr::BuildReqwestErr(BuildReqwestErr {
@@ -86,6 +89,7 @@ impl Client {
         Ok(Client {
             client,
             base_url: base_url.to_string(),
+            backend_url: reqwest::Url::parse(base_url).ok(),
             headers: request::Headers::default(),
             clock,
         })
@@ -109,18 +113,34 @@ impl Client {
             })),
             Ok(Err(e)) => Err(reqwest_err_to_http_client_err(e, req.meta, trace!())),
             Ok(Ok(response)) => {
-                // any response, error statuses included, carries the server's time
-                if let Some(date) = response.headers().get(reqwest::header::DATE) {
-                    if let Ok(date) = date.to_str() {
-                        self.clock.observe_date_header(date);
-                    }
-                }
+                self.observe_backend_date(&response);
                 Ok(response::Response {
                     reqwest: response,
                     meta: req.meta,
                 })
             }
         }
+    }
+
+    /// Records the response's `Date` header, error statuses included, but only
+    /// when the response came from the backend. A request to any other host,
+    /// or a redirect to one, must not set the agent's time.
+    fn observe_backend_date(&self, response: &reqwest::Response) {
+        if !self.is_backend(response.url()) {
+            return;
+        }
+        if let Some(date) = response.headers().get(reqwest::header::DATE) {
+            if let Ok(date) = date.to_str() {
+                self.clock.observe_date_header(date);
+            }
+        }
+    }
+
+    /// Whether `url` has the same scheme, host and port as the backend.
+    fn is_backend(&self, url: &reqwest::Url) -> bool {
+        self.backend_url
+            .as_ref()
+            .is_some_and(|backend| backend.origin() == url.origin())
     }
 }
 
