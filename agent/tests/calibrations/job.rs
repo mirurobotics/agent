@@ -4,6 +4,7 @@
 // internal crates
 use crate::queue::queue_suite;
 use crate::test_utils::filesys::dirs as test_dirs;
+use miru_agent::buffer::BufferJob;
 use miru_agent::calibrations::{CalibrationJob, Queue, QueueSnapshot, QueueSnapshotFile};
 use miru_agent::filesys::{files, File, WriteOptions};
 use miru_agent::queue::QueueJob;
@@ -25,6 +26,12 @@ fn calibration_job(name: &str) -> CalibrationJob {
 }
 
 queue_suite!(calibration_job, "calibration-generic-queue-test");
+
+#[test]
+fn received_at_is_the_calibration_time() {
+    let job = calibration_job("arm");
+    assert_eq!(BufferJob::received_at(&job), job.calibrated_at);
+}
 
 #[test]
 fn due_at_is_min_utc() {

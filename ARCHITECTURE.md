@@ -61,7 +61,9 @@ All source lives under `agent/src/`. The binary entry point is `main.rs`.
 
 `queue` — the generic persisted job queue. Type `Queue<J: QueueJob>` is a FIFO with entry ids, attempt counts, `next_attempt_at` backoff and a capacity limit, saved as an atomically written JSON snapshot. The upload and retention workers in `data_uploads/` each instantiate it with their own job type.
 
-`calibrations/` — the durable buffer for calibration reports accepted from the Device API. Type `Buffer` keeps a FIFO `queue::Queue` of report metadata in `calibrations/queue.json` and each report's content in its own file under `calibrations/content/`, capped at 1,000 reports or 256 MiB (`calibration_buffer_full`, 507, when full). A report is accepted only once its file and queue entry are both on disk; startup deletes report files with no queue entry and rebuilds an unreadable queue from the report files.
+`buffer` — the generic durable buffer. Type `Buffer<J: BufferJob, C>` keeps a FIFO `queue::Queue` of job metadata in a queue file and each item's content in its own `<entry id>.json` file, capped by item count and bytes. It never evicts: when full it rejects new items with `BufferFullErr`. An item is accepted only once its file and queue entry are both on disk. Startup deletes item files with no queue entry, drops entries whose file is missing, and rebuilds an unparseable or missing queue from the item files.
+
+`calibrations/` — calibration reports accepted from the Device API. `calibrations::Buffer` is `buffer::Buffer<CalibrationJob, serde_json::Value>` at `calibrations/queue.json` and `calibrations/content/`, capped at 1,000 reports or 256 MiB. `CalibrationsErr` maps a full buffer to 507 `calibration_buffer_full`.
 
 `services/` — domain service layer. Submodules: `device` (device status sync), `deployment` (deployment management), `file_rule` (cached file-rule lookup), `git_commit` (commit tracking), `release` (release management).
 

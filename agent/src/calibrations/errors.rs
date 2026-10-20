@@ -1,24 +1,15 @@
 // internal crates
-use crate::errors::{Code, HTTPCode, Trace};
-use crate::filesys::FileSysErr;
-use crate::queue::EnqueueErr;
+use crate::buffer::{BufferErr, BufferFullErr};
+use crate::errors::{Code, HTTPCode};
 
-/// The buffer is at its report or byte cap. Nothing was written and nothing
-/// already buffered was dropped; the caller should retry once uploads drain it.
+/// The calibration buffer is at its report or byte cap: 507
+/// `calibration_buffer_full`. Nothing was written and nothing already
+/// buffered was dropped; the caller should retry once uploads drain it.
 #[derive(Debug, thiserror::Error)]
-#[error(
-    "calibration buffer is full ({reports}/{max_reports} reports, {bytes}/{max_bytes} bytes); rejected a report of {report_bytes} bytes"
-)]
-pub struct BufferFullErr {
-    pub report_bytes: u64,
-    pub reports: usize,
-    pub max_reports: usize,
-    pub bytes: u64,
-    pub max_bytes: u64,
-    pub trace: Box<Trace>,
-}
+#[error(transparent)]
+pub struct CalibrationBufferFullErr(pub BufferFullErr);
 
-impl crate::errors::Error for BufferFullErr {
+impl crate::errors::Error for CalibrationBufferFullErr {
     fn code(&self) -> Code {
         Code::CalibrationBufferFull
     }
@@ -29,50 +20,32 @@ impl crate::errors::Error for BufferFullErr {
 
     fn params(&self) -> Option<serde_json::Value> {
         Some(serde_json::json!({
-            "max_reports": self.max_reports,
-            "max_bytes": self.max_bytes,
+            "max_reports": self.0.max_items,
+            "max_bytes": self.0.max_bytes,
         }))
     }
 }
 
 #[derive(Debug, thiserror::Error)]
-#[error("failed to serialize calibration report {id}: {source}")]
-pub struct SerializeReportErr {
-    pub id: uuid::Uuid,
-    #[source]
-    pub source: serde_json::Error,
-    pub trace: Box<Trace>,
-}
-
-impl crate::errors::Error for SerializeReportErr {}
-
-#[derive(Debug, thiserror::Error)]
 pub enum CalibrationsErr {
     #[error(transparent)]
-    BufferFullErr(BufferFullErr),
+    BufferFullErr(CalibrationBufferFullErr),
     #[error(transparent)]
-    SerializeReportErr(SerializeReportErr),
-    #[error(transparent)]
-    EnqueueErr(EnqueueErr),
-    #[error(transparent)]
-    FileSysErr(FileSysErr),
+    BufferErr(BufferErr),
 }
 
-impl From<FileSysErr> for CalibrationsErr {
-    fn from(e: FileSysErr) -> Self {
-        Self::FileSysErr(e)
-    }
-}
-
-impl From<EnqueueErr> for CalibrationsErr {
-    fn from(e: EnqueueErr) -> Self {
-        Self::EnqueueErr(e)
+/// A full buffer becomes the calibration-specific 507; every other buffer
+/// error passes through unchanged.
+impl From<BufferErr> for CalibrationsErr {
+    fn from(e: BufferErr) -> Self {
+        match e {
+            BufferErr::BufferFullErr(full) => Self::BufferFullErr(CalibrationBufferFullErr(full)),
+            other => Self::BufferErr(other),
+        }
     }
 }
 
 crate::impl_error!(CalibrationsErr {
     BufferFullErr,
-    SerializeReportErr,
-    EnqueueErr,
-    FileSysErr,
+    BufferErr,
 });

@@ -1,4 +1,5 @@
 // internal crates
+use crate::buffer::BufferJob;
 use crate::queue;
 
 // external crates
@@ -8,7 +9,8 @@ use serde::{Deserialize, Serialize};
 /// One buffered calibration report, as the upload worker will send it to Miru.
 /// Everything here is captured at intake, so an upload hours later still
 /// reports the deployment and time the calibration was taken under. The
-/// content itself lives in the report file named by the queue entry's id.
+/// content itself lives in the report file named by the queue entry's id
+/// (see [`crate::buffer::Buffer`]).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CalibrationJob {
     pub component_slug: String,
@@ -39,6 +41,12 @@ impl queue::QueueJob for CalibrationJob {
             self.component_slug,
             self.calibrated_at.to_rfc3339()
         )
+    }
+}
+
+impl BufferJob for CalibrationJob {
+    fn received_at(&self) -> DateTime<Utc> {
+        self.calibrated_at
     }
 }
 
