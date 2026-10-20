@@ -119,7 +119,11 @@ impl Fixture {
 
 /// The buffered items' names, oldest first.
 fn names(buffer: &TestBuffer) -> Vec<String> {
-    buffer.jobs().into_iter().map(|job| job.name).collect()
+    buffer
+        .entries()
+        .into_iter()
+        .map(|entry| entry.job.name)
+        .collect()
 }
 
 fn strings(names: &[&str]) -> Vec<String> {
