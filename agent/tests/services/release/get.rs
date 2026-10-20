@@ -261,6 +261,7 @@ pub mod get_release_fallback {
                 bucket_id: "bkt_1".to_string(),
                 bucket_name: "fleet-logs".to_string(),
                 path: "robots/".to_string(),
+                bundle: None,
             })),
             retention: Some(Box::new(backend_client::FileRuleRetention {
                 require_upload: Some(true),

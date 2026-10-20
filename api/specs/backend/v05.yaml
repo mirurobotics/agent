@@ -6,132 +6,96 @@ info:
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
-  x-release-version: v0.5.3
+  x-release-version: v0.5.6
   x-git-commit:
-    sha: b94639f25c8285c55280bd49787b7f1c700c3cf7
-    url: https://github.com/mirurobotics/openapi/commit/b94639f25c8285c55280bd49787b7f1c700c3cf7
-    message: 'feat(agent): add GET /file_rules/{file_rule_id} (#292)
+    sha: 36eaf08c8f6b9c3383880d8a361cc7b0e8b3a65b
+    url: https://github.com/mirurobotics/openapi/commit/36eaf08c8f6b9c3383880d8a361cc7b0e8b3a65b
+    message: 'feat: buffered calibrations in the Device API, reported_at in the agent
+      API (#327)
 
 
-      ## Summary
+      <!-- claude-projects-attribution: {"github_login":"miru-agents"} -->
+
+      _Requested by **bens-agent** · [project
+
+      thread](https://claude.ai/code/project/chan_01RNCMaVSP1K69BTB8Xydgqo?thread=cmsg_01RNCMaVSP1K69BTB8XydgqoTy7tHt8qj18hd3tDQSaHah)_
 
 
-      - Adds `GET /file_rules/{file_rule_id}` (`getFileRule`, tag `File
+      Before: the Device API''s `POST /calibrations` forwarded the calibration
 
-      Rules`) to the backend agent API. It returns the shared `BaseFileRule`,
+      to Miru inside the request and returned Miru''s `Calibration`, failing
 
-      which is the same object the agent already gets embedded in `GET
+      when Miru was unreachable. The agent API''s create request had no way to
 
-      /releases/{release_id}?expand=file_rules`. It mirrors the agent
+      say when the calibration was taken, so a calibration uploaded after an
 
-      `git-commits.yaml` path: `Miru-Version` header, the shared
-
-      `file_rule_id` path param, only `200` declared, and security inherited
-
-      from the root `DeviceSessionToken`.
-
-      - Why: the agent serves file rules only from its local cache, and the
-
-      cache can miss because releases and file rules are cached and pruned
-
-      independently. With this path documented, the agent can fall back to the
-
-      backend on a cache miss, just as it already does for deployments,
-
-      releases, and git commits.
-
-      - Regenerates `apis/apps/backend-server/agent/openapi.gen.yaml`. No
-
-      other bundles change. The agent API has no Stainless config, so there
-
-      are no SDK config updates.
+      outage was timed by its upload.
 
 
-      ## Dependencies and release
+      After: the Device API saves the calibration on the device and returns
+
+      **200** with only `reported_at` (`CreateCalibrationResponse`); the agent
+
+      uploads it later, in order. The agent API''s `CreateCalibrationRequest`
+
+      gains an optional `reported_at`: when the calibration was reported to
+
+      the agent, so history keeps the right time and order after an outage. It
+
+      defaults to the record time.
 
 
-      - This PR must merge before the backend agent-API endpoint
+      How: edited the agent request; replaced the Device API `Calibration`
 
-      (mirurobotics/backend#872) can land. That PR vendors the released agent
+      response schema with `CreateCalibrationResponse` and rewrote the path
 
-      spec, and its endpoint-parity test requires every served route to be
+      description for buffering; removed the calibration model from the
 
-      documented. This PR is also a prerequisite for the agent''s backend
+      Stainless device config; ran `./scripts/regen.sh`.
 
-      fallback on a file rule cache miss.
 
-      - **After merge, a maintainer needs to tag the squash-merge commit on
+      Deduplicating agent retries (an idempotency key) is deliberately out of
 
-      `main` `agent/v0.5.3`.** (`agent/v0.5.2` was taken by #293''s `os`
+      scope for now.
 
-      fields.) That tag publishes the `agent.yaml` and
 
-      `agent.changelog.stable.md` release assets that the backend vendors.
+      ## Release
+
+      - Agent: additive optional field, so `agent/v0.5.6` once merged.
+
+      - Device: per the plan, hold the `device/` tag until the agent''s `POST
+
+      /calibrations` route lands.
+
+      - The matching backend change (store `reported_at`) is a separate PR in
+
+      `mirurobotics/backend`.
 
 
       ## Test plan
 
+      - `./scripts/regen.sh` committed; `./scripts/lint.sh` (Redocly + Miru
 
-      - [x] `./scripts/regen.sh`: only the agent bundle changes
-
-      - [x] `./scripts/preflight.sh`: `=== All checks passed ===`
-
-
-      🤖 Generated with [Claude Code](https://claude.com/claude-code)
+      custom rules) passes for every bundle.
 
 
-      <!-- codesmith:footer -->
+      https://claude.ai/code/session_014Y5fdiEy1ogetHPpR5g9jh
+
 
       ---
 
-      <a
-
-      href="https://app.blacksmith.sh/mirurobotics/codesmith/openapi/pr/292?autoLogin=true&ref=codesmith_pr_footer"><picture><source
-
-      media="(prefers-color-scheme: dark)"
-
-      srcset="https://pr-comments-assets.blacksmith.sh/codesmith/view-with-codesmith-dark-v2.svg"><source
-
-      media="(prefers-color-scheme: light)"
-
-      srcset="https://pr-comments-assets.blacksmith.sh/codesmith/view-with-codesmith-light-v2.svg"><img
-
-      alt="View with [code]smith"
-
-      src="https://pr-comments-assets.blacksmith.sh/codesmith/view-with-codesmith-dark-v2.svg"></picture></a>
-
-      <a
-
-      href="https://backend.blacksmith.sh/track/enable-autofix?expires=1792873279&installation_model_id=425273&pr_number=292&ref=codesmith_pr_footer&repository=mirurobotics%2Fopenapi&return_to=https%3A%2F%2Fgithub.com%2Fmirurobotics%2Fopenapi%2Fpull%2F292&signature=d85fe9b822d33c85cd826a8dd0feff029bb33a97f3341c39849ebfde28b5b3e3"><picture><source
-
-      media="(prefers-color-scheme: dark)"
-
-      srcset="https://pr-comments-assets.blacksmith.sh/codesmith/autofix-with-codesmith-dark.svg"><source
-
-      media="(prefers-color-scheme: light)"
-
-      srcset="https://pr-comments-assets.blacksmith.sh/codesmith/autofix-with-codesmith-light.svg"><img
-
-      alt="Autofix with [code]smith"
-
-      src="https://pr-comments-assets.blacksmith.sh/codesmith/autofix-with-codesmith-dark.svg"></picture></a>
-
-      <sup>Need help on this PR? Tag <code>@codesmith</code> with what you
-
-      need. Autofix is disabled.</sup>
+      _Generated by [Claude Code](https://claude.ai/code)_
 
 
-      <!-- codesmith:autofix:disabled -->
-
-      <!-- /codesmith:footer -->
+      ---------
 
 
-      Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>'
-    author: ben-miru
+      Co-authored-by: Claude Opus 5.5 (1M context) <noreply@anthropic.com>'
+    author: Ben's Agent
     branch: HEAD
     dirty: false
   x-build:
-    built_at: '2026-10-08T21:21:42.941878+00:00'
+    built_at: '2026-10-19T23:57:11.331261+00:00'
 servers:
 - url: https://staging.api.mirurobotics.com/agent/v1
   description: Staging
@@ -347,6 +311,46 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Upload'
+  /calibrations:
+    parameters:
+    - $ref: '#/components/parameters/MiruVersion'
+    post:
+      tags:
+      - Calibrations
+      summary: Create
+      operationId: createCalibration
+      description: 'Record a calibration reported by the device. Miru generates the
+
+        calibration''s ID. The device''s identity is derived from the token and is
+
+        never read from the request body. The first report of a new
+
+        `component_slug` creates a component, and the first report of a new
+
+        `role` or `aspect` for a component adds it to the component''s `roles`
+
+        or `aspects`; each name is inferred from its slug.
+
+        A workspace holds at most 100 components, and each component holds at
+
+        most 100 roles and 100 aspects; once one is full, reports that would add
+
+        a new component, role or aspect to it are rejected.
+
+        '
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCalibrationRequest'
+      responses:
+        '200':
+          description: Successfully recorded the calibration.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Calibration'
   /git_commits/{git_commit_id}:
     parameters:
     - $ref: '#/components/parameters/MiruVersion'
@@ -647,14 +651,14 @@ components:
     ReleaseVersion:
       type: string
       enum:
-      - v0.5.3
+      - v0.5.6
       x-enum-varnames:
       - RELEASE_VERSION
       x-stainless-const: true
     APIGitCommit:
       type: string
       enum:
-      - b94639f25c8285c55280bd49787b7f1c700c3cf7
+      - 36eaf08c8f6b9c3383880d8a361cc7b0e8b3a65b
       x-enum-varnames:
       - API_GIT_COMMIT
       x-stainless-const: true
@@ -953,12 +957,12 @@ components:
           type: string
           format: date-time
           example: '2024-01-01T00:00:00Z'
-          description: Timestamp of when the device release was created.
+          description: Timestamp of when the deployment was created.
         updated_at:
           type: string
           format: date-time
           example: '2024-01-01T00:00:00Z'
-          description: Timestamp of when the device release was last updated.
+          description: Timestamp of when the deployment was last updated.
     OS:
       title: OS
       type: string
@@ -1121,10 +1125,15 @@ components:
           pattern: ^(/|[A-Za-z]:[\\/])
           maxLength: 1024
           example: /var/log/robot/*.log
-          description: A glob pattern selecting the files this rule manages. Must
-            be absolute (start with `/` on Linux, or a drive letter followed by `:\`
-            or `:/` on Windows, e.g. `C:\logs\*.log`), at most 1024 bytes, and must
-            contain no `..` segments and no empty path segments.
+          description: Absolute glob of the files this rule manages (`/` on Linux,
+            `C:\…` or `C:/…` on Windows; max 1024 bytes; no `.`, `..` or empty segments).
+            A `{name}` capture matches like `*` within one segment and must be used
+            in `upload.bundle` or `upload.path`. Names match `[a-z][a-z0-9_]*`, are
+            unique, and must not reuse a built-in path variable. A segment holds at
+            most one capture, and the rest of that segment must be constant text (no
+            `*`, `?`, `[`, `\` or other braces). A capture may not have `**` segments
+            both before and after it. `{a,b}` is literal. Devices see each capture
+            as `*`.
         stability_window_secs:
           type: integer
           format: int64
@@ -1170,12 +1179,28 @@ components:
           pattern: .*\{upload_id\}.*
           maxLength: 1024
           example: '{device_id}/{year}-{month}-{day}/{upload_id}/{file_name}'
-          description: The object-path template the collected file is written to.
-            Must contain `{upload_id}` so every upload lands on a distinct object
-            key, be at most 1024 bytes, have balanced braces, and contain no `..`
-            segments and no empty path segments. The supported variables are `{device_id}`,
-            `{device_name}`, `{file_name}`, `{upload_id}`, `{year}`, `{month}`, `{day}`,
-            `{hour}`, and `{minute}`.
+          description: 'Object-path template for the uploaded file. Contains `{upload_id}`,
+            is at most 1024 bytes, has balanced braces, and contains no `..` or empty
+            segments. Variables: `{device_id}`, `{device_name}`, `{file_name}`, `{upload_id}`,
+            `{bundle_id}`, `{year}`, `{month}`, `{day}`, `{hour}`, `{minute}`, plus
+            any `source.glob` capture. `{bundle_id}` requires `bundle`.'
+        bundle:
+          type: array
+          minItems: 1
+          maxItems: 16
+          uniqueItems: true
+          items:
+            type: string
+            pattern: ^[a-z][a-z0-9_]*$
+          example:
+          - recording
+          description: 'Names of the `source.glob` captures whose values group the
+            rule''s uploads into bundles: uploads from the same device and upload
+            collection that captured the same values, in the order listed, share a
+            bundle, across rules and over time. Capture names don''t affect matching,
+            so rules that name their captures differently still share a bundle when
+            they list them in the same order. Every name must be a `source.glob` capture,
+            listed once, with at most 16 names. Absent when the rule does not bundle.'
       example:
         upload_collection_id: upl_col_123
         upload_collection_name: Robot Logs
@@ -1445,8 +1470,8 @@ components:
     InstanceFormat:
       title: Instance Format
       type: string
-      description: 'The on-disk format used when a config instance is written to the
-        device filesystem.
+      description: 'The serialization format of config content. A config instance
+        is written to the device filesystem in this format.
 
         - `json`: standard JSON.
 
@@ -1482,7 +1507,7 @@ components:
           $ref: '#/components/schemas/InstanceFormat'
         data:
           type: string
-          description: The configuration values associated with the config instance.
+          description: The content's values, serialized in `format`.
           example: "{\n  \"enable_autonomy\": true,\n  \"enable_remote_control\":\
             \ true,\n  \"max_payload_kg\": 10.0\n}\n"
       example:
@@ -1664,8 +1689,11 @@ components:
           description: Source-side details of the file on the device.
         digest:
           type: string
-          example: sha256:1234567890
-          description: The digest of the file being uploaded.
+          pattern: ^sha256:[0-9a-f]{64}$
+          example: sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
+          description: The SHA-256 digest of the file being uploaded, formatted as
+            `sha256:` followed by 64 lowercase hex characters. Any other format is
+            rejected with a 400.
         size:
           type: integer
           format: int64
@@ -1784,8 +1812,9 @@ components:
           description: Destination-side details of where the file was uploaded.
         digest:
           type: string
-          example: sha256:1234567890
-          description: The digest of the uploaded file.
+          example: sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
+          description: The SHA-256 digest of the uploaded file, formatted as `sha256:`
+            followed by 64 lowercase hex characters.
         size:
           type: integer
           format: int64
@@ -1847,7 +1876,7 @@ components:
           bucket_id: bkt_123
           bucket_name: my-uploads-bucket
           object_key: logs/dvc_123/robot.log
-        digest: sha256:1234567890
+        digest: sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
         size: 1048576
         status: uploaded
         incomplete: false
@@ -2089,7 +2118,7 @@ components:
             bucket_id: bkt_123
             bucket_name: my-uploads-bucket
             object_key: logs/dvc_123/robot.log
-          digest: sha256:1234567890
+          digest: sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
           size: 1048576
           status: uploaded
           incomplete: false
@@ -2118,8 +2147,143 @@ components:
           release_id: rls_123
           release_version: v1.0.0
           deployment_id: dpl_123
-          digest: sha256:1234567890
+          digest: sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
           mtime: '2021-01-01T00:00:00Z'
+    CreateCalibrationRequest:
+      title: Create Calibration Request
+      type: object
+      required:
+      - component_slug
+      - content
+      properties:
+        deployment_id:
+          type: string
+          example: dpl_123
+          description: ID of the deployment the device is on. Omitted if the device
+            is on no deployment.
+        component_slug:
+          type: string
+          example: arm
+          description: Slug of the component the calibrated unit belongs to. A new
+            slug creates a component.
+        role:
+          type: string
+          example: aligner-1
+          description: Slug of the role the calibrated unit fills on the device, such
+            as `aligner-1` or `front-left`. Distinguishes several units of one component
+            on a device. Validated like a slug. Miru resolves it to one of the component's
+            `roles`, creating the role the first time it is reported.
+        serial_number:
+          type: string
+          maxLength: 255
+          example: M500-1234
+          description: Serial number of the physical unit that was calibrated, not
+            of the device, such as `M500-1234`. Free text, at most 255 characters.
+        aspect:
+          type: string
+          example: pose
+          description: Slug of the aspect of the unit that was calibrated, when it
+            has more than one, e.g. `intrinsics` vs `extrinsics`, or `pose` vs `home-offsets`.
+            Validated like a slug. Miru resolves it to one of the component's `aspects`,
+            creating the aspect the first time it is reported.
+        content:
+          allOf:
+          - $ref: '#/components/schemas/InstanceContent'
+          description: The calibration's content, at most 1 MiB.
+        reported_at:
+          type: string
+          format: date-time
+          example: '2026-03-10T12:00:00Z'
+          description: When the calibration was reported to the agent on the device.
+            The agent may upload it much later, for example after an outage, so Miru
+            stores this time with the calibration, separately from `created_at`. Defaults
+            to the time Miru records the calibration.
+    BaseCalibration:
+      title: Calibration
+      type: object
+      required:
+      - object
+      - id
+      - device_id
+      - component_id
+      - role_id
+      - aspect_id
+      - serial_number
+      - digest
+      - deployment_id
+      - created_at
+      properties:
+        object:
+          type: string
+          enum:
+          - calibration
+          example: calibration
+          x-stainless-const: true
+          description: The object type, which is always `calibration`.
+        id:
+          type: string
+          example: cal_123
+          description: ID of the calibration, generated by Miru.
+        device_id:
+          type: string
+          example: dvc_123
+          description: ID of the device that reported the calibration.
+        component_id:
+          type: string
+          example: cmp_123
+          description: ID of the component the calibrated unit belongs to.
+        role_id:
+          type: string
+          nullable: true
+          example: cmp_rol_123
+          description: ID of the component role the calibrated unit fills; null if
+            no role was reported.
+        aspect_id:
+          type: string
+          nullable: true
+          example: cmp_asp_123
+          description: ID of the component aspect that was calibrated; null if no
+            aspect was reported.
+        serial_number:
+          type: string
+          nullable: true
+          maxLength: 255
+          example: M500-1234
+          description: Serial number of the physical unit that was calibrated, not
+            of the device, such as `M500-1234`, or null if none was reported. Free
+            text, at most 255 characters.
+        digest:
+          type: string
+          example: sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+          description: Digest of the content, formatted as `sha256:` followed by 64
+            lowercase hex characters.
+        deployment_id:
+          type: string
+          nullable: true
+          example: dpl_123
+          description: ID of the deployment the device was on when it reported the
+            calibration; null if it had none or the deployment was deleted.
+        created_at:
+          type: string
+          format: date-time
+          example: '2021-01-01T00:00:00Z'
+          description: Timestamp of when Miru recorded the calibration.
+    Calibration:
+      title: Calibration
+      description: A calibration recorded by Miru.
+      allOf:
+      - $ref: '#/components/schemas/BaseCalibration'
+      example:
+        object: calibration
+        id: cal_123
+        device_id: dvc_123
+        component_id: cmp_123
+        role_id: cmp_rol_123
+        aspect_id: null
+        serial_number: M500-1234
+        digest: sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+        deployment_id: dpl_123
+        created_at: '2021-01-01T00:00:00Z'
     DeviceStatus:
       type: string
       description: 'The status of the device.
