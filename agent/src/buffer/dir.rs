@@ -230,10 +230,10 @@ where
 
     /// Make the queue and the content directory agree: delete item files that
     /// have no queue entry, and drop queue entries whose file is gone. Files
-    /// already buffered are kept even if they exceed a lowered size cap. A failed listing fails the open, since
-    /// acting on it would drop every entry. Problems with single files are
-    /// logged, never fatal: a file that cannot be cleaned up now is retried on
-    /// the next open.
+    /// already buffered are kept even if they exceed a lowered size cap. A
+    /// failed listing fails the open, since acting on it would drop every
+    /// entry. Problems with single files are logged, never fatal: a file that
+    /// cannot be cleaned up now is retried on the next open.
     async fn reconcile(&mut self) -> Result<(), BufferErr> {
         let queued: HashSet<Uuid> = self.queue.iter().map(|entry| entry.id).collect();
         let mut found = HashSet::new();
