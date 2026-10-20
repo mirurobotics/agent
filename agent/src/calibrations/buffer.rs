@@ -7,9 +7,9 @@ use crate::calibrations::{
     errors::{BufferFullErr, CalibrationsErr, SerializeReportErr},
     job::{CalibrationJob, Queue, QueueEntry, QueueSnapshot, QueueSnapshotFile},
 };
-use crate::data_uploads::queue::QueueJob;
 use crate::disk::layout::CalibrationsLayout;
 use crate::filesys::{dirs, files, Dir, File, Overwrite, PathExt, WriteOptions};
+use crate::queue::QueueJob;
 use crate::trace;
 
 // external crates

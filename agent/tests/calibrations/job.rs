@@ -5,8 +5,8 @@
 use crate::queue::queue_suite;
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::calibrations::{CalibrationJob, Queue, QueueSnapshot, QueueSnapshotFile};
-use miru_agent::queue::QueueJob;
 use miru_agent::filesys::{files, File, WriteOptions};
+use miru_agent::queue::QueueJob;
 
 // external crates
 use chrono::{DateTime, Utc};

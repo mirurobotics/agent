@@ -1,7 +1,7 @@
 // internal crates
-use crate::queue::EnqueueErr;
 use crate::errors::{Code, HTTPCode, Trace};
 use crate::filesys::FileSysErr;
+use crate::queue::EnqueueErr;
 
 /// The buffer is at its report or byte cap. Nothing was written and nothing
 /// already buffered was dropped; the caller should retry once uploads drain it.
