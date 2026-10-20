@@ -1,5 +1,6 @@
 // standard crates
 use std::sync::Arc;
+use std::time::Duration;
 
 // internal crates
 use crate::filesys::{errors::*, file::File, files, Atomic, Overwrite, WriteOptions};
@@ -13,7 +14,7 @@ use tokio::sync::{
     oneshot,
 };
 use tokio::task::JoinHandle;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 macro_rules! dispatch {
     ($op:expr, $respond_to:expr, $msg:expr) => {{
@@ -23,6 +24,15 @@ macro_rules! dispatch {
         }
     }};
 }
+
+/// Waits before each retry of a state file read that failed for a reason other
+/// than "missing" or "unparseable" (e.g. a transient EIO). Bounded so a
+/// permanent error (e.g. EACCES) delays boot by at most their sum.
+const READ_RETRY_DELAYS: [Duration; 3] = [
+    Duration::from_millis(50),
+    Duration::from_millis(250),
+    Duration::from_millis(1000),
+];
 
 // ============================== SINGLE THREADED ================================== //
 #[derive(Debug)]
@@ -51,57 +61,61 @@ where
         Ok(state_file)
     }
 
-    /// Opens `file`, starting from `default` when the file does not exist yet.
-    /// See [`Self::new_or_recover`] for how an unreadable file is handled.
-    pub async fn new_with_default(file: File, default: ContentT) -> Result<Self, FileSysErr>
-    where
-        Self: Sized,
-    {
-        Self::new_or_recover(file, default, |_| None).await
-    }
-
     /// Opens `file`, falling back to `default` only when that loses nothing:
     ///
     /// - **Missing file:** created with `default`.
     /// - **Unparseable file** (truncated, or written by another agent version):
     ///   the file is copied aside to `<name>.corrupt-<unix-ms>` so its contents
-    ///   survive for inspection, then atomically replaced with whatever
-    ///   `salvage` can recover from its bytes, or with `default` if it
-    ///   recovers nothing. The original stays in place until that write
-    ///   succeeds, so a failed write (e.g. ENOSPC) loses nothing.
-    /// - **Any other read error** (EIO, EACCES, ...): returned as-is and the
-    ///   file is left untouched. Overwriting it would silently discard state
-    ///   that may be perfectly intact once the error clears.
-    pub async fn new_or_recover(
-        file: File,
-        default: ContentT,
-        salvage: impl FnOnce(&[u8]) -> Option<ContentT>,
-    ) -> Result<Self, FileSysErr>
+    ///   survive for inspection, then atomically replaced with `default`. The
+    ///   original stays in place until that write succeeds, so a failed write
+    ///   (e.g. ENOSPC) loses nothing.
+    /// - **Any other read error** (EIO, EACCES, ...): the read is retried a
+    ///   few times (see [`READ_RETRY_DELAYS`]). If it still fails, the error
+    ///   is returned to the caller and the file is not modified. Overwriting
+    ///   it would silently discard state that may be intact once the error
+    ///   clears; callers decide how to run without it (the queues run
+    ///   without persistence for that boot).
+    pub async fn new_with_default(file: File, default: ContentT) -> Result<Self, FileSysErr>
     where
         Self: Sized,
     {
-        match Self::new(file.clone()).await {
+        match Self::new_with_retry(&file).await {
             Ok(state_file) => Ok(state_file),
             Err(FileSysErr::PathDoesNotExistErr(_)) => {
                 Self::create(file, &default, Overwrite::Allow).await
             }
             Err(FileSysErr::ParseJSONErr(err)) => {
-                let bytes = files::read_bytes(&file).await?;
                 let aside = Self::copy_aside(&file).await?;
-                let recovered = salvage(&bytes);
                 error!(
                     "state file {file} could not be parsed ({err}); copied it to {aside} and \
-                     {}",
-                    if recovered.is_some() {
-                        "kept the entries that could be recovered"
-                    } else {
-                        "started from the default"
-                    }
+                     started from the default"
                 );
-                let content = recovered.unwrap_or(default);
-                Self::create(file, &content, Overwrite::Allow).await
+                Self::create(file, &default, Overwrite::Allow).await
             }
             Err(err) => Err(err),
+        }
+    }
+
+    /// [`Self::new`], retrying errors other than "missing" and "unparseable"
+    /// after each of [`READ_RETRY_DELAYS`].
+    async fn new_with_retry(file: &File) -> Result<Self, FileSysErr> {
+        let mut delays = READ_RETRY_DELAYS.iter();
+        loop {
+            match Self::new(file.clone()).await {
+                Err(err)
+                    if !matches!(
+                        err,
+                        FileSysErr::PathDoesNotExistErr(_) | FileSysErr::ParseJSONErr(_)
+                    ) =>
+                {
+                    let Some(delay) = delays.next() else {
+                        return Err(err);
+                    };
+                    warn!("reading state file {file} failed ({err}); retrying in {delay:?}");
+                    tokio::time::sleep(*delay).await;
+                }
+                result => return result,
+            }
         }
     }
 

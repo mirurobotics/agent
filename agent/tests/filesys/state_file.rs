@@ -113,8 +113,8 @@ pub mod new_with_default {
     }
 
     // An error other than "missing" or "unparseable" (here: the path is a
-    // directory) is returned, and nothing is overwritten.
-    #[tokio::test]
+    // directory) is retried, then returned, and nothing is overwritten.
+    #[tokio::test(start_paused = true)]
     async fn unreadable_file_is_left_untouched() {
         let dir = test_dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
@@ -125,6 +125,35 @@ pub mod new_with_default {
         assert!(result.is_err());
         assert!(Dir::new(file.path().clone()).exists());
         assert!(corrupt_siblings(&dir).await.is_empty());
+    }
+
+    // A read error that clears while retrying (here: a directory at the path
+    // is replaced by a valid file) reads the file instead of failing.
+    #[tokio::test]
+    async fn transient_read_error_is_retried() {
+        let dir = test_dirs::temp("testing").unwrap();
+        let file = dir.file("test-file");
+        let blocker = Dir::new(file.path().clone());
+        dirs::create(&blocker).await.unwrap();
+        let token = Token {
+            token: "test-token".to_string(),
+            expires_at: Utc::now() + Duration::days(1),
+        };
+
+        let (fix_file, fix_token) = (file.clone(), token.clone());
+        let fixer = tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            tokio::fs::remove_dir(blocker.path()).await.unwrap();
+            files::write_json(&fix_file, &fix_token, WriteOptions::default())
+                .await
+                .unwrap();
+        });
+
+        let state_file = SingleThreadTokenFile::new_with_default(file, Token::default())
+            .await
+            .unwrap();
+        fixer.await.unwrap();
+        assert_eq!(state_file.read().as_ref(), &token);
     }
 
     #[tokio::test]
@@ -147,38 +176,6 @@ pub mod new_with_default {
             .unwrap();
         assert_eq!(state_file.read().as_ref(), &token);
     }
-}
-
-pub mod new_or_recover {
-    use super::*;
-
-    // An unparseable file is recreated from what `salvage` recovers from its
-    // bytes, and the original is kept aside.
-    #[tokio::test]
-    async fn unparseable_file_is_recreated_from_salvage() {
-        let dir = test_dirs::temp("testing").unwrap();
-        let file = dir.file("test-file");
-        files::write_string(&file, "salvageable", WriteOptions::default())
-            .await
-            .unwrap();
-        let salvaged = Token {
-            token: "salvaged".to_string(),
-            expires_at: Utc::now() + Duration::days(1),
-        };
-
-        let expected = salvaged.clone();
-        let state_file =
-            SingleThreadTokenFile::new_or_recover(file.clone(), Token::default(), move |bytes| {
-                assert_eq!(bytes, b"salvageable");
-                Some(salvaged)
-            })
-            .await
-            .unwrap();
-
-        assert_eq!(state_file.read().as_ref(), &expected);
-        assert_eq!(files::read_json::<Token>(&file).await.unwrap(), expected);
-        assert_eq!(corrupt_siblings(&dir).await.len(), 1);
-    }
 
     // Each recovery keeps its own aside copy instead of overwriting an
     // earlier one.
@@ -191,7 +188,7 @@ pub mod new_or_recover {
             files::write_string(&file, contents, WriteOptions::OVERWRITE_ATOMIC)
                 .await
                 .unwrap();
-            SingleThreadTokenFile::new_or_recover(file.clone(), Token::default(), |_| None)
+            SingleThreadTokenFile::new_with_default(file.clone(), Token::default())
                 .await
                 .unwrap();
             // aside names use millisecond timestamps
@@ -204,22 +201,6 @@ pub mod new_or_recover {
         }
         kept.sort();
         assert_eq!(kept, vec!["first-bad", "second-bad"]);
-    }
-
-    // A missing file never consults `salvage`.
-    #[tokio::test]
-    async fn missing_file_uses_default() {
-        let dir = test_dirs::temp("testing").unwrap();
-        let file = dir.file("test-file");
-
-        let state_file = SingleThreadTokenFile::new_or_recover(file, Token::default(), |_| {
-            panic!("salvage must not run for a missing file")
-        })
-        .await
-        .unwrap();
-
-        assert_eq!(state_file.read().as_ref(), &Token::default());
-        assert!(corrupt_siblings(&dir).await.is_empty());
     }
 }
 

@@ -8,30 +8,27 @@ Linear: ENG-1541 (File Uploads Tech Debt, M0 data-loss fixes). Also resolves the
 
 ## Progress
 
-- [x] M1: `new_or_recover` with per-error handling; `new_with_default` delegates to it.
-- [x] M2: `QueueSnapshot::salvage` and `queue::open_snapshot_file`; app state opens both queues through it.
-- [x] M3: tests, lint, clippy.
+- [x] M1: per-error handling in `new_with_default`, with a bounded retry for read errors.
+- [x] M2: tests, lint, clippy.
 
 ## The Change
 
-`SingleThreadStateFile::new_or_recover(file, default, salvage)`:
+`SingleThreadStateFile::new_with_default(file, default)`:
 
 - **Missing file:** create it with `default` (unchanged).
-- **Parse error:** copy the file aside to `<name>.corrupt-<unix-ms>` (never overwriting an earlier copy), log at `error!`, then atomically replace it with `salvage(bytes)` or, if that recovers nothing, `default`. The original stays in place until that write succeeds.
-- **Any other error:** return it and leave the file untouched. App state already degrades to running without persistence for that boot (fail-open), so the on-disk queue survives for the next boot.
+- **Parse error:** copy the file aside to `<name>.corrupt-<unix-ms>` (never overwriting an earlier copy), log at `error!`, then atomically replace it with `default`. The original stays in place until that write succeeds. Nothing reads the aside copy back; it is kept for inspection.
+- **Any other error:** retry the read after 50 ms, 250 ms and 1 s. If it still fails, return the error and leave the file untouched. App state already degrades to running without persistence for that boot (fail-open), so the on-disk queue survives for the next boot.
 
-`new_with_default` is `new_or_recover` with a salvage that recovers nothing. For the queues, `QueueSnapshot::salvage` keeps every entry that still deserializes on its own and logs how many it dropped; `queue::open_snapshot_file` wires it in, and `App` uses it for `upload_queue.json` and `delete_queue.json`.
+Per-entry salvage of a corrupt queue was considered and dropped: the real fix for entries that stop parsing after a version change is making the job types tolerant of each other's shapes, which is a separate follow-up.
 
-Behavior change to note: the token file now fails boot on a non-parse read error (EIO/EACCES) instead of being reset to an empty token. A parse error still resets it, with the old contents kept aside.
+Behavior change to note: the token file now fails boot on a non-parse read error (EIO/EACCES) that persists through the retries, instead of being reset to an empty token. A parse error still resets it, with the old contents kept aside.
 
 ## Validation
 
-- `filesys/state_file.rs`: `exists_invalid_data` now also asserts the `.corrupt-` sibling holds the original bytes; new `unreadable_file_is_left_untouched` (a directory at the path), `new_or_recover::unparseable_file_is_recreated_from_salvage`, `new_or_recover::missing_file_uses_default`.
-- `data_uploads/upload/queue.rs` `wire::unparseable_entry_is_dropped_and_the_rest_kept`.
-- `data_uploads/queue` unit tests: `salvage_rejects_bytes_that_are_not_a_snapshot`, `salvage_keeps_only_parseable_entries`.
-- `cargo test --package miru-agent`, `cargo fmt`, `cargo clippy --all-targets --all-features -D warnings`, custom import linter.
+- `filesys/state_file.rs` `new_with_default`: `exists_invalid_data` asserts the `.corrupt-` sibling holds the original bytes; `unreadable_file_is_left_untouched` (a directory at the path); `transient_read_error_is_retried`; `repeated_recoveries_keep_every_aside_copy`.
+- `cargo test --package miru-agent`, `cargo fmt`, `cargo clippy --all-targets --all-features -D warnings`.
 
 ## What does NOT change
 
 - Snapshot formats.
-- The scanner snapshot gets the move-aside behavior but no per-entry salvage.
+- Every state file opened through `new_with_default` (queues, scanner snapshot, token) gets the same handling.
