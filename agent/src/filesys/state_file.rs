@@ -106,7 +106,13 @@ where
                 FileSysErr::PathDoesNotExistErr(_) | FileSysErr::ParseJSONErr(_)
             )
         };
-        cooldown::retry(&READ_RETRY_DELAYS, retryable, || Self::new(file.clone())).await
+        cooldown::retry(
+            |n| READ_RETRY_DELAYS.get(n as usize).copied(),
+            retryable,
+            tokio::time::sleep,
+            || Self::new(file.clone()),
+        )
+        .await
     }
 
     /// Copies `file` to a timestamped `.corrupt-<unix-ms>` sibling, keeping

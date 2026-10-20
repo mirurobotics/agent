@@ -52,8 +52,9 @@ pub async fn write(file: &filesys::File, port: u16, token: &SecretString) -> Res
         mode: Some(0o640),
     };
     retry(
-        RETRY_DELAYS,
-        |_| true,
+        |n| RETRY_DELAYS.get(n as usize).copied(),
+        |_: &FileSysErr| true,
+        tokio::time::sleep,
         || files::write_json(file, &discovery, opts),
     )
     .await?;
@@ -62,6 +63,12 @@ pub async fn write(file: &filesys::File, port: u16, token: &SecretString) -> Res
 
 /// Remove the discovery file; a missing file is not an error.
 pub async fn remove(file: &filesys::File) -> Result<(), DiskErr> {
-    retry(RETRY_DELAYS, |_: &FileSysErr| true, || files::delete(file)).await?;
+    retry(
+        |n| RETRY_DELAYS.get(n as usize).copied(),
+        |_: &FileSysErr| true,
+        tokio::time::sleep,
+        || files::delete(file),
+    )
+    .await?;
     Ok(())
 }

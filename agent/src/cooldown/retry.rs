@@ -6,29 +6,36 @@ use std::time::Duration;
 // external crates
 use tracing::debug;
 
-/// Runs `op`, and while it fails with an error `should_retry` accepts, sleeps
-/// for the next of `delays` and runs it again. Returns the first success, the
-/// first error `should_retry` rejects, or the last error once `delays` is
-/// used up. Empty `delays` means a single attempt.
-pub async fn retry<T, E, F, Fut>(
-    delays: &[Duration],
+/// Runs `op`, and while it fails with an error `should_retry` accepts, asks
+/// `delay` how long to wait before the next try, waits with `sleep`, and runs
+/// it again. `delay` gets the retry number (0 for the first retry) and returns
+/// `None` to stop. Returns the first success, the first error `should_retry`
+/// rejects, or the last error once `delay` returns `None`.
+///
+/// For a fixed list of waits, pass `|n| DELAYS.get(n as usize).copied()`.
+pub async fn retry<T, E, F, Fut, S, SFut>(
+    delay: impl Fn(u32) -> Option<Duration>,
     should_retry: impl Fn(&E) -> bool,
+    sleep: S,
     mut op: F,
 ) -> Result<T, E>
 where
     E: Display,
     F: FnMut() -> Fut,
     Fut: Future<Output = Result<T, E>>,
+    S: Fn(Duration) -> SFut,
+    SFut: Future<Output = ()>,
 {
-    let mut delays = delays.iter();
+    let mut retries: u32 = 0;
     loop {
         match op().await {
             Err(err) if should_retry(&err) => {
-                let Some(delay) = delays.next() else {
+                let Some(wait) = delay(retries) else {
                     return Err(err);
                 };
-                debug!("operation failed, retrying in {delay:?}: {err}");
-                tokio::time::sleep(*delay).await;
+                debug!("operation failed, retrying in {wait:?}: {err}");
+                sleep(wait).await;
+                retries = retries.saturating_add(1);
             }
             result => return result,
         }
@@ -43,7 +50,7 @@ mod tests {
     // internal crates
     use super::*;
 
-    const DELAYS: [Duration; 2] = [Duration::from_millis(1), Duration::from_millis(1)];
+    const DELAYS: [Duration; 2] = [Duration::from_millis(1), Duration::from_millis(2)];
 
     /// Runs `retry` over an op that fails `failures` times with `err`, retrying
     /// every error except `"fatal"`, and returns the result and how many times
@@ -55,8 +62,9 @@ mod tests {
     ) -> (Result<(), &'static str>, u32) {
         let calls = AtomicU32::new(0);
         let result = retry(
-            delays,
+            |n| delays.get(n as usize).copied(),
             |e: &&str| *e != "fatal",
+            tokio::time::sleep,
             || async {
                 if calls.fetch_add(1, Ordering::SeqCst) < failures {
                     Err(err)
@@ -95,6 +103,23 @@ mod tests {
         let (result, calls) = run(&[], 1, "transient").await;
         assert!(result.is_err());
         assert_eq!(calls, 1);
+    }
+
+    #[tokio::test]
+    async fn waits_for_each_delay_in_order() {
+        let waits = std::sync::Mutex::new(Vec::new());
+        let result: Result<(), &str> = retry(
+            |n| DELAYS.get(n as usize).copied(),
+            |_| true,
+            |wait| {
+                waits.lock().unwrap().push(wait);
+                std::future::ready(())
+            },
+            || async { Err("transient") },
+        )
+        .await;
+        assert!(result.is_err());
+        assert_eq!(*waits.lock().unwrap(), DELAYS.to_vec());
     }
 
     #[tokio::test]
