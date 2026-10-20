@@ -74,9 +74,9 @@ mod wire {
 
     /// Pins the persisted wire format on the read side: an entry is
     /// `{id, job, attempts, next_attempt_at}` with the job's fields nested
-    /// rather than flattened. `SingleThreadStateFile::new_with_default`
-    /// silently overwrites a snapshot it cannot parse, so a shape change would
-    /// wipe a live user's queue instead of erroring — this test is the guard.
+    /// rather than flattened. A snapshot that no longer parses is copied aside
+    /// and the queue starts empty, so a shape change would drop a live user's
+    /// queued jobs — this test is the guard.
     ///
     /// `upload_job` is deterministic, so the expected job comes from it. The
     /// raw `"file"` value is a plain host-rooted string rather than `File`'s
@@ -181,8 +181,8 @@ mod wire {
             .await
             .unwrap();
 
-        // if deserialization failed, new_with_default would silently write an
-        // empty default snapshot and the pop below would find nothing
+        // if deserialization failed, new_with_default would copy the file
+        // aside and start empty, and the pop below would find nothing
         let queue = Queue::from_snapshot(8, open(&path).await);
         let entry = queue.next_ready(Utc::now()).unwrap();
         assert_eq!(entry.attempts, 2);

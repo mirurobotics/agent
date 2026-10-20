@@ -1,5 +1,8 @@
-// external crates
-use tracing::debug;
+// standard crates
+use std::time::Duration;
+
+// internal crates
+use crate::cooldown;
 
 const MAX_RETRIES: u32 = 2; // up to 3 total attempts
 
@@ -27,21 +30,13 @@ where
     Fut: std::future::Future<Output = Result<T, E>>,
     E: crate::errors::Error + std::fmt::Display,
 {
-    let mut attempt = 0;
-    loop {
-        match f().await {
-            Ok(val) => return Ok(val),
-            Err(e) => {
-                if !e.is_network_conn_err() || attempt >= MAX_RETRIES {
-                    return Err(e);
-                }
-                attempt += 1;
-                let delay = retry_delay_ms();
-                debug!("network error on attempt {attempt}, retrying in {delay}ms: {e}");
-                tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
-            }
-        }
-    }
+    cooldown::retry(
+        |n| (n < MAX_RETRIES).then(|| Duration::from_millis(retry_delay_ms())),
+        |e: &E| e.is_network_conn_err(),
+        tokio::time::sleep,
+        f,
+    )
+    .await
 }
 
 #[cfg(test)]

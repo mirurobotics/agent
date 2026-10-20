@@ -2,9 +2,9 @@
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::authn::token::{Token, Updates};
 use miru_agent::filesys::{
-    files,
+    dirs, files,
     state_file::{ConcurrentStateFile, SingleThreadStateFile},
-    FileSysErr, Overwrite, PathExt, WriteOptions,
+    Dir, File, FileSysErr, Overwrite, PathExt, WriteOptions,
 };
 
 // external crates
@@ -14,6 +14,18 @@ use tracing::{debug, error, info, trace, warn};
 
 // ========================= SINGLE THREADED STATE FILE =========================== //
 type SingleThreadTokenFile = SingleThreadStateFile<Token, Updates>;
+
+/// The `.corrupt-<uuid>` siblings a recovery copied aside in `dir`.
+async fn corrupt_siblings(dir: &Dir) -> Vec<File> {
+    let mut found = Vec::new();
+    let mut entries = tokio::fs::read_dir(dir.path()).await.unwrap();
+    while let Some(entry) = entries.next_entry().await.unwrap() {
+        if entry.file_name().to_string_lossy().contains(".corrupt-") {
+            found.push(File::new(entry.path()));
+        }
+    }
+    found
+}
 
 pub mod new {
     use super::*;
@@ -85,10 +97,65 @@ pub mod new_with_default {
             .await
             .unwrap();
 
-        let state_file = SingleThreadTokenFile::new_with_default(file, Token::default())
+        let state_file = SingleThreadTokenFile::new_with_default(file.clone(), Token::default())
             .await
             .unwrap();
         assert_eq!(state_file.read().as_ref(), &Token::default());
+
+        // the unparseable contents were copied aside, not destroyed
+        let aside = corrupt_siblings(&dir).await;
+        assert_eq!(aside.len(), 1, "{aside:?}");
+        assert_eq!(files::read_string(&aside[0]).await.unwrap(), "invalid-data");
+        assert_eq!(
+            files::read_json::<Token>(&file).await.unwrap(),
+            Token::default()
+        );
+    }
+
+    // An error other than "missing" or "unparseable" (here: the path is a
+    // directory) is retried, then returned, and nothing is overwritten.
+    #[tokio::test(start_paused = true)]
+    async fn unreadable_file_is_left_untouched() {
+        let dir = test_dirs::temp("testing").unwrap();
+        let file = dir.file("test-file");
+        dirs::create(&Dir::new(file.path().clone())).await.unwrap();
+
+        let result = SingleThreadTokenFile::new_with_default(file.clone(), Token::default()).await;
+
+        assert!(result.is_err());
+        assert!(Dir::new(file.path().clone()).exists());
+        assert!(corrupt_siblings(&dir).await.is_empty());
+    }
+
+    // A read error that clears while retrying (here: a directory at the path
+    // is replaced by a valid file) reads the file instead of failing. Time is
+    // paused, so the fix runs at 10 ms, strictly between the first read and
+    // the first retry at 50 ms.
+    #[tokio::test(start_paused = true)]
+    async fn transient_read_error_is_retried() {
+        let dir = test_dirs::temp("testing").unwrap();
+        let file = dir.file("test-file");
+        let blocker = Dir::new(file.path().clone());
+        dirs::create(&blocker).await.unwrap();
+        let token = Token {
+            token: "test-token".to_string(),
+            expires_at: Utc::now() + Duration::days(1),
+        };
+
+        let (fix_file, fix_token) = (file.clone(), token.clone());
+        let fixer = tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            tokio::fs::remove_dir(blocker.path()).await.unwrap();
+            files::write_json(&fix_file, &fix_token, WriteOptions::OVERWRITE_ATOMIC)
+                .await
+                .unwrap();
+        });
+
+        let state_file = SingleThreadTokenFile::new_with_default(file, Token::default())
+            .await
+            .unwrap();
+        fixer.await.unwrap();
+        assert_eq!(state_file.read().as_ref(), &token);
     }
 
     #[tokio::test]
@@ -110,6 +177,30 @@ pub mod new_with_default {
             .await
             .unwrap();
         assert_eq!(state_file.read().as_ref(), &token);
+    }
+
+    // Each recovery keeps its own aside copy instead of overwriting an
+    // earlier one.
+    #[tokio::test]
+    async fn repeated_recoveries_keep_every_aside_copy() {
+        let dir = test_dirs::temp("testing").unwrap();
+        let file = dir.file("test-file");
+
+        for contents in ["first-bad", "second-bad"] {
+            files::write_string(&file, contents, WriteOptions::OVERWRITE_ATOMIC)
+                .await
+                .unwrap();
+            SingleThreadTokenFile::new_with_default(file.clone(), Token::default())
+                .await
+                .unwrap();
+        }
+
+        let mut kept = Vec::new();
+        for aside in corrupt_siblings(&dir).await {
+            kept.push(files::read_string(&aside).await.unwrap());
+        }
+        kept.sort();
+        assert_eq!(kept, vec!["first-bad", "second-bad"]);
     }
 }
 

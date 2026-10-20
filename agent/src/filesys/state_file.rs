@@ -1,7 +1,9 @@
 // standard crates
 use std::sync::Arc;
+use std::time::Duration;
 
 // internal crates
+use crate::cooldown;
 use crate::filesys::{errors::*, file::File, files, Atomic, Overwrite, WriteOptions};
 use crate::models::Patch;
 use crate::trace;
@@ -23,6 +25,14 @@ macro_rules! dispatch {
         }
     }};
 }
+
+/// Waits between retries of a state file read that failed for a reason other
+/// than "missing" or "unparseable" (e.g. a transient EIO).
+const READ_RETRY_DELAYS: [Duration; 3] = [
+    Duration::from_millis(50),
+    Duration::from_millis(250),
+    Duration::from_millis(1000),
+];
 
 // ============================== SINGLE THREADED ================================== //
 #[derive(Debug)]
@@ -51,15 +61,67 @@ where
         Ok(state_file)
     }
 
+    /// Opens `file`:
+    ///
+    /// - **Missing:** created with `default`.
+    /// - **Unparseable:** copied aside to `<name>.corrupt-<uuid>` (best
+    ///   effort), then atomically replaced with `default`.
+    /// - **Other read error:** retried per [`READ_RETRY_DELAYS`], then returned
+    ///   with the file left untouched.
     pub async fn new_with_default(file: File, default: ContentT) -> Result<Self, FileSysErr>
     where
         Self: Sized,
     {
-        let result = Self::new(file.clone()).await;
-        match result {
+        match Self::new_with_retry(&file).await {
             Ok(state_file) => Ok(state_file),
-            Err(_) => Self::create(file, &default, Overwrite::Allow).await,
+            Err(FileSysErr::PathDoesNotExistErr(_)) => {
+                Self::create(file, &default, Overwrite::Allow).await
+            }
+            Err(FileSysErr::ParseJSONErr(err)) => {
+                match Self::copy_aside(&file).await {
+                    Ok(aside) => error!(
+                        "state file {file} could not be parsed ({err}); copied it to {aside} \
+                         and started from the default"
+                    ),
+                    Err(copy_err) => error!(
+                        "state file {file} could not be parsed ({err}) or copied aside \
+                         ({copy_err}); started from the default"
+                    ),
+                }
+                Self::create(file, &default, Overwrite::Allow).await
+            }
+            Err(err) => Err(err),
         }
+    }
+
+    /// [`Self::new`], retrying errors other than "missing" and "unparseable"
+    /// after each of [`READ_RETRY_DELAYS`].
+    async fn new_with_retry(file: &File) -> Result<Self, FileSysErr> {
+        let retryable = |err: &FileSysErr| {
+            !matches!(
+                err,
+                FileSysErr::PathDoesNotExistErr(_) | FileSysErr::ParseJSONErr(_)
+            )
+        };
+        cooldown::retry(
+            |n| READ_RETRY_DELAYS.get(n as usize).copied(),
+            retryable,
+            tokio::time::sleep,
+            || Self::new(file.clone()),
+        )
+        .await
+    }
+
+    /// Copies `file` to a uniquely named `.corrupt-<uuid>` sibling, keeping
+    /// its permissions.
+    async fn copy_aside(file: &File) -> Result<File, FileSysErr> {
+        let aside = file.parent()?.file(&format!(
+            "{}.corrupt-{}",
+            file.name()?,
+            uuid::Uuid::new_v4()
+        ));
+        files::copy_to(file, &aside, Overwrite::Deny).await?;
+        Ok(aside)
     }
 
     pub async fn create(
