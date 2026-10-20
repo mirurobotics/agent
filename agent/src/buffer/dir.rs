@@ -327,41 +327,44 @@ async fn item_files(content_dir: &Dir) -> Result<Vec<(Uuid, File)>, BufferErr> {
         .collect())
 }
 
-/// Open the queue snapshot. A missing snapshot is rebuilt from the item files
-/// (empty on first boot), so item files are never deleted for want of a
-/// queue. An existing snapshot that cannot be parsed is never silently
-/// replaced: it is set aside and the queue is rebuilt the same way. Any other
-/// read error fails the open and leaves the snapshot in place.
+/// Open the queue file (entry order, attempt counts and backoff). A missing
+/// one is rebuilt from the item files (empty on first boot), so item files are
+/// never deleted for want of a queue. An existing queue file that cannot be
+/// parsed is never silently replaced: it is set aside and the queue is rebuilt
+/// the same way. Any other read error fails the open and leaves the file in
+/// place.
 async fn load_snapshot<J, C>(
-    file: &File,
+    queue_file: &File,
     content_dir: &Dir,
 ) -> Result<QueueSnapshotFile<J>, BufferErr>
 where
     J: BufferJob,
     C: DeserializeOwned,
 {
-    if !file.exists() {
+    if !queue_file.exists() {
         let snapshot = rebuild_snapshot::<J, C>(content_dir).await?;
-        return Ok(QueueSnapshotFile::create(file.clone(), &snapshot, Overwrite::Allow).await?);
+        return Ok(
+            QueueSnapshotFile::create(queue_file.clone(), &snapshot, Overwrite::Allow).await?,
+        );
     }
-    let err = match QueueSnapshotFile::<J>::new(file.clone()).await {
+    let err = match QueueSnapshotFile::<J>::new(queue_file.clone()).await {
         Ok(snapshot_file) => return Ok(snapshot_file),
         Err(FileSysErr::ParseJSONErr(err)) => err,
         // a read error may be transient, so keep the snapshot and its attempt
         // counts and order for the next open instead of rebuilding
         Err(err) => return Err(err.into()),
     };
-    let aside = corrupt_path(file);
+    let aside = corrupt_path(queue_file);
     error!(
-        "{}: queue snapshot {file} is unreadable; moving it to {aside} and rebuilding from the item files: {err}",
+        "{}: queue file {queue_file} is unreadable; moving it to {aside} and rebuilding from the item files: {err}",
         J::LABEL
     );
     // rebuild before moving the snapshot aside: if the rebuild fails, the next
     // open must still find the unreadable snapshot, not an absent one it would
     // replace with an empty queue
     let snapshot = rebuild_snapshot::<J, C>(content_dir).await?;
-    files::move_to(file, &aside, Overwrite::Allow).await?;
-    Ok(QueueSnapshotFile::create(file.clone(), &snapshot, Overwrite::Allow).await?)
+    files::move_to(queue_file, &aside, Overwrite::Allow).await?;
+    Ok(QueueSnapshotFile::create(queue_file.clone(), &snapshot, Overwrite::Allow).await?)
 }
 
 /// A queue holding every readable item file under its own entry id, oldest
