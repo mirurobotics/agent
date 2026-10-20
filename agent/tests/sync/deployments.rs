@@ -1327,6 +1327,7 @@ mod cross_phase {
             error_status: DplErrStatus::Retrying,
             target_status: DplTarget::Deployed,
             config_instance_ids: vec!["cfg_inst_1".to_string()],
+            release_id: "dpl_1_rel".to_string(),
             attempts: 3,
             // no cooldown (UNIX_EPOCH is in the past)
             ..Default::default()
