@@ -193,8 +193,6 @@ pub mod new_with_default {
             SingleThreadTokenFile::new_with_default(file.clone(), Token::default())
                 .await
                 .unwrap();
-            // aside names use millisecond timestamps
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
         }
 
         let mut kept = Vec::new();

@@ -16,7 +16,7 @@ Linear: ENG-1541 (File Uploads Tech Debt, M0 data-loss fixes). Also resolves the
 `SingleThreadStateFile::new_with_default(file, default)`:
 
 - **Missing file:** create it with `default` (unchanged).
-- **Parse error:** copy the file aside to `<name>.corrupt-<unix-ms>` (never overwriting an earlier copy), log at `error!`, then atomically replace it with `default`. The original stays in place until that write succeeds. Nothing reads the aside copy back; it is kept for inspection.
+- **Parse error:** copy the file aside to `<name>.corrupt-<uuid>`, log at `error!`, then atomically replace it with `default`. The copy is best effort: if it fails, the error is logged and the file is still replaced, so the agent keeps working. Nothing reads the aside copy back; it is kept for inspection.
 - **Any other error:** retry the read after 50 ms, 250 ms and 1 s. If it still fails, return the error and leave the file untouched. App state already degrades to running without persistence for that boot (fail-open), so the on-disk queue survives for the next boot.
 
 Per-entry salvage of a corrupt queue was considered and dropped: the real fix for entries that stop parsing after a version change is making the job types tolerant of each other's shapes, which is a separate follow-up.

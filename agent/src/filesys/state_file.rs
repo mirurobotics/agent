@@ -64,8 +64,8 @@ where
     /// Opens `file`:
     ///
     /// - **Missing:** created with `default`.
-    /// - **Unparseable:** copied aside to `<name>.corrupt-<unix-ms>`, then
-    ///   atomically replaced with `default`.
+    /// - **Unparseable:** copied aside to `<name>.corrupt-<uuid>` (best
+    ///   effort), then atomically replaced with `default`.
     /// - **Other read error:** retried per [`READ_RETRY_DELAYS`], then returned
     ///   with the file left untouched.
     pub async fn new_with_default(file: File, default: ContentT) -> Result<Self, FileSysErr>
@@ -78,11 +78,16 @@ where
                 Self::create(file, &default, Overwrite::Allow).await
             }
             Err(FileSysErr::ParseJSONErr(err)) => {
-                let aside = Self::copy_aside(&file).await?;
-                error!(
-                    "state file {file} could not be parsed ({err}); copied it to {aside} and \
-                     started from the default"
-                );
+                match Self::copy_aside(&file).await {
+                    Ok(aside) => error!(
+                        "state file {file} could not be parsed ({err}); copied it to {aside} \
+                         and started from the default"
+                    ),
+                    Err(copy_err) => error!(
+                        "state file {file} could not be parsed ({err}) or copied aside \
+                         ({copy_err}); started from the default"
+                    ),
+                }
                 Self::create(file, &default, Overwrite::Allow).await
             }
             Err(err) => Err(err),
@@ -107,13 +112,14 @@ where
         .await
     }
 
-    /// Copies `file` to a timestamped `.corrupt-<unix-ms>` sibling, keeping
-    /// its permissions. Never overwrites an earlier aside copy.
+    /// Copies `file` to a uniquely named `.corrupt-<uuid>` sibling, keeping
+    /// its permissions.
     async fn copy_aside(file: &File) -> Result<File, FileSysErr> {
-        let ts = chrono::Utc::now().timestamp_millis();
-        let aside = file
-            .parent()?
-            .file(&format!("{}.corrupt-{ts}", file.name()?));
+        let aside = file.parent()?.file(&format!(
+            "{}.corrupt-{}",
+            file.name()?,
+            uuid::Uuid::new_v4()
+        ));
         files::copy_to(file, &aside, Overwrite::Deny).await?;
         Ok(aside)
     }
