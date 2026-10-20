@@ -24,8 +24,8 @@ After the final slice, a running agent has `<data>/calibrations/` (default `/var
 
 ## Progress
 
-- [x] Slice 1 `calibrations-buffer` (PR #324, already open): generic `buffer::Buffer` and `calibrations::Buffer`.
-- [x] Slice 2 `buffer-park` (2026-10-20): `Buffer::park`, plus a `move_failure_keeps_the_entry` test for the rename error path.
+- [x] Slice 1 `calibrations-buffer` (PR #324, already open): generic `queue::DirQueue` and `calibrations::DirQueue`.
+- [x] Slice 2 `buffer-park` (2026-10-20): `DirQueue::park`, plus a `move_failure_keeps_the_entry` test for the rename error path.
 - [x] Slice 3 `calibrations-sender` (2026-10-20): token errors are wrapped in a never-terminal `TokenErr` (see Decision Log); fixtures in `agent/tests/test_utils/calibrations.rs`.
 - [x] Slice 4 `calibrations-uploader` (2026-10-20): `calibrations/uploader.rs`, `mocks/calibration_sender.rs`, `SleepController::attempted_sleeps`; 25 uploader tests.
 - [x] Slice 5 `calibration-intake-service` (2026-10-20): `services/calibration/` at 100% region coverage, so its `.covgate` is `100.00`.
@@ -42,9 +42,10 @@ After the final slice, a running agent has `<data>/calibrations/` (default `/var
 - Decision: Keep the field name `CalibrationJob::calibrated_at`; it means "when the agent received the report". The sender maps it to the backend request's `reported_at`, and the service returns it as `reported_at`. Date/Author: 2026-10-20, user brief.
 - Decision: A report Miru rejects with a terminal 4xx is parked: its item file moves to `<data>/calibrations/failed/<entry id>.json`, its queue entry is dropped, and an error is logged. Parking is a generic `buffer::Buffer::park`, not calibration code. Date/Author: 2026-10-20, user brief.
 - Decision: Retry with the data-upload backoff values (10 s base, ×2 growth, 1 h cap). Network errors wait a flat 10 s and do not grow the backoff; 5xx, 401, 408, 429 and other non-terminal errors grow it. Reports are never dropped for age or attempt count; the report cap (intake answers 507 when full) is the backstop. Rationale: the agent promised the caller durability. Date/Author: 2026-10-20, plan author.
-- Decision: On a retryable failure the report stays at the head of the buffer and the worker waits out the backoff, instead of calling `Buffer::requeue` (which moves the entry to the tail and stamps a per-entry deadline). Rationale: the brief also requires FIFO draining, and per-entry requeue would let every other ready report fire its own failing request while Miru is down (a burst of up to 1,000 requests every 10 s). Holding the head gives strict FIFO and one request per backoff interval. The backoff streak is in memory only, so a restart retries at once. Date/Author: 2026-10-20, plan author.
+- Decision: On a retryable failure the report stays at the head of the buffer and the worker waits out the backoff, instead of calling `DirQueue::requeue` (which moves the entry to the tail and stamps a per-entry deadline). Rationale: the brief also requires FIFO draining, and per-entry requeue would let every other ready report fire its own failing request while Miru is down (a burst of up to 1,000 requests every 10 s). Holding the head gives strict FIFO and one request per backoff interval. The backoff streak is in memory only, so a restart retries at once. Date/Author: 2026-10-20, plan author.
 - Decision: The buffer is owned by one actor, `calibrations::Uploader`, in the style of `data_uploads::upload::Uploader`: intake sends it `Enqueue` over `mpsc` with a `oneshot` reply, and the actor uploads reports itself. While a send or a backoff is in flight it `select!`s on that and its command channel, so intake is answered at once and never waits on the network. Rationale: no lock, one owner, and the same pattern as data uploads; an earlier revision shared a `Mutex<Buffer>` plus a `Notify` wake-up. Date/Author: 2026-10-20, user (review of #331).
 - Decision: "Reconnect" is `sync::syncer::SyncEvent::SyncSuccess` from `SyncerExt::subscribe`. The poller and backend sync requests over MQTT (`workers/mqtt.rs`) both drive syncs, and a successful sync proves Miru is reachable. A `SyncSuccess` ends any backoff wait. `AppState` subscribes and hands the receiver to the uploader, so the actor needs no syncer. Date/Author: 2026-10-20, plan author.
+- Decision: The buffer is `queue::DirQueue`, the directory-backed variant of `queue::Queue`, beside it in the queue module the way `DirCache` sits beside `FileCache`. A full one returns the existing `QueueFullErr`. The 507 keeps its `calibration_buffer_full` code. Date/Author: 2026-10-20, user (review of #331).
 - Decision: The buffer caps the number of reports and each report file's size, not the total bytes (1,000 reports of up to 2 MiB, so 2 GiB at worst). Rationale: simpler, with no per-item size tracking, and a low chance of failing. Date/Author: 2026-10-20, user.
 - Decision: Intake does no validation of its own; Miru is the only judge, and a report it rejects is parked in `failed/` by the worker. Rationale: the checks duplicated Miru's rules, and the user preferred silent parking until a report-status endpoint exists over keeping two copies of the rules in sync. Date/Author: 2026-10-20, user (review of #331).
 - Decision: An error reading the deployments cache fails intake (500) rather than stamping `deployment_id: None`, so a broken cache never silently drops the association. No deployed deployment is fine and stamps `None`. Date/Author: 2026-10-20, plan author.
@@ -75,8 +76,8 @@ The agent (`agent/src/main.rs`, library modules listed in `agent/src/lib.rs`) sy
 Existing pieces this plan builds on:
 
 - `agent/src/queue/mod.rs`: `Queue<J: QueueJob>`, a persisted FIFO of `QueueEntry<J> { id: Uuid, job, attempts, next_attempt_at }`. `next_ready(now)` returns the oldest entry that is due, without removing it.
-- `agent/src/buffer/dir.rs`: `Buffer<J: BufferJob, C>` keeps one queue entry per item in `queue_file`, with the item's content in an *item file* `content_dir/<entry id>.json` holding `buffer::Item { job, content }`. The API is `open(queue_file, content_dir, BufferOptions)`, `enqueue(Item) -> Uuid`, `next_ready`, `read(id)`, `remove(id)`, `requeue(entry)`, `len`, `entries`. When full, `enqueue` returns `BufferErr::BufferFullErr` and never evicts; an item file over `max_item_bytes` gives `ItemTooLargeErr`. There is no total byte cap. `open` deletes item files that have no queue entry and drops entries whose file is missing. The private helper `item_file(dir, id)` builds `<id>.json` paths. `Buffer` is single-owner (`&mut self`) and has no `Debug` impl.
-- `agent/src/calibrations/`: `CalibrationJob { component_slug, role?, aspect?, serial_number?, deployment_id?, calibrated_at }` (`job.rs`); `Buffer = buffer::Buffer<CalibrationJob, serde_json::Value>`, `Report = buffer::Item<CalibrationJob, serde_json::Value>`, `DEFAULT_OPTIONS` (1,000 reports of up to 2 MiB each) and `open(&CalibrationsLayout, options)` (`buffer.rs`); `CalibrationsErr { BufferFullErr(CalibrationBufferFullErr) /* 507 calibration_buffer_full */, TooLargeErr(CalibrationTooLargeErr) /* 413 calibration_too_large */, BufferErr }` (`errors.rs`).
+- `agent/src/queue/dir.rs`: `DirQueue<J: DirQueueJob, C>` keeps one queue entry per item in `queue_file`, with the item's content in an *item file* `content_dir/<entry id>.json` holding `queue::Item { job, content }`. The API is `open(queue_file, content_dir, DirQueueOptions)`, `enqueue(Item) -> Uuid`, `next_ready`, `read(id)`, `remove(id)`, `requeue(entry)`, `len`, `entries`. When full, `enqueue` returns `DirQueueErr::QueueFullErr` and never evicts; an item file over `max_item_bytes` gives `ItemTooLargeErr`. There is no total byte cap. `open` deletes item files that have no queue entry and drops entries whose file is missing. The private helper `item_file(dir, id)` builds `<id>.json` paths. `Buffer` is single-owner (`&mut self`) and has no `Debug` impl.
+- `agent/src/calibrations/`: `CalibrationJob { component_slug, role?, aspect?, serial_number?, deployment_id?, calibrated_at }` (`job.rs`); `DirQueue = queue::DirQueue<CalibrationJob, serde_json::Value>`, `Report = queue::Item<CalibrationJob, serde_json::Value>`, `DEFAULT_OPTIONS` (1,000 reports of up to 2 MiB each) and `open(&CalibrationsLayout, options)` (`buffer.rs`); `CalibrationsErr { QueueFullErr(CalibrationQueueFullErr) /* 507 calibration_buffer_full */, TooLargeErr(CalibrationTooLargeErr) /* 413 calibration_too_large */, DirQueueErr }` (`errors.rs`).
 - `agent/src/disk/layout.rs`: `Layout::calibrations() -> CalibrationsLayout` with `root` (`<data>/calibrations`), `queue()` (`queue.json`) and `content()` (`content/`).
 - `agent/src/http/calibrations.rs`: `create(client: &impl ClientI, CreateParams { payload: &CreateCalibrationRequest, token: &str }) -> Result<Calibration, HTTPErr>`, with a 60 s timeout. `libs/backend-api/src/models/create_calibration_request.rs`: `CreateCalibrationRequest { deployment_id?, component_slug, role?, serial_number?, aspect?, content: Box<InstanceContent>, reported_at: String }`. `InstanceContent { format: InstanceFormat, data: String }`. `InstanceFormat` is `json | yaml | jsonc | xml | text`, plus the catch-all `InstanceFormatUnknown` for any other string.
 - Error classification, in `agent/src/http/errors.rs`: `RequestFailed::is_terminal()` is true for 4xx except 401, 408 and 429. Timeouts and connection failures report `is_network_conn_err() == true`. A *terminal* error means "Miru will never accept this request"; a *network* error means "Miru could not be reached".
@@ -89,9 +90,9 @@ Existing pieces this plan builds on:
 
 No new crates. New public items:
 
-    // agent/src/buffer/dir.rs (slice 2)
-    impl<J: BufferJob, C> Buffer<J, C> {
-        pub async fn park(&mut self, id: Uuid, dest_dir: &Dir) -> Result<Option<QueueEntry<J>>, BufferErr>;
+    // agent/src/queue/dir.rs (slice 2)
+    impl<J: DirQueueJob, C> DirQueue<J, C> {
+        pub async fn park(&mut self, id: Uuid, dest_dir: &Dir) -> Result<Option<QueueEntry<J>>, DirQueueErr>;
     }
 
     // agent/src/disk/layout.rs (slice 3)
@@ -113,7 +114,7 @@ No new crates. New public items:
 
     // agent/src/calibrations/uploader.rs (slice 4)
     #[derive(Debug, Clone)] pub struct UploaderOptions { pub backoff: cooldown::Backoff } // default 10 / 2 / 3600
-    pub struct UploaderArgs<S, F> { pub buffer: Buffer, pub failed: Dir, pub sender: Arc<S>,
+    pub struct UploaderArgs<S, F> { pub queue: DirQueue, pub failed: Dir, pub sender: Arc<S>,
         pub events: Option<watch::Receiver<SyncEvent>>, pub options: UploaderOptions, pub sleep_fn: F }
     #[derive(Debug)] pub struct Uploader { .. } // handle; the actor owns the buffer
     impl Uploader {
@@ -144,8 +145,8 @@ Each milestone is one slice: it merges on its own with CI green, depends only on
 
 | # | Slug | Scope | ~Lines | Depends on |
 |---|------|-------|--------|-----------|
-| 1 | `calibrations-buffer` | Generic `buffer::Buffer` and `calibrations::Buffer` (exists: PR #324) | 1,870 | none |
-| 2 | `buffer-park` | Generic `Buffer::park` moves an item aside and drops its entry | 140 | 1 |
+| 1 | `calibrations-buffer` | Generic `queue::DirQueue` and `calibrations::DirQueue` (exists: PR #324) | 1,870 | none |
+| 2 | `buffer-park` | Generic `DirQueue::park` moves an item aside and drops its entry | 140 | 1 |
 | 3 | `calibrations-sender` | `failed/` layout, `Sender`/`HttpSender`, error variants | 340 | 1 |
 | 4 | `calibrations-uploader` | `calibrations::Uploader` actor: owns the buffer, serves intake, drains, backs off, parks, shuts down | 1,000 | 2, 3 |
 | 5 | `calibration-intake-service` | `services::calibration::create`: stamp and enqueue, no validation | 220 | 4 |
@@ -153,9 +154,9 @@ Each milestone is one slice: it merges on its own with CI green, depends only on
 
 ### Milestone 2: `buffer-park`
 
-In `agent/src/buffer/dir.rs`, add `Buffer::park` in the Mutators section after `remove`. If `id` isn't in the queue, return `Ok(None)` and touch nothing. Otherwise: `dirs::create_if_absent(dest_dir)`, then `files::move_to(&self.item_file(id), &item_file(dest_dir, id), Overwrite::Allow)`, then `self.queue.remove(id)`, and return the entry. The file moves first, so a crash between the two steps leaves an entry whose file is gone; the next `open` drops that entry, and the parked copy survives. Removing the entry first would leave an orphan that `open` deletes. Any error before the entry is removed is returned, with the entry and its item file unchanged. The doc comment states this ordering and that `open` never looks inside `dest_dir`. Add one sentence to the `buffer` paragraph of `ARCHITECTURE.md`.
+In `agent/src/queue/dir.rs`, add `DirQueue::park` in the Mutators section after `remove`. If `id` isn't in the queue, return `Ok(None)` and touch nothing. Otherwise: `dirs::create_if_absent(dest_dir)`, then `files::move_to(&self.item_file(id), &item_file(dest_dir, id), Overwrite::Allow)`, then `self.queue.remove(id)`, and return the entry. The file moves first, so a crash between the two steps leaves an entry whose file is gone; the next `open` drops that entry, and the parked copy survives. Removing the entry first would leave an orphan that `open` deletes. Any error before the entry is removed is returned, with the entry and its item file unchanged. The doc comment states this ordering and that `open` never looks inside `dest_dir`. Add one sentence to the `buffer` paragraph of `ARCHITECTURE.md`.
 
-Tests, in a new `pub mod park` in `agent/tests/buffer/mod.rs`, using the file's existing `TestJob` and helpers:
+Tests, in a new `pub mod park` in `agent/tests/queue/dir.rs`, using the file's existing `TestJob` and helpers:
 
 - `moves_the_item_file_and_drops_the_entry`: enqueue `a` and `b`, then park `a` into `<tmp>/failed`. It returns `Some(entry a)`, and `entries()` holds only `b`. `failed/<a>.json` parses as `a`'s `Item`, and `content/<a>.json` is gone.
 - `parked_items_stay_out_after_reopen`: park `a`, reopen: `entries()` holds only `b`, and the parked file still exists.
@@ -220,7 +221,7 @@ All commands run from the agent repo root, `/home/claude/agent`, on branch `feat
 1. Before milestone 2, confirm the plan is active: `git ls-files plans/active/20261020-calibrations-upload-worker-and-intake.md` prints the path.
 2. Milestone 2 commit:
 
-        git add agent/src/buffer/dir.rs agent/tests/buffer/mod.rs ARCHITECTURE.md
+        git add agent/src/queue/dir.rs agent/tests/queue/dir.rs ARCHITECTURE.md
         git commit -m "feat(buffer): park a resolved item outside the buffer"
 
 3. Milestone 3 commit:
@@ -264,4 +265,4 @@ Acceptance, observable through the named tests:
 
 Every edit is additive except the new `CalibrationsErr`, `ServiceErr` and `Code` variants, which compile-break only exhaustive matches the plan already names (`agent/tests/errors/mod.rs`). Re-running a milestone's edits is safe; if a commit already exists, amend it rather than adding a second one. If a slice fails CI, fix it on that slice's branch; earlier slices are unaffected because no slice depends on a later one. Any milestone commit can be reverted alone, with its dependents reverted first (see the table).
 
-The on-disk format is unchanged: `queue.json` and `content/<id>.json` keep the slice 1 shape, and `failed/` is a new sibling that `Buffer::open` never reads. An older agent without the worker leaves buffered reports in place, and a newer one uploads them. Reverting milestone 6 stops uploads but keeps every buffered report on disk. Parked reports are never deleted automatically; remove `<data>/calibrations/failed/*.json` by hand once inspected.
+The on-disk format is unchanged: `queue.json` and `content/<id>.json` keep the slice 1 shape, and `failed/` is a new sibling that `DirQueue::open` never reads. An older agent without the worker leaves buffered reports in place, and a newer one uploads them. Reverting milestone 6 stops uploads but keeps every buffered report on disk. Parked reports are never deleted automatically; remove `<data>/calibrations/failed/*.json` by hand once inspected.

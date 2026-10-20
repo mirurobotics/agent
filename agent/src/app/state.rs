@@ -36,7 +36,7 @@ pub struct AppState {
     pub uploader: Arc<upload::Uploader>,
     pub token_mngr: Arc<authn::TokenManager>,
     pub event_hub: events::EventHub,
-    /// The calibration uploader, or `None` when its buffer failed to open at
+    /// The calibration uploader, or `None` when its queue failed to open at
     /// boot.
     pub calibrations: Option<Arc<calibrations::Uploader>>,
 }
@@ -309,7 +309,7 @@ impl AppState {
     }
 }
 
-/// Open the calibration buffer and spawn its uploader. An open failure is
+/// Open the calibration queue and spawn its uploader. An open failure is
 /// logged and leaves calibrations unavailable (fail-open, like the uploader
 /// and deleter), so a bad calibrations directory can't block config
 /// deployment.
@@ -323,11 +323,11 @@ async fn init_calibrations(
     Option<tokio::task::JoinHandle<()>>,
 ) {
     let layout = layout.calibrations();
-    let buffer = match calibrations::open(&layout, calibrations::DEFAULT_OPTIONS).await {
-        Ok(buffer) => buffer,
+    let queue = match calibrations::open(&layout, calibrations::DEFAULT_OPTIONS).await {
+        Ok(queue) => queue,
         Err(e) => {
             tracing::error!(
-                "failed to open the calibration buffer; calibrations are unavailable until restart: {e}"
+                "failed to open the calibration queue; calibrations are unavailable until restart: {e}"
             );
             return (None, None);
         }
@@ -340,7 +340,7 @@ async fn init_calibrations(
         }
     };
     let args = calibrations::UploaderArgs {
-        buffer,
+        queue,
         failed: layout.failed(),
         sender: Arc::new(calibrations::HttpSender::new(http_client, token_mngr)),
         events,

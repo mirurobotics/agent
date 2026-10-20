@@ -8,11 +8,11 @@ use std::time::Duration;
 use crate::mocks::calibration_sender::{MockCalibrationSender, Step};
 use crate::test_utils::calibrations::layout;
 use crate::test_utils::filesys::dirs as test_dirs;
-use miru_agent::buffer::BufferOptions;
 use miru_agent::calibrations::{self, CalibrationJob, Report, Uploader, UploaderArgs};
 use miru_agent::disk::{self, Layout};
 use miru_agent::errors::{Error, HTTPCode};
 use miru_agent::models::{Deployment, DplActivity};
+use miru_agent::queue::DirQueueOptions;
 use miru_agent::services::calibration::{self, CreateParams, Created};
 use miru_agent::services::ServiceErr;
 
@@ -34,12 +34,12 @@ impl Fixture {
         Self::with_options(calibrations::DEFAULT_OPTIONS).await
     }
 
-    async fn with_options(options: BufferOptions) -> Self {
+    async fn with_options(options: DirQueueOptions) -> Self {
         let dir = test_dirs::temp("calibration_service_test").unwrap();
         let calibrations_layout = layout(&dir);
         let (sender, started) = MockCalibrationSender::new();
         let args = UploaderArgs {
-            buffer: calibrations::open(&calibrations_layout, options)
+            queue: calibrations::open(&calibrations_layout, options)
                 .await
                 .unwrap(),
             failed: calibrations_layout.failed(),
@@ -99,7 +99,7 @@ fn params() -> CreateParams {
         role: Some("left".to_string()),
         aspect: Some("pose".to_string()),
         serial_number: Some("SN-1".to_string()),
-        // extra keys are kept: the caller's value is buffered unchanged
+        // extra keys are kept: the caller's value is queued unchanged
         content: json!({ "format": "yaml", "data": "offset: 1", "note": "kept" }),
     }
 }
@@ -161,13 +161,13 @@ async fn a_deployments_cache_error_fails_intake() {
 }
 
 #[tokio::test]
-async fn buffer_full_is_507() {
-    let options = BufferOptions {
+async fn queue_full_is_507() {
+    let options = DirQueueOptions {
         max_items: 1,
         ..calibrations::DEFAULT_OPTIONS
     };
     let fixture = Fixture::with_options(options).await;
-    // the first report stays buffered while its upload hangs
+    // the first report stays queued while its upload hangs
     let (_hold, hang) = oneshot::channel();
     fixture.sender.push(Step::Hang(hang));
     fixture.create(params()).await.unwrap();
@@ -182,7 +182,7 @@ async fn buffer_full_is_507() {
 
 #[tokio::test]
 async fn an_oversized_report_is_413() {
-    let options = BufferOptions {
+    let options = DirQueueOptions {
         max_item_bytes: 100,
         ..calibrations::DEFAULT_OPTIONS
     };

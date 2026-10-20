@@ -1,14 +1,14 @@
-//! The calibration instantiation of the generic buffer: its paths, caps and
-//! the 507 it maps a full buffer to. Buffer behavior itself is covered in
-//! `agent/tests/buffer/`.
+//! The calibration instantiation of the directory-backed queue: its paths,
+//! caps and the 507 and 413 it maps errors to. Queue behavior itself is
+//! covered in `agent/tests/queue/dir.rs`.
 
 // internal crates
 use crate::test_utils::filesys::dirs as test_dirs;
-use miru_agent::buffer::BufferOptions;
 use miru_agent::calibrations::{self, CalibrationJob, CalibrationsErr, Report};
 use miru_agent::disk::layout::CalibrationsLayout;
 use miru_agent::errors::{Code, Error, HTTPCode};
 use miru_agent::filesys::PathExt;
+use miru_agent::queue::DirQueueOptions;
 
 // external crates
 use chrono::DateTime;
@@ -43,37 +43,37 @@ fn default_options_are_1000_reports_of_2_mib() {
 
 #[tokio::test]
 async fn stores_reports_under_the_calibrations_layout() {
-    let dir = test_dirs::temp("calibration_buffer_test").unwrap();
+    let dir = test_dirs::temp("calibration_queue_test").unwrap();
     let layout = layout(&dir);
 
     let id = {
-        let mut buffer = calibrations::open(&layout, calibrations::DEFAULT_OPTIONS)
+        let mut queue = calibrations::open(&layout, calibrations::DEFAULT_OPTIONS)
             .await
             .unwrap();
-        buffer.enqueue(report("arm")).await.unwrap()
+        queue.enqueue(report("arm")).await.unwrap()
     };
 
     assert!(layout.queue().exists());
     assert!(layout.content().file(&format!("{id}.json")).exists());
-    let buffer = calibrations::open(&layout, calibrations::DEFAULT_OPTIONS)
+    let queue = calibrations::open(&layout, calibrations::DEFAULT_OPTIONS)
         .await
         .unwrap();
-    assert_eq!(buffer.read(id).await.unwrap(), report("arm"));
+    assert_eq!(queue.read(id).await.unwrap(), report("arm"));
 }
 
 #[tokio::test]
 async fn a_full_buffer_is_507_calibration_buffer_full() {
-    let dir = test_dirs::temp("calibration_buffer_test").unwrap();
-    let options = BufferOptions {
+    let dir = test_dirs::temp("calibration_queue_test").unwrap();
+    let options = DirQueueOptions {
         max_items: 1,
         max_item_bytes: 1024,
     };
-    let mut buffer = calibrations::open(&layout(&dir), options).await.unwrap();
-    buffer.enqueue(report("arm")).await.unwrap();
+    let mut queue = calibrations::open(&layout(&dir), options).await.unwrap();
+    queue.enqueue(report("arm")).await.unwrap();
 
-    let err = CalibrationsErr::from(buffer.enqueue(report("leg")).await.unwrap_err());
+    let err = CalibrationsErr::from(queue.enqueue(report("leg")).await.unwrap_err());
 
-    assert!(matches!(err, CalibrationsErr::BufferFullErr(_)), "{err:?}");
+    assert!(matches!(err, CalibrationsErr::QueueFullErr(_)), "{err:?}");
     assert!(matches!(err.code(), Code::CalibrationBufferFull));
     assert_eq!(err.code().as_str(), "calibration_buffer_full");
     assert_eq!(err.http_status(), HTTPCode::INSUFFICIENT_STORAGE);
@@ -82,37 +82,37 @@ async fn a_full_buffer_is_507_calibration_buffer_full() {
 
 #[tokio::test]
 async fn an_oversized_report_is_413_calibration_too_large() {
-    let dir = test_dirs::temp("calibration_buffer_test").unwrap();
-    let options = BufferOptions {
+    let dir = test_dirs::temp("calibration_queue_test").unwrap();
+    let options = DirQueueOptions {
         max_items: 10,
         max_item_bytes: 100,
     };
-    let mut buffer = calibrations::open(&layout(&dir), options).await.unwrap();
+    let mut queue = calibrations::open(&layout(&dir), options).await.unwrap();
     let mut big = report("arm");
     big.content = json!({ "format": "text", "data": "x".repeat(200) });
 
-    let err = CalibrationsErr::from(buffer.enqueue(big).await.unwrap_err());
+    let err = CalibrationsErr::from(queue.enqueue(big).await.unwrap_err());
 
     assert!(matches!(err, CalibrationsErr::TooLargeErr(_)), "{err:?}");
     assert!(matches!(err.code(), Code::CalibrationTooLarge));
     assert_eq!(err.code().as_str(), "calibration_too_large");
     assert_eq!(err.http_status(), HTTPCode::PAYLOAD_TOO_LARGE);
     assert_eq!(err.params(), Some(json!({ "max_bytes": 100 })));
-    assert!(buffer.is_empty());
+    assert!(queue.is_empty());
 }
 
 #[tokio::test]
-async fn other_buffer_errors_pass_through_as_internal() {
-    let dir = test_dirs::temp("calibration_buffer_test").unwrap();
+async fn other_queue_errors_pass_through_as_internal() {
+    let dir = test_dirs::temp("calibration_queue_test").unwrap();
     let layout = layout(&dir);
-    // a file where the buffer root should be
+    // a file where the queue root should be
     std::fs::write(layout.root.path(), "x").unwrap();
 
     let Err(err) = calibrations::open(&layout, calibrations::DEFAULT_OPTIONS).await else {
         panic!("expected the open to fail");
     };
 
-    assert!(matches!(err, CalibrationsErr::BufferErr(_)), "{err:?}");
+    assert!(matches!(err, CalibrationsErr::QueueErr(_)), "{err:?}");
     assert!(matches!(err.code(), Code::InternalServerError), "{err}");
     assert_eq!(err.http_status(), HTTPCode::INTERNAL_SERVER_ERROR);
 }

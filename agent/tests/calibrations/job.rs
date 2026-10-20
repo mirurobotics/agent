@@ -4,10 +4,9 @@
 // internal crates
 use crate::queue::queue_suite;
 use crate::test_utils::filesys::dirs as test_dirs;
-use miru_agent::buffer::BufferJob;
 use miru_agent::calibrations::{CalibrationJob, Queue, QueueSnapshot, QueueSnapshotFile};
 use miru_agent::filesys::{files, File, WriteOptions};
-use miru_agent::queue::QueueJob;
+use miru_agent::queue::{DirQueueJob, QueueJob};
 
 // external crates
 use chrono::{DateTime, Utc};
@@ -30,7 +29,7 @@ queue_suite!(calibration_job, "calibration-generic-queue-test");
 #[test]
 fn received_at_is_the_calibration_time() {
     let job = calibration_job("arm");
-    assert_eq!(BufferJob::received_at(&job), job.calibrated_at);
+    assert_eq!(DirQueueJob::received_at(&job), job.calibrated_at);
 }
 
 #[test]
@@ -58,9 +57,9 @@ async fn open(path: &File) -> QueueSnapshotFile {
 mod wire {
     use super::*;
 
-    /// Pins the persisted shape of `queue.json`. It holds buffered reports the
+    /// Pins the persisted shape of `queue.json`. It holds queued reports the
     /// agent has promised to deliver, so a shape change must fail here rather
-    /// than strand a live buffer.
+    /// than strand a live queue.
     #[tokio::test]
     async fn raw_json_snapshot_loads() {
         let dir = test_dirs::temp("calibration_queue_test").unwrap();

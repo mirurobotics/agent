@@ -11,12 +11,12 @@ use crate::mocks::calibration_sender::{MockCalibrationSender, Step};
 use crate::mocks::error::SleepController;
 use crate::test_utils::calibrations::{layout, report};
 use crate::test_utils::filesys::dirs as test_dirs;
-use miru_agent::buffer::BufferOptions;
 use miru_agent::calibrations::{
-    self, Buffer, CalibrationsErr, Uploader, UploaderArgs, UploaderOptions,
+    self, CalibrationsErr, DirQueue, Uploader, UploaderArgs, UploaderOptions,
 };
 use miru_agent::disk::layout::CalibrationsLayout;
 use miru_agent::filesys::{dirs, files, File, PathExt, WriteOptions};
+use miru_agent::queue::DirQueueOptions;
 use miru_agent::sync::syncer::{CooldownEnd, SyncEvent};
 
 // external crates
@@ -59,23 +59,23 @@ impl Harness {
         }
     }
 
-    async fn open(&self) -> Buffer {
+    async fn open(&self) -> DirQueue {
         self.open_with(calibrations::DEFAULT_OPTIONS).await
     }
 
-    async fn open_with(&self, options: BufferOptions) -> Buffer {
+    async fn open_with(&self, options: DirQueueOptions) -> DirQueue {
         calibrations::open(&self.layout, options).await.unwrap()
     }
 
-    /// Open the buffer and run an uploader on it until the test ends.
+    /// Open the queue and run an uploader on it until the test ends.
     async fn spawn(&mut self) {
-        let buffer = self.open().await;
-        self.spawn_with(buffer);
+        let queue = self.open().await;
+        self.spawn_with(queue);
     }
 
-    fn spawn_with(&mut self, buffer: Buffer) {
+    fn spawn_with(&mut self, queue: DirQueue) {
         let args = UploaderArgs {
-            buffer,
+            queue,
             failed: self.layout.failed(),
             sender: self.sender.clone(),
             events: self.events.as_ref().map(watch::Sender::subscribe),
@@ -124,7 +124,7 @@ impl Harness {
         guard(self.started.recv()).await.unwrap();
     }
 
-    /// Wait until every report is sent and the buffer is empty.
+    /// Wait until every report is sent and the queue is empty.
     async fn await_drained(&self, sent: &[&str]) {
         eventually(|| async { self.sender.sent() == strings(sent) && self.len().await == 0 }).await;
     }
@@ -135,14 +135,14 @@ impl Harness {
     }
 }
 
-/// A buffer at `h`'s layout holding a report per slug, oldest first.
-async fn preloaded(h: &Harness, slugs: &[&str]) -> (Buffer, Vec<Uuid>) {
-    let mut buffer = h.open().await;
+/// A queue at `h`'s layout holding a report per slug, oldest first.
+async fn preloaded(h: &Harness, slugs: &[&str]) -> (DirQueue, Vec<Uuid>) {
+    let mut queue = h.open().await;
     let mut ids = Vec::with_capacity(slugs.len());
     for slug in slugs {
-        ids.push(buffer.enqueue(report(slug)).await.unwrap());
+        ids.push(queue.enqueue(report(slug)).await.unwrap());
     }
-    (buffer, ids)
+    (queue, ids)
 }
 
 async fn guard<T>(future: impl Future<Output = T>) -> T {
@@ -172,9 +172,9 @@ fn strings(names: &[&str]) -> Vec<String> {
 #[tokio::test]
 async fn drains_reports_buffered_before_start_in_order() {
     let mut h = Harness::new();
-    let (buffer, _) = preloaded(&h, &["a", "b", "c"]).await;
+    let (queue, _) = preloaded(&h, &["a", "b", "c"]).await;
 
-    h.spawn_with(buffer);
+    h.spawn_with(queue);
 
     h.await_drained(&["a", "b", "c"]).await;
     assert!(dirs::files(&h.layout.content()).await.unwrap().is_empty());
@@ -228,22 +228,22 @@ async fn intake_during_a_backoff_does_not_extend_it() {
 }
 
 #[tokio::test]
-async fn a_full_buffer_is_507_and_keeps_what_it_holds() {
+async fn a_full_queue_is_507_and_keeps_what_it_holds() {
     let mut h = Harness::new();
     let (_hold, hang) = oneshot::channel::<()>();
     h.sender.push(Step::Hang(hang));
-    let options = BufferOptions {
+    let options = DirQueueOptions {
         max_items: 1,
         ..calibrations::DEFAULT_OPTIONS
     };
-    let buffer = h.open_with(options).await;
-    h.spawn_with(buffer);
+    let queue = h.open_with(options).await;
+    h.spawn_with(queue);
     h.enqueue("a").await;
     h.await_started().await;
 
     let err = h.uploader().enqueue(report("b")).await.unwrap_err();
 
-    assert!(matches!(err, CalibrationsErr::BufferFullErr(_)), "{err:?}");
+    assert!(matches!(err, CalibrationsErr::QueueFullErr(_)), "{err:?}");
     assert_eq!(h.len().await, 1);
 }
 
@@ -251,8 +251,8 @@ async fn a_full_buffer_is_507_and_keeps_what_it_holds() {
 async fn offline_then_online_uploads_in_order() {
     let mut h = Harness::new();
     h.sender.push(Step::Network);
-    let (buffer, _) = preloaded(&h, &["a", "b"]).await;
-    h.spawn_with(buffer);
+    let (queue, _) = preloaded(&h, &["a", "b"]).await;
+    h.spawn_with(queue);
 
     h.await_sleep().await;
     assert_eq!(h.sleeps_secs(), [10]);
@@ -339,8 +339,8 @@ async fn a_success_resets_the_backoff() {
     h.sender.push(Step::Server);
     h.sender.push(Step::Ok);
     h.sender.push(Step::Server);
-    let (buffer, _) = preloaded(&h, &["a", "b"]).await;
-    h.spawn_with(buffer);
+    let (queue, _) = preloaded(&h, &["a", "b"]).await;
+    h.spawn_with(queue);
 
     for _ in 0..2 {
         h.await_sleep().await;
@@ -371,7 +371,7 @@ async fn terminal_rejection_is_parked_not_retried() {
 #[tokio::test]
 async fn an_unreadable_report_is_parked_without_sending() {
     let mut h = Harness::new();
-    let (buffer, ids) = preloaded(&h, &["a", "b"]).await;
+    let (queue, ids) = preloaded(&h, &["a", "b"]).await;
     files::write_string(
         &h.content_file(ids[0]),
         "not json",
@@ -379,7 +379,7 @@ async fn an_unreadable_report_is_parked_without_sending() {
     )
     .await
     .unwrap();
-    h.spawn_with(buffer);
+    h.spawn_with(queue);
 
     h.await_drained(&["b"]).await;
     let parked = files::read_string(&h.failed_file(ids[0])).await.unwrap();
@@ -389,9 +389,9 @@ async fn an_unreadable_report_is_parked_without_sending() {
 #[tokio::test]
 async fn a_report_whose_file_is_missing_is_dropped() {
     let mut h = Harness::new();
-    let (buffer, ids) = preloaded(&h, &["a", "b"]).await;
+    let (queue, ids) = preloaded(&h, &["a", "b"]).await;
     files::delete(&h.content_file(ids[0])).await.unwrap();
-    h.spawn_with(buffer);
+    h.spawn_with(queue);
 
     h.await_drained(&["b"]).await;
     assert!(!h.failed_file(ids[0]).exists());
@@ -424,12 +424,12 @@ async fn a_failed_park_is_retried() {
 #[tokio::test]
 async fn a_read_error_is_retried() {
     let mut h = Harness::new();
-    let (buffer, ids) = preloaded(&h, &["a"]).await;
+    let (queue, ids) = preloaded(&h, &["a"]).await;
     // a directory where the report file should be cannot be read
     files::delete(&h.content_file(ids[0])).await.unwrap();
     let dir = h.layout.content().subdir(format!("{}.json", ids[0]));
     dirs::create(&dir).await.unwrap();
-    h.spawn_with(buffer);
+    h.spawn_with(queue);
 
     h.await_sleep().await;
     assert_eq!(h.sleeps_secs(), [10]);

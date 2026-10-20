@@ -250,7 +250,7 @@ async fn shutdown_signal_received() {
 
 #[serial]
 #[tokio::test]
-async fn runs_without_calibrations_when_the_buffer_cannot_open() {
+async fn runs_without_calibrations_when_the_queue_cannot_open() {
     let (_dir, layout) = activated_layout().await;
     // a regular file where the calibrations directory should be
     files::write_string(

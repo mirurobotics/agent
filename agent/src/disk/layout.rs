@@ -149,7 +149,7 @@ impl AuthLayout {
     }
 }
 
-/// The calibration buffer: a queue snapshot plus one report file per buffered
+/// The calibration queue: a queue snapshot plus one report file per queued
 /// calibration, so a queue write never rewrites the (possibly large) content.
 pub struct CalibrationsLayout {
     pub root: filesys::Dir,

@@ -4,12 +4,13 @@ use std::marker::PhantomData;
 use std::str::FromStr;
 
 // internal crates
-use crate::buffer::{
-    errors::{BufferErr, BufferFullErr, ItemTooLargeErr, SerializeItemErr},
-    job::{BufferJob, Item},
-};
 use crate::filesys::{dirs, files, Dir, File, FileSysErr, Overwrite, PathExt, WriteOptions};
-use crate::queue::{Queue, QueueEntry, QueueJob, QueueSnapshot, QueueSnapshotFile};
+use crate::queue::{
+    errors::{DirQueueErr, ItemTooLargeErr, QueueFullErr, SerializeItemErr},
+    item::Item,
+    job::{DirQueueJob, QueueJob},
+    Queue, QueueEntry, QueueSnapshot, QueueSnapshotFile,
+};
 use crate::trace;
 
 // external crates
@@ -28,27 +29,27 @@ const ITEM_EXT: &str = ".json";
 const CORRUPT_EXT: &str = ".corrupt";
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub struct BufferOptions {
-    /// The most items the buffer holds at once.
+pub struct DirQueueOptions {
+    /// The most items the queue holds at once.
     pub max_items: usize,
-    /// The largest item file the buffer accepts, in bytes.
+    /// The largest item file the queue accepts, in bytes.
     pub max_item_bytes: u64,
 }
 
 /// A FIFO of accepted items that survives agent restarts until each one is
-/// [`Buffer::remove`]d.
+/// [`DirQueue::remove`]d.
 ///
 /// The queue (`queue_file`) holds each item's job, attempt count and backoff,
 /// and each item's content lives in its own file under `content_dir`, so a
 /// queue write never rewrites large content. An item is accepted only once
 /// both are on disk: the item file is written first and the queue entry
 /// second, so a crash between the two leaves an orphan file that the next
-/// [`Buffer::open`] removes, never a queue entry without content. Unlike a
-/// cache, the buffer never evicts: when full it rejects new items. Disk use is
+/// [`DirQueue::open`] removes, never a queue entry without content. Unlike a
+/// cache, the queue never evicts: when full it rejects new items. Disk use is
 /// bounded by `max_items` times `max_item_bytes`.
 ///
-/// The buffer is single-owner (`&mut self`); callers that share it wrap it.
-pub struct Buffer<J: BufferJob, C> {
+/// The queue is single-owner (`&mut self`); callers that share it wrap it.
+pub struct DirQueue<J: DirQueueJob, C> {
     queue: Queue<J>,
     content_dir: Dir,
     max_items: usize,
@@ -56,32 +57,32 @@ pub struct Buffer<J: BufferJob, C> {
     _content: PhantomData<C>,
 }
 
-impl<J, C> Buffer<J, C>
+impl<J, C> DirQueue<J, C>
 where
-    J: BufferJob,
+    J: DirQueueJob,
     C: Serialize + DeserializeOwned,
 {
-    /// Load the buffer, creating it when absent. A missing `queue_file` is
+    /// Load the queue, creating it when absent. A missing `queue_file` is
     /// rebuilt from the item files, and an unparseable one is set aside with
     /// [`CORRUPT_EXT`] and rebuilt the same way. Item files with no queue
     /// entry are deleted, and queue entries with no item file are dropped.
     pub async fn open(
         queue_file: File,
         content_dir: Dir,
-        options: BufferOptions,
-    ) -> Result<Self, BufferErr> {
+        options: DirQueueOptions,
+    ) -> Result<Self, DirQueueErr> {
         dirs::create_if_absent(&content_dir).await?;
         let snapshot_file = load_snapshot::<J, C>(&queue_file, &content_dir).await?;
-        let mut buffer = Self {
+        let mut queue = Self {
             queue: Queue::from_snapshot(options.max_items, snapshot_file),
             content_dir,
             max_items: options.max_items,
             max_item_bytes: options.max_item_bytes,
             _content: PhantomData,
         };
-        buffer.reconcile().await?;
-        info!("{} buffer loaded: {} item(s)", J::LABEL, buffer.len());
-        Ok(buffer)
+        queue.reconcile().await?;
+        info!("{} queue loaded: {} item(s)", J::LABEL, queue.len());
+        Ok(queue)
     }
 
     // ================ Accessors ================ //
@@ -94,12 +95,12 @@ where
         self.queue.is_empty()
     }
 
-    /// The buffered items' queue entries, oldest first.
+    /// The queued items' entries, oldest first.
     pub fn entries(&self) -> Vec<QueueEntry<J>> {
         self.queue.iter().cloned().collect()
     }
 
-    /// The oldest item that is due at `now`. The entry stays buffered until
+    /// The oldest item that is due at `now`. The entry stays queued until
     /// [`Self::remove`]d.
     pub fn next_ready(&self, now: DateTime<Utc>) -> Option<QueueEntry<J>> {
         self.queue.next_ready(now)
@@ -110,21 +111,21 @@ where
     }
 
     /// Read the item file of the queue entry `id`.
-    pub async fn read(&self, id: Uuid) -> Result<Item<J, C>, BufferErr> {
+    pub async fn read(&self, id: Uuid) -> Result<Item<J, C>, DirQueueErr> {
         Ok(files::read_json::<Item<J, C>>(&self.item_file(id)).await?)
     }
 
     // ================ Mutators ================ //
 
-    /// Buffer `item` durably. On success the item file and its queue entry are
-    /// both on disk. On any error nothing is buffered: a full buffer returns
-    /// [`BufferFullErr`] rather than dropping an older item, and an item file
+    /// Queue `item` durably. On success the item file and its queue entry are
+    /// both on disk. On any error nothing is queued: a full queue returns
+    /// [`QueueFullErr`] rather than dropping an older item, and an item file
     /// over `max_item_bytes` returns [`ItemTooLargeErr`]. Returns
     /// the new queue entry's id, which also names its item file.
-    pub async fn enqueue(&mut self, item: Item<J, C>) -> Result<Uuid, BufferErr> {
+    pub async fn enqueue(&mut self, item: Item<J, C>) -> Result<Uuid, DirQueueErr> {
         let id = Uuid::new_v4();
         let file = self.item_file(id);
-        self.verify_capacity()?;
+        self.verify_capacity(item.job.name())?;
         let bytes = serialize_item(id, &item)?;
         self.verify_item_size(bytes.len() as u64)?;
 
@@ -160,8 +161,8 @@ where
         &mut self,
         id: Uuid,
         dest_dir: &Dir,
-    ) -> Result<Option<QueueEntry<J>>, BufferErr> {
-        if !self.is_buffered(id) {
+    ) -> Result<Option<QueueEntry<J>>, DirQueueErr> {
+        if !self.is_queued(id) {
             return Ok(None);
         }
         dirs::create_if_absent(dest_dir).await?;
@@ -175,12 +176,12 @@ where
     }
 
     /// Move `entry` to the tail with its updated attempt count and deadline.
-    /// An entry that is no longer buffered (already removed, or stale) is
+    /// An entry that is no longer queued (already removed, or stale) is
     /// ignored, so it can't come back without its item file.
     pub async fn requeue(&mut self, entry: QueueEntry<J>) {
-        if !self.is_buffered(entry.id) {
+        if !self.is_queued(entry.id) {
             warn!(
-                "{}: ignoring requeue of {}, which is not buffered",
+                "{}: ignoring requeue of {}, which is not queued",
                 J::LABEL,
                 entry.job.name()
             );
@@ -195,26 +196,20 @@ where
         item_file(&self.content_dir, id)
     }
 
-    fn is_buffered(&self, id: Uuid) -> bool {
+    fn is_queued(&self, id: Uuid) -> bool {
         self.queue.iter().any(|entry| entry.id == id)
     }
 
-    fn verify_capacity(&self) -> Result<(), BufferErr> {
-        let items = self.queue.len();
-        if items < self.max_items {
+    fn verify_capacity(&self, name: String) -> Result<(), DirQueueErr> {
+        if self.queue.len() < self.max_items {
             return Ok(());
         }
-        let err = BufferFullErr {
-            label: J::LABEL,
-            items,
-            max_items: self.max_items,
-            trace: trace!(),
-        };
+        let err = QueueFullErr::new(J::LABEL, self.max_items, name);
         warn!("{err}");
-        Err(BufferErr::BufferFullErr(err))
+        Err(DirQueueErr::QueueFullErr(err))
     }
 
-    fn verify_item_size(&self, item_bytes: u64) -> Result<(), BufferErr> {
+    fn verify_item_size(&self, item_bytes: u64) -> Result<(), DirQueueErr> {
         if item_bytes <= self.max_item_bytes {
             return Ok(());
         }
@@ -225,16 +220,16 @@ where
             trace: trace!(),
         };
         warn!("{err}");
-        Err(BufferErr::ItemTooLargeErr(err))
+        Err(DirQueueErr::ItemTooLargeErr(err))
     }
 
     /// Make the queue and the content directory agree: delete item files that
     /// have no queue entry, and drop queue entries whose file is gone. Files
-    /// already buffered are kept even if they exceed a lowered size cap. A
+    /// already queued are kept even if they exceed a lowered size cap. A
     /// failed listing fails the open, since acting on it would drop every
     /// entry. Problems with single files are logged, never fatal: a file that
     /// cannot be cleaned up now is retried on the next open.
-    async fn reconcile(&mut self) -> Result<(), BufferErr> {
+    async fn reconcile(&mut self) -> Result<(), DirQueueErr> {
         let queued: HashSet<Uuid> = self.queue.iter().map(|entry| entry.id).collect();
         let mut found = HashSet::new();
         for (id, file) in item_files(&self.content_dir).await? {
@@ -274,9 +269,9 @@ fn item_file(content_dir: &Dir, id: Uuid) -> File {
 fn serialize_item<J: QueueJob, C: Serialize>(
     id: Uuid,
     item: &Item<J, C>,
-) -> Result<Vec<u8>, BufferErr> {
+) -> Result<Vec<u8>, DirQueueErr> {
     serde_json::to_vec(item).map_err(|source| {
-        BufferErr::SerializeItemErr(SerializeItemErr {
+        DirQueueErr::SerializeItemErr(SerializeItemErr {
             label: J::LABEL,
             id,
             source,
@@ -294,7 +289,7 @@ async fn delete_item_file<J: QueueJob>(file: &File) {
 /// The item files in `content_dir` with their queue entry ids. Only names in
 /// the exact form [`item_file`] writes count. A listing error is returned,
 /// never treated as an empty directory.
-async fn item_files(content_dir: &Dir) -> Result<Vec<(Uuid, File)>, BufferErr> {
+async fn item_files(content_dir: &Dir) -> Result<Vec<(Uuid, File)>, DirQueueErr> {
     let listing = dirs::files(content_dir).await?;
     Ok(listing
         .into_iter()
@@ -316,9 +311,9 @@ async fn item_files(content_dir: &Dir) -> Result<Vec<(Uuid, File)>, BufferErr> {
 async fn load_snapshot<J, C>(
     queue_file: &File,
     content_dir: &Dir,
-) -> Result<QueueSnapshotFile<J>, BufferErr>
+) -> Result<QueueSnapshotFile<J>, DirQueueErr>
 where
-    J: BufferJob,
+    J: DirQueueJob,
     C: DeserializeOwned,
 {
     if !queue_file.exists() {
@@ -348,13 +343,13 @@ where
 }
 
 /// A queue holding every readable item file under its own entry id, oldest
-/// [`BufferJob::received_at`] first. Attempt counts and backoff are lost, so
+/// [`DirQueueJob::received_at`] first. Attempt counts and backoff are lost, so
 /// every item is due at once. An item file that cannot be parsed is renamed
 /// with [`CORRUPT_EXT`] and skipped. A failed listing or read is returned,
 /// never rebuilt as a smaller queue.
-async fn rebuild_snapshot<J, C>(content_dir: &Dir) -> Result<QueueSnapshot<J>, BufferErr>
+async fn rebuild_snapshot<J, C>(content_dir: &Dir) -> Result<QueueSnapshot<J>, DirQueueErr>
 where
-    J: BufferJob,
+    J: DirQueueJob,
     C: DeserializeOwned,
 {
     let mut entries = Vec::new();

@@ -305,7 +305,7 @@ pub mod init {
     }
 
     #[tokio::test]
-    async fn calibrations_degrade_when_buffer_path_unwritable() {
+    async fn calibrations_degrade_when_queue_path_unwritable() {
         let env = TestEnv::valid().await;
         // a regular file where the calibrations directory should be
         files::write_string(

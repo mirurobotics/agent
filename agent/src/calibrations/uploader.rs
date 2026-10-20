@@ -4,15 +4,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 // internal crates
-use crate::buffer::BufferErr;
 use crate::calibrations::{
-    buffer::{Buffer, Report},
     errors::{CalibrationsErr, InvalidReportErr, ReceiveActorMessageErr, SendActorMessageErr},
+    queue::{DirQueue, Report},
     sender::Sender,
 };
 use crate::cooldown;
 use crate::errors::Error;
 use crate::filesys::{errors::ParseJSONErr, Dir, FileSysErr};
+use crate::queue::DirQueueErr;
 use crate::sync::syncer::SyncEvent;
 use crate::trace;
 use crate::workers::next_sync_event;
@@ -44,7 +44,7 @@ impl Default for UploaderOptions {
 }
 
 pub struct UploaderArgs<S, F> {
-    pub buffer: Buffer,
+    pub queue: DirQueue,
     /// Where reports Miru permanently rejected are parked.
     pub failed: Dir,
     pub sender: Arc<S>,
@@ -74,11 +74,11 @@ enum Flow {
     Shutdown,
 }
 
-/// How one attempt at the oldest buffered report ended.
+/// How one attempt at the oldest queued report ended.
 enum Outcome {
-    /// Sent, parked or dropped: the report is no longer buffered.
+    /// Sent, parked or dropped: the report is no longer queued.
     Resolved,
-    /// The report stays at the head of the buffer and is retried after a wait.
+    /// The report stays at the head of the queue and is retried after a wait.
     Retry { network: bool },
 }
 
@@ -107,7 +107,7 @@ impl Streak {
 
 struct Worker<S, F> {
     receiver: mpsc::Receiver<Command>,
-    buffer: Buffer,
+    queue: DirQueue,
     failed: Dir,
     sender: Arc<S>,
     events: Option<watch::Receiver<SyncEvent>>,
@@ -124,7 +124,7 @@ where
 {
     async fn run(mut self) {
         loop {
-            let next = self.buffer.next_ready(Utc::now()).map(|entry| entry.id);
+            let next = self.queue.next_ready(Utc::now()).map(|entry| entry.id);
             let flow = match next {
                 Some(id) => self.attempt(id).await,
                 None => self.idle().await,
@@ -148,18 +148,18 @@ where
     }
 
     /// Send report `id` and resolve it. `None` when a shutdown arrived
-    /// mid-send; the report stays buffered and is re-sent on the next boot.
+    /// mid-send; the report stays queued and is re-sent on the next boot.
     async fn upload(&mut self, id: Uuid) -> Option<Outcome> {
-        let result = match self.buffer.read(id).await {
+        let result = match self.queue.read(id).await {
             Ok(report) => {
                 let sender = self.sender.clone();
                 self.serve_until(async move { sender.send(&report).await })
                     .await?
             }
-            Err(BufferErr::FileSysErr(FileSysErr::PathDoesNotExistErr(_))) => {
+            Err(DirQueueErr::FileSysErr(FileSysErr::PathDoesNotExistErr(_))) => {
                 return Some(self.drop_missing(id).await);
             }
-            Err(BufferErr::FileSysErr(FileSysErr::ParseJSONErr(e))) => Err(unreadable(e)),
+            Err(DirQueueErr::FileSysErr(FileSysErr::ParseJSONErr(e))) => Err(unreadable(e)),
             Err(e) => Err(e.into()),
         };
         Some(self.resolve(id, result).await)
@@ -168,16 +168,16 @@ where
     /// A report whose file is gone has nothing left to send or park.
     async fn drop_missing(&mut self, id: Uuid) -> Outcome {
         error!("calibrations: dropping report {id}, whose file is missing");
-        self.buffer.remove(id).await;
+        self.queue.remove(id).await;
         Outcome::Resolved
     }
 
     /// Remove a sent report, park one that can never be sent, and keep any
-    /// other at the head of the buffer for a retry.
+    /// other at the head of the queue for a retry.
     async fn resolve(&mut self, id: Uuid, result: Result<(), CalibrationsErr>) -> Outcome {
         let err = match result {
             Ok(()) => {
-                self.buffer.remove(id).await;
+                self.queue.remove(id).await;
                 info!("calibrations: uploaded report {id}");
                 return Outcome::Resolved;
             }
@@ -189,7 +189,7 @@ where
                 network: err.is_network_conn_err(),
             };
         }
-        match self.buffer.park(id, &self.failed).await {
+        match self.queue.park(id, &self.failed).await {
             Ok(_) => {
                 error!("calibrations: report {id} can never be uploaded; parked as failed/{id}.json: {err}");
                 Outcome::Resolved
@@ -273,10 +273,10 @@ where
         };
         match cmd {
             Command::Enqueue { report, respond_to } => {
-                let result = self.buffer.enqueue(*report).await;
+                let result = self.queue.enqueue(*report).await;
                 respond(respond_to, result.map_err(CalibrationsErr::from), "enqueue");
             }
-            Command::Len { respond_to } => respond(respond_to, self.buffer.len(), "len"),
+            Command::Len { respond_to } => respond(respond_to, self.queue.len(), "len"),
             Command::Shutdown { respond_to } => {
                 respond(respond_to, (), "shutdown");
                 return Flow::Shutdown;
@@ -302,7 +302,7 @@ fn respond<T>(respond_to: oneshot::Sender<T>, value: T, op: &str) {
 
 // ================================== HANDLE ======================================= //
 /// Handle to the calibration uploader: one task that owns the calibration
-/// buffer, buffers what intake sends it, and uploads reports to Miru one at a
+/// queue, queues what intake sends it, and uploads reports to Miru one at a
 /// time, oldest first. It keeps serving intake during an upload or a backoff.
 #[derive(Debug)]
 pub struct Uploader {
@@ -319,7 +319,7 @@ impl Uploader {
         let (sender, receiver) = mpsc::channel(buffer_size);
         let worker = Worker {
             receiver,
-            buffer: args.buffer,
+            queue: args.queue,
             failed: args.failed,
             sender: args.sender,
             events: args.events,
@@ -330,8 +330,8 @@ impl Uploader {
         (Self { sender }, tokio::spawn(worker.run()))
     }
 
-    /// Buffer `report` durably. A full buffer is the 507
-    /// [`CalibrationsErr::BufferFullErr`], and a report over the size cap the
+    /// Queue `report` durably. A full queue is the 507
+    /// [`CalibrationsErr::QueueFullErr`], and a report over the size cap the
     /// 413 [`CalibrationsErr::TooLargeErr`].
     pub async fn enqueue(&self, report: Report) -> Result<Uuid, CalibrationsErr> {
         self.send_command("enqueue", |respond_to| Command::Enqueue {
@@ -341,7 +341,7 @@ impl Uploader {
         .await?
     }
 
-    /// The number of buffered reports, including one being uploaded.
+    /// The number of queued reports, including one being uploaded.
     // an actor-round-tripping is_empty would be dead weight next to len()
     #[allow(clippy::len_without_is_empty)]
     pub async fn len(&self) -> Result<usize, CalibrationsErr> {
@@ -349,7 +349,7 @@ impl Uploader {
             .await
     }
 
-    /// Stop the uploader, dropping any in-flight upload. Buffered reports,
+    /// Stop the uploader, dropping any in-flight upload. Queued reports,
     /// including the interrupted one, stay on disk for the next boot.
     pub async fn shutdown(&self) -> Result<(), CalibrationsErr> {
         info!("calibrations: shutting down uploader...");

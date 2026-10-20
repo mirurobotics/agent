@@ -5,8 +5,8 @@ use std::sync::Arc;
 // internal crates
 use crate::authn::TokenManagerExt;
 use crate::calibrations::{
-    buffer::Report,
     errors::{CalibrationsErr, InvalidReportErr},
+    queue::Report,
 };
 use crate::http::{self, ClientI, HTTPErr};
 use crate::trace;
@@ -21,7 +21,7 @@ use tracing::warn;
 /// # Cancel safety
 ///
 /// The worker drops an in-flight `send` on shutdown. The report is removed
-/// from the buffer only after `send` returns `Ok`, so an interrupted send is
+/// from the queue only after `send` returns `Ok`, so an interrupted send is
 /// retried on the next boot, and Miru may then store the calibration twice.
 pub trait Sender: Send + Sync {
     fn send(&self, report: &Report) -> impl Future<Output = Result<(), CalibrationsErr>> + Send;
