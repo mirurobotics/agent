@@ -8,16 +8,14 @@
 //!   use the monotonic clock, which never jumps but resets on reboot. Use these
 //!   for cooldowns, backoff and refresh scheduling.
 //! - **What time is it, for sure?** [`Clock::server_now`] is the server's
-//!   time, learned from the `Date` header of the latest server response and
-//!   advanced by monotonic time since. It is `None` until the agent has heard
+//!   time, from the latest reading passed to [`Clock::observe_server_time`]
+//!   and advanced by monotonic time since. It is `None` until the agent has heard
 //!   from the server in this process.
-//!   In the agent the server is the Miru backend: `http::Client` records
-//!   the `Date` header only from responses that come from the backend.
+//!   In the agent the server is the Miru backend: `http::Client` reads its
+//!   time from the `Date` header of backend responses and records it here.
 //! - **Roughly what time is it?** [`Clock::system_now`] is the system clock as-is.
 //!   Use it only for logs.
 
-pub mod http_date;
 pub mod shared;
 
-pub use self::http_date::{parse_age, parse_http_date};
 pub use self::shared::{Clock, SYNC_TOLERANCE};

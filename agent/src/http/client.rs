@@ -4,6 +4,7 @@ use std::sync::Arc;
 // internal crates
 use crate::clock::Clock;
 use crate::http::{
+    date,
     errors::{reqwest_err_to_http_client_err, BuildReqwestErr, HTTPErr, TimeoutErr},
     request, response,
 };
@@ -12,6 +13,7 @@ use crate::trace;
 // external crates
 use serde::de::DeserializeOwned;
 use tokio::time::timeout;
+use tracing::debug;
 
 #[derive(Debug)]
 pub struct Client {
@@ -132,9 +134,12 @@ impl Client {
         }
         let headers = response.headers();
         let header = |name| headers.get(name).and_then(|v| v.to_str().ok());
-        if let Some(date) = header(reqwest::header::DATE) {
-            self.clock
-                .observe_date_header(date, header(reqwest::header::AGE));
+        let Some(date) = header(reqwest::header::DATE) else {
+            return;
+        };
+        match date::server_time(date, header(reqwest::header::AGE)) {
+            Some(server_time) => self.clock.observe_server_time(server_time),
+            None => debug!("http: ignoring unparseable Date header {date:?}"),
         }
     }
 
