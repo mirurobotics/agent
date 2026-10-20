@@ -33,7 +33,7 @@ After the final slice, a running agent has `<data>/calibrations/` (default `/var
 
 ## Surprises & Discoveries
 
-- `serde_json` stops at 128 levels of nesting, while Go's `encoding/json` allows 10,000, so intake rejects json data nested deeper than 128 levels that Miru would accept. Accepted as an edge case; lifting it needs serde_json's `unbounded_depth` feature.
+- Intake's json check deserializes into `serde::de::IgnoredAny`, which serde_json handles with its iterative syntax-only `ignore_value`: there is no 128-level nesting limit and no number range check (evidence: `accepts_deeply_nested_json`). Go's `encoding/json` stops at 10,000 levels, so json nested deeper than that is accepted at intake and parked when Miru rejects it. Accepted as an edge case.
 - `AuthnErr` forwards `is_terminal()` to its inner `HTTPErr`, so a token request Miru answers with, say, 403 is "terminal". Passed through unchanged, that would make the worker park every buffered report while token issuance fails. Evidence: `crate::impl_error!(AuthnErr { .., HTTPErr, .. })` in `agent/src/authn/errors.rs`.
 
 ## Decision Log
@@ -53,6 +53,7 @@ After the final slice, a running agent has `<data>/calibrations/` (default `/var
 - Decision: The worker drops (removes) a queue entry whose report file is missing, since there is nothing to send or park and leaving it at the head would block every later report until restart. A report file that fails to parse is parked (terminal `InvalidReportErr`), and any other read error is a counted retry. The private `Outcome` is `Resolved | Retry { network }`: sent, parked and dropped all reset the streak, and only the logs tell them apart. Date/Author: 2026-10-20, implementer.
 - Decision: `ServiceErr::CalibrationsErr` holds a `Box<CalibrationsErr>`, because the unboxed variant grows `ServiceErr` to 128 bytes and trips clippy's `result_large_err` across `server/`. The size and syntax failures of `content.data` name the field `content.data`; a `content` that isn't a `{ format, data }` object names `content`. Date/Author: 2026-10-20, implementer.
 - Decision: Each send is one HTTP request (no `http::with_retry`); the worker's backoff is the only retry loop. If parking fails, the report is kept and handled like a counted retry. Date/Author: 2026-10-20, plan author.
+- Decision: `HttpSender` treats a `POST /calibrations` whose response body cannot be parsed (`HTTPErr::UnmarshalJSONErr`, which `http::client::fetch` returns only after a 2xx) as sent, with a warning. Miru has stored the report, so retrying would store it again on every attempt and hold the head of the buffer forever, for example if the generated `Calibration` model drifts from Miru's response. Date/Author: 2026-10-20, review.
 
 ## Outcomes & Retrospective
 

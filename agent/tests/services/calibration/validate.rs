@@ -204,6 +204,15 @@ fn rejects_unparseable_json() {
 }
 
 #[test]
+fn accepts_deeply_nested_json() {
+    // the syntax check has no 128-level limit (Go's encoding/json allows
+    // 10,000 levels)
+    let deep = format!("{}{}", "[".repeat(1000), "]".repeat(1000));
+
+    validate::params(&with_data("json", deep)).unwrap();
+}
+
+#[test]
 fn checks_fields_in_order() {
     let p = CreateParams {
         component_slug: "Bad".to_string(),
