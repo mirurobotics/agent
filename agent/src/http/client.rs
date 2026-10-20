@@ -2,6 +2,7 @@
 use std::sync::Arc;
 
 // internal crates
+use crate::clock::Clock;
 use crate::http::{
     errors::{reqwest_err_to_http_client_err, BuildReqwestErr, HTTPErr, TimeoutErr},
     request, response,
@@ -17,6 +18,7 @@ pub struct Client {
     client: reqwest::Client,
     base_url: String,
     headers: request::Headers,
+    clock: Clock,
 }
 
 // Per the reqwest docs, we do not need to wrap the client in Rc or Arc to reuse it
@@ -69,6 +71,12 @@ impl<T: ClientI> ClientI for Arc<T> {
 
 impl Client {
     pub fn new(base_url: &str) -> Result<Self, HTTPErr> {
+        Self::with_clock(base_url, Clock::new())
+    }
+
+    /// A client that records the backend's time from every response into
+    /// `clock`.
+    pub fn with_clock(base_url: &str, clock: Clock) -> Result<Self, HTTPErr> {
         let client = reqwest::Client::builder().build().map_err(|e| {
             HTTPErr::BuildReqwestErr(BuildReqwestErr {
                 source: e,
@@ -79,7 +87,13 @@ impl Client {
             client,
             base_url: base_url.to_string(),
             headers: request::Headers::default(),
+            clock,
         })
+    }
+
+    /// The clock this client feeds with the backend's time.
+    pub fn clock(&self) -> &Clock {
+        &self.clock
     }
 
     pub fn build_request(&self, params: request::Params) -> Result<request::Request, HTTPErr> {
@@ -94,10 +108,18 @@ impl Client {
                 trace: trace!(),
             })),
             Ok(Err(e)) => Err(reqwest_err_to_http_client_err(e, req.meta, trace!())),
-            Ok(Ok(response)) => Ok(response::Response {
-                reqwest: response,
-                meta: req.meta,
-            }),
+            Ok(Ok(response)) => {
+                // any response, error statuses included, carries the server's time
+                if let Some(date) = response.headers().get(reqwest::header::DATE) {
+                    if let Ok(date) = date.to_str() {
+                        self.clock.observe_date_header(date);
+                    }
+                }
+                Ok(response::Response {
+                    reqwest: response,
+                    meta: req.meta,
+                })
+            }
         }
     }
 }
