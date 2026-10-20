@@ -11,6 +11,7 @@ use crate::http::{
 use crate::trace;
 
 // external crates
+use chrono::{DateTime, Utc};
 use serde::de::DeserializeOwned;
 use tokio::time::timeout;
 use tracing::debug;
@@ -37,6 +38,16 @@ pub struct Client {
 pub trait ClientI: Send + Sync {
     fn base_url(&self) -> &str;
 
+    /// The server's time now, if this client has heard from the backend.
+    fn server_now(&self) -> Option<DateTime<Utc>> {
+        None
+    }
+
+    /// The server's time when known, else the system clock.
+    fn server_or_system_now(&self) -> DateTime<Utc> {
+        self.server_now().unwrap_or_else(Utc::now)
+    }
+
     /// Build, send, handle response — returns body text and request metadata.
     fn execute(
         &self,
@@ -47,6 +58,14 @@ pub trait ClientI: Send + Sync {
 impl ClientI for Client {
     fn base_url(&self) -> &str {
         &self.base_url
+    }
+
+    fn server_now(&self) -> Option<DateTime<Utc>> {
+        self.clock.server_now()
+    }
+
+    fn server_or_system_now(&self) -> DateTime<Utc> {
+        self.clock.server_or_system_now()
     }
 
     async fn execute(
@@ -66,6 +85,14 @@ impl<T: ClientI> ClientI for Arc<T> {
         self.as_ref().base_url()
     }
 
+    fn server_now(&self) -> Option<DateTime<Utc>> {
+        self.as_ref().server_now()
+    }
+
+    fn server_or_system_now(&self) -> DateTime<Utc> {
+        self.as_ref().server_or_system_now()
+    }
+
     async fn execute(
         &self,
         params: request::Params<'_>,
@@ -79,7 +106,7 @@ impl Client {
         Self::with_clock(base_url, Clock::new())
     }
 
-    /// A client that records the backend's time into `clock` from every
+    /// A client that records the server's time into `clock` from every
     /// response that comes from `base_url`'s origin.
     pub fn with_clock(base_url: &str, clock: Clock) -> Result<Self, HTTPErr> {
         let client = reqwest::Client::builder().build().map_err(|e| {
@@ -97,7 +124,7 @@ impl Client {
         })
     }
 
-    /// The clock this client feeds with the backend's time.
+    /// The clock this client feeds with the server's time.
     pub fn clock(&self) -> &Clock {
         &self.clock
     }

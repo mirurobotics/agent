@@ -7,10 +7,12 @@ use crate::crypt::{base64, rsa};
 use crate::filesys::file::File;
 use crate::http::{self, devices};
 use crate::trace;
+use backend_api::models::TokenResponse;
 
 // external crates
 use chrono::{DateTime, Duration, Utc};
 use serde::Serialize;
+use tracing::debug;
 use uuid::Uuid;
 
 #[derive(Serialize)]
@@ -32,12 +34,23 @@ pub async fn issue_token(
     private_key_file: &File,
     public_key_file: &File,
 ) -> Result<Token, AuthnErr> {
-    // build the self-signed JWT
-    let jwt = mint_jwt(private_key_file, public_key_file).await?;
-
-    // send the token request
-    let params = devices::IssueTokenParams { token: &jwt };
-    let resp = devices::issue_token(http_client, params).await?;
+    let server_time_before = http_client.server_now();
+    let resp = match request_token(http_client, private_key_file, public_key_file).await {
+        Ok(resp) => resp,
+        // A robot that booted with its clock at 1970 signs a JWT the backend
+        // rejects as expired. Before the first backend response the agent has
+        // no better time to sign with; the rejection itself carries the
+        // server's time, so retry once now that it is known.
+        Err(AuthnErr::HTTPErr(e))
+            if is_unauthorized(&e)
+                && server_time_before.is_none()
+                && http_client.server_now().is_some() =>
+        {
+            debug!("token request rejected before server time was known; retrying");
+            request_token(http_client, private_key_file, public_key_file).await?
+        }
+        Err(e) => return Err(e),
+    };
 
     // format the response
     let expires_at = resp.expires_at.parse::<DateTime<Utc>>().map_err(|e| {
@@ -55,12 +68,34 @@ pub async fn issue_token(
     })
 }
 
+/// Sign a JWT with the server's time when known, else the system clock, and
+/// send the token request.
+async fn request_token(
+    http_client: &impl http::ClientI,
+    private_key_file: &File,
+    public_key_file: &File,
+) -> Result<TokenResponse, AuthnErr> {
+    let now = http_client.server_or_system_now();
+    let jwt = mint_jwt(private_key_file, public_key_file, now).await?;
+    let params = devices::IssueTokenParams { token: &jwt };
+    Ok(devices::issue_token(http_client, params).await?)
+}
+
+fn is_unauthorized(e: &http::HTTPErr) -> bool {
+    matches!(e, http::HTTPErr::RequestFailed(f) if f.status == reqwest::StatusCode::UNAUTHORIZED)
+}
+
 /// Build a self-signed RS512 JWT (RFC 7519) whose header carries the device's public
 /// key fingerprint as `kid` (RFC 7515 §4.1.4). The backend looks up the enrolled device
 /// by this fingerprint and verifies the signature with the stored public key. The
-/// payload contains a unique `jti`, the current `iat`, and an `exp` two minutes in the
-/// future.
-pub async fn mint_jwt(private_key_file: &File, public_key_file: &File) -> Result<String, AuthnErr> {
+/// payload contains a unique `jti`, `iat` set to `now`, and an `exp` two minutes after
+/// `now`. Pass the server's time when known: the backend rejects a JWT whose `exp`
+/// has passed by its own clock.
+pub async fn mint_jwt(
+    private_key_file: &File,
+    public_key_file: &File,
+    now: DateTime<Utc>,
+) -> Result<String, AuthnErr> {
     // load the public key and compute its canonical fingerprint
     let public_key = rsa::read_public_key(public_key_file).await?;
     let kid = rsa::fingerprint(&public_key)?;
@@ -71,7 +106,6 @@ pub async fn mint_jwt(private_key_file: &File, public_key_file: &File) -> Result
         typ: "JWT",
         kid,
     };
-    let now = Utc::now();
     let exp = now + Duration::minutes(2);
     let payload = JwtPayload {
         jti: Uuid::new_v4().to_string(),

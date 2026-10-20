@@ -5,11 +5,11 @@ use std::time::Duration;
 
 // internal crates
 use crate::authn::TokenManagerExt;
+use crate::clock::Clock;
 use crate::cooldown;
 use crate::errors::*;
 
 // external crates
-use chrono::Utc;
 use tracing::{debug, error, info};
 
 #[derive(Debug, Clone)]
@@ -34,6 +34,7 @@ impl Default for TokenRefreshWorkerOptions {
 pub async fn run_token_refresh_worker<F, Fut, TokenManagerT: TokenManagerExt>(
     options: &TokenRefreshWorkerOptions,
     token_mngr: &TokenManagerT,
+    clock: &Clock,
     sleep_fn: F, // for testing purposes
     mut shutdown_signal: Pin<Box<impl Future<Output = ()> + Send + 'static>>,
 ) where
@@ -45,10 +46,8 @@ pub async fn run_token_refresh_worker<F, Fut, TokenManagerT: TokenManagerExt>(
 
     loop {
         // refresh
-        let next_wait = refresh_once(options, token_mngr, &mut err_streak).await;
-
-        let refresh_time = Utc::now() + next_wait;
-        debug!("waiting until {:?} to refresh token", refresh_time);
+        let next_wait = refresh_once(options, token_mngr, clock, &mut err_streak).await;
+        debug!("waiting {}s to refresh token", next_wait.as_secs());
 
         // wait to refresh or shutdown if the signal is received
         tokio::select! {
@@ -66,6 +65,7 @@ pub async fn run_token_refresh_worker<F, Fut, TokenManagerT: TokenManagerExt>(
 async fn refresh_once<TokenManagerT: TokenManagerExt>(
     options: &TokenRefreshWorkerOptions,
     token_mngr: &TokenManagerT,
+    clock: &Clock,
     err_streak: &mut u32,
 ) -> Duration {
     match token_mngr.refresh_token().await {
@@ -81,6 +81,7 @@ async fn refresh_once<TokenManagerT: TokenManagerExt>(
             *err_streak = 0;
             calc_refresh_wait(
                 token_mngr,
+                clock,
                 options.refresh_advance_secs,
                 *err_streak,
                 options.backoff,
@@ -91,6 +92,7 @@ async fn refresh_once<TokenManagerT: TokenManagerExt>(
             debug!("unable to refresh token due to a network connection error: {e:?}");
             calc_refresh_wait(
                 token_mngr,
+                clock,
                 options.refresh_advance_secs,
                 // we want to try network connection errors again immediately
                 // (even if the previous errors were not network connection
@@ -108,6 +110,7 @@ async fn refresh_once<TokenManagerT: TokenManagerExt>(
             *err_streak += 1;
             calc_refresh_wait(
                 token_mngr,
+                clock,
                 options.refresh_advance_secs,
                 *err_streak,
                 options.backoff,
@@ -117,8 +120,15 @@ async fn refresh_once<TokenManagerT: TokenManagerExt>(
     }
 }
 
+/// The wait until the next refresh. The token's expiry is the server's time,
+/// so it is compared against the server's time when known. Before the first
+/// backend response only the system clock is available, and it may be decades
+/// off (a robot that booted at 1970 would read a fresh token as valid for ~56
+/// years), so the wait is capped at the backoff maximum until the backend's
+/// time is known.
 pub async fn calc_refresh_wait<TokenManagerT: TokenManagerExt>(
     token_mngr: &TokenManagerT,
+    clock: &Clock,
     refresh_advance_secs: i64,
     err_streak: u32,
     backoff: cooldown::Backoff,
@@ -126,10 +136,14 @@ pub async fn calc_refresh_wait<TokenManagerT: TokenManagerExt>(
     // calculate the cooldown period
     let cooldown_secs = cooldown::calc(&backoff, err_streak);
 
-    match token_mngr.get_token().await {
+    let (now, from_server) = match clock.server_now() {
+        Some(now) => (now, true),
+        None => (clock.system_now(), false),
+    };
+    let wait = match token_mngr.get_token().await {
         Ok(token) => {
             let expiration = token.expires_at;
-            let secs_until_exp = (expiration - Utc::now()).num_seconds();
+            let secs_until_exp = (expiration - now).num_seconds();
 
             // if the token will expire within our refresh advance period, only wait
             // for the cooldown period before refreshing the token
@@ -146,5 +160,10 @@ pub async fn calc_refresh_wait<TokenManagerT: TokenManagerExt>(
             error!("Error fetching token from token manager: {:#?}", e);
             Duration::from_secs(cooldown_secs as u64)
         }
+    };
+    if from_server {
+        wait
+    } else {
+        wait.min(Duration::from_secs(backoff.max_secs.max(0) as u64))
     }
 }

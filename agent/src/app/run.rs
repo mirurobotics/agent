@@ -9,6 +9,7 @@ use crate::app::{
     state::AppState,
 };
 use crate::authn::{self, TokenManagerExt};
+use crate::clock::Clock;
 use crate::data_uploads::scan;
 use crate::disk::{self, Layout};
 use crate::filesys;
@@ -64,6 +65,7 @@ async fn init(
 
     init_token_refresh_worker(
         app_state.token_mngr.clone(),
+        app_state.http_client.clock().clone(),
         options.token_refresh_worker.clone(),
         shutdown_manager,
         shutdown_tx.subscribe(),
@@ -168,6 +170,7 @@ async fn init_app_state(
 
 async fn init_token_refresh_worker(
     token_mngr: Arc<authn::TokenManager>,
+    clock: Clock,
     options: TokenRefreshWorkerOptions,
     shutdown_manager: &mut ShutdownManager,
     mut shutdown_rx: broadcast::Receiver<()>,
@@ -184,6 +187,7 @@ async fn init_token_refresh_worker(
         run_token_refresh_worker(
             &options,
             token_mngr.as_ref(),
+            &clock,
             |wait| tokio::time::sleep(wait),
             Box::pin(async move {
                 let _ = shutdown_rx.recv().await;

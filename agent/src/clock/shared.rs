@@ -118,6 +118,12 @@ impl Clock {
         )
     }
 
+    /// The server's time when known, else the system clock. For callers that
+    /// must produce a time now and cannot wait to hear from the server.
+    pub fn server_or_system_now(&self) -> DateTime<Utc> {
+        self.server_now().unwrap_or_else(|| self.system_now())
+    }
+
     /// How far ahead of the system clock the server was at the latest reading,
     /// or `None` before the first reading.
     pub fn offset(&self) -> Option<TimeDelta> {

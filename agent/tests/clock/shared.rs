@@ -174,6 +174,23 @@ pub mod server_now {
     }
 }
 
+pub mod server_or_system_now {
+    use super::*;
+
+    #[test]
+    fn is_the_system_clock_before_any_server_reading() {
+        let fake = Fake::new(epoch());
+        assert_eq!(fake.clock.server_or_system_now(), epoch());
+    }
+
+    #[test]
+    fn is_the_server_time_once_known() {
+        let fake = Fake::new(epoch());
+        fake.clock.observe_server_time(real());
+        assert_eq!(fake.clock.server_or_system_now(), real());
+    }
+}
+
 pub mod offset {
     use super::*;
 
