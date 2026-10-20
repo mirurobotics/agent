@@ -164,7 +164,17 @@ where
     }
 
     /// Move `entry` to the tail with its updated attempt count and deadline.
+    /// An entry that is no longer buffered (already removed, or stale) is
+    /// ignored, so it can't come back without its item file.
     pub async fn requeue(&mut self, entry: QueueEntry<J>) {
+        if !self.sizes.contains_key(&entry.id) {
+            warn!(
+                "{}: ignoring requeue of {}, which is not buffered",
+                J::LABEL,
+                entry.job.name()
+            );
+            return;
+        }
         self.queue.requeue(entry).await;
     }
 
