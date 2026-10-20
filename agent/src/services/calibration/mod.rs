@@ -1,7 +1,7 @@
-//! Calibration intake: validate a report against Miru's rules, stamp it, and
-//! buffer it for the upload worker.
+//! Calibration intake: stamp a report and buffer it for the upload worker.
+//! Reports aren't checked against Miru's rules here; one Miru rejects is
+//! parked by the upload worker.
 
 mod create;
-pub mod validate;
 
 pub use self::create::*;

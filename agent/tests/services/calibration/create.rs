@@ -154,23 +154,6 @@ async fn wakes_the_worker() {
 }
 
 #[tokio::test]
-async fn invalid_report_is_not_buffered() {
-    let fixture = Fixture::new().await;
-    let invalid = CreateParams {
-        component_slug: "Arm".to_string(),
-        ..params()
-    };
-
-    let err = fixture.create(invalid).await.unwrap_err();
-
-    assert!(matches!(err, ServiceErr::InvalidRequestErr(_)), "{err:?}");
-    assert_eq!(err.code().as_str(), "invalid_request");
-    assert_eq!(err.http_status(), HTTPCode::UNPROCESSABLE_ENTITY);
-    assert_eq!(err.params(), Some(json!({ "field": "component_slug" })));
-    assert!(fixture.buffered().await.is_empty());
-}
-
-#[tokio::test]
 async fn buffer_full_is_507() {
     let options = BufferOptions {
         max_items: 1,

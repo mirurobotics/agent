@@ -18,7 +18,7 @@ Out of scope: the Device API route `POST /calibrations` (handler, `libs/device-a
 On-device applications will report calibrations to the local agent, which must accept them even while Miru is unreachable and deliver them later. Slice 1 (open PR #324) already stores accepted reports durably on disk. This plan adds the two pieces that make that store useful:
 
 1. An upload worker that sends buffered reports to Miru's `POST /calibrations` one at a time, oldest first. It deletes each report once Miru answers 200, waits with capped backoff while Miru is unreachable or failing, resumes immediately when the agent reconnects, and moves any report Miru permanently rejects into `<data>/calibrations/failed/` with an error log line instead of retrying it forever.
-2. An intake service that validates a report against Miru's rules (so permanent rejections are rare), stamps the receive time and current deployment, buffers it, wakes the worker and returns `{ reported_at }`.
+2. An intake service that stamps the receive time and current deployment, buffers it, wakes the worker and returns `{ reported_at }`.
 
 After the final slice, a running agent has `<data>/calibrations/` (default `/var/lib/miru/calibrations/` on Linux) with `queue.json` and `content/`, and the worker drains anything found there at startup. The service has no caller until the Device API route lands; its behavior is proven by tests.
 
@@ -45,7 +45,7 @@ After the final slice, a running agent has `<data>/calibrations/` (default `/var
 - Decision: On a retryable failure the report stays at the head of the buffer and the worker waits out the backoff, instead of calling `Buffer::requeue` (which moves the entry to the tail and stamps a per-entry deadline). Rationale: the brief also requires FIFO draining, and per-entry requeue would let every other ready report fire its own failing request while Miru is down (a burst of up to 1,000 requests every 10 s). Holding the head gives strict FIFO and one request per backoff interval. The backoff streak is in memory only, so a restart retries at once. Date/Author: 2026-10-20, plan author.
 - Decision: Intake and the worker share the buffer through `calibrations::SharedBuffer` (a `tokio::sync::Mutex<Buffer>` plus a `tokio::sync::Notify` wake-up), not a new actor. The worker never holds the lock across the HTTP call, so intake never waits on the network. Rationale: an actor would add a command enum, handle and send/receive errors (~150 lines) for no extra safety, since the buffer has exactly two users. Date/Author: 2026-10-20, plan author.
 - Decision: "Reconnect" is `sync::syncer::SyncEvent::SyncSuccess` from `SyncerExt::subscribe`. The poller and backend sync requests over MQTT (`workers/mqtt.rs`) both drive syncs, and a successful sync proves Miru is reachable. A `SyncSuccess` ends any backoff wait. Date/Author: 2026-10-20, plan author.
-- Decision: Intake mirrors Miru's own checks (backend `internal/configs/services/calibrations/clean.go`, `create.go`, `internal/configs/ugc/calibrations.go`; core `pkg/ugc/generic.go`, `sanitize.go`). `component_slug`, `role` and `aspect` all use core's `SanitizeSlug` regex `^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$`: 1–32 lowercase alphanumerics and hyphens, starting and ending alphanumeric (consecutive hyphens allowed), matched as given with no trimming. `serial_number` has no NUL and at most 255 Unicode scalar values (Go counts runes). `is_slug` is hand-written; no regex crate. Date/Author: 2026-10-20, from Miru's source.
+- Decision: Intake does no validation of its own; Miru is the only judge, and a report it rejects is parked in `failed/` by the worker. Rationale: the checks duplicated Miru's rules, and the user preferred silent parking until a report-status endpoint exists over keeping two copies of the rules in sync. Date/Author: 2026-10-20, user (review of #331).
 - Decision: Content is checked by deserializing it into `backend_api::models::InstanceContent`; `format` must be `json`, `yaml`, `jsonc`, `xml` or `text` (`InstanceFormatUnknown` is rejected), and `data` must be 1 to 1,048,576 bytes (Miru measures `len(data)`; empty is rejected). Miru also rejects json, jsonc and yaml data that doesn't parse. Intake checks json with `serde_json`; the agent has no yaml or jsonc parser and no new crates are added, so those two rely on the worker parking Miru's terminal rejection. The caller's JSON value is buffered unchanged. Date/Author: 2026-10-20, from Miru's source.
 - Decision: An error reading the deployments cache fails intake (500) rather than stamping `deployment_id: None`, so a broken cache never silently drops the association. No deployed deployment is fine and stamps `None`. Date/Author: 2026-10-20, plan author.
 - Decision: If the buffer fails to open at boot, `AppState::calibrations` is `None`, the error is logged, the worker isn't spawned and the agent still boots (fail-open, like the uploader and deleter), so a bad calibrations directory can't block config deployment. The future route will answer with an error while it is `None`. Date/Author: 2026-10-20, plan author.
@@ -57,7 +57,7 @@ After the final slice, a running agent has `<data>/calibrations/` (default `/var
 
 ## Outcomes & Retrospective
 
-All six slices are implemented on `feat/calibrations-reference`, one commit per milestone. A booted agent opens `<data>/calibrations/` and runs the upload worker, which drains reports in intake order, backs off 10 s → 1 h on failures (flat 10 s while unreachable), resumes on a successful sync, parks Miru's terminal rejections (and unparseable report files) in `failed/`, and loses nothing on shutdown. `services::calibration::create` validates against Miru's actual rules and buffers offline; it has no caller until the Device API route lands. Region coverage (with the root-only permission tests rerun as `nobody`): `calibrations` 100%, `services/calibration` 100%, `buffer` 94.0%, `workers` 92.0%, `services` 97.7%, `app` 94.8%, all at or above their gates.
+All six slices are implemented on `feat/calibrations-reference`, one commit per milestone. A booted agent opens `<data>/calibrations/` and runs the upload worker, which drains reports in intake order, backs off 10 s → 1 h on failures (flat 10 s while unreachable), resumes on a successful sync, parks Miru's terminal rejections (and unparseable report files) in `failed/`, and loses nothing on shutdown. `services::calibration::create` stamps and buffers offline without validating (Miru's rejections are parked by the worker); it has no caller until the Device API route lands. Region coverage (with the root-only permission tests rerun as `nobody`): `calibrations` 100%, `services/calibration` 100%, `buffer` 94.0%, `workers` 92.0%, `services` 97.7%, `app` 94.8%, all at or above their gates.
 
 Deviations from the original plan: token failures are a never-terminal `TokenErr`; a report whose file is missing is dropped rather than retried; the slug rule and content checks follow Miru's source (see Decision Log); `ServiceErr::CalibrationsErr` is boxed; `services/calibration/.covgate` is `100.00`. Open items: deduplication (out of scope), yaml/jsonc syntax is only checked by Miru, and the plan file stays in `plans/active/` until the slices are carved.
 
@@ -129,13 +129,8 @@ No new crates. `tokio::sync::{Mutex, Notify}` are already available (the `sync` 
         sleep_fn: F, shutdown_signal: Pin<Box<impl Future<Output = ()> + Send + 'static>>,
     ) where F: Fn(Duration) -> Fut, Fut: Future<Output = ()> + Send;
 
-    // agent/src/errors/mod.rs (slice 5)
-    Code::InvalidRequest // as_str() == "invalid_request"
-
     // agent/src/services/errors.rs (slice 5)
-    pub struct InvalidRequestErr { pub field: &'static str, pub reason: String, pub trace: Box<Trace> }
-    // code InvalidRequest, http_status 422, params {"field": field}
-    ServiceErr::{InvalidRequestErr(InvalidRequestErr), CalibrationsErr(calibrations::CalibrationsErr)}
+    ServiceErr::CalibrationsErr(Box<calibrations::CalibrationsErr>)
 
     // agent/src/services/calibration/ (slice 5)
     pub struct CreateParams { pub component_slug: String, pub role: Option<String>, pub aspect: Option<String>,
@@ -143,7 +138,6 @@ No new crates. `tokio::sync::{Mutex, Notify}` are already available (the `sync` 
     pub struct Created { pub reported_at: DateTime<Utc> }
     pub async fn create(buffer: &SharedBuffer, deployments: &disk::Deployments,
                         params: CreateParams, now: DateTime<Utc>) -> Result<Created, ServiceErr>;
-    pub mod validate { pub fn params(p: &CreateParams) -> Result<(), InvalidRequestErr>; pub fn is_slug(s: &str) -> bool; }
 
     // agent/src/app/state.rs (slice 6)
     AppState { pub calibrations: Option<calibrations::SharedBuffer>, .. }
@@ -158,7 +152,7 @@ Each milestone is one slice: it merges on its own with CI green, depends only on
 | 2 | `buffer-park` | Generic `Buffer::park` moves an item aside and drops its entry | 140 | 1 |
 | 3 | `calibrations-shared-buffer-and-sender` | `failed/` layout, `SharedBuffer`, `Sender`/`HttpSender`, error variants | 400 | 1 |
 | 4 | `calibrations-upload-worker` | `workers/calibrations.rs` drain loop, backoff, park, reconnect, shutdown | 450 | 2, 3 |
-| 5 | `calibration-intake-service` | `invalid_request` code, validation, `services::calibration::create` | 380 | 3 |
+| 5 | `calibration-intake-service` | `services::calibration::create`: stamp and buffer, no validation | 200 | 3 |
 | 6 | `calibrations-wiring` | Open the buffer in `AppState`, spawn and join the worker, docs | 150 | 4, 5 |
 
 ### Milestone 2: `buffer-park`
@@ -216,22 +210,13 @@ Tests in `agent/tests/workers/calibrations.rs` (declared in `agent/tests/workers
 
 ### Milestone 5: `calibration-intake-service`
 
-`agent/src/errors/mod.rs`: add `Code::InvalidRequest` with `as_str() == "invalid_request"`. In `agent/tests/errors/mod.rs`, bump `EXPECTED_CODE_VARIANTS` to 7, add the case, and add the arm to the exhaustive match.
+`agent/src/services/errors.rs`: add the `ServiceErr` variant `CalibrationsErr(Box<CalibrationsErr>)` with its `From` impl and `impl_error!` entry.
 
-`agent/src/services/errors.rs`: add `InvalidRequestErr` (as in Interfaces; `#[error("invalid {field}: {reason}")]`) and the `ServiceErr` variants `InvalidRequestErr` and `CalibrationsErr`, with `From` impls and `impl_error!` entries.
+`agent/src/services/calibration/create.rs` (new): `CreateParams`, `Created` and `create`. Intake does not validate (see Decision Log). `create` takes the deployment id from `disk::deployments::find_deployed(deployments).await?.map(|d| d.id)`, builds a `Report` whose `CalibrationJob` has `calibrated_at: now` and whose content is the caller's value unchanged, calls `buffer.enqueue(report).await?` (which wakes the worker), and returns `Created { reported_at: now }`. `now` is a parameter, so tests control time; the future route passes `Utc::now()`. `agent/src/services/calibration/mod.rs`: `mod create; pub use create::*;`. Add `pub mod calibration;` to `agent/src/services/mod.rs`, add `agent/src/services/calibration/.covgate` (measured: `100.00`), and list `calibration` among the `services/` submodules in `ARCHITECTURE.md`.
 
-`agent/src/services/calibration/validate.rs` (new) holds the constants `MAX_CONTENT_BYTES: usize = 1024 * 1024`, `MAX_SERIAL_NUMBER_CHARS: usize = 255` and `MAX_SLUG_CHARS: usize = 32`. It has:
+Tests in `agent/tests/services/calibration/{mod.rs, create.rs}` (declare `pub mod calibration;` in `agent/tests/services/mod.rs`):
 
-- `pub fn is_slug(s: &str) -> bool`, Miru's slug rule from the Decision Log (1–32 chars), hand-written with no regex crate.
-- `pub fn params(p: &CreateParams) -> Result<(), InvalidRequestErr>`, which checks in Miru's order: `component_slug` (slug); `role` and `aspect` when present (slug); `serial_number` when present (no NUL, `chars().count() <= 255`); then `content`. For `content`, `InstanceContent::deserialize(&p.content)` must succeed (field `content`), the format must not be `InstanceFormatUnknown` (field `content.format`), `1 <= data.len() <= MAX_CONTENT_BYTES` (field `content.data`), and json data must parse (field `content.data`).
-- A private `fn invalid(field, reason) -> InvalidRequestErr` builder.
-
-`agent/src/services/calibration/create.rs` (new): `CreateParams`, `Created` and `create`. `create` runs `validate::params(&params)?`. It takes the deployment id from `disk::deployments::find_deployed(deployments).await?.map(|d| d.id)`, builds a `Report` whose `CalibrationJob` has `calibrated_at: now` and whose content is the caller's value unchanged, calls `buffer.enqueue(report).await?` (which wakes the worker), and returns `Created { reported_at: now }`. `now` is a parameter, so tests control time; the future route passes `Utc::now()`. `agent/src/services/calibration/mod.rs`: `mod create; pub mod validate; pub use create::*;`. Add `pub mod calibration;` to `agent/src/services/mod.rs`, add `agent/src/services/calibration/.covgate` (measured: `100.00`), and list `calibration` among the `services/` submodules in `ARCHITECTURE.md`.
-
-Tests in `agent/tests/services/calibration/{mod.rs, validate.rs, create.rs}` (declare `pub mod calibration;` in `agent/tests/services/mod.rs`). Assert each error through `code().as_str() == "invalid_request"`, `http_status() == 422` and `params() == Some(json!({"field": ..}))`.
-
-- validate: `accepts_a_minimal_report`. `accepts_every_format` (json, yaml, jsonc, xml, text). `accepts_valid_slugs` (`arm`, `aligner-1`, `front-left`, `home-offsets`, `0`, `a--b`, a 32-character slug). `rejects_bad_slugs_in_each_slug_field`: `""`, `Arm`, `-arm`, `arm-`, ` arm`, `arm 1`, `arm_1`, `ärm` and a 33-character slug, each under `component_slug`, `role` and `aspect`, with the matching field. `content_of_exactly_1_mib_is_accepted`, `content_of_1_mib_plus_1_byte_is_rejected` and `empty_data_is_rejected` (field `content.data`). `serial_number_limit_counts_characters` (255 `é` accepted, 256 rejected) and `serial_number_rejects_nul`. `rejects_malformed_content` (not an object, missing `data`, non-string `data`: field `content`). `rejects_an_unknown_format` (`toml`: field `content.format`). `rejects_unparseable_json` (field `content.data`; the same text as `text` or `yaml` is accepted).
-- create: `accepted_while_offline` (no HTTP client exists in the call; returns `reported_at == now`; the buffered job has `calibrated_at == now` and the caller's content). `stamps_the_current_deployment` (a `Deployed` deployment `dpl_1` in a temp `Deployments` store gives `deployment_id == Some("dpl_1")`). `no_deployment_is_fine` (`None`). `wakes_the_worker` (`woken()` resolves). `invalid_report_is_not_buffered` (422; buffer empty). `buffer_full_is_507` (`code().as_str() == "calibration_buffer_full"`, status 507).
+- create: `accepted_while_offline` (no HTTP client exists in the call; returns `reported_at == now`; the buffered job has `calibrated_at == now` and the caller's content). `stamps_the_current_deployment` (a `Deployed` deployment `dpl_1` in a temp `Deployments` store gives `deployment_id == Some("dpl_1")`). `no_deployment_is_fine` (`None`). `wakes_the_worker` (`woken()` resolves). `buffer_full_is_507` (`code().as_str() == "calibration_buffer_full"`, status 507).
 
 ### Milestone 6: `calibrations-wiring`
 
@@ -290,7 +275,7 @@ Acceptance, observable through the named tests:
 - A 422 from Miru moves the report to `<data>/calibrations/failed/<id>.json` and logs an error; the report is never re-sent and later reports still upload (`terminal_rejection_is_parked_not_retried`).
 - Shutdown during an upload loses nothing: after restart the report is sent again (`shutdown_mid_upload_keeps_the_report_for_replay`).
 - `services::calibration::create` with Miru offline returns `{ reported_at: now }` and buffers the report with the current deployment id, or `None` when nothing is deployed (`accepted_while_offline`, `stamps_the_current_deployment`, `no_deployment_is_fine`).
-- `data` of 1,048,576 bytes is accepted, and 1,048,577 bytes, empty data or unparseable json gives 422 `invalid_request` with `params == {"field": "content.data"}`. Each bad slug (Miru's 1–32 character rule) or a serial number over 255 characters gives 422 naming its field. A full buffer gives 507 `calibration_buffer_full`.
+- Intake accepts any report shape without checking it, and a full buffer gives 507 `calibration_buffer_full`.
 - A booted agent has `<data>/calibrations/content/`. A blocked calibrations path still boots, with calibrations unavailable (`calibration_buffer_opened`, `calibrations_degrade_when_buffer_path_unwritable`).
 
 ## Idempotence and Recovery

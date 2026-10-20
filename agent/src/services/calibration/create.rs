@@ -1,7 +1,7 @@
 // internal crates
 use crate::calibrations::{CalibrationJob, Report, SharedBuffer};
 use crate::disk;
-use crate::services::{calibration::validate, errors::ServiceErr};
+use crate::services::errors::ServiceErr;
 
 // external crates
 use chrono::{DateTime, Utc};
@@ -23,7 +23,7 @@ pub struct Created {
     pub reported_at: DateTime<Utc>,
 }
 
-/// Accept a calibration: validate it, stamp it with `now` and the deployed
+/// Accept a calibration: stamp it with `now` and the deployed
 /// deployment (if any), buffer it and wake the upload worker. Works offline;
 /// nothing here talks to Miru. A deployments-cache error fails the call
 /// rather than dropping the deployment association.
@@ -33,7 +33,6 @@ pub async fn create(
     params: CreateParams,
     now: DateTime<Utc>,
 ) -> Result<Created, ServiceErr> {
-    validate::params(&params)?;
     let deployment_id = disk::deployments::find_deployed(deployments)
         .await?
         .map(|deployment| deployment.id);
