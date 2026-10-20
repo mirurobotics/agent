@@ -247,3 +247,26 @@ async fn shutdown_signal_received() {
 
     agent.stop().await.unwrap();
 }
+
+#[serial]
+#[tokio::test]
+async fn runs_without_calibrations_when_the_buffer_cannot_open() {
+    let (_dir, layout) = activated_layout().await;
+    // a regular file where the calibrations directory should be
+    files::write_string(
+        &filesys::File::new(layout.calibrations().root.path().clone()),
+        "x",
+        WriteOptions::default(),
+    )
+    .await
+    .unwrap();
+    let agent = spawn_run(options(&layout, lifecycle(), None));
+
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(
+        !agent.handle.is_finished(),
+        "run exited before the shutdown signal"
+    );
+
+    agent.stop().await.unwrap();
+}

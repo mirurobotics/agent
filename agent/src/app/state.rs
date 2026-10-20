@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 // internal crates
 use crate::authn::{self, token_mngr::TokenFile, TokenManagerExt};
+use crate::calibrations;
 use crate::cooldown;
 use crate::data_uploads::{
     retention::{self, DeleterExt},
@@ -35,6 +36,8 @@ pub struct AppState {
     pub uploader: Arc<upload::Uploader>,
     pub token_mngr: Arc<authn::TokenManager>,
     pub event_hub: events::EventHub,
+    /// The calibration buffer, or `None` when it failed to open at boot.
+    pub calibrations: Option<calibrations::SharedBuffer>,
 }
 
 impl AppState {
@@ -83,6 +86,7 @@ impl AppState {
         // initialize the data upload pipeline (deleter, uploader, scanner)
         let (deleter, uploader, scanner, data_upload_handles) =
             Self::init_data_uploads(layout, http_client.clone(), token_mngr.clone()).await?;
+        let calibrations = init_calibrations(layout).await;
 
         let shutdown_handle = async move {
             let mut handles = vec![token_mngr_handle, syncer_handle, event_hub_handle];
@@ -101,6 +105,7 @@ impl AppState {
                 uploader,
                 token_mngr,
                 event_hub,
+                calibrations,
             },
             shutdown_handle,
         ))
@@ -288,6 +293,23 @@ impl AppState {
         match first_err {
             Some(e) => Err(e),
             None => Ok(()),
+        }
+    }
+}
+
+/// Open the calibration buffer. A failure is logged and leaves calibrations
+/// unavailable (fail-open, like the uploader and deleter), so a bad
+/// calibrations directory can't block config deployment. The buffer has no
+/// actor, so [`AppState::shutdown`] has nothing to stop.
+async fn init_calibrations(layout: &disk::Layout) -> Option<calibrations::SharedBuffer> {
+    let options = calibrations::DEFAULT_OPTIONS;
+    match calibrations::SharedBuffer::open(&layout.calibrations(), options).await {
+        Ok(buffer) => Some(buffer),
+        Err(e) => {
+            tracing::error!(
+                "failed to open the calibration buffer; calibrations are unavailable until restart: {e}"
+            );
+            None
         }
     }
 }

@@ -12,7 +12,7 @@ use miru_agent::data_uploads::scan::ScannerExt;
 use miru_agent::data_uploads::upload::UploaderExt;
 use miru_agent::deploy::fsm;
 use miru_agent::disk::{Capacities, DiskErr, Layout};
-use miru_agent::filesys::{dirs, files, Dir, FileSysErr, PathExt, WriteOptions};
+use miru_agent::filesys::{dirs, files, Dir, File, FileSysErr, PathExt, WriteOptions};
 use miru_agent::http;
 use miru_agent::logs;
 use miru_agent::models::{self, Device, DeviceStatus};
@@ -289,6 +289,39 @@ pub mod init {
 
         // nothing replaced the blocking directory with a snapshot file
         assert!(env.layout.delete_queue().path().is_dir());
+    }
+
+    #[tokio::test]
+    async fn calibration_buffer_opened() {
+        let env = TestEnv::valid().await;
+
+        let (state, state_handle) = env.init().await.unwrap();
+
+        let buffer = state.calibrations.as_ref().expect("calibration buffer");
+        assert!(buffer.lock().await.is_empty());
+        assert!(env.layout.calibrations().content().exists());
+        state.shutdown().await.unwrap();
+        state_handle.await;
+    }
+
+    #[tokio::test]
+    async fn calibrations_degrade_when_buffer_path_unwritable() {
+        let env = TestEnv::valid().await;
+        // a regular file where the calibrations directory should be
+        files::write_string(
+            &File::new(env.layout.calibrations().root.path().clone()),
+            "x",
+            WriteOptions::default(),
+        )
+        .await
+        .unwrap();
+
+        let (state, state_handle) = env.init().await.unwrap();
+
+        // fail-open: the agent boots without calibrations
+        assert!(state.calibrations.is_none());
+        state.shutdown().await.unwrap();
+        state_handle.await;
     }
 }
 

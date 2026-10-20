@@ -29,7 +29,7 @@ After the final slice, a running agent has `<data>/calibrations/` (default `/var
 - [x] Slice 3 `calibrations-shared-buffer-and-sender` (2026-10-20): token errors are wrapped in a never-terminal `TokenErr` (see Decision Log); fixtures in `agent/tests/test_utils/calibrations.rs`.
 - [x] Slice 4 `calibrations-upload-worker` (2026-10-20): `workers/calibrations.rs`, `mocks/calibration_sender.rs`, `SleepController::attempted_sleeps`; 17 worker tests.
 - [x] Slice 5 `calibration-intake-service` (2026-10-20): `services/calibration/` at 100% region coverage, so its `.covgate` is `100.00`.
-- [ ] Slice 6 `calibrations-wiring`.
+- [x] Slice 6 `calibrations-wiring` (2026-10-20): the worker joins are moved into `ShutdownManager::join_upload_workers` to keep `shutdown_impl` under 50 lines; extra test `app::run::runs_without_calibrations_when_the_buffer_cannot_open`.
 
 ## Surprises & Discoveries
 
@@ -56,7 +56,9 @@ After the final slice, a running agent has `<data>/calibrations/` (default `/var
 
 ## Outcomes & Retrospective
 
-(Summarize at completion.)
+All six slices are implemented on `feat/calibrations-reference`, one commit per milestone. A booted agent opens `<data>/calibrations/` and runs the upload worker, which drains reports in intake order, backs off 10 s → 1 h on failures (flat 10 s while unreachable), resumes on a successful sync, parks Miru's terminal rejections (and unparseable report files) in `failed/`, and loses nothing on shutdown. `services::calibration::create` validates against Miru's actual rules and buffers offline; it has no caller until the Device API route lands. Region coverage (with the root-only permission tests rerun as `nobody`): `calibrations` 100%, `services/calibration` 100%, `buffer` 94.0%, `workers` 92.0%, `services` 97.7%, `app` 94.8%, all at or above their gates.
+
+Deviations from the original plan: token failures are a never-terminal `TokenErr`; a report whose file is missing is dropped rather than retried; the slug rule and content checks follow Miru's source (see Decision Log); `ServiceErr::CalibrationsErr` is boxed; `services/calibration/.covgate` is `100.00`. Open items: deduplication (out of scope), yaml/jsonc syntax is only checked by Miru, and the plan file stays in `plans/active/` until the slices are carved.
 
 ## Context and Orientation
 

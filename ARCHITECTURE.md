@@ -81,7 +81,8 @@ All source lives under `agent/src/`. The binary entry point is `main.rs`.
 
 ### Background workers
 
-`workers/` — three long-running tasks:
+`workers/` — long-running tasks, including:
+- `calibrations` — uploads buffered calibration reports to Miru, oldest first; backs off while Miru is unreachable or failing and retries at once when a sync succeeds. Spawned only when the calibration buffer opened at boot (`AppState::calibrations`).
 - `mqtt` — subscribes to MQTT topics, triggers sync on events.
 - `poller` — periodic backend sync on a timer.
 - `token_refresh` — rotates JWT before expiry.
@@ -100,7 +101,7 @@ All workers receive a broadcast shutdown signal and clean up gracefully.
 
 - **Provision and runtime are mutually exclusive.** `main.rs` picks one path at startup. They share no runtime state; provision writes the files that runtime later reads.
 - **All backend HTTP goes through `http::Client`.** No module uses raw reqwest. The client handles retry logic and attaches auth headers.
-- **Shutdown ordering matters.** Syncer shuts down before storage (it writes during sync). Token manager shuts down last. This is enforced in `AppState::shutdown()`.
+- **Shutdown ordering matters.** Syncer shuts down before storage (it writes during sync). Token manager shuts down last. This is enforced in `AppState::shutdown()`. `ShutdownManager` joins every worker, including the calibration upload worker (which uses the token manager), before `AppState::shutdown()`.
 - **Generated code is never hand-edited.** `libs/backend-api` and `libs/device-api` are overwritten on regeneration.
 - **Tests exercise ordinary production behavior.** `cargo test` needs no custom feature or logging environment; production algorithms and client construction are identical in normal and test builds, and tests control dependencies and time. Test layout conventions live in `AGENTS.md` § Testing.
 - **The agent has no direct database.** All persistence is file-based via `disk::Layout`. The backend owns the database.
