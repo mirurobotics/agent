@@ -359,6 +359,63 @@ pub mod open {
         assert_eq!(rebuilt, strings(&["a", "b"]));
     }
 
+    /// A read error other than a parse failure may be transient, so the
+    /// snapshot, with its attempt counts and order, stays for the next open.
+    #[tokio::test]
+    async fn snapshot_read_failure_fails_the_open_and_keeps_the_snapshot() {
+        let fixture = Fixture::new();
+        let ids = {
+            let mut buffer = fixture.open().await;
+            enqueue_all(&mut buffer, &["a"]).await
+        };
+        let saved = files::read_string(&fixture.queue_file()).await.unwrap();
+        files::delete(&fixture.queue_file()).await.unwrap();
+        // a directory in its place reads with an I/O error, not a parse error
+        let blocker = Dir::new(fixture.queue_file().path().clone());
+        dirs::create(&blocker).await.unwrap();
+
+        let result = Buffer::open(&fixture.layout(), BufferOptions::default()).await;
+
+        assert!(matches!(result, Err(CalibrationsErr::FileSysErr(_))));
+        assert!(!fixture.root.file("queue.json.corrupt").exists());
+        assert!(fixture.report_file(ids[0]).exists());
+        dirs::delete(&blocker).await.unwrap();
+        files::write_string(
+            &fixture.queue_file(),
+            &saved,
+            WriteOptions::OVERWRITE_ATOMIC,
+        )
+        .await
+        .unwrap();
+        let buffer = fixture.open().await;
+        assert_eq!(names(&buffer), strings(&["a"]));
+    }
+
+    /// A report file that cannot be read (as opposed to parsed) during a
+    /// rebuild fails the open instead of being set aside.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn report_read_failure_during_a_rebuild_fails_the_open() {
+        use std::os::unix::fs::PermissionsExt;
+        let fixture = Fixture::new();
+        let ids = {
+            let mut buffer = fixture.open().await;
+            enqueue_all(&mut buffer, &["a"]).await
+        };
+        files::delete(&fixture.queue_file()).await.unwrap();
+        let report = fixture.report_file(ids[0]);
+        let mode = |bits| std::fs::Permissions::from_mode(bits);
+        std::fs::set_permissions(report.path(), mode(0o000)).unwrap();
+
+        let result = Buffer::open(&fixture.layout(), BufferOptions::default()).await;
+
+        std::fs::set_permissions(report.path(), mode(0o600)).unwrap();
+        assert!(matches!(result, Err(CalibrationsErr::FileSysErr(_))));
+        assert!(report.exists());
+        let buffer = fixture.open().await;
+        assert_eq!(names(&buffer), strings(&["a"]));
+    }
+
     #[tokio::test]
     async fn rebuilds_a_missing_queue_from_the_report_files() {
         let fixture = Fixture::new();

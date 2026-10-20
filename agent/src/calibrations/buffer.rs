@@ -8,7 +8,7 @@ use crate::calibrations::{
     job::{CalibrationJob, Queue, QueueEntry, QueueSnapshot, QueueSnapshotFile},
 };
 use crate::disk::layout::CalibrationsLayout;
-use crate::filesys::{dirs, files, Dir, File, Overwrite, PathExt, WriteOptions};
+use crate::filesys::{dirs, files, Dir, File, FileSysErr, Overwrite, PathExt, WriteOptions};
 use crate::queue::QueueJob;
 use crate::trace;
 
@@ -309,8 +309,9 @@ async fn report_files(content_dir: &Dir) -> Result<Vec<(Uuid, File)>, Calibratio
 
 /// Open `queue.json`. A missing snapshot is rebuilt from the report files
 /// (empty on first boot), so report files are never deleted for want of a
-/// queue. An existing snapshot that cannot be read is never silently
-/// replaced: it is set aside and the queue is rebuilt the same way.
+/// queue. An existing snapshot that cannot be parsed is never silently
+/// replaced: it is set aside and the queue is rebuilt the same way. Any other
+/// read error fails the open and leaves the snapshot in place.
 async fn load_snapshot(
     file: &File,
     content_dir: &Dir,
@@ -321,7 +322,10 @@ async fn load_snapshot(
     }
     let err = match QueueSnapshotFile::new(file.clone()).await {
         Ok(snapshot_file) => return Ok(snapshot_file),
-        Err(err) => err,
+        Err(FileSysErr::ParseJSONErr(err)) => err,
+        // a read error may be transient, so keep the snapshot and its attempt
+        // counts and order for the next open instead of rebuilding
+        Err(err) => return Err(err.into()),
     };
     let aside = corrupt_path(file);
     error!("calibration: queue snapshot {file} is unreadable; moving it to {aside} and rebuilding from the report files: {err}");
@@ -335,8 +339,9 @@ async fn load_snapshot(
 
 /// A queue holding every readable report file under its own entry id, oldest
 /// calibration first. Attempt counts and backoff are lost, so every report is
-/// due at once. An unreadable report file is renamed with [`CORRUPT_EXT`] and
-/// skipped. A failed listing is returned, never rebuilt as an empty queue.
+/// due at once. A report file that cannot be parsed is renamed with
+/// [`CORRUPT_EXT`] and skipped. A failed listing or read is returned, never
+/// rebuilt as a smaller queue.
 async fn rebuild_snapshot(content_dir: &Dir) -> Result<QueueSnapshot, CalibrationsErr> {
     let mut entries = Vec::new();
     for (id, file) in report_files(content_dir).await? {
@@ -347,10 +352,13 @@ async fn rebuild_snapshot(content_dir: &Dir) -> Result<QueueSnapshot, Calibratio
                 attempts: 0,
                 next_attempt_at: None,
             }),
-            Err(err) => {
+            Err(FileSysErr::ParseJSONErr(err)) => {
                 error!("calibration: report file {file} is unreadable; setting it aside: {err}");
                 set_aside(&file).await;
             }
+            // a read error may be transient; fail rather than set aside a
+            // report that may be intact
+            Err(err) => return Err(err.into()),
         }
     }
     entries.sort_by_key(|entry| (entry.job.calibrated_at, entry.id));
