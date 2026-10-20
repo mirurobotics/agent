@@ -60,7 +60,7 @@ pub mod create {
     use super::*;
 
     #[tokio::test]
-    async fn sends_payload_and_token() {
+    async fn success() {
         let mock = MockClient {
             create_calibration_fn: std::sync::Mutex::new(Box::new(|| Ok(calibration()))),
             ..MockClient::default()
