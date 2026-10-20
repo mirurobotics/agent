@@ -682,6 +682,103 @@ pub mod remove {
     }
 }
 
+pub mod park {
+    use super::*;
+
+    fn failed(fixture: &Fixture) -> Dir {
+        fixture.root.subdir("failed")
+    }
+
+    #[tokio::test]
+    async fn moves_the_item_file_and_drops_the_entry() {
+        let fixture = Fixture::new();
+        let mut buffer = fixture.open().await;
+        let ids = enqueue_all(&mut buffer, &["a", "b"]).await;
+
+        let parked = buffer.park(ids[0], &failed(&fixture)).await.unwrap();
+
+        let parked = parked.unwrap();
+        assert_eq!((parked.id, parked.job.name), (ids[0], "a".to_string()));
+        assert_eq!(names(&buffer), strings(&["b"]));
+        assert_eq!(queue_on_disk(&fixture).await, strings(&["b"]));
+        assert_eq!(buffer.used_bytes(), serialized_len(&item("b")));
+        let moved = failed(&fixture).file(&format!("{}.json", ids[0]));
+        let moved: TestItem = files::read_json(&moved).await.unwrap();
+        assert_eq!(moved, item("a"));
+        assert!(!fixture.item_file(ids[0]).exists());
+    }
+
+    #[tokio::test]
+    async fn parked_items_stay_out_after_reopen() {
+        let fixture = Fixture::new();
+        let ids = {
+            let mut buffer = fixture.open().await;
+            let ids = enqueue_all(&mut buffer, &["a", "b"]).await;
+            buffer.park(ids[0], &failed(&fixture)).await.unwrap();
+            ids
+        };
+
+        let buffer = fixture.open().await;
+
+        assert_eq!(names(&buffer), strings(&["b"]));
+        assert!(failed(&fixture).file(&format!("{}.json", ids[0])).exists());
+    }
+
+    #[tokio::test]
+    async fn unknown_id_is_none() {
+        let fixture = Fixture::new();
+        let mut buffer = fixture.open().await;
+        enqueue_all(&mut buffer, &["a"]).await;
+
+        let parked = buffer.park(Uuid::new_v4(), &failed(&fixture)).await;
+
+        assert!(parked.unwrap().is_none());
+        assert_eq!(buffer.len(), 1);
+        assert!(!failed(&fixture).exists());
+    }
+
+    #[tokio::test]
+    async fn failure_keeps_the_entry() {
+        let fixture = Fixture::new();
+        let mut buffer = fixture.open().await;
+        let ids = enqueue_all(&mut buffer, &["a"]).await;
+        let used = buffer.used_bytes();
+        // a regular file where the destination directory should be
+        files::write_string(
+            &File::new(failed(&fixture).path().clone()),
+            "x",
+            WriteOptions::OVERWRITE_ATOMIC,
+        )
+        .await
+        .unwrap();
+
+        let err = buffer.park(ids[0], &failed(&fixture)).await.unwrap_err();
+
+        assert!(matches!(err, BufferErr::FileSysErr(_)), "{err:?}");
+        assert_eq!(buffer.len(), 1);
+        assert_eq!(buffer.used_bytes(), used);
+        assert_eq!(queue_on_disk(&fixture).await, strings(&["a"]));
+        assert!(fixture.item_file(ids[0]).exists());
+    }
+
+    #[tokio::test]
+    async fn move_failure_keeps_the_entry() {
+        let fixture = Fixture::new();
+        let mut buffer = fixture.open().await;
+        let ids = enqueue_all(&mut buffer, &["a"]).await;
+        // a directory where the parked file should land
+        let dest = failed(&fixture).subdir(format!("{}.json", ids[0]));
+        dirs::create(&dest).await.unwrap();
+
+        let err = buffer.park(ids[0], &failed(&fixture)).await.unwrap_err();
+
+        assert!(matches!(err, BufferErr::FileSysErr(_)), "{err:?}");
+        assert_eq!(names(&buffer), strings(&["a"]));
+        assert_eq!(queue_on_disk(&fixture).await, strings(&["a"]));
+        assert!(fixture.item_file(ids[0]).exists());
+    }
+}
+
 pub mod requeue {
     use super::*;
 

@@ -163,6 +163,34 @@ where
         Some(entry)
     }
 
+    /// Move the item file of the entry `id` into `dest_dir` (as
+    /// `<entry id>.json`) and drop its queue entry, for an item that can never
+    /// be resolved but should be kept for inspection. The file moves first, so
+    /// a crash between the two steps leaves an entry without a file, which the
+    /// next [`Self::open`] drops, while the parked copy survives; removing the
+    /// entry first would leave an orphan that `open` deletes. `open` never
+    /// looks inside `dest_dir`. Unknown ids return `Ok(None)` and touch
+    /// nothing. On an error the entry and its item file are unchanged.
+    pub async fn park(
+        &mut self,
+        id: Uuid,
+        dest_dir: &Dir,
+    ) -> Result<Option<QueueEntry<J>>, BufferErr> {
+        if !self.sizes.contains_key(&id) {
+            return Ok(None);
+        }
+        dirs::create_if_absent(dest_dir).await?;
+        files::move_to(
+            &self.item_file(id),
+            &item_file(dest_dir, id),
+            Overwrite::Allow,
+        )
+        .await?;
+        let entry = self.queue.remove(id).await;
+        self.untrack(id);
+        Ok(entry)
+    }
+
     /// Move `entry` to the tail with its updated attempt count and deadline.
     /// An entry that is no longer buffered (already removed, or stale) is
     /// ignored, so it can't come back without its item file.
