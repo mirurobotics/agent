@@ -20,7 +20,7 @@ impl Fake {
         let raw = Arc::new(Mutex::new(raw));
         let mono = Arc::new(Mutex::new(Instant::now()));
         let (r, m) = (raw.clone(), mono.clone());
-        let clock = Clock::with_sources(
+        let clock = Clock::from_sources(
             Arc::new(move || *r.lock().unwrap()),
             Arc::new(move || *m.lock().unwrap()),
         );

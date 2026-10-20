@@ -17,8 +17,8 @@ use tracing::{debug, warn};
 /// spends some time in flight, so an exact match is not expected.
 pub const TRUST_TOLERANCE: TimeDelta = TimeDelta::seconds(60);
 
-type RawFn = Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>;
-type MonoFn = Arc<dyn Fn() -> Instant + Send + Sync>;
+type DateTimeFn = Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>;
+type InstantFn = Arc<dyn Fn() -> Instant + Send + Sync>;
 
 /// One reading of the backend's time, with what the agent's own clocks said
 /// at the same moment.
@@ -35,15 +35,15 @@ struct Anchor {
 /// The agent's shared clock. Cheap to clone; clones share the backend anchor.
 #[derive(Clone)]
 pub struct Clock {
-    raw_fn: RawFn,
-    mono_fn: MonoFn,
+    datetime_fn: DateTimeFn,
+    instant_fn: InstantFn,
     anchor: Arc<RwLock<Option<Anchor>>>,
 }
 
 impl fmt::Debug for Clock {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Clock")
-            .field("anchor", &self.read_anchor())
+            .field("anchor", &self.get_anchor())
             .finish_non_exhaustive()
     }
 }
@@ -57,27 +57,27 @@ impl Default for Clock {
 impl Clock {
     /// A clock backed by the system wall clock and monotonic clock.
     pub fn new() -> Self {
-        Self::with_sources(Arc::new(Utc::now), Arc::new(Instant::now))
+        Self::from_sources(Arc::new(Utc::now), Arc::new(Instant::now))
     }
 
     /// A clock with injected wall-clock and monotonic sources, so tests can
     /// control both.
-    pub fn with_sources(raw_fn: RawFn, mono_fn: MonoFn) -> Self {
+    pub fn from_sources(datetime_fn: DateTimeFn, instant_fn: InstantFn) -> Self {
         Self {
-            raw_fn,
-            mono_fn,
+            datetime_fn,
+            instant_fn,
             anchor: Arc::new(RwLock::new(None)),
         }
     }
 
     /// The wall clock as-is. It may be decades off; use it only for logs.
     pub fn raw_now(&self) -> DateTime<Utc> {
-        (self.raw_fn)()
+        (self.datetime_fn)()
     }
 
     /// The current monotonic instant.
     pub fn instant(&self) -> Instant {
-        (self.mono_fn)()
+        (self.instant_fn)()
     }
 
     /// Monotonic time since `earlier`, or zero if `earlier` is in the future.
@@ -93,7 +93,7 @@ impl Clock {
             observed_at: self.instant(),
             wall_clock: self.raw_now(),
         };
-        let previous = self.write_anchor(anchor);
+        let previous = self.set_anchor(anchor);
         // computed up front: arguments of a disabled log macro never run
         let offset_secs = (server - anchor.wall_clock).num_seconds();
         if offset_secs.abs() > TRUST_TOLERANCE.num_seconds() && previous.is_none() {
@@ -117,7 +117,7 @@ impl Clock {
     /// The backend's time now, or `None` if the agent has not heard from the
     /// backend in this process.
     pub fn trusted_now(&self) -> Option<DateTime<Utc>> {
-        let anchor = self.read_anchor()?;
+        let anchor = self.get_anchor()?;
         let elapsed = self.instant().saturating_duration_since(anchor.observed_at);
         let elapsed = TimeDelta::from_std(elapsed).unwrap_or(TimeDelta::MAX);
         Some(
@@ -131,7 +131,7 @@ impl Clock {
     /// How far ahead of the wall clock the backend was at the latest reading,
     /// or `None` before the first reading.
     pub fn offset(&self) -> Option<TimeDelta> {
-        self.read_anchor().map(|a| a.backend_time - a.wall_clock)
+        self.get_anchor().map(|a| a.backend_time - a.wall_clock)
     }
 
     /// Whether the wall clock currently agrees with the backend's time to
@@ -143,11 +143,11 @@ impl Clock {
         }
     }
 
-    fn read_anchor(&self) -> Option<Anchor> {
+    fn get_anchor(&self) -> Option<Anchor> {
         *self.anchor.read().unwrap_or_else(|e| e.into_inner())
     }
 
-    fn write_anchor(&self, anchor: Anchor) -> Option<Anchor> {
+    fn set_anchor(&self, anchor: Anchor) -> Option<Anchor> {
         let mut guard = self.anchor.write().unwrap_or_else(|e| e.into_inner());
         guard.replace(anchor)
     }
