@@ -15,7 +15,7 @@ use tracing::{debug, error, info, trace, warn};
 // ========================= SINGLE THREADED STATE FILE =========================== //
 type SingleThreadTokenFile = SingleThreadStateFile<Token, Updates>;
 
-/// The `.corrupt-<ts>` siblings a recovery copied aside in `dir`.
+/// The `.corrupt-<uuid>` siblings a recovery copied aside in `dir`.
 async fn corrupt_siblings(dir: &Dir) -> Vec<File> {
     let mut found = Vec::new();
     let mut entries = tokio::fs::read_dir(dir.path()).await.unwrap();
