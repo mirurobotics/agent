@@ -107,7 +107,7 @@ impl Buffer {
             sizes: HashMap::new(),
             used_bytes: 0,
         };
-        buffer.reconcile().await;
+        buffer.reconcile().await?;
         info!(
             "calibration buffer loaded: {} report(s), {} byte(s)",
             buffer.len(),
@@ -229,20 +229,25 @@ impl Buffer {
 
     /// Make the queue and the content directory agree: size every report file
     /// that has a queue entry, delete the ones that do not, and drop queue
-    /// entries whose file is gone. Problems are logged, never fatal: a file
-    /// that cannot be cleaned up now is retried on the next open.
-    async fn reconcile(&mut self) {
+    /// entries whose file is gone. A failed listing fails the open, since
+    /// acting on it would drop every entry. Problems with single files are
+    /// logged, never fatal: a file that cannot be cleaned up now is retried on
+    /// the next open.
+    async fn reconcile(&mut self) -> Result<(), CalibrationsErr> {
         let queued: HashSet<Uuid> = self.queue.iter().map(|entry| entry.id).collect();
-        for (id, file) in report_files(&self.content_dir).await {
+        for (id, file) in report_files(&self.content_dir).await? {
             if !queued.contains(&id) {
                 warn!("calibration: removing report file {file} with no queue entry");
                 delete_report_file(&file).await;
                 continue;
             }
-            match files::size(&file).await {
-                Ok(bytes) => self.track(id, bytes),
-                Err(err) => error!("calibration: failed to size report file {file}: {err}"),
-            }
+            // the file is listed, so it exists even if it cannot be sized now;
+            // count it as empty rather than drop its entry
+            let bytes = files::size(&file).await.unwrap_or_else(|err| {
+                error!("calibration: failed to size report file {file}: {err}");
+                0
+            });
+            self.track(id, bytes);
         }
 
         let missing: Vec<QueueEntry> = self
@@ -258,6 +263,7 @@ impl Buffer {
             );
             self.queue.remove(entry.id).await;
         }
+        Ok(())
     }
 }
 
@@ -286,17 +292,11 @@ async fn delete_report_file(file: &File) {
 }
 
 /// The report files in `content_dir` with their queue entry ids. Only names in
-/// the exact form [`report_file`] writes count. A listing error is logged and
-/// treated as an empty directory.
-async fn report_files(content_dir: &Dir) -> Vec<(Uuid, File)> {
-    let listing = match dirs::files(content_dir).await {
-        Ok(listing) => listing,
-        Err(err) => {
-            error!("calibration: failed to list report files in {content_dir}: {err}");
-            return Vec::new();
-        }
-    };
-    listing
+/// the exact form [`report_file`] writes count. A listing error is returned,
+/// never treated as an empty directory.
+async fn report_files(content_dir: &Dir) -> Result<Vec<(Uuid, File)>, CalibrationsErr> {
+    let listing = dirs::files(content_dir).await?;
+    Ok(listing
         .into_iter()
         .filter_map(|file| {
             let name = file.name().ok()?;
@@ -304,7 +304,7 @@ async fn report_files(content_dir: &Dir) -> Vec<(Uuid, File)> {
             let id = Uuid::from_str(stem).ok()?;
             (id.hyphenated().to_string() == stem).then_some((id, file))
         })
-        .collect()
+        .collect())
 }
 
 /// Open `queue.json`, creating it when absent. An existing snapshot that
@@ -324,18 +324,21 @@ async fn load_snapshot(
     };
     let aside = corrupt_path(file);
     error!("calibration: queue snapshot {file} is unreadable; moving it to {aside} and rebuilding from the report files: {err}");
+    // rebuild before moving the snapshot aside: if the rebuild fails, the next
+    // open must still find the unreadable snapshot, not an absent one it would
+    // replace with an empty queue
+    let snapshot = rebuild_snapshot(content_dir).await?;
     files::move_to(file, &aside, Overwrite::Allow).await?;
-    let snapshot = rebuild_snapshot(content_dir).await;
     Ok(QueueSnapshotFile::create(file.clone(), &snapshot, Overwrite::Allow).await?)
 }
 
 /// A queue holding every readable report file under its own entry id, oldest
 /// calibration first. Attempt counts and backoff are lost, so every report is
 /// due at once. An unreadable report file is renamed with [`CORRUPT_EXT`] and
-/// skipped.
-async fn rebuild_snapshot(content_dir: &Dir) -> QueueSnapshot {
+/// skipped. A failed listing is returned, never rebuilt as an empty queue.
+async fn rebuild_snapshot(content_dir: &Dir) -> Result<QueueSnapshot, CalibrationsErr> {
     let mut entries = Vec::new();
-    for (id, file) in report_files(content_dir).await {
+    for (id, file) in report_files(content_dir).await? {
         match files::read_json::<ReportFile>(&file).await {
             Ok(record) => entries.push(QueueEntry {
                 id,
@@ -350,7 +353,7 @@ async fn rebuild_snapshot(content_dir: &Dir) -> QueueSnapshot {
         }
     }
     entries.sort_by_key(|entry| (entry.job.calibrated_at, entry.id));
-    QueueSnapshot { entries }
+    Ok(QueueSnapshot { entries })
 }
 
 /// `file` with [`CORRUPT_EXT`] appended to its name.

@@ -283,6 +283,82 @@ pub mod open {
         );
     }
 
+    /// Lock the content directory so it cannot be listed, run `f`, then
+    /// restore it so the temp dir can be cleaned up.
+    #[cfg(unix)]
+    async fn with_unlistable_content<T>(
+        fixture: &Fixture,
+        f: impl std::future::Future<Output = T>,
+    ) -> T {
+        use std::os::unix::fs::PermissionsExt;
+        let content = fixture.layout().content();
+        let mode = |bits| std::fs::Permissions::from_mode(bits);
+        dirs::set_permissions(&content, mode(0o300)).await.unwrap();
+        let out = f.await;
+        dirs::set_permissions(&content, mode(0o700)).await.unwrap();
+        out
+    }
+
+    /// A transient listing failure must not read as an empty directory: that
+    /// would drop every queue entry, and the next open would delete every
+    /// report file as an orphan.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn listing_failure_fails_the_open_and_loses_nothing() {
+        let fixture = Fixture::new();
+        let ids = {
+            let mut buffer = fixture.open().await;
+            enqueue_all(&mut buffer, &["a", "b"]).await
+        };
+
+        let result = with_unlistable_content(
+            &fixture,
+            Buffer::open(&fixture.layout(), BufferOptions::default()),
+        )
+        .await;
+
+        assert!(matches!(result, Err(CalibrationsErr::FileSysErr(_))));
+        assert_eq!(queue_on_disk(&fixture).await, strings(&["a", "b"]));
+        let buffer = fixture.open().await;
+        assert_eq!(names(&buffer), strings(&["a", "b"]));
+        assert!(fixture.report_file(ids[0]).exists());
+        assert!(fixture.report_file(ids[1]).exists());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn listing_failure_during_a_rebuild_keeps_the_snapshot_for_the_next_open() {
+        let fixture = Fixture::new();
+        {
+            let mut buffer = fixture.open().await;
+            enqueue_all(&mut buffer, &["a", "b"]).await;
+        }
+        files::write_string(
+            &fixture.queue_file(),
+            "{not json",
+            WriteOptions::OVERWRITE_ATOMIC,
+        )
+        .await
+        .unwrap();
+
+        let result = with_unlistable_content(
+            &fixture,
+            Buffer::open(&fixture.layout(), BufferOptions::default()),
+        )
+        .await;
+
+        assert!(matches!(result, Err(CalibrationsErr::FileSysErr(_))));
+        // the unreadable snapshot stays put, so the next open rebuilds again
+        // rather than starting from an empty queue
+        let raw = files::read_string(&fixture.queue_file()).await.unwrap();
+        assert_eq!(raw, "{not json");
+        let buffer = fixture.open().await;
+        // same calibration time, so the rebuild's order between them is by id
+        let mut rebuilt = names(&buffer);
+        rebuilt.sort();
+        assert_eq!(rebuilt, strings(&["a", "b"]));
+    }
+
     #[tokio::test]
     async fn loads_a_backlog_over_a_lowered_cap() {
         let fixture = Fixture::new();
