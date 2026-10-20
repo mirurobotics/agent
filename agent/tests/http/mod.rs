@@ -1,3 +1,4 @@
+pub mod calibrations;
 pub mod client;
 pub mod config_instances;
 pub mod deployments;
