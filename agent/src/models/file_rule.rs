@@ -58,6 +58,15 @@ pub struct FileRuleRetention {
     pub ttl_secs: u64,
 }
 
+impl FileRuleRetention {
+    /// Whether a file must be uploaded before it may be deleted. Only an
+    /// explicit `require_upload: true` waits for the upload; an absent field
+    /// means the file is deletable once stable.
+    pub fn requires_upload(&self) -> bool {
+        self.require_upload.unwrap_or(false)
+    }
+}
+
 // ================================= FILE RULE ===================================== //
 pub type FileRuleID = String;
 pub type UploadCollectionID = String;

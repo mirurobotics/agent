@@ -227,9 +227,7 @@ where
         let Some(retention) = &entry.job.retention else {
             return;
         };
-        // Same gate as the retention sink: only `require_upload: true` waits
-        // for the upload; everything else was enqueued at stability.
-        if !retention.require_upload.unwrap_or(false) {
+        if !retention.requires_upload() {
             return;
         }
 
