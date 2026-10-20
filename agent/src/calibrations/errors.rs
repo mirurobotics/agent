@@ -131,6 +131,15 @@ impl From<AuthnErr> for CalibrationsErr {
     }
 }
 
+impl From<crate::actor::ActorErr> for CalibrationsErr {
+    fn from(e: crate::actor::ActorErr) -> Self {
+        match e {
+            crate::actor::ActorErr::SendActorMessageErr(e) => Self::SendActorMessageErr(e),
+            crate::actor::ActorErr::ReceiveActorMessageErr(e) => Self::ReceiveActorMessageErr(e),
+        }
+    }
+}
+
 crate::impl_error!(CalibrationsErr {
     QueueFullErr,
     TooLargeErr,

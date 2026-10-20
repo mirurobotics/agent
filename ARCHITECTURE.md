@@ -19,6 +19,8 @@ All source lives under `agent/src/`. The binary entry point is `main.rs`.
 
 ### Core infrastructure
 
+`actor` — plumbing shared by single-owner actors: a task that owns some state and takes commands over `mpsc`, answering each over `oneshot`. The worker implements `Actor` (`commands`, `handle`) and uses `serve_next` to wait for work and `serve_until` to keep answering commands while something slow, such as an upload, runs. The handle holds a `Mailbox` and calls `Mailbox::request`, whose `ActorErr` converts into each module's `SendActorMessageErr` / `ReceiveActorMessageErr` variants. The calibrations uploader, the data upload uploader and the retention deleter use it.
+
 `cli` — command-line argument parsing. Determines provision vs runtime mode and parses `--console` (foreground instead of Windows service).
 
 `errors` — custom Error trait with `code()`, `http_status()`, `params()`, `is_network_conn_err()` methods. All error types derive `thiserror::Error`. Aggregating enums use the `impl_error!` macro defined here.
