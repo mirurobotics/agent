@@ -15,8 +15,7 @@ use uuid::Uuid;
 /// A deterministic calibration job, due the moment it arrives.
 fn calibration_job(name: &str) -> CalibrationJob {
     CalibrationJob {
-        report_id: format!("clb_rpt_{name}"),
-        component_slug: "arm".to_string(),
+        component_slug: name.to_string(),
         role: Some("aligner-1".to_string()),
         aspect: Some("pose".to_string()),
         serial_number: Some("SN-1".to_string()),
@@ -30,14 +29,17 @@ queue_suite!(calibration_job, "calibration-generic-queue-test");
 #[test]
 fn due_at_is_min_utc() {
     assert_eq!(
-        QueueJob::due_at(&calibration_job("a")),
+        QueueJob::due_at(&calibration_job("arm")),
         DateTime::<Utc>::MIN_UTC
     );
 }
 
 #[test]
-fn name_is_the_report_id() {
-    assert_eq!(QueueJob::name(&calibration_job("a")), "clb_rpt_a");
+fn name_is_the_component_and_time() {
+    assert_eq!(
+        QueueJob::name(&calibration_job("arm")),
+        "calibration of arm received at 1970-01-01T00:16:40+00:00"
+    );
 }
 
 async fn open(path: &File) -> QueueSnapshotFile {
@@ -60,7 +62,7 @@ mod wire {
         let raw = format!(
             concat!(
                 r#"{{"entries":[{{"id":"{id}","job":{{"#,
-                r#""report_id":"clb_rpt_a","component_slug":"arm","#,
+                r#""component_slug":"arm","#,
                 r#""role":"aligner-1","aspect":"pose","serial_number":"SN-1","#,
                 r#""deployment_id":"dpl_1","calibrated_at":"1970-01-01T00:16:40Z""#,
                 r#"}},"attempts":0,"next_attempt_at":null}}]}}"#,
@@ -75,7 +77,7 @@ mod wire {
 
         let entry = queue.next_ready(Utc::now()).unwrap();
         assert_eq!(entry.id, id);
-        assert_eq!(entry.job, calibration_job("a"));
+        assert_eq!(entry.job, calibration_job("arm"));
     }
 
     /// The optional fields may be absent, as for a calibration taken with no
@@ -85,7 +87,7 @@ mod wire {
         let dir = test_dirs::temp("calibration_queue_test").unwrap();
         let path = dir.to_dir().file("queue.json");
         let raw = concat!(
-            r#"{"entries":[{"job":{"report_id":"clb_rpt_a","component_slug":"arm","#,
+            r#"{"entries":[{"job":{"component_slug":"arm","#,
             r#""calibrated_at":"1970-01-01T00:16:40Z"}}]}"#,
         );
         files::write_string(&path, raw, WriteOptions::OVERWRITE_ATOMIC)
@@ -100,7 +102,7 @@ mod wire {
             aspect: None,
             serial_number: None,
             deployment_id: None,
-            ..calibration_job("a")
+            ..calibration_job("arm")
         };
         assert_eq!(job, expected);
     }
@@ -111,7 +113,7 @@ mod wire {
         let path = dir.to_dir().file("queue.json");
         {
             let mut queue = Queue::from_snapshot(8, open(&path).await);
-            queue.enqueue(calibration_job("a")).await.unwrap();
+            queue.enqueue(calibration_job("arm")).await.unwrap();
         }
 
         let raw = files::read_string(&path).await.unwrap();
@@ -126,7 +128,6 @@ mod wire {
                 "calibrated_at",
                 "component_slug",
                 "deployment_id",
-                "report_id",
                 "role",
                 "serial_number",
             ],

@@ -7,10 +7,9 @@ use crate::filesys::FileSysErr;
 /// already buffered was dropped; the caller should retry once uploads drain it.
 #[derive(Debug, thiserror::Error)]
 #[error(
-    "calibration buffer is full ({reports}/{max_reports} reports, {bytes}/{max_bytes} bytes); rejected report {report_id} of {report_bytes} bytes"
+    "calibration buffer is full ({reports}/{max_reports} reports, {bytes}/{max_bytes} bytes); rejected a report of {report_bytes} bytes"
 )]
 pub struct BufferFullErr {
-    pub report_id: String,
     pub report_bytes: u64,
     pub reports: usize,
     pub max_reports: usize,
@@ -36,32 +35,10 @@ impl crate::errors::Error for BufferFullErr {
     }
 }
 
-/// A report id that cannot safely name a file on every platform. Report ids
-/// are minted by the agent, so this is an internal error.
 #[derive(Debug, thiserror::Error)]
-#[error("invalid calibration report id {report_id:?}")]
-pub struct InvalidReportIdErr {
-    pub report_id: String,
-    pub trace: Box<Trace>,
-}
-
-impl crate::errors::Error for InvalidReportIdErr {}
-
-/// A report id already buffered. Report ids are minted by the agent, so this
-/// is an internal error.
-#[derive(Debug, thiserror::Error)]
-#[error("calibration report {report_id} is already buffered")]
-pub struct DuplicateReportErr {
-    pub report_id: String,
-    pub trace: Box<Trace>,
-}
-
-impl crate::errors::Error for DuplicateReportErr {}
-
-#[derive(Debug, thiserror::Error)]
-#[error("failed to serialize calibration report {report_id}: {source}")]
+#[error("failed to serialize calibration report {id}: {source}")]
 pub struct SerializeReportErr {
-    pub report_id: String,
+    pub id: uuid::Uuid,
     #[source]
     pub source: serde_json::Error,
     pub trace: Box<Trace>,
@@ -73,10 +50,6 @@ impl crate::errors::Error for SerializeReportErr {}
 pub enum CalibrationsErr {
     #[error(transparent)]
     BufferFullErr(BufferFullErr),
-    #[error(transparent)]
-    InvalidReportIdErr(InvalidReportIdErr),
-    #[error(transparent)]
-    DuplicateReportErr(DuplicateReportErr),
     #[error(transparent)]
     SerializeReportErr(SerializeReportErr),
     #[error(transparent)]
@@ -99,8 +72,6 @@ impl From<EnqueueErr> for CalibrationsErr {
 
 crate::impl_error!(CalibrationsErr {
     BufferFullErr,
-    InvalidReportIdErr,
-    DuplicateReportErr,
     SerializeReportErr,
     EnqueueErr,
     FileSysErr,

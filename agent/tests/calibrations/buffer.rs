@@ -9,15 +9,16 @@ use miru_agent::filesys::{dirs, files, Dir, File, PathExt, WriteOptions};
 // external crates
 use chrono::{DateTime, TimeDelta, Utc};
 use serde_json::json;
+use uuid::Uuid;
 
 fn now() -> DateTime<Utc> {
     DateTime::from_timestamp(5000, 0).unwrap()
 }
 
+/// A job told apart from others by its component slug, `name`.
 fn job(name: &str, calibrated_at_secs: i64) -> CalibrationJob {
     CalibrationJob {
-        report_id: format!("clb_rpt_{name}"),
-        component_slug: "arm".to_string(),
+        component_slug: name.to_string(),
         role: Some("aligner-1".to_string()),
         aspect: None,
         serial_number: Some("SN-1".to_string()),
@@ -75,10 +76,8 @@ impl Fixture {
         Buffer::open(&self.layout(), options).await.unwrap()
     }
 
-    fn report_file(&self, name: &str) -> File {
-        self.layout()
-            .content()
-            .file(&format!("clb_rpt_{name}.json"))
+    fn report_file(&self, id: Uuid) -> File {
+        self.layout().content().file(&format!("{id}.json"))
     }
 
     fn queue_file(&self) -> File {
@@ -86,38 +85,45 @@ impl Fixture {
     }
 }
 
-fn report_ids(buffer: &Buffer) -> Vec<String> {
-    buffer.jobs().into_iter().map(|job| job.report_id).collect()
+/// The buffered reports' names (component slugs), oldest first.
+fn names(buffer: &Buffer) -> Vec<String> {
+    buffer
+        .jobs()
+        .into_iter()
+        .map(|job| job.component_slug)
+        .collect()
 }
 
-fn ids(names: &[&str]) -> Vec<String> {
-    names.iter().map(|name| format!("clb_rpt_{name}")).collect()
+fn strings(names: &[&str]) -> Vec<String> {
+    names.iter().map(|name| name.to_string()).collect()
 }
 
 /// Take and remove every ready report, oldest first.
 async fn drain(buffer: &mut Buffer) -> Vec<String> {
     let mut out = Vec::new();
     while let Some(entry) = buffer.next_ready(now()) {
-        out.push(entry.job.report_id.clone());
+        out.push(entry.job.component_slug.clone());
         buffer.remove(entry.id).await.unwrap();
     }
     out
 }
 
-async fn enqueue_all(buffer: &mut Buffer, names: &[&str]) {
+async fn enqueue_all(buffer: &mut Buffer, names: &[&str]) -> Vec<Uuid> {
+    let mut ids = Vec::new();
     for name in names {
-        buffer.enqueue(report(name)).await.unwrap();
+        ids.push(buffer.enqueue(report(name)).await.unwrap());
     }
+    ids
 }
 
-/// The report ids `queue.json` holds, read straight from disk.
+/// The names `queue.json` holds, read straight from disk.
 async fn queue_on_disk(fixture: &Fixture) -> Vec<String> {
     let value: serde_json::Value = files::read_json(&fixture.queue_file()).await.unwrap();
     value["entries"]
         .as_array()
         .unwrap()
         .iter()
-        .map(|entry| entry["job"]["report_id"].as_str().unwrap().to_string())
+        .map(|entry| entry["job"]["component_slug"].as_str().unwrap().to_string())
         .collect()
 }
 
@@ -140,31 +146,32 @@ pub mod open {
     #[tokio::test]
     async fn survives_a_restart() {
         let fixture = Fixture::new();
-        let used = {
+        let (ids, used) = {
             let mut buffer = fixture.open().await;
-            enqueue_all(&mut buffer, &["a", "b", "c"]).await;
-            buffer.used_bytes()
+            let ids = enqueue_all(&mut buffer, &["a", "b", "c"]).await;
+            (ids, buffer.used_bytes())
         };
 
         let mut buffer = fixture.open().await;
 
-        assert_eq!(report_ids(&buffer), ids(&["a", "b", "c"]));
+        assert_eq!(names(&buffer), strings(&["a", "b", "c"]));
         assert_eq!(buffer.used_bytes(), used);
-        let file = buffer.read("clb_rpt_b").await.unwrap();
+        assert_eq!(buffer.next_ready(now()).unwrap().id, ids[0]);
+        let file = buffer.read(ids[1]).await.unwrap();
         assert_eq!(file.job, report("b").job);
         assert_eq!(file.content, report("b").content);
-        assert_eq!(drain(&mut buffer).await, ids(&["a", "b", "c"]));
+        assert_eq!(drain(&mut buffer).await, strings(&["a", "b", "c"]));
     }
 
     #[tokio::test]
     async fn removes_report_files_with_no_queue_entry() {
         let fixture = Fixture::new();
-        {
+        let ids = {
             let mut buffer = fixture.open().await;
-            enqueue_all(&mut buffer, &["a"]).await;
-        }
+            enqueue_all(&mut buffer, &["a"]).await
+        };
         // a crash between the report file and the queue entry leaves this
-        let orphan = fixture.report_file("orphan");
+        let orphan = fixture.report_file(Uuid::new_v4());
         files::write_string(&orphan, "{}", WriteOptions::OVERWRITE_ATOMIC)
             .await
             .unwrap();
@@ -172,19 +179,22 @@ pub mod open {
         let buffer = fixture.open().await;
 
         assert!(!orphan.exists());
-        assert!(fixture.report_file("a").exists());
-        assert_eq!(report_ids(&buffer), ids(&["a"]));
+        assert!(fixture.report_file(ids[0]).exists());
+        assert_eq!(names(&buffer), strings(&["a"]));
     }
 
     #[tokio::test]
     async fn leaves_files_that_are_not_report_files() {
         let fixture = Fixture::new();
         let content = fixture.layout().content();
+        let id = Uuid::new_v4();
         let others = [
-            content.file("clb_rpt_a.json.corrupt"),
-            content.file(".clb_rpt_b.json.tmp"),
+            content.file(&format!("{id}.json.corrupt")),
+            content.file(&format!(".{id}.json.tmp")),
+            content.file(&format!("{}.json", id.simple())),
+            content.file(&format!("{}.json", id.to_string().to_uppercase())),
             content.file("notes.txt"),
-            content.file("bad.id.json"),
+            content.file("not-a-uuid.json"),
         ];
         for file in &others {
             files::write_string(file, "x", WriteOptions::OVERWRITE_ATOMIC)
@@ -203,16 +213,16 @@ pub mod open {
     #[tokio::test]
     async fn drops_queue_entries_whose_report_file_is_missing() {
         let fixture = Fixture::new();
-        {
+        let ids = {
             let mut buffer = fixture.open().await;
-            enqueue_all(&mut buffer, &["a", "b", "c"]).await;
-        }
-        files::delete(&fixture.report_file("b")).await.unwrap();
+            enqueue_all(&mut buffer, &["a", "b", "c"]).await
+        };
+        files::delete(&fixture.report_file(ids[1])).await.unwrap();
 
         let buffer = fixture.open().await;
 
-        assert_eq!(report_ids(&buffer), ids(&["a", "c"]));
-        assert_eq!(queue_on_disk(&fixture).await, ids(&["a", "c"]));
+        assert_eq!(names(&buffer), strings(&["a", "c"]));
+        assert_eq!(queue_on_disk(&fixture).await, strings(&["a", "c"]));
         assert_eq!(
             buffer.used_bytes(),
             serialized_len(&report("a")) + serialized_len(&report("c"))
@@ -222,6 +232,7 @@ pub mod open {
     #[tokio::test]
     async fn rebuilds_an_unreadable_queue_from_the_report_files() {
         let fixture = Fixture::new();
+        let mut ids = Vec::new();
         {
             let mut buffer = fixture.open().await;
             // enqueued out of calibration order; the rebuild orders by
@@ -231,7 +242,7 @@ pub mod open {
                     job: job(name, secs),
                     ..report(name)
                 };
-                buffer.enqueue(report).await.unwrap();
+                ids.push(buffer.enqueue(report).await.unwrap());
             }
         }
         files::write_string(
@@ -242,8 +253,9 @@ pub mod open {
         .await
         .unwrap();
         // an unreadable report file is set aside, not uploaded or deleted
+        let broken = Uuid::new_v4();
         files::write_string(
-            &fixture.report_file("broken"),
+            &fixture.report_file(broken),
             "{not json",
             WriteOptions::OVERWRITE_ATOMIC,
         )
@@ -252,42 +264,23 @@ pub mod open {
 
         let mut buffer = fixture.open().await;
 
-        assert_eq!(report_ids(&buffer), ids(&["early", "middle", "late"]));
+        assert_eq!(names(&buffer), strings(&["early", "middle", "late"]));
         assert_eq!(
             queue_on_disk(&fixture).await,
-            ids(&["early", "middle", "late"])
+            strings(&["early", "middle", "late"])
         );
+        // each rebuilt entry keeps the id that names its report file
+        let entry = buffer.next_ready(now()).unwrap();
+        assert_eq!(entry.id, ids[1]);
         let aside = fixture.root.file("queue.json.corrupt");
         assert_eq!(files::read_string(&aside).await.unwrap(), "{not json");
         let content = fixture.layout().content();
-        assert!(content.file("clb_rpt_broken.json.corrupt").exists());
-        assert!(!fixture.report_file("broken").exists());
-        assert_eq!(drain(&mut buffer).await, ids(&["early", "middle", "late"]));
-    }
-
-    #[tokio::test]
-    async fn rebuild_sets_aside_a_report_file_under_the_wrong_name() {
-        let fixture = Fixture::new();
-        {
-            let mut buffer = fixture.open().await;
-            enqueue_all(&mut buffer, &["a"]).await;
-        }
-        files::copy_to(
-            &fixture.report_file("a"),
-            &fixture.report_file("other"),
-            miru_agent::filesys::Overwrite::Deny,
-        )
-        .await
-        .unwrap();
-        files::write_string(&fixture.queue_file(), "[]", WriteOptions::OVERWRITE_ATOMIC)
-            .await
-            .unwrap();
-
-        let buffer = fixture.open().await;
-
-        assert_eq!(report_ids(&buffer), ids(&["a"]));
-        let content = fixture.layout().content();
-        assert!(content.file("clb_rpt_other.json.corrupt").exists());
+        assert!(content.file(&format!("{broken}.json.corrupt")).exists());
+        assert!(!fixture.report_file(broken).exists());
+        assert_eq!(
+            drain(&mut buffer).await,
+            strings(&["early", "middle", "late"])
+        );
     }
 
     #[tokio::test]
@@ -329,14 +322,19 @@ pub mod open {
 pub mod enqueue {
     use super::*;
 
+    /// Every report in a single listing of the content directory.
+    async fn content_files(fixture: &Fixture) -> Vec<File> {
+        dirs::files(&fixture.layout().content()).await.unwrap()
+    }
+
     #[tokio::test]
     async fn writes_the_report_file_and_the_queue_entry() {
         let fixture = Fixture::new();
         let mut buffer = fixture.open().await;
 
-        buffer.enqueue(report("a")).await.unwrap();
+        let id = buffer.enqueue(report("a")).await.unwrap();
 
-        let raw = files::read_string(&fixture.report_file("a")).await.unwrap();
+        let raw = files::read_string(&fixture.report_file(id)).await.unwrap();
         let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
         let mut keys: Vec<&str> = value
             .as_object()
@@ -346,9 +344,11 @@ pub mod enqueue {
             .collect();
         keys.sort_unstable();
         assert_eq!(keys, ["content", "job"], "{raw}");
-        assert_eq!(value["job"]["report_id"], "clb_rpt_a", "{raw}");
+        assert_eq!(value["job"]["component_slug"], "a", "{raw}");
         assert_eq!(value["content"], report("a").content, "{raw}");
-        assert_eq!(queue_on_disk(&fixture).await, ids(&["a"]));
+        assert_eq!(queue_on_disk(&fixture).await, strings(&["a"]));
+        let entries: serde_json::Value = files::read_json(&fixture.queue_file()).await.unwrap();
+        assert_eq!(entries["entries"][0]["id"], id.to_string());
         assert_eq!(buffer.used_bytes(), raw.len() as u64);
     }
 
@@ -359,8 +359,19 @@ pub mod enqueue {
 
         enqueue_all(&mut buffer, &["c", "a", "b"]).await;
 
-        assert_eq!(drain(&mut buffer).await, ids(&["c", "a", "b"]));
+        assert_eq!(drain(&mut buffer).await, strings(&["c", "a", "b"]));
         assert!(buffer.is_empty());
+    }
+
+    #[tokio::test]
+    async fn identical_reports_are_both_buffered() {
+        let fixture = Fixture::new();
+        let mut buffer = fixture.open().await;
+
+        let ids = enqueue_all(&mut buffer, &["a", "a"]).await;
+
+        assert_ne!(ids[0], ids[1]);
+        assert_eq!(drain(&mut buffer).await, strings(&["a", "a"]));
     }
 
     #[tokio::test]
@@ -379,10 +390,9 @@ pub mod enqueue {
             panic!("expected BufferFullErr, got {err:?}");
         };
         assert_eq!((err.reports, err.max_reports), (2, 2));
-        assert_eq!(err.report_id, "clb_rpt_c");
-        assert!(!fixture.report_file("c").exists());
-        assert_eq!(report_ids(&buffer), ids(&["a", "b"]));
-        assert_eq!(queue_on_disk(&fixture).await, ids(&["a", "b"]));
+        assert_eq!(content_files(&fixture).await.len(), 2);
+        assert_eq!(names(&buffer), strings(&["a", "b"]));
+        assert_eq!(queue_on_disk(&fixture).await, strings(&["a", "b"]));
     }
 
     #[tokio::test]
@@ -407,8 +417,8 @@ pub mod enqueue {
             (err.bytes, err.max_bytes, err.report_bytes),
             (1000, 1000, 300)
         );
-        assert!(!fixture.report_file("c").exists());
-        assert_eq!(report_ids(&buffer), ids(&["a", "b"]));
+        assert_eq!(content_files(&fixture).await.len(), 2);
+        assert_eq!(names(&buffer), strings(&["a", "b"]));
     }
 
     #[tokio::test]
@@ -430,56 +440,6 @@ pub mod enqueue {
     }
 
     #[tokio::test]
-    async fn rejects_a_duplicate_report_id() {
-        let fixture = Fixture::new();
-        let mut buffer = fixture.open().await;
-        buffer.enqueue(report("a")).await.unwrap();
-        let before = files::read_string(&fixture.report_file("a")).await.unwrap();
-
-        let mut duplicate = report("a");
-        duplicate.content = json!("different");
-        let err = buffer.enqueue(duplicate).await.unwrap_err();
-
-        assert!(
-            matches!(err, CalibrationsErr::DuplicateReportErr(_)),
-            "{err:?}"
-        );
-        let after = files::read_string(&fixture.report_file("a")).await.unwrap();
-        assert_eq!(before, after);
-        assert_eq!(buffer.len(), 1);
-    }
-
-    #[tokio::test]
-    async fn rejects_report_ids_unsafe_as_file_names() {
-        let fixture = Fixture::new();
-        let mut buffer = fixture.open().await;
-        let long = "a".repeat(129);
-        for bad in [
-            "",
-            "../escape",
-            "a/b",
-            "a\\b",
-            "C:x",
-            "a.b",
-            "a b",
-            long.as_str(),
-        ] {
-            let mut report = report("x");
-            report.job.report_id = bad.to_string();
-
-            let err = buffer.enqueue(report).await.unwrap_err();
-
-            assert!(
-                matches!(err, CalibrationsErr::InvalidReportIdErr(_)),
-                "{bad:?}: {err:?}"
-            );
-        }
-        assert!(buffer.is_empty());
-        let listing = dirs::files(&fixture.layout().content()).await.unwrap();
-        assert!(listing.is_empty(), "{listing:?}");
-    }
-
-    #[tokio::test]
     async fn queue_write_failure_rejects_and_removes_the_report_file() {
         let fixture = Fixture::new();
         let mut buffer = fixture.open().await;
@@ -495,8 +455,8 @@ pub mod enqueue {
         let err = buffer.enqueue(report("b")).await.unwrap_err();
 
         assert!(matches!(err, CalibrationsErr::EnqueueErr(_)), "{err:?}");
-        assert!(!fixture.report_file("b").exists());
-        assert_eq!(report_ids(&buffer), ids(&["a"]));
+        assert_eq!(content_files(&fixture).await.len(), 1);
+        assert_eq!(names(&buffer), strings(&["a"]));
         assert_eq!(buffer.used_bytes(), used);
     }
 
@@ -504,10 +464,16 @@ pub mod enqueue {
     async fn report_file_write_failure_rejects() {
         let fixture = Fixture::new();
         let mut buffer = fixture.open().await;
-        // a directory where the report file would go
-        dirs::create(&Dir::new(fixture.report_file("a").path().clone()))
-            .await
-            .unwrap();
+        // a file where the content directory should be
+        let content = fixture.layout().content();
+        dirs::delete(&content).await.unwrap();
+        files::write_string(
+            &File::new(content.path().clone()),
+            "x",
+            WriteOptions::OVERWRITE_ATOMIC,
+        )
+        .await
+        .unwrap();
 
         let err = buffer.enqueue(report("a")).await.unwrap_err();
 
@@ -524,15 +490,14 @@ pub mod remove {
     async fn deletes_the_entry_and_its_report_file() {
         let fixture = Fixture::new();
         let mut buffer = fixture.open().await;
-        enqueue_all(&mut buffer, &["a", "b"]).await;
+        let ids = enqueue_all(&mut buffer, &["a", "b"]).await;
 
-        let entry = buffer.next_ready(now()).unwrap();
-        let removed = buffer.remove(entry.id).await.unwrap();
+        let removed = buffer.remove(ids[0]).await.unwrap();
 
-        assert_eq!(removed.job.report_id, "clb_rpt_a");
-        assert!(!fixture.report_file("a").exists());
-        assert!(fixture.report_file("b").exists());
-        assert_eq!(queue_on_disk(&fixture).await, ids(&["b"]));
+        assert_eq!(removed.job.component_slug, "a");
+        assert!(!fixture.report_file(ids[0]).exists());
+        assert!(fixture.report_file(ids[1]).exists());
+        assert_eq!(queue_on_disk(&fixture).await, strings(&["b"]));
         assert_eq!(buffer.used_bytes(), serialized_len(&report("b")));
     }
 
@@ -542,7 +507,7 @@ pub mod remove {
         let mut buffer = fixture.open().await;
         enqueue_all(&mut buffer, &["a"]).await;
 
-        assert!(buffer.remove(uuid::Uuid::new_v4()).await.is_none());
+        assert!(buffer.remove(Uuid::new_v4()).await.is_none());
         assert_eq!(buffer.len(), 1);
     }
 }
@@ -554,9 +519,9 @@ pub mod requeue {
     async fn backoff_survives_a_restart() {
         let fixture = Fixture::new();
         let deadline = now() + TimeDelta::minutes(5);
-        {
+        let ids = {
             let mut buffer = fixture.open().await;
-            enqueue_all(&mut buffer, &["a", "b"]).await;
+            let ids = enqueue_all(&mut buffer, &["a", "b"]).await;
             let entry = buffer.next_ready(now()).unwrap();
             buffer
                 .requeue(QueueEntry {
@@ -569,21 +534,22 @@ pub mod requeue {
                 buffer.earliest_next_attempt(),
                 Some(DateTime::<Utc>::MIN_UTC)
             );
-        }
+            ids
+        };
 
         let mut buffer = fixture.open().await;
 
-        assert_eq!(report_ids(&buffer), ids(&["b", "a"]));
+        assert_eq!(names(&buffer), strings(&["b", "a"]));
         let ready = buffer.next_ready(now()).unwrap();
-        assert_eq!(ready.job.report_id, "clb_rpt_b");
+        assert_eq!(ready.id, ids[1]);
         buffer.remove(ready.id).await.unwrap();
         // `a` waits out its backoff, then comes back with its attempt count
         assert!(buffer.next_ready(now()).is_none());
         assert_eq!(buffer.earliest_next_attempt(), Some(deadline));
         let waiting = buffer.next_ready(deadline).unwrap();
-        assert_eq!(waiting.job.report_id, "clb_rpt_a");
+        assert_eq!(waiting.id, ids[0]);
         assert_eq!(waiting.attempts, 3);
-        assert!(buffer.read("clb_rpt_a").await.is_ok());
+        assert!(buffer.read(ids[0]).await.is_ok());
     }
 }
 
@@ -594,28 +560,21 @@ pub mod read {
     async fn returns_the_job_and_content() {
         let fixture = Fixture::new();
         let mut buffer = fixture.open().await;
-        buffer.enqueue(report("a")).await.unwrap();
+        let id = buffer.enqueue(report("a")).await.unwrap();
 
-        let file = buffer.read("clb_rpt_a").await.unwrap();
+        let file = buffer.read(id).await.unwrap();
 
         assert_eq!(file.job, report("a").job);
         assert_eq!(file.content, report("a").content);
     }
 
     #[tokio::test]
-    async fn errors_for_an_unknown_or_invalid_report() {
+    async fn errors_for_an_unknown_entry() {
         let fixture = Fixture::new();
         let buffer = fixture.open().await;
 
-        let missing = buffer.read("clb_rpt_missing").await.unwrap_err();
-        assert!(
-            matches!(missing, CalibrationsErr::FileSysErr(_)),
-            "{missing:?}"
-        );
-        let invalid = buffer.read("../queue").await.unwrap_err();
-        assert!(
-            matches!(invalid, CalibrationsErr::InvalidReportIdErr(_)),
-            "{invalid:?}"
-        );
+        let err = buffer.read(Uuid::new_v4()).await.unwrap_err();
+
+        assert!(matches!(err, CalibrationsErr::FileSysErr(_)), "{err:?}");
     }
 }

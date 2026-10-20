@@ -8,12 +8,9 @@ use serde::{Deserialize, Serialize};
 /// One buffered calibration report, as the upload worker will send it to Miru.
 /// Everything here is captured at intake, so an upload hours later still
 /// reports the deployment and time the calibration was taken under. The
-/// content itself lives in the report file named by `report_id`.
+/// content itself lives in the report file named by the queue entry's id.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CalibrationJob {
-    /// The agent-local receipt id, unique per device. Miru uses it to make
-    /// the agent's own upload retries idempotent.
-    pub report_id: String,
     pub component_slug: String,
     #[serde(default)]
     pub role: Option<String>,
@@ -37,7 +34,11 @@ impl queue::QueueJob for CalibrationJob {
     }
 
     fn name(&self) -> String {
-        self.report_id.clone()
+        format!(
+            "calibration of {} received at {}",
+            self.component_slug,
+            self.calibrated_at.to_rfc3339()
+        )
     }
 }
 

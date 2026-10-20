@@ -282,18 +282,15 @@ pub mod cases {
     pub mod enqueue_durable {
         use super::*;
 
-        pub async fn persists_and_returns_the_entry_id<J: QueueJob>(
-            tmp: &str,
-            make: fn(&str) -> J,
-        ) {
+        pub async fn persists_under_the_given_id<J: QueueJob>(tmp: &str, make: fn(&str) -> J) {
             let (_dir, path) = temp_path(tmp);
 
-            let id = {
+            let id = Uuid::new_v4();
+            {
                 let mut queue = Queue::<J>::from_snapshot(DEFAULT_CAPACITY, open::<J>(&path).await);
-                let id = queue.enqueue_durable(make("a.log")).await.unwrap();
+                queue.enqueue_durable(id, make("a.log")).await.unwrap();
                 assert_eq!(queue.next_ready(now()).unwrap().id, id);
-                id
-            };
+            }
 
             let reloaded = Queue::<J>::from_snapshot(DEFAULT_CAPACITY, open::<J>(&path).await);
             let entry = reloaded.next_ready(now()).unwrap();
@@ -310,24 +307,39 @@ pub mod cases {
             files::delete(&path).await.unwrap();
             dirs::create(&Dir::new(path.path().clone())).await.unwrap();
 
-            let err = queue.enqueue_durable(make("b.log")).await.unwrap_err();
+            let err = queue
+                .enqueue_durable(Uuid::new_v4(), make("b.log"))
+                .await
+                .unwrap_err();
             assert!(matches!(err, EnqueueErr::FileSysErr(_)), "{err:?}");
             assert_eq!(queued(&queue), jobs(make, &["a.log"]));
         }
 
         pub async fn full_queue_rejects_with_queue_full_err<J: QueueJob>(make: fn(&str) -> J) {
             let mut queue = Queue::<J>::new(1);
-            queue.enqueue_durable(make("a.log")).await.unwrap();
+            queue
+                .enqueue_durable(Uuid::new_v4(), make("a.log"))
+                .await
+                .unwrap();
 
-            let err = queue.enqueue_durable(make("b.log")).await.unwrap_err();
+            let err = queue
+                .enqueue_durable(Uuid::new_v4(), make("b.log"))
+                .await
+                .unwrap_err();
             assert!(matches!(err, EnqueueErr::QueueFullErr(_)), "{err:?}");
             assert_eq!(queue.len(), 1);
         }
 
         pub async fn without_a_snapshot_file_succeeds<J: QueueJob>(make: fn(&str) -> J) {
             let mut queue = Queue::<J>::new(DEFAULT_CAPACITY);
-            queue.enqueue_durable(make("a.log")).await.unwrap();
-            queue.enqueue_durable(make("b.log")).await.unwrap();
+            queue
+                .enqueue_durable(Uuid::new_v4(), make("a.log"))
+                .await
+                .unwrap();
+            queue
+                .enqueue_durable(Uuid::new_v4(), make("b.log"))
+                .await
+                .unwrap();
 
             assert_eq!(drain(&mut queue).await, jobs(make, &["a.log", "b.log"]));
         }
@@ -763,7 +775,7 @@ macro_rules! queue_suite {
                 ],
             },
             enqueue_durable {
-                disk: [persists_and_returns_the_entry_id, persist_failure_rolls_back],
+                disk: [persists_under_the_given_id, persist_failure_rolls_back],
                 mem: [
                     full_queue_rejects_with_queue_full_err,
                     without_a_snapshot_file_succeeds,

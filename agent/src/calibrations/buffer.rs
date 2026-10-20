@@ -1,13 +1,13 @@
 // standard crates
 use std::collections::{HashMap, HashSet};
+use std::str::FromStr;
 
 // internal crates
 use crate::calibrations::{
-    errors::{
-        BufferFullErr, CalibrationsErr, DuplicateReportErr, InvalidReportIdErr, SerializeReportErr,
-    },
+    errors::{BufferFullErr, CalibrationsErr, SerializeReportErr},
     job::{CalibrationJob, Queue, QueueEntry, QueueSnapshot, QueueSnapshotFile},
 };
+use crate::data_uploads::queue::QueueJob;
 use crate::disk::layout::CalibrationsLayout;
 use crate::filesys::{dirs, files, Dir, File, Overwrite, PathExt, WriteOptions};
 use crate::trace;
@@ -18,15 +18,14 @@ use serde::{Deserialize, Serialize};
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
-/// The report files' extension. Anything else in the content directory (an
-/// in-flight atomic write, a set-aside `.corrupt` file) is left alone.
+/// The report files' extension. A report file is named `<entry id>.json`, the
+/// queue entry's UUID. Anything else in the content directory (an in-flight
+/// atomic write, a set-aside `.corrupt` file) is left alone.
 const REPORT_EXT: &str = ".json";
 
 /// Appended to a report file that cannot be parsed while rebuilding the queue,
 /// so it is kept for inspection but never read or cleaned up again.
 const CORRUPT_EXT: &str = ".corrupt";
-
-const MAX_REPORT_ID_LEN: usize = 128;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct BufferOptions {
@@ -52,7 +51,7 @@ pub struct Report {
     pub content: serde_json::Value,
 }
 
-/// The on-disk shape of `content/<report_id>.json`. The job is stored beside
+/// The on-disk shape of `content/<entry id>.json`. The job is stored beside
 /// the content so the queue can be rebuilt from the report files alone if
 /// `queue.json` is ever lost to corruption.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -83,8 +82,8 @@ pub struct Buffer {
     content_dir: Dir,
     max_reports: usize,
     max_bytes: u64,
-    /// Report-file size per buffered report id.
-    sizes: HashMap<String, u64>,
+    /// Report-file size per queue entry id.
+    sizes: HashMap<Uuid, u64>,
     used_bytes: u64,
 }
 
@@ -147,10 +146,9 @@ impl Buffer {
         self.queue.earliest_next_attempt()
     }
 
-    /// Read a buffered report's file.
-    pub async fn read(&self, report_id: &str) -> Result<ReportFile, CalibrationsErr> {
-        let file = self.report_file(report_id)?;
-        Ok(files::read_json::<ReportFile>(&file).await?)
+    /// Read the report file of the queue entry `id`.
+    pub async fn read(&self, id: Uuid) -> Result<ReportFile, CalibrationsErr> {
+        Ok(files::read_json::<ReportFile>(&self.report_file(id)).await?)
     }
 
     // ================ Mutators ================ //
@@ -158,28 +156,23 @@ impl Buffer {
     /// Buffer `report` durably. On success the report file and its queue entry
     /// are both on disk. On any error nothing is buffered, and a full buffer
     /// returns [`BufferFullErr`] rather than dropping an older report.
-    pub async fn enqueue(&mut self, report: Report) -> Result<(), CalibrationsErr> {
-        let report_id = report.job.report_id.clone();
-        let file = self.report_file(&report_id)?;
-        if self.sizes.contains_key(&report_id) {
-            return Err(CalibrationsErr::DuplicateReportErr(DuplicateReportErr {
-                report_id,
-                trace: trace!(),
-            }));
-        }
-        let bytes = serialize_report(&report)?;
+    /// Returns the new queue entry's id, which also names its report file.
+    pub async fn enqueue(&mut self, report: Report) -> Result<Uuid, CalibrationsErr> {
+        let id = Uuid::new_v4();
+        let file = self.report_file(id);
+        let bytes = serialize_report(id, &report)?;
         let report_bytes = bytes.len() as u64;
-        self.verify_capacity(&report_id, report_bytes)?;
+        self.verify_capacity(report_bytes)?;
 
         // content first: a crash before the queue entry lands leaves only an
         // orphan file, which the next open removes
         files::write_bytes(&file, &bytes, WriteOptions::OVERWRITE_ATOMIC).await?;
-        if let Err(err) = self.queue.enqueue_durable(report.job).await {
+        if let Err(err) = self.queue.enqueue_durable(id, report.job).await {
             delete_report_file(&file).await;
             return Err(err.into());
         }
-        self.track(report_id, report_bytes);
-        Ok(())
+        self.track(id, report_bytes);
+        Ok(id)
     }
 
     /// Drop the entry with `id` and its report file, once the report has been
@@ -188,11 +181,8 @@ impl Buffer {
     /// ignored.
     pub async fn remove(&mut self, id: Uuid) -> Option<QueueEntry> {
         let entry = self.queue.remove(id).await?;
-        let report_id = &entry.job.report_id;
-        if let Ok(file) = self.report_file(report_id) {
-            delete_report_file(&file).await;
-        }
-        self.untrack(report_id);
+        delete_report_file(&self.report_file(id)).await;
+        self.untrack(id);
         Some(entry)
     }
 
@@ -203,19 +193,17 @@ impl Buffer {
 
     // ================ Internals ================ //
 
-    fn report_file(&self, report_id: &str) -> Result<File, CalibrationsErr> {
-        validate_report_id(report_id)?;
-        Ok(self.content_dir.file(&format!("{report_id}{REPORT_EXT}")))
+    fn report_file(&self, id: Uuid) -> File {
+        report_file(&self.content_dir, id)
     }
 
-    fn verify_capacity(&self, report_id: &str, report_bytes: u64) -> Result<(), CalibrationsErr> {
+    fn verify_capacity(&self, report_bytes: u64) -> Result<(), CalibrationsErr> {
         let reports = self.queue.len();
         let over_bytes = self.used_bytes.saturating_add(report_bytes) > self.max_bytes;
         if reports < self.max_reports && !over_bytes {
             return Ok(());
         }
         let err = BufferFullErr {
-            report_id: report_id.to_string(),
             report_bytes,
             reports,
             max_reports: self.max_reports,
@@ -227,15 +215,15 @@ impl Buffer {
         Err(CalibrationsErr::BufferFullErr(err))
     }
 
-    fn track(&mut self, report_id: String, bytes: u64) {
-        if let Some(old) = self.sizes.insert(report_id, bytes) {
+    fn track(&mut self, id: Uuid, bytes: u64) {
+        if let Some(old) = self.sizes.insert(id, bytes) {
             self.used_bytes = self.used_bytes.saturating_sub(old);
         }
         self.used_bytes = self.used_bytes.saturating_add(bytes);
     }
 
-    fn untrack(&mut self, report_id: &str) {
-        if let Some(bytes) = self.sizes.remove(report_id) {
+    fn untrack(&mut self, id: Uuid) {
+        if let Some(bytes) = self.sizes.remove(&id) {
             self.used_bytes = self.used_bytes.saturating_sub(bytes);
         }
     }
@@ -245,19 +233,15 @@ impl Buffer {
     /// entries whose file is gone. Problems are logged, never fatal: a file
     /// that cannot be cleaned up now is retried on the next open.
     async fn reconcile(&mut self) {
-        let queued: HashSet<String> = self
-            .queue
-            .iter()
-            .map(|entry| entry.job.report_id.clone())
-            .collect();
-        for (report_id, file) in report_files(&self.content_dir).await {
-            if !queued.contains(&report_id) {
+        let queued: HashSet<Uuid> = self.queue.iter().map(|entry| entry.id).collect();
+        for (id, file) in report_files(&self.content_dir).await {
+            if !queued.contains(&id) {
                 warn!("calibration: removing report file {file} with no queue entry");
                 delete_report_file(&file).await;
                 continue;
             }
             match files::size(&file).await {
-                Ok(bytes) => self.track(report_id, bytes),
+                Ok(bytes) => self.track(id, bytes),
                 Err(err) => error!("calibration: failed to size report file {file}: {err}"),
             }
         }
@@ -265,44 +249,31 @@ impl Buffer {
         let missing: Vec<QueueEntry> = self
             .queue
             .iter()
-            .filter(|entry| !self.sizes.contains_key(&entry.job.report_id))
+            .filter(|entry| !self.sizes.contains_key(&entry.id))
             .cloned()
             .collect();
         for entry in missing {
             error!(
-                "calibration: dropping report {} whose report file is missing",
-                entry.job.report_id
+                "calibration: dropping {} whose report file is missing",
+                QueueJob::name(&entry.job)
             );
             self.queue.remove(entry.id).await;
         }
     }
 }
 
-/// Report ids name files, so they are restricted to characters that are safe
-/// in a file name on every platform.
-fn validate_report_id(report_id: &str) -> Result<(), CalibrationsErr> {
-    let valid = !report_id.is_empty()
-        && report_id.len() <= MAX_REPORT_ID_LEN
-        && report_id
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
-    if valid {
-        return Ok(());
-    }
-    Err(CalibrationsErr::InvalidReportIdErr(InvalidReportIdErr {
-        report_id: report_id.to_string(),
-        trace: trace!(),
-    }))
+fn report_file(content_dir: &Dir, id: Uuid) -> File {
+    content_dir.file(&format!("{}{REPORT_EXT}", id.hyphenated()))
 }
 
-fn serialize_report(report: &Report) -> Result<Vec<u8>, CalibrationsErr> {
+fn serialize_report(id: Uuid, report: &Report) -> Result<Vec<u8>, CalibrationsErr> {
     let record = ReportFileRef {
         job: &report.job,
         content: &report.content,
     };
     serde_json::to_vec(&record).map_err(|source| {
         CalibrationsErr::SerializeReportErr(SerializeReportErr {
-            report_id: report.job.report_id.clone(),
+            id,
             source,
             trace: trace!(),
         })
@@ -315,9 +286,10 @@ async fn delete_report_file(file: &File) {
     }
 }
 
-/// The report files in `content_dir` with their report ids. A listing error is
-/// logged and treated as an empty directory.
-async fn report_files(content_dir: &Dir) -> Vec<(String, File)> {
+/// The report files in `content_dir` with their queue entry ids. Only names in
+/// the exact form [`report_file`] writes count. A listing error is logged and
+/// treated as an empty directory.
+async fn report_files(content_dir: &Dir) -> Vec<(Uuid, File)> {
     let listing = match dirs::files(content_dir).await {
         Ok(listing) => listing,
         Err(err) => {
@@ -329,9 +301,9 @@ async fn report_files(content_dir: &Dir) -> Vec<(String, File)> {
         .into_iter()
         .filter_map(|file| {
             let name = file.name().ok()?;
-            let report_id = name.strip_suffix(REPORT_EXT)?;
-            validate_report_id(report_id).ok()?;
-            Some((report_id.to_string(), file))
+            let stem = name.strip_suffix(REPORT_EXT)?;
+            let id = Uuid::from_str(stem).ok()?;
+            (id.hyphenated().to_string() == stem).then_some((id, file))
         })
         .collect()
 }
@@ -360,39 +332,28 @@ async fn load_snapshot(
     Ok(QueueSnapshotFile::create(file.clone(), &snapshot, Overwrite::Allow).await?)
 }
 
-/// A queue holding every readable report file, oldest calibration first.
-/// Attempt counts and backoff are lost, so every report is due at once. An
-/// unreadable report file is renamed with [`CORRUPT_EXT`] and skipped.
+/// A queue holding every readable report file under its own entry id, oldest
+/// calibration first. Attempt counts and backoff are lost, so every report is
+/// due at once. An unreadable report file is renamed with [`CORRUPT_EXT`] and
+/// skipped.
 async fn rebuild_snapshot(content_dir: &Dir) -> QueueSnapshot {
-    let mut jobs = Vec::new();
-    for (report_id, file) in report_files(content_dir).await {
+    let mut entries = Vec::new();
+    for (id, file) in report_files(content_dir).await {
         match files::read_json::<ReportFile>(&file).await {
-            Ok(record) if record.job.report_id == report_id => jobs.push(record.job),
-            Ok(record) => {
-                error!(
-                    "calibration: report file {file} holds report {}; setting it aside",
-                    record.job.report_id
-                );
-                set_aside(&file).await;
-            }
+            Ok(record) => entries.push(QueueEntry {
+                id,
+                job: record.job,
+                attempts: 0,
+                next_attempt_at: None,
+            }),
             Err(err) => {
                 error!("calibration: report file {file} is unreadable; setting it aside: {err}");
                 set_aside(&file).await;
             }
         }
     }
-    jobs.sort_by(|a, b| (a.calibrated_at, &a.report_id).cmp(&(b.calibrated_at, &b.report_id)));
-    QueueSnapshot {
-        entries: jobs
-            .into_iter()
-            .map(|job| QueueEntry {
-                id: Uuid::new_v4(),
-                job,
-                attempts: 0,
-                next_attempt_at: None,
-            })
-            .collect(),
-    }
+    entries.sort_by_key(|entry| (entry.job.calibrated_at, entry.id));
+    QueueSnapshot { entries }
 }
 
 async fn set_aside(file: &File) {

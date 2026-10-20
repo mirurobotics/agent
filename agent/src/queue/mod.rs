@@ -180,10 +180,10 @@ impl<J: QueueJob> Queue<J> {
     /// once the snapshot holding it is on disk. A failed write rolls the entry
     /// back and returns the error, so memory never holds an entry that a
     /// restart would lose. Use it when the caller promises durability to
-    /// someone else. Returns the new entry's id.
-    pub async fn enqueue_durable(&mut self, job: J) -> Result<Uuid, EnqueueErr> {
+    /// someone else. The caller supplies a fresh `id` (for example to name a
+    /// file it writes before the entry); reusing a queued id is a caller bug.
+    pub async fn enqueue_durable(&mut self, id: Uuid, job: J) -> Result<(), EnqueueErr> {
         self.verify_capacity(&job).await?;
-        let id = Uuid::new_v4();
         self.entries.push_back(QueueEntry {
             id,
             job,
@@ -203,7 +203,7 @@ impl<J: QueueJob> Queue<J> {
             J::LABEL,
             self.entries.len()
         );
-        Ok(id)
+        Ok(())
     }
 
     /// Drop the entry with `id` and persist the shortened queue. This is the
