@@ -1,5 +1,6 @@
 // internal crates
-use crate::data_uploads::{queue, upload::job::Job};
+use crate::data_uploads::upload::job::Job;
+use crate::queue;
 
 // external crates
 use chrono::{DateTime, Utc};

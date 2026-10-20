@@ -20,6 +20,7 @@ pub mod platform;
 #[cfg(unix)]
 pub mod privilege;
 pub mod provisioning;
+pub mod queue;
 pub mod server;
 pub mod services;
 pub mod shutdown;
