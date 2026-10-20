@@ -1,4 +1,4 @@
-//! Parsing the HTTP `Date` and `Age` headers the backend's responses carry.
+//! Parsing the HTTP `Date` and `Age` headers the server's responses carry.
 
 // external crates
 use chrono::{DateTime, TimeDelta, Utc};

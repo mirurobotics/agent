@@ -228,9 +228,9 @@ pub mod clock {
     }
 
     #[tokio::test]
-    async fn trusted_time_is_unknown_before_any_response() {
+    async fn server_time_is_unknown_before_any_response() {
         let client = http::Client::new("http://127.0.0.1:1").unwrap();
-        assert_eq!(client.clock().trusted_now(), None);
+        assert_eq!(client.clock().server_now(), None);
     }
 
     #[tokio::test]
@@ -238,9 +238,9 @@ pub mod clock {
         let server = mock::run_server(router()).await;
         let client = http::Client::new(&server.base_url).unwrap();
         get(&client, &server.base_url, "/fixed-date").await;
-        let trusted = client.clock().trusted_now().unwrap();
+        let server_now = client.clock().server_now().unwrap();
         let expected = Utc.with_ymd_and_hms(2026, 10, 20, 2, 58, 4).unwrap();
-        assert!(trusted >= expected && trusted - expected < chrono::TimeDelta::seconds(5));
+        assert!(server_now >= expected && server_now - expected < chrono::TimeDelta::seconds(5));
     }
 
     #[tokio::test]
@@ -248,7 +248,7 @@ pub mod clock {
         let server = mock::run_server(router()).await;
         let client = http::Client::new(&server.base_url).unwrap();
         get(&client, &server.base_url, "/not-found").await;
-        assert!(client.clock().trusted_now().is_some());
+        assert!(client.clock().server_now().is_some());
     }
 
     #[tokio::test]
@@ -256,7 +256,7 @@ pub mod clock {
         let server = mock::run_server(router()).await;
         let client = http::Client::new(&server.base_url).unwrap();
         get(&client, &server.base_url, "/bad-date").await;
-        assert_eq!(client.clock().trusted_now(), None);
+        assert_eq!(client.clock().server_now(), None);
     }
 
     #[tokio::test]
@@ -264,9 +264,9 @@ pub mod clock {
         let server = mock::run_server(router()).await;
         let client = http::Client::new(&server.base_url).unwrap();
         get(&client, &server.base_url, "/cached-date").await;
-        let trusted = client.clock().trusted_now().unwrap();
+        let server_now = client.clock().server_now().unwrap();
         let expected = Utc.with_ymd_and_hms(2026, 10, 20, 3, 8, 4).unwrap();
-        assert!(trusted >= expected && trusted - expected < chrono::TimeDelta::seconds(5));
+        assert!(server_now >= expected && server_now - expected < chrono::TimeDelta::seconds(5));
     }
 
     #[tokio::test]
@@ -275,7 +275,7 @@ pub mod clock {
         let other = mock::run_server(router()).await;
         let client = http::Client::new(&backend.base_url).unwrap();
         get(&client, &other.base_url, "/fixed-date").await;
-        assert_eq!(client.clock().trusted_now(), None);
+        assert_eq!(client.clock().server_now(), None);
     }
 
     #[tokio::test]
@@ -283,7 +283,7 @@ pub mod clock {
         let server = mock::run_server(router()).await;
         let client = http::Client::new("not a url").unwrap();
         get(&client, &server.base_url, "/fixed-date").await;
-        assert_eq!(client.clock().trusted_now(), None);
+        assert_eq!(client.clock().server_now(), None);
     }
 
     #[tokio::test]
@@ -292,6 +292,6 @@ pub mod clock {
         let shared = Clock::new();
         let client = http::Client::with_clock(&server.base_url, shared.clone()).unwrap();
         get(&client, &server.base_url, "/fixed-date").await;
-        assert!(shared.trusted_now().is_some());
+        assert!(shared.server_now().is_some());
     }
 }

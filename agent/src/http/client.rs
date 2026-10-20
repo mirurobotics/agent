@@ -18,7 +18,7 @@ pub struct Client {
     client: reqwest::Client,
     base_url: String,
     /// `base_url` parsed, so responses can be checked against the backend's
-    /// origin before their `Date` header is trusted.
+    /// origin before their `Date` header is recorded.
     backend_url: Option<reqwest::Url>,
     headers: request::Headers,
     clock: Clock,
