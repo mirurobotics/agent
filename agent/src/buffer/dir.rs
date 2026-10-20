@@ -94,9 +94,9 @@ where
         self.queue.is_empty()
     }
 
-    /// The buffered items' jobs, oldest first.
-    pub fn jobs(&self) -> Vec<J> {
-        self.queue.iter().map(|entry| entry.job.clone()).collect()
+    /// The buffered items' queue entries, oldest first.
+    pub fn entries(&self) -> Vec<QueueEntry<J>> {
+        self.queue.iter().cloned().collect()
     }
 
     /// The oldest item that is due at `now`. The entry stays buffered until
