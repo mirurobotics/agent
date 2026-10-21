@@ -1,34 +1,20 @@
-// standard crates
-use std::future::Future;
-
 // internal crates
-use miru_agent::cache::{
-    concurrent::ConcurrentCache, single_thread::SingleThreadCache, CacheEntry, CacheErr,
-};
+use miru_agent::cache::{cache_impl::CacheImpl, CacheEntry, CacheErr};
 use miru_agent::filesys::Overwrite;
 
 // external crates
 use chrono::Utc;
-use tokio::task::JoinHandle;
+use futures::Future;
 
 #[macro_export]
-macro_rules! concurrent_cache_tests {
+macro_rules! cache_impl_tests {
     ($spawn_cache:expr, $spawn_cache_with_capacity:expr) => {
-        pub mod shutdown {
-            use super::*;
-
-            #[tokio::test]
-            async fn test_shutdown() {
-                $crate::cache::concurrent::shutdown::shutdown_impl($spawn_cache).await;
-            }
-        }
-
         pub mod size {
             use super::*;
 
             #[tokio::test]
-            async fn test_size() {
-                $crate::cache::concurrent::size::size_impl($spawn_cache).await;
+            async fn size() {
+                $crate::cache::cache_impl::size::size_impl($spawn_cache).await;
             }
         }
 
@@ -36,8 +22,8 @@ macro_rules! concurrent_cache_tests {
             use super::*;
 
             #[tokio::test]
-            async fn test_entry_map() {
-                $crate::cache::concurrent::entry_map::entry_map_impl($spawn_cache).await;
+            async fn entry_map() {
+                $crate::cache::cache_impl::entry_map::entry_map_impl($spawn_cache).await;
             }
         }
 
@@ -45,8 +31,8 @@ macro_rules! concurrent_cache_tests {
             use super::*;
 
             #[tokio::test]
-            async fn test_value_map() {
-                $crate::cache::concurrent::value_map::value_map_impl($spawn_cache).await;
+            async fn value_map() {
+                $crate::cache::cache_impl::value_map::value_map_impl($spawn_cache).await;
             }
         }
 
@@ -54,8 +40,8 @@ macro_rules! concurrent_cache_tests {
             use super::*;
 
             #[tokio::test]
-            async fn test_entries() {
-                $crate::cache::concurrent::entries::entries_impl($spawn_cache).await;
+            async fn entries() {
+                $crate::cache::cache_impl::entries::entries_impl($spawn_cache).await;
             }
         }
 
@@ -63,8 +49,8 @@ macro_rules! concurrent_cache_tests {
             use super::*;
 
             #[tokio::test]
-            async fn test_values() {
-                $crate::cache::concurrent::values::values_impl($spawn_cache).await;
+            async fn values() {
+                $crate::cache::cache_impl::values::values_impl($spawn_cache).await;
             }
         }
 
@@ -73,13 +59,13 @@ macro_rules! concurrent_cache_tests {
 
             #[tokio::test]
             async fn doesnt_exist() {
-                $crate::cache::concurrent::read_entry_optional::doesnt_exist_impl($spawn_cache)
+                $crate::cache::cache_impl::read_entry_optional::doesnt_exist_impl($spawn_cache)
                     .await;
             }
 
             #[tokio::test]
             async fn exists() {
-                $crate::cache::concurrent::read_entry_optional::exists_impl($spawn_cache).await;
+                $crate::cache::cache_impl::read_entry_optional::exists_impl($spawn_cache).await;
             }
         }
 
@@ -88,12 +74,12 @@ macro_rules! concurrent_cache_tests {
 
             #[tokio::test]
             async fn doesnt_exist() {
-                $crate::cache::concurrent::read_entry::doesnt_exist_impl($spawn_cache).await;
+                $crate::cache::cache_impl::read_entry::doesnt_exist_impl($spawn_cache).await;
             }
 
             #[tokio::test]
             async fn exists() {
-                $crate::cache::concurrent::read_entry::exists_impl($spawn_cache).await;
+                $crate::cache::cache_impl::read_entry::exists_impl($spawn_cache).await;
             }
         }
 
@@ -102,12 +88,12 @@ macro_rules! concurrent_cache_tests {
 
             #[tokio::test]
             async fn doesnt_exist() {
-                $crate::cache::concurrent::read_optional::doesnt_exist_impl($spawn_cache).await;
+                $crate::cache::cache_impl::read_optional::doesnt_exist_impl($spawn_cache).await;
             }
 
             #[tokio::test]
             async fn exists() {
-                $crate::cache::concurrent::read_optional::exists_impl($spawn_cache).await;
+                $crate::cache::cache_impl::read_optional::exists_impl($spawn_cache).await;
             }
         }
 
@@ -116,12 +102,12 @@ macro_rules! concurrent_cache_tests {
 
             #[tokio::test]
             async fn doesnt_exist() {
-                $crate::cache::concurrent::read::doesnt_exist_impl($spawn_cache).await;
+                $crate::cache::cache_impl::read::doesnt_exist_impl($spawn_cache).await;
             }
 
             #[tokio::test]
             async fn exists() {
-                $crate::cache::concurrent::read::exists_impl($spawn_cache).await;
+                $crate::cache::cache_impl::read::exists_impl($spawn_cache).await;
             }
         }
 
@@ -130,29 +116,29 @@ macro_rules! concurrent_cache_tests {
 
             #[tokio::test]
             async fn doesnt_exist_overwrite_false() {
-                $crate::cache::concurrent::write::doesnt_exist_overwrite_false_impl($spawn_cache)
+                $crate::cache::cache_impl::write::doesnt_exist_overwrite_false_impl($spawn_cache)
                     .await;
             }
 
             #[tokio::test]
             async fn doesnt_exist_overwrite_true() {
-                $crate::cache::concurrent::write::doesnt_exist_overwrite_true_impl($spawn_cache)
+                $crate::cache::cache_impl::write::doesnt_exist_overwrite_true_impl($spawn_cache)
                     .await;
             }
 
             #[tokio::test]
             async fn exists_overwrite_false() {
-                $crate::cache::concurrent::write::exists_overwrite_false_impl($spawn_cache).await;
+                $crate::cache::cache_impl::write::exists_overwrite_false_impl($spawn_cache).await;
             }
 
             #[tokio::test]
             async fn exists_overwrite_true() {
-                $crate::cache::concurrent::write::exists_overwrite_true_impl($spawn_cache).await;
+                $crate::cache::cache_impl::write::exists_overwrite_true_impl($spawn_cache).await;
             }
 
             #[tokio::test]
             async fn trigger_prune() {
-                $crate::cache::concurrent::write::trigger_prune_impl($spawn_cache_with_capacity)
+                $crate::cache::cache_impl::write::trigger_prune_impl($spawn_cache_with_capacity)
                     .await;
             }
         }
@@ -162,13 +148,13 @@ macro_rules! concurrent_cache_tests {
 
             #[tokio::test]
             async fn inserts_when_absent() {
-                $crate::cache::concurrent::write_if_absent::inserts_when_absent_impl($spawn_cache)
+                $crate::cache::cache_impl::write_if_absent::inserts_when_absent_impl($spawn_cache)
                     .await;
             }
 
             #[tokio::test]
             async fn noop_when_present() {
-                $crate::cache::concurrent::write_if_absent::noop_when_present_impl($spawn_cache)
+                $crate::cache::cache_impl::write_if_absent::noop_when_present_impl($spawn_cache)
                     .await;
             }
         }
@@ -178,12 +164,12 @@ macro_rules! concurrent_cache_tests {
 
             #[tokio::test]
             async fn doesnt_exist() {
-                $crate::cache::concurrent::delete::doesnt_exist_impl($spawn_cache).await;
+                $crate::cache::cache_impl::delete::doesnt_exist_impl($spawn_cache).await;
             }
 
             #[tokio::test]
             async fn exists() {
-                $crate::cache::concurrent::delete::exists_impl($spawn_cache).await;
+                $crate::cache::cache_impl::delete::exists_impl($spawn_cache).await;
             }
         }
 
@@ -192,13 +178,13 @@ macro_rules! concurrent_cache_tests {
 
             #[tokio::test]
             async fn empty_cache() {
-                $crate::cache::concurrent::prune::empty_cache_impl($spawn_cache_with_capacity)
+                $crate::cache::cache_impl::prune::empty_cache_impl($spawn_cache_with_capacity)
                     .await;
             }
 
             #[tokio::test]
             async fn cache_equal_to_max_size() {
-                $crate::cache::concurrent::prune::cache_equal_to_max_size_impl(
+                $crate::cache::cache_impl::prune::cache_equal_to_max_size_impl(
                     $spawn_cache_with_capacity,
                 )
                 .await;
@@ -206,7 +192,7 @@ macro_rules! concurrent_cache_tests {
 
             #[tokio::test]
             async fn remove_oldest_entries() {
-                $crate::cache::concurrent::prune::remove_oldest_entries_impl(
+                $crate::cache::cache_impl::prune::remove_oldest_entries_impl(
                     $spawn_cache_with_capacity,
                 )
                 .await;
@@ -218,7 +204,7 @@ macro_rules! concurrent_cache_tests {
 
             #[tokio::test]
             async fn find_entries_where() {
-                $crate::cache::concurrent::find_entries_where::find_entries_where_impl(
+                $crate::cache::cache_impl::find_entries_where::find_entries_where_impl(
                     $spawn_cache,
                 )
                 .await;
@@ -230,7 +216,7 @@ macro_rules! concurrent_cache_tests {
 
             #[tokio::test]
             async fn find_where() {
-                $crate::cache::concurrent::find_where::find_where_impl($spawn_cache).await;
+                $crate::cache::cache_impl::find_where::find_where_impl($spawn_cache).await;
             }
         }
 
@@ -239,7 +225,7 @@ macro_rules! concurrent_cache_tests {
 
             #[tokio::test]
             async fn find_one_entry_optional() {
-                $crate::cache::concurrent::find_one_entry_optional::find_one_entry_optional_impl(
+                $crate::cache::cache_impl::find_one_entry_optional::find_one_entry_optional_impl(
                     $spawn_cache,
                 )
                 .await;
@@ -251,7 +237,7 @@ macro_rules! concurrent_cache_tests {
 
             #[tokio::test]
             async fn find_one_optional() {
-                $crate::cache::concurrent::find_one_optional::find_one_optional_impl($spawn_cache)
+                $crate::cache::cache_impl::find_one_optional::find_one_optional_impl($spawn_cache)
                     .await;
             }
         }
@@ -261,7 +247,7 @@ macro_rules! concurrent_cache_tests {
 
             #[tokio::test]
             async fn find_one_entry() {
-                $crate::cache::concurrent::find_one_entry::find_one_entry_impl($spawn_cache).await;
+                $crate::cache::cache_impl::find_one_entry::find_one_entry_impl($spawn_cache).await;
             }
         }
 
@@ -270,7 +256,7 @@ macro_rules! concurrent_cache_tests {
 
             #[tokio::test]
             async fn find_one() {
-                $crate::cache::concurrent::find_one::find_one_impl($spawn_cache).await;
+                $crate::cache::cache_impl::find_one::find_one_impl($spawn_cache).await;
             }
         }
 
@@ -279,50 +265,23 @@ macro_rules! concurrent_cache_tests {
 
             #[tokio::test]
             async fn get_dirty_entries() {
-                $crate::cache::concurrent::get_dirty_entries::get_dirty_entries_impl($spawn_cache)
+                $crate::cache::cache_impl::get_dirty_entries::get_dirty_entries_impl($spawn_cache)
                     .await;
             }
         }
     };
 }
 
-pub mod shutdown {
-    use super::*;
-
-    pub async fn shutdown_impl<F, Fut, SingleThreadCacheT>(spawn_cache: F)
-    where
-        F: Fn() -> Fut + Clone,
-        Fut: Future<
-            Output = (
-                crate::test_utils::filesys::dirs::TempDir,
-                ConcurrentCache<SingleThreadCacheT, String, String>,
-                JoinHandle<()>,
-            ),
-        >,
-        SingleThreadCacheT: SingleThreadCache<String, String>,
-    {
-        let (_tmp, cache, worker_handle) = spawn_cache().await;
-        cache.shutdown().await.unwrap();
-        worker_handle.await.unwrap();
-    }
-}
-
 pub mod size {
     use super::*;
 
-    pub async fn size_impl<F, Fut, SingleThreadCacheT>(new_cache: F)
+    pub async fn size_impl<F, Fut, ImplT>(new_cache: F)
     where
         F: Fn() -> Fut + Clone,
-        Fut: Future<
-            Output = (
-                crate::test_utils::filesys::dirs::TempDir,
-                ConcurrentCache<SingleThreadCacheT, String, String>,
-                JoinHandle<()>,
-            ),
-        >,
-        SingleThreadCacheT: SingleThreadCache<String, String>,
+        Fut: Future<Output = (crate::test_utils::filesys::dirs::TempDir, ImplT)>,
+        ImplT: CacheImpl<String, String>,
     {
-        let (_tmp, cache, _) = new_cache().await;
+        let (_tmp, mut cache) = new_cache().await;
         assert_eq!(cache.size().await.unwrap(), 0);
 
         // create 10 entries
@@ -338,9 +297,8 @@ pub mod size {
 
         // create 10 more entries
         for i in 0..10 {
-            let j = i + 10;
-            let key = format!("key{j}");
-            let value = format!("value{j}");
+            let key = format!("key{}", i + 10);
+            let value = format!("value{}", i + 10);
             cache
                 .write(key, value, |_, _| true, Overwrite::Deny)
                 .await
@@ -350,9 +308,8 @@ pub mod size {
 
         // overwrite 10 entries
         for i in 0..10 {
-            let j = i + 5;
-            let key = format!("key{j}");
-            let value = format!("value{j}");
+            let key = format!("key{}", i + 5);
+            let value = format!("value{}", i + 5);
             cache
                 .write(key, value, |_, _| true, Overwrite::Allow)
                 .await
@@ -365,19 +322,13 @@ pub mod size {
 pub mod entry_map {
     use super::*;
 
-    pub async fn entry_map_impl<F, Fut, SingleThreadCacheT>(new_cache: F)
+    pub async fn entry_map_impl<F, Fut, ImplT>(new_cache: F)
     where
         F: Fn() -> Fut + Clone,
-        Fut: Future<
-            Output = (
-                crate::test_utils::filesys::dirs::TempDir,
-                ConcurrentCache<SingleThreadCacheT, String, String>,
-                JoinHandle<()>,
-            ),
-        >,
-        SingleThreadCacheT: SingleThreadCache<String, String>,
+        Fut: Future<Output = (crate::test_utils::filesys::dirs::TempDir, ImplT)>,
+        ImplT: CacheImpl<String, String>,
     {
-        let (_tmp, cache, _) = new_cache().await;
+        let (_tmp, mut cache) = new_cache().await;
         let result = cache.entry_map().await.unwrap();
         assert_eq!(result.len(), 0);
 
@@ -411,19 +362,13 @@ pub mod entry_map {
 pub mod value_map {
     use super::*;
 
-    pub async fn value_map_impl<F, Fut, SingleThreadCacheT>(new_cache: F)
+    pub async fn value_map_impl<F, Fut, ImplT>(new_cache: F)
     where
         F: Fn() -> Fut + Clone,
-        Fut: Future<
-            Output = (
-                crate::test_utils::filesys::dirs::TempDir,
-                ConcurrentCache<SingleThreadCacheT, String, String>,
-                JoinHandle<()>,
-            ),
-        >,
-        SingleThreadCacheT: SingleThreadCache<String, String>,
+        Fut: Future<Output = (crate::test_utils::filesys::dirs::TempDir, ImplT)>,
+        ImplT: CacheImpl<String, String>,
     {
-        let (_tmp, cache, _) = new_cache().await;
+        let (_tmp, mut cache) = new_cache().await;
         let result = cache.value_map().await.unwrap();
         assert_eq!(result.len(), 0);
 
@@ -451,19 +396,13 @@ pub mod value_map {
 pub mod entries {
     use super::*;
 
-    pub async fn entries_impl<F, Fut, SingleThreadCacheT>(new_cache: F)
+    pub async fn entries_impl<F, Fut, ImplT>(new_cache: F)
     where
         F: Fn() -> Fut + Clone,
-        Fut: Future<
-            Output = (
-                crate::test_utils::filesys::dirs::TempDir,
-                ConcurrentCache<SingleThreadCacheT, String, String>,
-                JoinHandle<()>,
-            ),
-        >,
-        SingleThreadCacheT: SingleThreadCache<String, String>,
+        Fut: Future<Output = (crate::test_utils::filesys::dirs::TempDir, ImplT)>,
+        ImplT: CacheImpl<String, String>,
     {
-        let (_tmp, cache, _) = new_cache().await;
+        let (_tmp, mut cache) = new_cache().await;
         let result = cache.entries().await.unwrap();
         assert_eq!(result.len(), 0);
 
@@ -494,19 +433,13 @@ pub mod entries {
 pub mod values {
     use super::*;
 
-    pub async fn values_impl<F, Fut, SingleThreadCacheT>(new_cache: F)
+    pub async fn values_impl<F, Fut, ImplT>(new_cache: F)
     where
         F: Fn() -> Fut + Clone,
-        Fut: Future<
-            Output = (
-                crate::test_utils::filesys::dirs::TempDir,
-                ConcurrentCache<SingleThreadCacheT, String, String>,
-                JoinHandle<()>,
-            ),
-        >,
-        SingleThreadCacheT: SingleThreadCache<String, String>,
+        Fut: Future<Output = (crate::test_utils::filesys::dirs::TempDir, ImplT)>,
+        ImplT: CacheImpl<String, String>,
     {
-        let (_tmp, cache, _) = new_cache().await;
+        let (_tmp, mut cache) = new_cache().await;
         let result = cache.values().await.unwrap();
         assert_eq!(result.len(), 0);
 
@@ -535,40 +468,28 @@ pub mod values {
 pub mod read_entry_optional {
     use super::*;
 
-    pub async fn doesnt_exist_impl<F, Fut, SingleThreadCacheT>(spawn_cache: F)
+    pub async fn doesnt_exist_impl<F, Fut, ImplT>(new_cache: F)
     where
         F: Fn() -> Fut + Clone,
-        Fut: Future<
-            Output = (
-                crate::test_utils::filesys::dirs::TempDir,
-                ConcurrentCache<SingleThreadCacheT, String, String>,
-                JoinHandle<()>,
-            ),
-        >,
-        SingleThreadCacheT: SingleThreadCache<String, String>,
+        Fut: Future<Output = (crate::test_utils::filesys::dirs::TempDir, ImplT)>,
+        ImplT: CacheImpl<String, String>,
     {
-        let (_tmp, cache, _) = spawn_cache().await;
+        let (_tmp, mut cache) = new_cache().await;
         let result = cache
-            .read_entry_optional("1234567890".to_string())
+            .read_entry_optional(&"1234567890".to_string())
             .await
             .unwrap();
         assert!(result.is_none());
     }
 
-    pub async fn exists_impl<F, Fut, SingleThreadCacheT>(spawn_cache: F)
+    pub async fn exists_impl<F, Fut, ImplT>(new_cache: F)
     where
         F: Fn() -> Fut + Clone,
-        Fut: Future<
-            Output = (
-                crate::test_utils::filesys::dirs::TempDir,
-                ConcurrentCache<SingleThreadCacheT, String, String>,
-                JoinHandle<()>,
-            ),
-        >,
-        SingleThreadCacheT: SingleThreadCache<String, String>,
+        Fut: Future<Output = (crate::test_utils::filesys::dirs::TempDir, ImplT)>,
+        ImplT: CacheImpl<String, String>,
     {
         // spawn the cache
-        let (_tmp, cache, _) = spawn_cache().await;
+        let (_tmp, mut cache) = new_cache().await;
 
         // write the entry
         let key = "key".to_string();
@@ -581,11 +502,7 @@ pub mod read_entry_optional {
 
         // read the entry
         let before_read = Utc::now();
-        let read_entry = cache
-            .read_entry_optional(key.clone())
-            .await
-            .unwrap()
-            .unwrap();
+        let read_entry = cache.read_entry_optional(&key).await.unwrap().unwrap();
 
         // check the timestamps
         assert!(read_entry.created_at > before_write);
@@ -607,42 +524,30 @@ pub mod read_entry_optional {
 pub mod read_entry {
     use super::*;
 
-    pub async fn doesnt_exist_impl<F, Fut, SingleThreadCacheT>(spawn_cache: F)
+    pub async fn doesnt_exist_impl<F, Fut, ImplT>(new_cache: F)
     where
         F: Fn() -> Fut + Clone,
-        Fut: Future<
-            Output = (
-                crate::test_utils::filesys::dirs::TempDir,
-                ConcurrentCache<SingleThreadCacheT, String, String>,
-                JoinHandle<()>,
-            ),
-        >,
-        SingleThreadCacheT: SingleThreadCache<String, String>,
+        Fut: Future<Output = (crate::test_utils::filesys::dirs::TempDir, ImplT)>,
+        ImplT: CacheImpl<String, String>,
     {
-        let (_tmp, cache, _) = spawn_cache().await;
+        let (_tmp, mut cache) = new_cache().await;
         assert!(matches!(
             cache
-                .read_entry("1234567890".to_string())
+                .read_entry(&"1234567890".to_string())
                 .await
                 .unwrap_err(),
             CacheErr::CacheElementNotFound { .. }
         ));
     }
 
-    pub async fn exists_impl<F, Fut, SingleThreadCacheT>(spawn_cache: F)
+    pub async fn exists_impl<F, Fut, ImplT>(new_cache: F)
     where
         F: Fn() -> Fut + Clone,
-        Fut: Future<
-            Output = (
-                crate::test_utils::filesys::dirs::TempDir,
-                ConcurrentCache<SingleThreadCacheT, String, String>,
-                JoinHandle<()>,
-            ),
-        >,
-        SingleThreadCacheT: SingleThreadCache<String, String>,
+        Fut: Future<Output = (crate::test_utils::filesys::dirs::TempDir, ImplT)>,
+        ImplT: CacheImpl<String, String>,
     {
         // spawn the cache
-        let (_tmp, cache, _) = spawn_cache().await;
+        let (_tmp, mut cache) = new_cache().await;
 
         // write the entry
         let key = "key".to_string();
@@ -655,7 +560,7 @@ pub mod read_entry {
 
         // read the entry
         let before_read = Utc::now();
-        let read_entry = cache.read_entry(key.clone()).await.unwrap();
+        let read_entry = cache.read_entry(&key).await.unwrap();
 
         // check the timestamps
         assert!(read_entry.created_at > before_write);
@@ -677,37 +582,25 @@ pub mod read_entry {
 pub mod read_optional {
     use super::*;
 
-    pub async fn doesnt_exist_impl<F, Fut, SingleThreadCacheT>(spawn_cache: F)
+    pub async fn doesnt_exist_impl<F, Fut, ImplT>(new_cache: F)
     where
         F: Fn() -> Fut + Clone,
-        Fut: Future<
-            Output = (
-                crate::test_utils::filesys::dirs::TempDir,
-                ConcurrentCache<SingleThreadCacheT, String, String>,
-                JoinHandle<()>,
-            ),
-        >,
-        SingleThreadCacheT: SingleThreadCache<String, String>,
+        Fut: Future<Output = (crate::test_utils::filesys::dirs::TempDir, ImplT)>,
+        ImplT: CacheImpl<String, String>,
     {
-        let (_tmp, cache, _) = spawn_cache().await;
+        let (_tmp, mut cache) = new_cache().await;
         let key = "1234567890".to_string();
-        let read_value = cache.read_optional(key.clone()).await.unwrap();
+        let read_value = cache.read_optional(&key).await.unwrap();
         assert_eq!(read_value, None);
     }
 
-    pub async fn exists_impl<F, Fut, SingleThreadCacheT>(spawn_cache: F)
+    pub async fn exists_impl<F, Fut, ImplT>(new_cache: F)
     where
         F: Fn() -> Fut + Clone,
-        Fut: Future<
-            Output = (
-                crate::test_utils::filesys::dirs::TempDir,
-                ConcurrentCache<SingleThreadCacheT, String, String>,
-                JoinHandle<()>,
-            ),
-        >,
-        SingleThreadCacheT: SingleThreadCache<String, String>,
+        Fut: Future<Output = (crate::test_utils::filesys::dirs::TempDir, ImplT)>,
+        ImplT: CacheImpl<String, String>,
     {
-        let (_tmp, cache, _) = spawn_cache().await;
+        let (_tmp, mut cache) = new_cache().await;
         let key = "1234567890".to_string();
         let value = "value".to_string();
         cache
@@ -715,13 +608,13 @@ pub mod read_optional {
             .await
             .unwrap();
         let before_read = Utc::now();
-        let read_value = cache.read(key.clone()).await.unwrap();
+        let read_value = cache.read_optional(&key).await.unwrap().unwrap();
         assert_eq!(read_value, value);
 
         // check the last accessed time was properly set
         let after_read = Utc::now();
-        let entries = cache.entries().await.unwrap();
-        let entry = entries.iter().find(|e| e.key == key).unwrap();
+        let entries = cache.entry_map().await.unwrap();
+        let entry = entries.get(&key).unwrap();
         assert!(entry.last_accessed > before_read);
         assert!(entry.last_accessed < after_read);
     }
@@ -730,38 +623,26 @@ pub mod read_optional {
 pub mod read {
     use super::*;
 
-    pub async fn doesnt_exist_impl<F, Fut, SingleThreadCacheT>(spawn_cache: F)
+    pub async fn doesnt_exist_impl<F, Fut, ImplT>(new_cache: F)
     where
         F: Fn() -> Fut + Clone,
-        Fut: Future<
-            Output = (
-                crate::test_utils::filesys::dirs::TempDir,
-                ConcurrentCache<SingleThreadCacheT, String, String>,
-                JoinHandle<()>,
-            ),
-        >,
-        SingleThreadCacheT: SingleThreadCache<String, String>,
+        Fut: Future<Output = (crate::test_utils::filesys::dirs::TempDir, ImplT)>,
+        ImplT: CacheImpl<String, String>,
     {
-        let (_tmp, cache, _) = spawn_cache().await;
+        let (_tmp, mut cache) = new_cache().await;
         assert!(matches!(
-            cache.read("1234567890".to_string()).await.unwrap_err(),
-            CacheErr::CacheElementNotFound(_)
+            cache.read(&"1234567890".to_string()).await.unwrap_err(),
+            CacheErr::CacheElementNotFound { .. }
         ));
     }
 
-    pub async fn exists_impl<F, Fut, SingleThreadCacheT>(spawn_cache: F)
+    pub async fn exists_impl<F, Fut, ImplT>(new_cache: F)
     where
         F: Fn() -> Fut + Clone,
-        Fut: Future<
-            Output = (
-                crate::test_utils::filesys::dirs::TempDir,
-                ConcurrentCache<SingleThreadCacheT, String, String>,
-                JoinHandle<()>,
-            ),
-        >,
-        SingleThreadCacheT: SingleThreadCache<String, String>,
+        Fut: Future<Output = (crate::test_utils::filesys::dirs::TempDir, ImplT)>,
+        ImplT: CacheImpl<String, String>,
     {
-        let (_tmp, cache, _) = spawn_cache().await;
+        let (_tmp, mut cache) = new_cache().await;
         let key = "1234567890".to_string();
         let value = "value".to_string();
         cache
@@ -771,34 +652,27 @@ pub mod read {
 
         // reading the digests should return the digests
         let before_read = Utc::now();
-        let read_value = cache.read(key.clone()).await.unwrap();
+        let read_value = cache.read(&key).await.unwrap();
         assert_eq!(read_value, value);
 
         // check the last accessed time was properly set
         let after_read = Utc::now();
-        let entries = cache.entries().await.unwrap();
-        let entry = entries.iter().find(|e| e.key == key).unwrap();
-        assert!(entry.last_accessed > before_read);
-        assert!(entry.last_accessed < after_read);
+        let entries = cache.entry_map().await.unwrap();
+        assert!(entries.get(&key).unwrap().last_accessed > before_read);
+        assert!(entries.get(&key).unwrap().last_accessed < after_read);
     }
 }
 
 pub mod write {
     use super::*;
 
-    pub async fn doesnt_exist_overwrite_false_impl<F, Fut, SingleThreadCacheT>(spawn_cache: F)
+    pub async fn doesnt_exist_overwrite_false_impl<F, Fut, ImplT>(new_cache: F)
     where
         F: Fn() -> Fut + Clone,
-        Fut: Future<
-            Output = (
-                crate::test_utils::filesys::dirs::TempDir,
-                ConcurrentCache<SingleThreadCacheT, String, String>,
-                JoinHandle<()>,
-            ),
-        >,
-        SingleThreadCacheT: SingleThreadCache<String, String>,
+        Fut: Future<Output = (crate::test_utils::filesys::dirs::TempDir, ImplT)>,
+        ImplT: CacheImpl<String, String>,
     {
-        let (_tmp, cache, _) = spawn_cache().await;
+        let (_tmp, mut cache) = new_cache().await;
         let before_write = Utc::now();
         let key = "1234567890".to_string();
         let value = "value".to_string();
@@ -820,19 +694,13 @@ pub mod write {
         assert_eq!(read_entry.last_accessed, read_entry.created_at);
     }
 
-    pub async fn doesnt_exist_overwrite_true_impl<F, Fut, SingleThreadCacheT>(spawn_cache: F)
+    pub async fn doesnt_exist_overwrite_true_impl<F, Fut, ImplT>(new_cache: F)
     where
         F: Fn() -> Fut + Clone,
-        Fut: Future<
-            Output = (
-                crate::test_utils::filesys::dirs::TempDir,
-                ConcurrentCache<SingleThreadCacheT, String, String>,
-                JoinHandle<()>,
-            ),
-        >,
-        SingleThreadCacheT: SingleThreadCache<String, String>,
+        Fut: Future<Output = (crate::test_utils::filesys::dirs::TempDir, ImplT)>,
+        ImplT: CacheImpl<String, String>,
     {
-        let (_tmp, cache, _) = spawn_cache().await;
+        let (_tmp, mut cache) = new_cache().await;
         let key = "1234567890".to_string();
         let value = "value".to_string();
         let before_write = Utc::now();
@@ -854,19 +722,13 @@ pub mod write {
         assert_eq!(read_entry.last_accessed, read_entry.created_at);
     }
 
-    pub async fn exists_overwrite_false_impl<F, Fut, SingleThreadCacheT>(spawn_cache: F)
+    pub async fn exists_overwrite_false_impl<F, Fut, ImplT>(new_cache: F)
     where
         F: Fn() -> Fut + Clone,
-        Fut: Future<
-            Output = (
-                crate::test_utils::filesys::dirs::TempDir,
-                ConcurrentCache<SingleThreadCacheT, String, String>,
-                JoinHandle<()>,
-            ),
-        >,
-        SingleThreadCacheT: SingleThreadCache<String, String>,
+        Fut: Future<Output = (crate::test_utils::filesys::dirs::TempDir, ImplT)>,
+        ImplT: CacheImpl<String, String>,
     {
-        let (_tmp, cache, _) = spawn_cache().await;
+        let (_tmp, mut cache) = new_cache().await;
         let key = "1234567890".to_string();
         let value = "value".to_string();
         cache
@@ -884,19 +746,13 @@ pub mod write {
         ));
     }
 
-    pub async fn exists_overwrite_true_impl<F, Fut, SingleThreadCacheT>(spawn_cache: F)
+    pub async fn exists_overwrite_true_impl<F, Fut, ImplT>(new_cache: F)
     where
         F: Fn() -> Fut + Clone,
-        Fut: Future<
-            Output = (
-                crate::test_utils::filesys::dirs::TempDir,
-                ConcurrentCache<SingleThreadCacheT, String, String>,
-                JoinHandle<()>,
-            ),
-        >,
-        SingleThreadCacheT: SingleThreadCache<String, String>,
+        Fut: Future<Output = (crate::test_utils::filesys::dirs::TempDir, ImplT)>,
+        ImplT: CacheImpl<String, String>,
     {
-        let (_tmp, cache, _) = spawn_cache().await;
+        let (_tmp, mut cache) = new_cache().await;
         let key = "1234567890".to_string();
         let value = "value".to_string();
         let before_creation = Utc::now();
@@ -924,19 +780,13 @@ pub mod write {
         assert!(read_entry.last_accessed > read_entry.created_at);
     }
 
-    pub async fn trigger_prune_impl<F, Fut, SingleThreadCacheT>(new_cache: F)
+    pub async fn trigger_prune_impl<F, Fut, ImplT>(new_cache: F)
     where
         F: Fn(usize) -> Fut + Clone,
-        Fut: Future<
-            Output = (
-                crate::test_utils::filesys::dirs::TempDir,
-                ConcurrentCache<SingleThreadCacheT, String, String>,
-                JoinHandle<()>,
-            ),
-        >,
-        SingleThreadCacheT: SingleThreadCache<String, String>,
+        Fut: Future<Output = (crate::test_utils::filesys::dirs::TempDir, ImplT)>,
+        ImplT: CacheImpl<String, String>,
     {
-        let (_tmp, cache, _) = new_cache(10).await;
+        let (_tmp, mut cache) = new_cache(10).await;
 
         // create 11 entries
         for i in 0..11 {
@@ -964,19 +814,13 @@ pub mod write {
 pub mod write_if_absent {
     use super::*;
 
-    pub async fn inserts_when_absent_impl<F, Fut, SingleThreadCacheT>(spawn_cache: F)
+    pub async fn inserts_when_absent_impl<F, Fut, ImplT>(new_cache: F)
     where
         F: Fn() -> Fut + Clone,
-        Fut: Future<
-            Output = (
-                crate::test_utils::filesys::dirs::TempDir,
-                ConcurrentCache<SingleThreadCacheT, String, String>,
-                JoinHandle<()>,
-            ),
-        >,
-        SingleThreadCacheT: SingleThreadCache<String, String>,
+        Fut: Future<Output = (crate::test_utils::filesys::dirs::TempDir, ImplT)>,
+        ImplT: CacheImpl<String, String>,
     {
-        let (_tmp, cache, _) = spawn_cache().await;
+        let (_tmp, mut cache) = new_cache().await;
         let key = "key1".to_string();
         let value = "value1".to_string();
         cache
@@ -989,19 +833,13 @@ pub mod write_if_absent {
         assert_eq!(entry.value, value);
     }
 
-    pub async fn noop_when_present_impl<F, Fut, SingleThreadCacheT>(spawn_cache: F)
+    pub async fn noop_when_present_impl<F, Fut, ImplT>(new_cache: F)
     where
         F: Fn() -> Fut + Clone,
-        Fut: Future<
-            Output = (
-                crate::test_utils::filesys::dirs::TempDir,
-                ConcurrentCache<SingleThreadCacheT, String, String>,
-                JoinHandle<()>,
-            ),
-        >,
-        SingleThreadCacheT: SingleThreadCache<String, String>,
+        Fut: Future<Output = (crate::test_utils::filesys::dirs::TempDir, ImplT)>,
+        ImplT: CacheImpl<String, String>,
     {
-        let (_tmp, cache, _) = spawn_cache().await;
+        let (_tmp, mut cache) = new_cache().await;
         let key = "key1".to_string();
         cache
             .write(
@@ -1027,36 +865,24 @@ pub mod write_if_absent {
 pub mod delete {
     use super::*;
 
-    pub async fn doesnt_exist_impl<F, Fut, SingleThreadCacheT>(spawn_cache: F)
+    pub async fn doesnt_exist_impl<F, Fut, ImplT>(new_cache: F)
     where
         F: Fn() -> Fut + Clone,
-        Fut: Future<
-            Output = (
-                crate::test_utils::filesys::dirs::TempDir,
-                ConcurrentCache<SingleThreadCacheT, String, String>,
-                JoinHandle<()>,
-            ),
-        >,
-        SingleThreadCacheT: SingleThreadCache<String, String>,
+        Fut: Future<Output = (crate::test_utils::filesys::dirs::TempDir, ImplT)>,
+        ImplT: CacheImpl<String, String>,
     {
-        let (_tmp, cache, _) = spawn_cache().await;
+        let (_tmp, mut cache) = new_cache().await;
         let key = "1234567890".to_string();
-        cache.delete(key.clone()).await.unwrap();
+        cache.delete(&key).await.unwrap();
     }
 
-    pub async fn exists_impl<F, Fut, SingleThreadCacheT>(spawn_cache: F)
+    pub async fn exists_impl<F, Fut, ImplT>(new_cache: F)
     where
         F: Fn() -> Fut + Clone,
-        Fut: Future<
-            Output = (
-                crate::test_utils::filesys::dirs::TempDir,
-                ConcurrentCache<SingleThreadCacheT, String, String>,
-                JoinHandle<()>,
-            ),
-        >,
-        SingleThreadCacheT: SingleThreadCache<String, String>,
+        Fut: Future<Output = (crate::test_utils::filesys::dirs::TempDir, ImplT)>,
+        ImplT: CacheImpl<String, String>,
     {
-        let (_tmp, cache, _) = spawn_cache().await;
+        let (_tmp, mut cache) = new_cache().await;
         let key = "1234567890".to_string();
         let value = "value".to_string();
         cache
@@ -1065,44 +891,36 @@ pub mod delete {
             .unwrap();
 
         // should not throw an error since it exists
-        cache.delete(key.clone()).await.unwrap();
-        let error = cache.read(key.clone()).await.unwrap_err();
-        assert!(matches!(error, CacheErr::CacheElementNotFound(_)));
+        cache.delete(&key).await.unwrap();
+
+        // the cache should not exist now
+        assert!(matches!(
+            cache.read(&key).await.unwrap_err(),
+            CacheErr::CacheElementNotFound { .. }
+        ));
     }
 }
 
 pub mod prune {
     use super::*;
 
-    pub async fn empty_cache_impl<F, Fut, SingleThreadCacheT>(spawn_cache: F)
+    pub async fn empty_cache_impl<F, Fut, ImplT>(new_cache: F)
     where
         F: Fn(usize) -> Fut + Clone,
-        Fut: Future<
-            Output = (
-                crate::test_utils::filesys::dirs::TempDir,
-                ConcurrentCache<SingleThreadCacheT, String, String>,
-                JoinHandle<()>,
-            ),
-        >,
-        SingleThreadCacheT: SingleThreadCache<String, String>,
+        Fut: Future<Output = (crate::test_utils::filesys::dirs::TempDir, ImplT)>,
+        ImplT: CacheImpl<String, String>,
     {
-        let (_tmp, cache, _) = spawn_cache(10).await;
+        let (_tmp, mut cache) = new_cache(10).await;
         cache.prune().await.unwrap();
     }
 
-    pub async fn cache_equal_to_max_size_impl<F, Fut, SingleThreadCacheT>(spawn_cache: F)
+    pub async fn cache_equal_to_max_size_impl<F, Fut, ImplT>(new_cache: F)
     where
         F: Fn(usize) -> Fut + Clone,
-        Fut: Future<
-            Output = (
-                crate::test_utils::filesys::dirs::TempDir,
-                ConcurrentCache<SingleThreadCacheT, String, String>,
-                JoinHandle<()>,
-            ),
-        >,
-        SingleThreadCacheT: SingleThreadCache<String, String>,
+        Fut: Future<Output = (crate::test_utils::filesys::dirs::TempDir, ImplT)>,
+        ImplT: CacheImpl<String, String>,
     {
-        let (_tmp, cache, _) = spawn_cache(10).await;
+        let (_tmp, mut cache) = new_cache(10).await;
 
         // create 10 entries
         for i in 0..10 {
@@ -1120,24 +938,18 @@ pub mod prune {
         // the cache should still have all ten entries
         for i in 0..10 {
             let key = format!("key{i}");
-            let value = cache.read(key).await.unwrap();
+            let value = cache.read(&key).await.unwrap();
             assert_eq!(value, format!("value{i}"));
         }
     }
 
-    pub async fn remove_oldest_entries_impl<F, Fut, SingleThreadCacheT>(spawn_cache: F)
+    pub async fn remove_oldest_entries_impl<F, Fut, ImplT>(new_cache: F)
     where
         F: Fn(usize) -> Fut + Clone,
-        Fut: Future<
-            Output = (
-                crate::test_utils::filesys::dirs::TempDir,
-                ConcurrentCache<SingleThreadCacheT, String, String>,
-                JoinHandle<()>,
-            ),
-        >,
-        SingleThreadCacheT: SingleThreadCache<String, String>,
+        Fut: Future<Output = (crate::test_utils::filesys::dirs::TempDir, ImplT)>,
+        ImplT: CacheImpl<String, String>,
     {
-        let (_tmp, cache, _) = spawn_cache(10).await;
+        let (_tmp, mut cache) = new_cache(10).await;
 
         // create 20 entries
         for i in 0..20 {
@@ -1155,13 +967,13 @@ pub mod prune {
         // first 10 entries should be deleted since they are the oldest
         for i in 0..10 {
             let key = format!("key{i}");
-            cache.read(key).await.unwrap_err();
+            cache.read(&key).await.unwrap_err();
         }
 
         // last 10 entries should still exist
         for i in 10..20 {
             let key = format!("key{i}");
-            let value = cache.read(key).await.unwrap();
+            let value = cache.read(&key).await.unwrap();
             assert_eq!(value, format!("value{i}"));
         }
     }
@@ -1170,19 +982,13 @@ pub mod prune {
 pub mod find_entries_where {
     use super::*;
 
-    pub async fn find_entries_where_impl<F, Fut, SingleThreadCacheT>(spawn_cache: F)
+    pub async fn find_entries_where_impl<F, Fut, ImplT>(new_cache: F)
     where
         F: Fn() -> Fut + Clone,
-        Fut: Future<
-            Output = (
-                crate::test_utils::filesys::dirs::TempDir,
-                ConcurrentCache<SingleThreadCacheT, String, String>,
-                JoinHandle<()>,
-            ),
-        >,
-        SingleThreadCacheT: SingleThreadCache<String, String>,
+        Fut: Future<Output = (crate::test_utils::filesys::dirs::TempDir, ImplT)>,
+        ImplT: CacheImpl<String, String>,
     {
-        let (_tmp, cache, _) = spawn_cache().await;
+        let (_tmp, mut cache) = new_cache().await;
 
         // create 10 entries
         for i in 0..10 {
@@ -1226,19 +1032,13 @@ pub mod find_entries_where {
 pub mod find_where {
     use super::*;
 
-    pub async fn find_where_impl<F, Fut, SingleThreadCacheT>(spawn_cache: F)
+    pub async fn find_where_impl<F, Fut, ImplT>(new_cache: F)
     where
         F: Fn() -> Fut + Clone,
-        Fut: Future<
-            Output = (
-                crate::test_utils::filesys::dirs::TempDir,
-                ConcurrentCache<SingleThreadCacheT, String, String>,
-                JoinHandle<()>,
-            ),
-        >,
-        SingleThreadCacheT: SingleThreadCache<String, String>,
+        Fut: Future<Output = (crate::test_utils::filesys::dirs::TempDir, ImplT)>,
+        ImplT: CacheImpl<String, String>,
     {
-        let (_tmp, cache, _) = spawn_cache().await;
+        let (_tmp, mut cache) = new_cache().await;
 
         // create 10 entries
         for i in 0..10 {
@@ -1262,9 +1062,8 @@ pub mod find_where {
         assert_eq!(found[0], "value5");
 
         // check the last accessed time was properly set
-        let entries = cache.entries().await.unwrap();
-        let entry = entries.iter().find(|e| e.value == "value5").unwrap();
-        assert!(entry.last_accessed > after_write);
+        let entries = cache.entry_map().await.unwrap();
+        assert!(entries.get("key5").unwrap().last_accessed > after_write);
 
         // multiple entries found
         let found = cache.find_where(|value| value != "value5").await.unwrap();
@@ -1275,19 +1074,13 @@ pub mod find_where {
 pub mod find_one_entry_optional {
     use super::*;
 
-    pub async fn find_one_entry_optional_impl<F, Fut, SingleThreadCacheT>(spawn_cache: F)
+    pub async fn find_one_entry_optional_impl<F, Fut, ImplT>(new_cache: F)
     where
         F: Fn() -> Fut + Clone,
-        Fut: Future<
-            Output = (
-                crate::test_utils::filesys::dirs::TempDir,
-                ConcurrentCache<SingleThreadCacheT, String, String>,
-                JoinHandle<()>,
-            ),
-        >,
-        SingleThreadCacheT: SingleThreadCache<String, String>,
+        Fut: Future<Output = (crate::test_utils::filesys::dirs::TempDir, ImplT)>,
+        ImplT: CacheImpl<String, String>,
     {
-        let (_tmp, cache, _) = spawn_cache().await;
+        let (_tmp, mut cache) = new_cache().await;
 
         // create 10 entries
         for i in 0..10 {
@@ -1331,19 +1124,13 @@ pub mod find_one_entry_optional {
 pub mod find_one_optional {
     use super::*;
 
-    pub async fn find_one_optional_impl<F, Fut, SingleThreadCacheT>(spawn_cache: F)
+    pub async fn find_one_optional_impl<F, Fut, ImplT>(new_cache: F)
     where
         F: Fn() -> Fut + Clone,
-        Fut: Future<
-            Output = (
-                crate::test_utils::filesys::dirs::TempDir,
-                ConcurrentCache<SingleThreadCacheT, String, String>,
-                JoinHandle<()>,
-            ),
-        >,
-        SingleThreadCacheT: SingleThreadCache<String, String>,
+        Fut: Future<Output = (crate::test_utils::filesys::dirs::TempDir, ImplT)>,
+        ImplT: CacheImpl<String, String>,
     {
-        let (_tmp, cache, _) = spawn_cache().await;
+        let (_tmp, mut cache) = new_cache().await;
 
         // create 10 entries
         for i in 0..10 {
@@ -1373,35 +1160,28 @@ pub mod find_one_optional {
         assert_eq!(found.unwrap(), "value5");
 
         // check the last accessed time was properly set
-        let entries = cache.entries().await.unwrap();
-        let entry = entries.iter().find(|e| e.value == "value5").unwrap();
-        assert!(entry.last_accessed > after_write);
+        let entries = cache.entry_map().await.unwrap();
+        assert!(entries.get("key5").unwrap().last_accessed > after_write);
 
         // multiple entries found
         let err = cache
             .find_one_optional("not value5", |value| value != "value5")
             .await
             .unwrap_err();
-        assert!(matches!(err, CacheErr::FoundTooManyCacheElements(_)));
+        assert!(matches!(err, CacheErr::FoundTooManyCacheElements { .. }));
     }
 }
 
 pub mod find_one_entry {
     use super::*;
 
-    pub async fn find_one_entry_impl<F, Fut, SingleThreadCacheT>(spawn_cache: F)
+    pub async fn find_one_entry_impl<F, Fut, ImplT>(new_cache: F)
     where
         F: Fn() -> Fut + Clone,
-        Fut: Future<
-            Output = (
-                crate::test_utils::filesys::dirs::TempDir,
-                ConcurrentCache<SingleThreadCacheT, String, String>,
-                JoinHandle<()>,
-            ),
-        >,
-        SingleThreadCacheT: SingleThreadCache<String, String>,
+        Fut: Future<Output = (crate::test_utils::filesys::dirs::TempDir, ImplT)>,
+        ImplT: CacheImpl<String, String>,
     {
-        let (_tmp, cache, _) = spawn_cache().await;
+        let (_tmp, mut cache) = new_cache().await;
 
         // create 10 entries
         for i in 0..10 {
@@ -1444,19 +1224,13 @@ pub mod find_one_entry {
 pub mod find_one {
     use super::*;
 
-    pub async fn find_one_impl<F, Fut, SingleThreadCacheT>(spawn_cache: F)
+    pub async fn find_one_impl<F, Fut, ImplT>(new_cache: F)
     where
         F: Fn() -> Fut + Clone,
-        Fut: Future<
-            Output = (
-                crate::test_utils::filesys::dirs::TempDir,
-                ConcurrentCache<SingleThreadCacheT, String, String>,
-                JoinHandle<()>,
-            ),
-        >,
-        SingleThreadCacheT: SingleThreadCache<String, String>,
+        Fut: Future<Output = (crate::test_utils::filesys::dirs::TempDir, ImplT)>,
+        ImplT: CacheImpl<String, String>,
     {
-        let (_tmp, cache, _) = spawn_cache().await;
+        let (_tmp, mut cache) = new_cache().await;
 
         // create 10 entries
         for i in 0..10 {
@@ -1475,7 +1249,7 @@ pub mod find_one {
             .find_one("value10", |value| value == "value10")
             .await
             .unwrap_err();
-        assert!(matches!(error, CacheErr::CacheElementNotFound(_)));
+        assert!(matches!(error, CacheErr::CacheElementNotFound { .. }));
 
         // one entry found
         let found = cache
@@ -1485,35 +1259,28 @@ pub mod find_one {
         assert_eq!(found, "value5");
 
         // check the last accessed time was properly set
-        let entries = cache.entries().await.unwrap();
-        let entry = entries.iter().find(|e| e.value == "value5").unwrap();
-        assert!(entry.last_accessed > after_write);
+        let entries = cache.entry_map().await.unwrap();
+        assert!(entries.get("key5").unwrap().last_accessed > after_write);
 
         // multiple entries found
         let err = cache
             .find_one("not value5", |value| value != "value5")
             .await
             .unwrap_err();
-        assert!(matches!(err, CacheErr::FoundTooManyCacheElements(_)));
+        assert!(matches!(err, CacheErr::FoundTooManyCacheElements { .. }));
     }
 }
 
 pub mod get_dirty_entries {
     use super::*;
 
-    pub async fn get_dirty_entries_impl<F, Fut, SingleThreadCacheT>(spawn_cache: F)
+    pub async fn get_dirty_entries_impl<F, Fut, ImplT>(new_cache: F)
     where
         F: Fn() -> Fut + Clone,
-        Fut: Future<
-            Output = (
-                crate::test_utils::filesys::dirs::TempDir,
-                ConcurrentCache<SingleThreadCacheT, String, String>,
-                JoinHandle<()>,
-            ),
-        >,
-        SingleThreadCacheT: SingleThreadCache<String, String>,
+        Fut: Future<Output = (crate::test_utils::filesys::dirs::TempDir, ImplT)>,
+        ImplT: CacheImpl<String, String>,
     {
-        let (_tmp, cache, _) = spawn_cache().await;
+        let (_tmp, mut cache) = new_cache().await;
 
         // create 10 entries
         for i in 0..10 {
