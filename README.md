@@ -76,7 +76,7 @@ Runs: `cargo update` (updates `Cargo.lock`), the custom import linter, `cargo fm
 
 ## CI/CD
 
-The **CI** workflow (`ci.yml`) runs on every push and pull request. See the workflow file for the current job list.
+The **CI** workflow (`ci.yml`) runs on pull requests, pushes to `release/*`, a weekly schedule on `main`, and manual dispatch. It does not rerun on push to `main`, since branches must be up to date with `main` before merging. See the workflow file for the current job list.
 
 The **Builder** workflow (`builder.yml`) builds and pushes the builder Docker image to GHCR when `build/Dockerfile.builder` changes.
 
