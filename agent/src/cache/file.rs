@@ -1,6 +1,6 @@
 // internal crates
 use crate::cache::{
-    concurrent::{Cache, Command, SendCacheKey, SendCacheValue, Worker},
+    concurrent::{Cache, CacheKey, CacheValue, Command, Worker},
     errors::CacheErr,
     file_impl::FileCacheImpl,
 };
@@ -14,8 +14,8 @@ pub type FileCache<K, V> = Cache<FileCacheImpl<K, V>, K, V>;
 
 impl<K, V> FileCache<K, V>
 where
-    K: SendCacheKey,
-    V: SendCacheValue,
+    K: CacheKey,
+    V: CacheValue,
 {
     pub async fn spawn(
         buffer_size: usize,

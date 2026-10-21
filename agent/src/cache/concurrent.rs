@@ -4,7 +4,7 @@ use std::fmt::Debug;
 
 // internal crates
 use crate::cache::{
-    cache_impl::{CacheImpl, CacheKey, CacheValue},
+    cache_impl::{CacheImpl, CacheKeyImpl, CacheValueImpl},
     entry::CacheEntry,
     errors::{CacheErr, ReceiveActorMessageErr, SendActorMessageErr},
 };
@@ -27,13 +27,13 @@ macro_rules! dispatch {
     }};
 }
 
-pub trait SendCacheKey: CacheKey + Send + Sync + 'static {}
+pub trait CacheKey: CacheKeyImpl + Send + Sync + 'static {}
 
-impl<K> SendCacheKey for K where K: CacheKey + Send + Sync + 'static {}
+impl<K> CacheKey for K where K: CacheKeyImpl + Send + Sync + 'static {}
 
-pub trait SendCacheValue: CacheValue + Send + Sync + 'static {}
+pub trait CacheValue: CacheValueImpl + Send + Sync + 'static {}
 
-impl<V> SendCacheValue for V where V: CacheValue + Send + Sync + 'static {}
+impl<V> CacheValue for V where V: CacheValueImpl + Send + Sync + 'static {}
 
 // ============================== WORKER COMMANDS ================================== //
 type QueryEntryFilter<K, V> = Box<dyn Fn(&CacheEntry<K, V>) -> bool + Send + Sync>;
@@ -137,8 +137,8 @@ where
 pub struct Worker<ImplT, K, V>
 where
     ImplT: CacheImpl<K, V>,
-    K: SendCacheKey,
-    V: SendCacheValue,
+    K: CacheKey,
+    V: CacheValue,
 {
     pub cache: ImplT,
     pub receiver: Receiver<Command<K, V>>,
@@ -147,8 +147,8 @@ where
 impl<ImplT, K, V> Worker<ImplT, K, V>
 where
     ImplT: CacheImpl<K, V>,
-    K: SendCacheKey,
-    V: SendCacheValue,
+    K: CacheKey,
+    V: CacheValue,
 {
     // lint:allow(funclen) — actor dispatch table; one arm per Command variant
     pub async fn run(mut self) {
@@ -347,8 +347,8 @@ where
 pub struct Cache<ImplT, K, V>
 where
     ImplT: CacheImpl<K, V>,
-    K: SendCacheKey,
-    V: SendCacheValue,
+    K: CacheKey,
+    V: CacheValue,
 {
     sender: Sender<Command<K, V>>,
     _phantom: std::marker::PhantomData<ImplT>,
@@ -357,8 +357,8 @@ where
 impl<ImplT, K, V> Cache<ImplT, K, V>
 where
     ImplT: CacheImpl<K, V>,
-    K: SendCacheKey,
-    V: SendCacheValue,
+    K: CacheKey,
+    V: CacheValue,
 {
     pub fn new(sender: Sender<Command<K, V>>) -> Self {
         Self {
@@ -371,8 +371,8 @@ where
 impl<ImplT, K, V> Cache<ImplT, K, V>
 where
     ImplT: CacheImpl<K, V>,
-    K: SendCacheKey,
-    V: SendCacheValue,
+    K: CacheKey,
+    V: CacheValue,
 {
     async fn send_command<R>(
         &self,

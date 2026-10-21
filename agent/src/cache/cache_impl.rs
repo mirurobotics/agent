@@ -17,19 +17,25 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use tracing::info;
 
-pub trait CacheKey: Debug + Clone + ToString + Serialize + DeserializeOwned + Eq + Hash {}
+pub trait CacheKeyImpl:
+    Debug + Clone + ToString + Serialize + DeserializeOwned + Eq + Hash
+{
+}
 
-impl<K> CacheKey for K where K: Debug + Clone + ToString + Serialize + DeserializeOwned + Eq + Hash {}
+impl<K> CacheKeyImpl for K where
+    K: Debug + Clone + ToString + Serialize + DeserializeOwned + Eq + Hash
+{
+}
 
-pub trait CacheValue: Debug + Clone + Serialize + DeserializeOwned {}
+pub trait CacheValueImpl: Debug + Clone + Serialize + DeserializeOwned {}
 
-impl<V> CacheValue for V where V: Debug + Clone + Serialize + DeserializeOwned {}
+impl<V> CacheValueImpl for V where V: Debug + Clone + Serialize + DeserializeOwned {}
 
 #[allow(async_fn_in_trait)]
 pub trait CacheImpl<K, V>
 where
-    K: CacheKey,
-    V: CacheValue,
+    K: CacheKeyImpl,
+    V: CacheValueImpl,
 {
     // -------------------------------- CUSTOM METHODS --------------------------------- //
     async fn read_entry_impl(&self, key: &K) -> Result<Option<CacheEntry<K, V>>, CacheErr>;

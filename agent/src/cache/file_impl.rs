@@ -4,20 +4,18 @@ use std::fmt::Debug;
 
 // internal crates
 use crate::cache::{
-    cache_impl::{CacheImpl, CacheKey, CacheValue},
+    cache_impl::{CacheImpl, CacheKeyImpl, CacheValueImpl},
     entry::CacheEntry,
     errors::{CacheErr, CannotOverwriteCacheElement},
 };
 use crate::filesys::{file::File, files, path::PathExt, Overwrite, WriteOptions};
 use crate::trace;
 
-// external crates
-
 #[derive(Debug)]
 pub struct FileCacheImpl<K, V>
 where
-    K: CacheKey,
-    V: CacheValue,
+    K: CacheKeyImpl,
+    V: CacheValueImpl,
 {
     file: File,
     capacity: usize,
@@ -27,8 +25,8 @@ where
 
 impl<K, V> FileCacheImpl<K, V>
 where
-    K: CacheKey,
-    V: CacheValue,
+    K: CacheKeyImpl,
+    V: CacheValueImpl,
 {
     pub async fn new(file: File, capacity: usize) -> Result<Self, CacheErr> {
         if !file.exists() {
@@ -59,8 +57,8 @@ where
 
 impl<K, V> CacheImpl<K, V> for FileCacheImpl<K, V>
 where
-    K: CacheKey,
-    V: CacheValue,
+    K: CacheKeyImpl,
+    V: CacheValueImpl,
 {
     async fn read_entry_impl(&self, key: &K) -> Result<Option<CacheEntry<K, V>>, CacheErr> {
         let cache = self.read_cache().await?;

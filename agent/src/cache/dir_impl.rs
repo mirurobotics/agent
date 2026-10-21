@@ -4,7 +4,7 @@ use std::fmt::Debug;
 
 // internal crates
 use crate::cache::{
-    cache_impl::{CacheImpl, CacheKey, CacheValue},
+    cache_impl::{CacheImpl, CacheKeyImpl, CacheValueImpl},
     entry::CacheEntry,
     errors::{CacheErr, CannotOverwriteCacheElement},
 };
@@ -19,8 +19,8 @@ use futures::future::try_join_all;
 #[derive(Debug)]
 pub struct DirCacheImpl<K, V>
 where
-    K: CacheKey,
-    V: CacheValue,
+    K: CacheKeyImpl,
+    V: CacheValueImpl,
 {
     dir: Dir,
     capacity: usize,
@@ -30,8 +30,8 @@ where
 
 impl<K, V> DirCacheImpl<K, V>
 where
-    K: CacheKey,
-    V: CacheValue,
+    K: CacheKeyImpl,
+    V: CacheValueImpl,
 {
     pub async fn new(dir: Dir, capacity: usize) -> Result<Self, CacheErr> {
         dirs::create_if_absent(&dir).await?;
@@ -53,8 +53,8 @@ where
 
 impl<K, V> CacheImpl<K, V> for DirCacheImpl<K, V>
 where
-    K: CacheKey,
-    V: CacheValue,
+    K: CacheKeyImpl,
+    V: CacheValueImpl,
 {
     async fn read_entry_impl(&self, key: &K) -> Result<Option<CacheEntry<K, V>>, CacheErr> {
         let entry_file = self.cache_entry_file(key);
