@@ -1,24 +1,16 @@
-// standard crates
-use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
-
 // internal crates
 pub use crate::data_uploads::scan::state::{Config, StableFile};
 use crate::data_uploads::scan::{
     errors::*,
-    rule::{Options, RuleScanner},
-    sink::StableFileSink,
-    state::{RuleState, ScanSnapshotFile, ScannerSnapshot},
+    scanner_impl::{ScannerArgs, ScannerImpl},
 };
-use crate::filesys::files;
-use crate::models::{Deployment, FileRule, FileRuleID};
+use crate::models::{Deployment, FileRule};
 use crate::trace;
 
 // external crates
-use chrono::{DateTime, Utc};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
-use tracing::{debug, error, info, warn};
+use tracing::{error, info};
 
 macro_rules! dispatch {
     ($op:expr, $respond_to:expr, $msg:expr) => {{
@@ -29,245 +21,6 @@ macro_rules! dispatch {
     }};
 }
 
-/// The IDs of `rules`, or an error if an ID repeats or a glob is invalid.
-pub(crate) fn validate_rules(rules: &[FileRule]) -> Result<HashSet<FileRuleID>, ScanErr> {
-    let mut ids = HashSet::new();
-    for rule in rules {
-        if !ids.insert(rule.id.clone()) {
-            return Err(ScanErr::DuplicateFileRuleID(DuplicateFileRuleID {
-                file_rule_id: rule.id.clone(),
-                trace: trace!(),
-            }));
-        }
-        files::validate_glob(&rule.source.glob)?;
-    }
-    Ok(ids)
-}
-
-// ======================== SINGLE-THREADED IMPLEMENTATION ========================= //
-pub struct ScannerArgs {
-    pub now_fn: Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>,
-    pub sinks: Vec<Arc<dyn StableFileSink>>,
-    pub(crate) snapshot_file: Option<ScanSnapshotFile>,
-}
-
-impl Default for ScannerArgs {
-    fn default() -> Self {
-        Self {
-            now_fn: Arc::new(Utc::now),
-            sinks: Vec::new(),
-            snapshot_file: None,
-        }
-    }
-}
-
-pub struct SingleThreadScanner {
-    scanners: HashMap<FileRuleID, RuleScanner>,
-    deployed: HashSet<FileRuleID>,
-    now_fn: Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>,
-    sinks: Vec<Arc<dyn StableFileSink>>,
-    snapshot_file: Option<ScanSnapshotFile>,
-}
-
-impl SingleThreadScanner {
-    pub fn new(args: ScannerArgs) -> Result<Self, ScanErr> {
-        let persisted = Self::load_snapshot(&args.snapshot_file);
-        let scanners = persisted
-            .rules
-            .iter()
-            .map(|(rule_id, state)| {
-                (
-                    rule_id.clone(),
-                    RuleScanner::from_state(state.clone(), Options::default()),
-                )
-            })
-            .collect();
-        Ok(Self {
-            scanners,
-            deployed: persisted.deployed,
-            now_fn: args.now_fn,
-            sinks: args.sinks,
-            snapshot_file: args.snapshot_file,
-        })
-    }
-
-    fn load_snapshot(state_file: &Option<ScanSnapshotFile>) -> ScannerSnapshot {
-        let Some(state_file) = state_file.as_ref() else {
-            return ScannerSnapshot {
-                rules: HashMap::new(),
-                deployed: HashSet::new(),
-            };
-        };
-        state_file.read().as_ref().clone()
-    }
-
-    async fn persist_snapshot(&mut self) {
-        let Some(state_file) = self.snapshot_file.as_mut() else {
-            return;
-        };
-        let rules: HashMap<FileRuleID, RuleState> = self
-            .scanners
-            .iter()
-            .map(|(rule_id, scanner)| (rule_id.clone(), scanner.state().clone()))
-            .collect();
-        let snapshot = ScannerSnapshot {
-            rules,
-            deployed: self.deployed.clone(),
-        };
-        if let Err(err) = state_file.patch(snapshot).await {
-            warn!("scan: failed to persist scanner state: {err}");
-        }
-    }
-
-    async fn dispatch_stable_files(&self, stable_files: Vec<(StableFile, FileRule)>) {
-        let Some((last, rest)) = self.sinks.split_last() else {
-            if !stable_files.is_empty() {
-                let count = stable_files.len();
-                debug!("scan: no sinks attached; {count} stable file(s) not delivered");
-            }
-            return;
-        };
-        for (file, rule) in stable_files {
-            for sink in rest {
-                sink.on_stable_file(file.clone(), &rule).await;
-            }
-            last.on_stable_file(file, &rule).await;
-        }
-    }
-
-    #[cfg(test)]
-    async fn get_rules(&self) -> Result<Vec<FileRule>, ScanErr> {
-        let rules = self
-            .scanners
-            .values()
-            .map(|c| c.rule().clone())
-            .collect::<Vec<_>>();
-        Ok(rules)
-    }
-
-    #[cfg(test)]
-    async fn get_ledger_count(&self) -> Result<usize, ScanErr> {
-        let count = self
-            .scanners
-            .values()
-            .map(RuleScanner::ledger_count)
-            .sum::<usize>();
-        Ok(count)
-    }
-
-    async fn clear_rules(&mut self) -> Result<(), ScanErr> {
-        self.deployed.clear();
-        self.persist_snapshot().await;
-        info!("scan: cleared all deployed file rules");
-        Ok(())
-    }
-
-    async fn update_rules(
-        &mut self,
-        deployment: Deployment,
-        rules: Vec<FileRule>,
-    ) -> Result<(), ScanErr> {
-        // Reject an invalid rule set whole, before touching any scanner, and
-        // deploy nothing. Running its valid rules, or keeping the previous
-        // deployment's rules, would upload and delete under a policy nobody
-        // approved.
-        let deployed = match validate_rules(&rules) {
-            Ok(deployed) => deployed,
-            Err(err) => {
-                self.clear_rules().await?;
-                return Err(err);
-            }
-        };
-
-        // Every rule gets a scanner, whether or not it uploads: a retention-only
-        // rule still needs its glob walked and its files ledgered so the
-        // retention engine has eligibility to act on.
-        let now = (self.now_fn)();
-        for rule in rules.iter() {
-            match self.scanners.get_mut(&rule.id) {
-                Some(scanner) => scanner.set_deployment(deployment.clone()),
-                None => {
-                    let config = Config {
-                        deployment: deployment.clone(),
-                        rule: rule.clone(),
-                    };
-                    self.scanners.insert(
-                        rule.id.clone(),
-                        RuleScanner::new(config, now, Options::default()).await?,
-                    );
-                }
-            }
-        }
-
-        self.deployed = deployed;
-        self.persist_snapshot().await;
-
-        let count = rules.len();
-        let deployment_id = &deployment.id;
-        info!("scan: applied {count} rule(s) for deployment {deployment_id}");
-
-        Ok(())
-    }
-
-    async fn scan(&mut self) -> Result<(), ScanErr> {
-        let mut stable_files = Vec::new();
-        let mut inactive_rules = Vec::new();
-
-        let now = (self.now_fn)();
-
-        let active = self.scanners.len();
-        let deployed = self.deployed.len();
-        debug!("scan: tick over {active} rule(s), {deployed} deployed");
-
-        // evaludate candidates for all scanners
-        for (rule_id, scanner) in self.scanners.iter_mut() {
-            match scanner.evaluate_candidates(now).await {
-                Ok(stable) => {
-                    if !stable.is_empty() {
-                        let count = stable.len();
-                        debug!("scan: rule {rule_id} produced {count} stable file(s)");
-                    }
-                    let rule = scanner.rule().clone();
-                    stable_files.extend(stable.into_iter().map(|file| (file, rule.clone())));
-                }
-                Err(err) => warn!("scan: evaluate failed for rule {rule_id}: {err}"),
-            }
-
-            // discover candidates for deployed scanners
-            if self.deployed.contains(rule_id) {
-                if let Err(err) = scanner.discover_candidates(now).await {
-                    warn!("scan: discover failed for rule {rule_id}: {err}");
-                }
-            // if the scanner has no candidates, it is inactive
-            } else if !scanner.has_candidates() {
-                inactive_rules.push(rule_id.clone());
-            }
-        }
-
-        // prune inactive rule scanners
-        let pruned = inactive_rules.len();
-        for rule_id in inactive_rules {
-            info!("scan: pruned inactive rule {rule_id}");
-            self.scanners.remove(&rule_id);
-        }
-
-        // Dispatch before persisting. A crash in between leaves them as
-        // candidates, so the next process re-emits them. Persisting first
-        // would record them as done without ever queueing them.
-        let delivered = stable_files.len();
-        self.dispatch_stable_files(stable_files).await;
-        self.persist_snapshot().await;
-
-        debug!(
-            "scan: tick complete; {delivered} stable file(s) delivered to sinks, \
-             {pruned} inactive rule(s) pruned"
-        );
-
-        Ok(())
-    }
-}
-
-// ========================= MULTI-THREADED IMPLEMENTATION ========================= //
 #[allow(async_fn_in_trait)]
 pub trait ScannerExt {
     async fn clear_rules(&self) -> Result<(), ScanErr>;
@@ -306,12 +59,12 @@ pub enum Command {
 }
 
 pub struct Worker {
-    scanner: SingleThreadScanner,
+    scanner: ScannerImpl,
     receiver: mpsc::Receiver<Command>,
 }
 
 impl Worker {
-    pub fn new(scanner: SingleThreadScanner, receiver: mpsc::Receiver<Command>) -> Self {
+    pub fn new(scanner: ScannerImpl, receiver: mpsc::Receiver<Command>) -> Self {
         Self { scanner, receiver }
     }
 
@@ -371,7 +124,7 @@ impl Worker {
     }
 }
 
-/// Command handle to the [`SingleThreadScanner`] actor. Reactive, not
+/// Command handle to the [`ScannerImpl`] actor. Reactive, not
 /// self-scheduling: each [`scan`](ScannerExt::scan) call performs exactly one
 /// discover/evaluate pass and reports newly-stable files exactly once. The
 /// cadence that drives repeated passes is imposed by an external driver (future
@@ -385,7 +138,7 @@ impl Scanner {
     pub fn spawn(buffer_size: usize, args: ScannerArgs) -> Result<(Self, JoinHandle<()>), ScanErr> {
         let (sender, receiver) = mpsc::channel(buffer_size);
         let worker = Worker {
-            scanner: SingleThreadScanner::new(args)?,
+            scanner: ScannerImpl::new(args)?,
             receiver,
         };
         let worker_handle = tokio::spawn(worker.run());
@@ -470,9 +223,9 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     // internal crates
-    use super::{Scanner, ScannerArgs, SingleThreadScanner, StableFile, Worker};
-    use super::{ScannerExt, StableFileSink};
+    use super::{Scanner, ScannerArgs, ScannerExt, ScannerImpl, StableFile, Worker};
     use crate::data_uploads::scan::rule::RuleScanner;
+    use crate::data_uploads::scan::sink::StableFileSink;
     use crate::data_uploads::scan::state::{Config, RuleState, ScanSnapshotFile, ScannerSnapshot};
     use crate::filesys::{dirs, files, Dir, File, PathExt, WriteOptions};
     use crate::models::{Deployment, DplActivity, FileRule, FileRuleSource, FileRuleUpload};
@@ -803,7 +556,7 @@ mod tests {
         #[tokio::test]
         async fn worker_new_and_scanner_new_round_trip() {
             let (tx, rx) = mpsc::channel(64);
-            let single = SingleThreadScanner::new(ScannerArgs::default()).unwrap();
+            let single = ScannerImpl::new(ScannerArgs::default()).unwrap();
             let worker = Worker::new(single, rx);
             let handle = tokio::spawn(worker.run());
 
@@ -903,7 +656,7 @@ mod tests {
             let mut snapshot_file = state_file(&state_path).await;
             snapshot_file.patch(expected.clone()).await.unwrap();
 
-            let scanner = SingleThreadScanner::new(ScannerArgs {
+            let scanner = ScannerImpl::new(ScannerArgs {
                 snapshot_file: Some(snapshot_file),
                 sinks: vec![Arc::new(RecordingSink::new())],
                 ..ScannerArgs::default()
@@ -936,7 +689,7 @@ mod tests {
             let mut snapshot_file = state_file(&state_path).await;
             snapshot_file.patch(expected.clone()).await.unwrap();
 
-            let loaded = SingleThreadScanner::load_snapshot(&Some(snapshot_file));
+            let loaded = ScannerImpl::load_snapshot(&Some(snapshot_file));
 
             assert_eq!(loaded, expected);
         }
@@ -962,7 +715,7 @@ mod tests {
                 rules: HashMap::from([(DEFAULT_RULE_ID.to_string(), rule_state.clone())]),
                 deployed: HashSet::from([DEFAULT_RULE_ID.to_string()]),
             };
-            let mut scanner = SingleThreadScanner::new(ScannerArgs {
+            let mut scanner = ScannerImpl::new(ScannerArgs {
                 now_fn: Arc::new(clock.now_fn()),
                 sinks: vec![Arc::new(RecordingSink::new())],
                 snapshot_file: Some(state_file(&state_path).await),
@@ -987,7 +740,7 @@ mod tests {
                 deployment: deployment("d"),
                 rule: upload_rule(DEFAULT_RULE_ID, "/none/*.mcap", 0),
             });
-            let mut scanner = SingleThreadScanner::new(ScannerArgs {
+            let mut scanner = ScannerImpl::new(ScannerArgs {
                 snapshot_file: Some(state_file(&state_path).await),
                 sinks: vec![Arc::new(RecordingSink::new())],
                 ..ScannerArgs::default()
@@ -1283,7 +1036,7 @@ mod tests {
 
     mod validate_rules_fn {
         use super::*;
-        use crate::data_uploads::scan::{scanner::validate_rules, ScanErr};
+        use crate::data_uploads::scan::{validate_rules, ScanErr};
 
         #[test]
         fn returns_ids() {
@@ -1726,7 +1479,7 @@ mod tests {
         async fn scan_isolates_bad_glob_rule_from_emitting_sibling() {
             let clock = Clock::new(1000);
             let sink = RecordingSink::new();
-            let mut single = SingleThreadScanner::new(ScannerArgs {
+            let mut single = ScannerImpl::new(ScannerArgs {
                 now_fn: Arc::new(clock.now_fn()),
                 sinks: vec![Arc::new(sink.clone())],
                 snapshot_file: None,
@@ -1836,7 +1589,7 @@ mod tests {
         #[tokio::test]
         async fn scan_prunes_ledger_via_discovery() {
             let clock = Clock::new(1000);
-            let mut single = SingleThreadScanner::new(ScannerArgs {
+            let mut single = ScannerImpl::new(ScannerArgs {
                 now_fn: Arc::new(clock.now_fn()),
                 sinks: vec![Arc::new(RecordingSink::new())],
                 snapshot_file: None,
@@ -1907,7 +1660,7 @@ mod tests {
         #[tokio::test]
         async fn undeployed_collection_is_not_pruned() {
             let clock = Clock::new(1000);
-            let mut single = SingleThreadScanner::new(ScannerArgs {
+            let mut single = ScannerImpl::new(ScannerArgs {
                 now_fn: Arc::new(clock.now_fn()),
                 sinks: vec![Arc::new(RecordingSink::new())],
                 snapshot_file: None,
