@@ -60,6 +60,8 @@ Pick the enum facility by what the enum needs to do:
 
 ## Testing
 
+AI agents may run the commands in this section and in Linting locally for fast feedback, preferring targeted runs (one test or module). CI stays final: a change is validated only when CI is green on the pushed head.
+
 Ordinary Cargo tests and the logging-suppressed wrapper are supported:
 
 ```bash

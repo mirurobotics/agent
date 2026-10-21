@@ -2,6 +2,7 @@ pub mod errors;
 pub mod issue;
 pub mod token;
 pub mod token_mngr;
+pub mod token_mngr_impl;
 
 pub use self::errors::AuthnErr;
 pub use self::issue::issue_token;

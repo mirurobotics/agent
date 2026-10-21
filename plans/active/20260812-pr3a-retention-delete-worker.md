@@ -78,7 +78,7 @@ _(filled as work proceeds)_
   `delete_queue.json`, mocks `agent/tests/mocks/deleter.rs`, tests
   `agent/tests/{delete/,workers/delete.rs,app/state.rs}`. Its `models/upload_rule.rs` /
   scan-side changes are obsolete (pre-PR-1/2 world) and are not ported.
-- Persistence pattern: `SingleThreadStateFile` snapshot, mirroring the uploader's queue.
+- Persistence pattern: `StateFile` snapshot, mirroring the uploader's queue.
 
 ## Plan of Work
 

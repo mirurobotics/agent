@@ -1,10 +1,13 @@
 name: CI
 
 on:
+  schedule:
+    - cron: '17 6 * * *'
   push:
-    branches: [main, "release/*"]
+    branches: ["release/*"]
   pull_request:
     branches: [main, "release/*"]
+  workflow_dispatch:
   workflow_call:
 
 concurrency:
@@ -41,14 +44,19 @@ jobs:
   windows-check:
     runs-on: blacksmith-4vcpu-windows-2025
     timeout-minutes: 60
+    # No toolchain or NASM install steps on the Windows jobs. rustup installs
+    # the toolchain pinned in rust-toolchain.toml on first use (an install of
+    # `stable` would go unused), and the runner image already has NASM on
+    # PATH. If NASM ever leaves the image, AWS_LC_SYS_PREBUILT_NASM lets
+    # aws-lc-sys link its prebuilt objects instead of failing. rust-cache
+    # hashes it (env-vars) because aws-lc-sys rebuilds when it changes.
     env:
       # Full PDBs dominate MSVC link time; test diagnostics do not need them.
       CARGO_PROFILE_DEV_DEBUG: 0
+      CARGO_INCREMENTAL: 0
+      AWS_LC_SYS_PREBUILT_NASM: 1
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Install Rust Toolchain
-        uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
@@ -57,11 +65,7 @@ jobs:
           # host-target test artifacts; a new key lets this job save its own.
           key: test-suite
           cache-on-failure: true
-
-      - name: Install NASM (aws-lc-sys)
-        run: |
-          choco install nasm -y
-          echo "C:\Program Files\NASM" >> $env:GITHUB_PATH
+          env-vars: AWS_LC_SYS
 
       - name: Run Windows Tests
         env:
@@ -96,24 +100,19 @@ jobs:
     if: needs.windows_package_scope.outputs.windows_package == 'true'
     runs-on: blacksmith-4vcpu-windows-2025
     timeout-minutes: 30
+    # Toolchain and NASM: see windows-check.
+    env:
+      CARGO_INCREMENTAL: 0
+      AWS_LC_SYS_PREBUILT_NASM: 1
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Install Rust Toolchain
-        uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
-        with:
-          targets: x86_64-pc-windows-msvc
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           key: msi-release
           cache-on-failure: true
-
-      - name: Install NASM (aws-lc-sys)
-        run: |
-          choco install nasm -y
-          echo "C:\Program Files\NASM" >> $env:GITHUB_PATH
+          env-vars: AWS_LC_SYS
 
       - name: Build Windows Target
         run: cargo build --target x86_64-pc-windows-msvc --package miru-agent --bin miru-agent --locked --release

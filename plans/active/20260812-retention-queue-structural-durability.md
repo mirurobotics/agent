@@ -17,8 +17,8 @@ Base branch `main`; working branch `refactor/deleter-queue-identity-removal` (al
 Verified on `main`:
 
 - `Queue::pop_front` / `Queue::requeue` touch memory only; `Queue::persist` is separate and caller-driven.
-- `SingleThreadDeleter::sweep` (`agent/src/data_uploads/retention/deleter.rs:95`) pops an entry into ownership, does the stat/hash/delete work, and persists only once the entry has resolved (`deleter.rs:107`). Nothing persists between the pop and the resolution, so a crash mid-sweep leaves the entry on disk and it is retried.
-- `SingleThreadDeleter` owns `Queue` by value — no `Arc`, no `Mutex`. Exactly two production persist sites: `deleter.rs:86` (enqueue) and `deleter.rs:107` (sweep).
+- `DeleterImpl::sweep` (`agent/src/data_uploads/retention/deleter_impl.rs`) pops an entry into ownership, does the stat/hash/delete work, and persists only once the entry has resolved. Nothing persists between the pop and the resolution, so a crash mid-sweep leaves the entry on disk and it is retried.
+- `DeleterImpl` owns `Queue` by value — no `Arc`, no `Mutex`. Exactly two production persist sites, both in `deleter_impl.rs`: `enqueue` and `sweep`.
 - `Worker::run` is `while let Some(cmd) = self.receiver.recv().await` and awaits `sweep()` to completion inside its match arm, so no `Enqueue`/`Shutdown` can interleave with a sweep.
 - The Deleter is not wired into the application. `agent/src/data_uploads/mod.rs` declares the module; nothing outside `retention/` constructs a `Deleter` (the only external references are `agent/tests/data_uploads/retention/deleter.rs` and the test mock `agent/tests/mocks/deleter.rs`).
 
@@ -31,7 +31,7 @@ The reference implementation is the upload queue after `5a6cae2` ("fix(upload): 
 ## Progress
 
 - [x] M1: `Queue` gains entry identity, `next_ready`, `remove`; `persist` becomes private and every mutator persists.
-- [x] M2: `SingleThreadDeleter::sweep` becomes select-and-resolve; `SweepOutcome::NotDue` disappears; inline deleter tests updated.
+- [x] M2: `DeleterImpl::sweep` becomes select-and-resolve; `SweepOutcome::NotDue` disappears; inline deleter tests updated.
 - [x] M3: Queue tests move to `agent/tests/data_uploads/retention/queue.rs`, mirroring `agent/tests/data_uploads/upload/queue.rs`, plus the mid-sweep-persist durability test.
 - [ ] M4: Preflight CLEAN locally, pushed, draft PR opened, CI green on branch head before the PR leaves draft.
 
@@ -119,7 +119,7 @@ The selected entry never leaves the deque, so `len()` counts it for the duration
 
 **D4 — Snapshot: new nested `QueueEntry` shape, with `#[serde(default = "Uuid::new_v4")]` on `id`, and no migration for the old format.**
 
-`DeleteQueueSnapshot.entries` changes from `Vec<Job>` to `Vec<QueueEntry>` where `QueueEntry { id: Uuid, job: Job }` — the uploader's shape and field names. An existing `delete_queue.json` written by `main` (a flat array of `Job` objects) will not deserialize; `SingleThreadStateFile::new_with_default` (`agent/src/filesys/state_file.rs:54`) falls back to `create(file, &default, Overwrite::Allow)` on any read/parse error, so such a file is silently overwritten with an empty snapshot rather than failing the boot. That is acceptable **only** because no released agent has ever written a `delete_queue.json`.
+`DeleteQueueSnapshot.entries` changes from `Vec<Job>` to `Vec<QueueEntry>` where `QueueEntry { id: Uuid, job: Job }` — the uploader's shape and field names. An existing `delete_queue.json` written by `main` (a flat array of `Job` objects) will not deserialize; `StateFile::new_with_default` (`agent/src/filesys/state_file.rs`) falls back to `create(file, &default, Overwrite::Allow)` on any read/parse error, so such a file is silently overwritten with an empty snapshot rather than failing the boot. That is acceptable **only** because no released agent has ever written a `delete_queue.json`.
 
 **Correction (recorded during execution).** The original premise — "the module is unshipped and unwired: nothing constructs a `Deleter`" — was true when this plan was written and is now false. `#205` ("stability-eligibility sink, deleter wiring, and sweep driver", merged 2026-08-12) wires the Deleter into `agent/src/app/state.rs:177`, which constructs a real `DeleteQueueSnapshotFile` at `layout.delete_queue()`. The conclusion survives, but on a narrower and time-limited basis: the latest release tag is `v0.10.0` (2026-07-20), which predates `#205`, so no agent in the field runs the wiring and no device has written the file.
 
@@ -131,18 +131,18 @@ Rejected: `#[serde(flatten)] job` to preserve the flat on-disk shape and get tru
 
 **D5 — Persistence unifies inside `Queue`; `Deleter` stops persisting.**
 
-`Queue::persist` becomes private. `enqueue`, `remove`, and `requeue` each persist as their last act; `next_ready` and `count_ready` never persist and are not `async`. `SingleThreadDeleter::enqueue` loses its `self.queue.persist().await` line and becomes a thin `self.queue.enqueue(job).await`; `sweep` loses its `self.queue.persist().await` arm. After this there is exactly one persist implementation and no caller can forget to call it — which is the same structural move as the identity change, applied to the write path.
+`Queue::persist` becomes private. `enqueue`, `remove`, and `requeue` each persist as their last act; `next_ready` and `count_ready` never persist and are not `async`. `DeleterImpl::enqueue` loses its `self.queue.persist().await` line and becomes a thin `self.queue.enqueue(job).await`; `sweep` loses its `self.queue.persist().await` arm. After this there is exactly one persist implementation and no caller can forget to call it — which is the same structural move as the identity change, applied to the write path.
 
 Failure direction is safe in every case, as it is for the uploader: a swallowed persist failure on `remove` leaves a resolved entry on disk, which the next sweep drops as `AlreadyGone`; a swallowed failure on `requeue` leaves the entry in its pre-rotation position, which is retried. Every swallowed failure fails toward redundant work, never toward loss.
 
 ## Context and Orientation
 
-Retention is an actor: `Deleter` (handle) + `Worker` (loop) over `SingleThreadDeleter` in `agent/src/data_uploads/retention/deleter.rs`, holding a `Queue` from `agent/src/data_uploads/retention/queue.rs`. `Job::due_at()` (`job.rs:24`) is `last_observed_at + ttl_secs`, saturating to `DateTime::<Utc>::MAX_UTC` on overflow, i.e. "never due".
+Retention is an actor: `Deleter` (handle) + `Worker` (loop) in `agent/src/data_uploads/retention/deleter.rs`, over `DeleterImpl` in `agent/src/data_uploads/retention/deleter_impl.rs`, holding a `Queue` from `agent/src/data_uploads/retention/queue.rs`. `Job::due_at()` (`job.rs:24`) is `last_observed_at + ttl_secs`, saturating to `DateTime::<Utc>::MAX_UTC` on overflow, i.e. "never due".
 
 The reference implementation to mirror, method for method:
 
 - `agent/src/data_uploads/upload/queue.rs` — `QueueEntry` with `#[serde(default = "Uuid::new_v4")] id: Uuid`; `next_ready(&self, now)` returning a clone and leaving the entry in the deque; `remove(&mut self, id) -> Option<QueueEntry>` as the only removal-persisting path, with a private `remove_impl`; `requeue(entry)` doing `remove_impl(entry.id)` then `push_back`.
-- `agent/src/data_uploads/upload/uploader.rs` — the worker hands the id back at each resolution point (`uploader.rs:200,217,243,248`).
+- `agent/src/data_uploads/upload/uploader_impl.rs` — `UploaderImpl` hands the id back at each resolution point (`finish_attempt` and the failure handlers it calls).
 - `agent/tests/data_uploads/upload/queue.rs` and `agent/tests/data_uploads/upload/uploader.rs` (`mod durability`) — the test structure to mirror.
 
 Test layout differs between the two modules today and this plan converges it. The upload queue has **no** inline tests; everything lives in `agent/tests/data_uploads/upload/queue.rs` against the public API (`upload/mod.rs` re-exports `Queue, QueueEntry, QueueSnapshot, QueueSnapshotFile`). The retention queue has ~270 lines of inline `#[cfg(test)] mod tests` plus a `#[cfg(test)] pub(crate) fn entries()` accessor, and `agent/tests/data_uploads/retention/` holds only three actor-boundary tests in `deleter.rs`.
