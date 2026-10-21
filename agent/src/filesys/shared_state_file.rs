@@ -24,14 +24,14 @@ macro_rules! dispatch {
     }};
 }
 
-pub trait StatePatch: Send + Sync + 'static {}
-impl<T> StatePatch for T where T: Send + Sync + 'static {}
+pub trait SharedPatch: Send + Sync + 'static {}
+impl<T> SharedPatch for T where T: Send + Sync + 'static {}
 
-pub trait StateContent<PatchT>:
+pub trait SharedContent<PatchT>:
     Clone + Serialize + DeserializeOwned + Patch<PatchT> + Send + Sync + 'static + PartialEq
 {
 }
-impl<T, U> StateContent<U> for T where
+impl<T, U> SharedContent<U> for T where
     T: Clone + Serialize + DeserializeOwned + Patch<U> + Send + Sync + 'static + PartialEq
 {
 }
@@ -102,16 +102,16 @@ where
 #[derive(Debug)]
 pub struct SharedStateFile<ContentT, PatchT>
 where
-    PatchT: StatePatch,
-    ContentT: StateContent<PatchT>,
+    PatchT: SharedPatch,
+    ContentT: SharedContent<PatchT>,
 {
     sender: Sender<Command<ContentT, PatchT>>,
 }
 
 impl<ContentT, PatchT> SharedStateFile<ContentT, PatchT>
 where
-    PatchT: StatePatch,
-    ContentT: StateContent<PatchT>,
+    PatchT: SharedPatch,
+    ContentT: SharedContent<PatchT>,
 {
     pub async fn spawn(
         buffer_size: usize,
