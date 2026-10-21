@@ -128,12 +128,11 @@ impl<J: QueueJob> FileQueue<J> {
         self.verify_capacity(&job).await?;
         let id = Uuid::new_v4();
         self.push(id, job);
-        if let Err(err) = self.try_persist().await {
+        if let Err(err) = self.persist().await {
             if self.persistence == Persistence::Durable {
                 self.remove_impl(id);
                 return Err(EnqueueErr::FileSysErr(err));
             }
-            self.log_persist_failure(&err);
         }
         self.log_enqueued();
         Ok(id)
@@ -161,7 +160,7 @@ impl<J: QueueJob> FileQueue<J> {
     /// the worker has resolved the entry. Unknown ids are ignored.
     pub async fn remove(&mut self, id: Uuid) -> Option<QueueEntry<J>> {
         if let Some(entry) = self.remove_impl(id) {
-            self.persist().await;
+            let _ = self.persist().await;
             info!(
                 "{}: job removed; queue length {}",
                 J::LABEL,
@@ -184,7 +183,7 @@ impl<J: QueueJob> FileQueue<J> {
     pub async fn requeue(&mut self, entry: QueueEntry<J>) {
         self.remove_impl(entry.id);
         self.entries.push_back(entry);
-        self.persist().await;
+        let _ = self.persist().await;
         info!(
             "{}: job requeued; queue length {}",
             J::LABEL,
@@ -207,36 +206,29 @@ impl<J: QueueJob> FileQueue<J> {
         if reset == 0 {
             return;
         }
-        self.persist().await;
+        let _ = self.persist().await;
         warn!("{}: pulled {reset} deadline(s) back to {horizon}", J::LABEL);
     }
 
-    /// The sole writer to disk. A queue without a snapshot file has nothing
-    /// to write and always succeeds.
-    async fn try_persist(&mut self) -> Result<(), FileSysErr> {
+    /// The sole writer to disk, called by every mutator as its last act. A
+    /// failed write is logged and returned. Only a durable `enqueue` acts on
+    /// the error; every other caller keeps the in-memory queue authoritative.
+    /// A queue without a snapshot file has nothing to write and always succeeds.
+    async fn persist(&mut self) -> Result<(), FileSysErr> {
         let Some(snapshot_file) = self.snapshot_file.as_mut() else {
             return Ok(());
         };
         let snapshot = QueueSnapshot {
             entries: self.entries.iter().cloned().collect(),
         };
-        snapshot_file.patch(snapshot).await
-    }
-
-    /// Called by `remove`, `requeue` and `reset_invalid_deadlines` as their
-    /// last act: a failed write is logged and the in-memory queue stays
-    /// authoritative.
-    async fn persist(&mut self) {
-        if let Err(err) = self.try_persist().await {
-            self.log_persist_failure(&err);
+        let result = snapshot_file.patch(snapshot).await;
+        if let Err(err) = &result {
+            warn!(
+                "{label}: failed to persist {label} queue: {err}",
+                label = J::LABEL
+            );
         }
-    }
-
-    fn log_persist_failure(&self, err: &FileSysErr) {
-        warn!(
-            "{label}: failed to persist {label} queue: {err}",
-            label = J::LABEL
-        );
+        result
     }
 
     /// The queued jobs, oldest enqueue first (test observability only).
