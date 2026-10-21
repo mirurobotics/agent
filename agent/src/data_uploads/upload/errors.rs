@@ -65,6 +65,15 @@ pub enum UploadErr {
     ReceiveActorMessageErr(ReceiveActorMessageErr),
 }
 
+impl From<crate::actor::ActorErr> for UploadErr {
+    fn from(e: crate::actor::ActorErr) -> Self {
+        match e {
+            crate::actor::ActorErr::SendActorMessageErr(e) => Self::SendActorMessageErr(e),
+            crate::actor::ActorErr::ReceiveActorMessageErr(e) => Self::ReceiveActorMessageErr(e),
+        }
+    }
+}
+
 crate::impl_error!(UploadErr {
     QueueFullErr,
     ExecutorErr,
