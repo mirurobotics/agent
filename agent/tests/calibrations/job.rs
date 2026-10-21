@@ -2,7 +2,7 @@
 //! plus the on-disk wire pin for `calibrations/queue.json`.
 
 // internal crates
-use crate::queue::queue_suite;
+use crate::queue::file::queue_suite;
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::calibrations::{Job, Queue, QueueSnapshot, QueueSnapshotFile};
 use miru_agent::filesys::{files, File, WriteOptions};

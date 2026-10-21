@@ -2,7 +2,7 @@
 use chrono::{DateTime, Utc};
 use serde::{de::DeserializeOwned, Serialize};
 
-/// Everything a [`Queue`](super::Queue) needs to know about the job it carries.
+/// Everything a [`FileQueue`](super::FileQueue) needs to know about the job it carries.
 pub trait QueueJob:
     Clone + std::fmt::Debug + PartialEq + Serialize + DeserializeOwned + Send + Sync + 'static
 {

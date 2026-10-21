@@ -46,7 +46,7 @@ impl queue::QueueJob for Job {
     }
 }
 
-pub type Queue = queue::Queue<Job>;
+pub type Queue = queue::FileQueue<Job>;
 
 pub type QueueEntry = queue::QueueEntry<Job>;
 

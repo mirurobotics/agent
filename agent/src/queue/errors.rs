@@ -1,7 +1,7 @@
 // internal crates
 use crate::errors::Trace;
 
-/// Returned (inside [`EnqueueErr`]) by [`super::Queue::enqueue`], and by
+/// Returned (inside [`EnqueueErr`]) by [`super::FileQueue::enqueue`], and by
 /// [`super::DirQueue::enqueue`], when the queue is at capacity. Nothing was written and nothing already queued
 /// was dropped.
 /// Workers wrap this in their own error enum via `From`.
@@ -27,7 +27,7 @@ impl QueueFullErr {
     }
 }
 
-/// Returned by [`super::Queue::enqueue`]: either the queue is full or, for a
+/// Returned by [`super::FileQueue::enqueue`]: either the queue is full or, for a
 /// durable queue, the snapshot holding the new entry could not be written.
 #[derive(Debug, thiserror::Error)]
 pub enum EnqueueErr {

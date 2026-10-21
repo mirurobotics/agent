@@ -1,5 +1,5 @@
 // internal crates
-use crate::queue::{enqueue, queue_suite, DEFAULT_CAPACITY};
+use crate::queue::file::{enqueue, queue_suite, DEFAULT_CAPACITY};
 use crate::test_utils::filesys::{abs_path, dirs as test_dirs};
 use miru_agent::data_uploads::retention::{
     DeleteQueueSnapshot, DeleteQueueSnapshotFile, Job, Queue,

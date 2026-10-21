@@ -12,7 +12,7 @@ use crate::queue::{
     errors::{DirQueueErr, ItemTooLargeErr, SerializeItemErr},
     item::Item,
     job::QueueJob,
-    Persistence, Queue, QueueEntry, QueueSnapshot, QueueSnapshotFile,
+    FileQueue, Persistence, QueueEntry, QueueSnapshot, QueueSnapshotFile,
 };
 use crate::trace;
 
@@ -45,7 +45,7 @@ pub struct DirQueueOptions {
 /// The queue (`queue_file`) holds each item's job, attempt count and backoff,
 /// and each item's content lives in its own file under `content_dir`, so a
 /// queue write never rewrites large content. An item is accepted only once
-/// both are on disk: the queue entry is written first (a durable [`Queue`])
+/// both are on disk: the queue entry is written first (a durable [`FileQueue`])
 /// and the item file second, so a crash between the two leaves an entry
 /// without content, which the next [`DirQueue::open`] drops. Unlike a
 /// cache, the queue never evicts: when full it rejects new items. Disk use is
@@ -57,7 +57,7 @@ pub struct DirQueueOptions {
 ///
 /// The queue is single-owner (`&mut self`); callers that share it wrap it.
 pub struct DirQueue<J: QueueJob, C> {
-    queue: Queue<J>,
+    queue: FileQueue<J>,
     content: Content<J, C>,
     max_item_bytes: u64,
 }
@@ -87,7 +87,7 @@ where
         dirs::create_if_absent(&content_dir).await?;
         let snapshot_file = load_snapshot::<J, C>(&queue_file, &content_dir).await?;
         let mut queue = Self {
-            queue: Queue::from_snapshot(options.capacity, snapshot_file, Persistence::Durable),
+            queue: FileQueue::from_snapshot(options.capacity, snapshot_file, Persistence::Durable),
             content: Content::Dir(content_dir.clone()),
             max_item_bytes: options.max_item_bytes,
         };
@@ -99,7 +99,7 @@ where
     /// An empty queue that keeps everything in memory, with the same caps.
     pub fn in_memory(options: DirQueueOptions) -> Self {
         Self {
-            queue: Queue::new(options.capacity),
+            queue: FileQueue::new(options.capacity),
             content: Content::Memory(HashMap::new()),
             max_item_bytes: options.max_item_bytes,
         }
