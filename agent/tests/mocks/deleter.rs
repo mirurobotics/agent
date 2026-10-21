@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 // internal crates
-use miru_agent::data_uploads::retention::errors::QueueFullErr;
+use miru_agent::data_uploads::retention::errors::{EnqueueErr, QueueFullErr};
 use miru_agent::data_uploads::retention::{DeleteErr, DeleterExt, Job};
 
 type ResultFn = Box<dyn Fn() -> Result<(), DeleteErr> + Send + Sync>;
@@ -65,7 +65,9 @@ impl DeleterExt for MockDeleter {
         let step = self.script.lock().unwrap().pop_front();
         match step {
             None => Ok(()),
-            Some(MockStep::Err) => Err(QueueFullErr::new("delete", 0, file).into()),
+            Some(MockStep::Err) => {
+                Err(EnqueueErr::from(QueueFullErr::new("delete", 0, file)).into())
+            }
         }
     }
 
