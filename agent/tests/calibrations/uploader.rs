@@ -320,6 +320,27 @@ async fn a_queue_write_failure_queues_nothing() {
     assert!(!h.layout.reports().exists());
 }
 
+/// A file whose name isn't UTF-8 can't be a report file, so the sweep
+/// deletes it too.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_file_with_a_non_utf8_name_is_deleted_at_start() {
+    use std::os::unix::ffi::OsStrExt;
+
+    let mut h = Harness::new();
+    preloaded(&h, &["a"]).await;
+    let name = std::ffi::OsStr::from_bytes(b"\xff.json");
+    let odd = File::new(h.layout.reports().path().join(name));
+    files::write_string(&odd, "{}", WriteOptions::OVERWRITE_ATOMIC)
+        .await
+        .unwrap();
+
+    h.spawn().await;
+
+    h.await_drained(&["a"]).await;
+    assert!(!odd.exists());
+}
+
 /// A report file that can't be deleted is left for the next boot's sweep;
 /// the report itself is still dequeued.
 #[cfg(unix)]
