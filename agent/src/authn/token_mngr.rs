@@ -2,8 +2,8 @@
 use std::sync::Arc;
 
 // internal crates
-use crate::authn::{errors::*, issue::issue_token, token, token::Token};
-use crate::filesys::{file::File, path::PathExt, state_file::StateFile};
+use crate::authn::{errors::*, token, token::Token, token_mngr_impl::TokenManagerImpl};
+use crate::filesys::{file::File, state_file::StateFile};
 use crate::http;
 use crate::trace;
 
@@ -34,57 +34,6 @@ pub trait TokenManagerExt: Send + Sync {
     fn refresh_token(&self) -> impl std::future::Future<Output = Result<(), AuthnErr>> + Send;
 }
 
-// ======================== SINGLE THREADED IMPLEMENTATION ========================= //
-pub(crate) struct SingleThreadTokenManager<HTTPClientT: http::ClientI> {
-    http_client: Arc<HTTPClientT>,
-    token_file: TokenFile,
-    private_key_file: File,
-    public_key_file: File,
-}
-
-impl<HTTPClientT: http::ClientI> SingleThreadTokenManager<HTTPClientT> {
-    pub(crate) fn new(
-        http_client: Arc<HTTPClientT>,
-        token_file: TokenFile,
-        private_key_file: File,
-        public_key_file: File,
-    ) -> Result<Self, AuthnErr> {
-        token_file.file.assert_exists()?;
-        private_key_file.assert_exists()?;
-        public_key_file.assert_exists()?;
-        Ok(Self {
-            http_client,
-            token_file,
-            private_key_file,
-            public_key_file,
-        })
-    }
-
-    async fn get_token(&self) -> Arc<Token> {
-        // get the token
-        self.token_file.read()
-    }
-
-    async fn refresh_token(&mut self) -> Result<(), AuthnErr> {
-        // attempt to issue a new token
-        let token = self.issue_token().await?;
-
-        // update the token file
-        self.token_file.write(token).await?;
-
-        Ok(())
-    }
-
-    async fn issue_token(&self) -> Result<Token, AuthnErr> {
-        issue_token(
-            self.http_client.as_ref(),
-            &self.private_key_file,
-            &self.public_key_file,
-        )
-        .await
-    }
-}
-
 // ========================= MULTI-THREADED IMPLEMENTATION ========================= //
 pub(crate) enum Command {
     GetToken {
@@ -99,7 +48,7 @@ pub(crate) enum Command {
 }
 
 pub(crate) struct Worker<HTTPClientT: http::ClientI> {
-    token_mngr: SingleThreadTokenManager<HTTPClientT>,
+    token_mngr: TokenManagerImpl<HTTPClientT>,
     receiver: Receiver<Command>,
 }
 
@@ -147,7 +96,7 @@ impl TokenManager {
     ) -> Result<(Self, JoinHandle<()>), AuthnErr> {
         let (sender, receiver) = mpsc::channel(buffer_size);
         let worker = Worker {
-            token_mngr: SingleThreadTokenManager::new(
+            token_mngr: TokenManagerImpl::new(
                 http_client,
                 token_file,
                 private_key_file,
