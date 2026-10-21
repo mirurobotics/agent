@@ -233,7 +233,7 @@ async fn a_full_queue_is_507_and_keeps_what_it_holds() {
     let (_hold, hang) = oneshot::channel::<()>();
     h.sender.push(Step::Hang(hang));
     let options = DirQueueOptions {
-        max_items: 1,
+        capacity: 1,
         ..calibrations::DEFAULT_OPTIONS
     };
     let queue = h.open_with(options).await;

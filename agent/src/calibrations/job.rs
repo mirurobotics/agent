@@ -1,5 +1,5 @@
 // internal crates
-use crate::queue::{self, DirQueueJob};
+use crate::queue;
 
 // external crates
 use chrono::{DateTime, Utc};
@@ -43,12 +43,6 @@ impl queue::QueueJob for Job {
             name.push_str(&format!(" (aspect {aspect})"));
         }
         format!("{name} received at {}", self.calibrated_at.to_rfc3339())
-    }
-}
-
-impl DirQueueJob for Job {
-    fn received_at(&self) -> DateTime<Utc> {
-        self.calibrated_at
     }
 }
 

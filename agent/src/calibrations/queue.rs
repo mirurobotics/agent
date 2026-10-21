@@ -15,7 +15,7 @@ pub type Report = queue::Item<Job, serde_json::Value>;
 /// up to 1 MiB of calibration data, and 2 MiB leaves room for its JSON
 /// escaping and the job metadata in the same file.
 pub const DEFAULT_OPTIONS: queue::DirQueueOptions = queue::DirQueueOptions {
-    max_items: 1000,
+    capacity: 1000,
     max_item_bytes: 2 * 1024 * 1024,
 };
 

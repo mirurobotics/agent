@@ -16,11 +16,3 @@ pub trait QueueJob:
     /// How this job identifies itself in logs and the capacity error.
     fn name(&self) -> String;
 }
-
-/// What a [`DirQueue`](super::DirQueue) needs to know about the job it
-/// carries, beyond what [`QueueJob`] covers.
-pub trait DirQueueJob: QueueJob {
-    /// When the item was accepted. Orders a queue rebuilt from the item files,
-    /// since the original queue order is lost with `queue.json`.
-    fn received_at(&self) -> DateTime<Utc>;
-}

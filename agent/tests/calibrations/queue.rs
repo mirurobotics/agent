@@ -34,7 +34,7 @@ fn layout(dir: &test_dirs::TempDir) -> CalibrationsLayout {
 
 #[test]
 fn default_options_are_1000_reports_of_2_mib() {
-    assert_eq!(calibrations::DEFAULT_OPTIONS.max_items, 1000);
+    assert_eq!(calibrations::DEFAULT_OPTIONS.capacity, 1000);
     assert_eq!(
         calibrations::DEFAULT_OPTIONS.max_item_bytes,
         2 * 1024 * 1024
@@ -65,7 +65,7 @@ async fn stores_reports_under_the_calibrations_layout() {
 async fn a_full_buffer_is_507_calibration_buffer_full() {
     let dir = test_dirs::temp("calibration_queue_test").unwrap();
     let options = DirQueueOptions {
-        max_items: 1,
+        capacity: 1,
         max_item_bytes: 1024,
     };
     let mut queue = calibrations::open(&layout(&dir), options).await.unwrap();
@@ -84,7 +84,7 @@ async fn a_full_buffer_is_507_calibration_buffer_full() {
 async fn an_oversized_report_is_413_calibration_too_large() {
     let dir = test_dirs::temp("calibration_queue_test").unwrap();
     let options = DirQueueOptions {
-        max_items: 10,
+        capacity: 10,
         max_item_bytes: 100,
     };
     let mut queue = calibrations::open(&layout(&dir), options).await.unwrap();

@@ -163,7 +163,7 @@ async fn a_deployments_cache_error_fails_intake() {
 #[tokio::test]
 async fn queue_full_is_507() {
     let options = DirQueueOptions {
-        max_items: 1,
+        capacity: 1,
         ..calibrations::DEFAULT_OPTIONS
     };
     let fixture = Fixture::with_options(options).await;

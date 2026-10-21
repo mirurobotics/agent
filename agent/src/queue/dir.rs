@@ -9,9 +9,9 @@ use crate::filesys::{
     WriteOptions,
 };
 use crate::queue::{
-    errors::{DirQueueErr, ItemTooLargeErr, QueueFullErr, SerializeItemErr},
+    errors::{DirQueueErr, ItemTooLargeErr, SerializeItemErr},
     item::Item,
-    job::{DirQueueJob, QueueJob},
+    job::QueueJob,
     Persistence, Queue, QueueEntry, QueueSnapshot, QueueSnapshotFile,
 };
 use crate::trace;
@@ -34,7 +34,7 @@ const CORRUPT_EXT: &str = ".corrupt";
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct DirQueueOptions {
     /// The most items the queue holds at once.
-    pub max_items: usize,
+    pub capacity: usize,
     /// The largest item file the queue accepts, in bytes.
     pub max_item_bytes: u64,
 }
@@ -49,17 +49,16 @@ pub struct DirQueueOptions {
 /// and the item file second, so a crash between the two leaves an entry
 /// without content, which the next [`DirQueue::open`] drops. Unlike a
 /// cache, the queue never evicts: when full it rejects new items. Disk use is
-/// bounded by `max_items` times `max_item_bytes`.
+/// bounded by `capacity` times `max_item_bytes`.
 ///
 /// [`DirQueue::in_memory`] is the fallback for when the queue can't be opened
 /// on disk: the same queue, with nothing persisted, so it is empty after a
 /// restart.
 ///
 /// The queue is single-owner (`&mut self`); callers that share it wrap it.
-pub struct DirQueue<J: DirQueueJob, C> {
+pub struct DirQueue<J: QueueJob, C> {
     queue: Queue<J>,
     content: Content<J, C>,
-    max_items: usize,
     max_item_bytes: u64,
 }
 
@@ -73,7 +72,7 @@ enum Content<J, C> {
 
 impl<J, C> DirQueue<J, C>
 where
-    J: DirQueueJob,
+    J: QueueJob,
     C: Clone + Serialize + DeserializeOwned,
 {
     /// Load the queue, creating it when absent. A missing `queue_file` is
@@ -88,9 +87,8 @@ where
         dirs::create_if_absent(&content_dir).await?;
         let snapshot_file = load_snapshot::<J, C>(&queue_file, &content_dir).await?;
         let mut queue = Self {
-            queue: Queue::from_snapshot(options.max_items, snapshot_file, Persistence::Durable),
+            queue: Queue::from_snapshot(options.capacity, snapshot_file, Persistence::Durable),
             content: Content::Dir(content_dir.clone()),
-            max_items: options.max_items,
             max_item_bytes: options.max_item_bytes,
         };
         queue.reconcile(&content_dir).await?;
@@ -101,9 +99,8 @@ where
     /// An empty queue that keeps everything in memory, with the same caps.
     pub fn in_memory(options: DirQueueOptions) -> Self {
         Self {
-            queue: Queue::new(options.max_items),
+            queue: Queue::new(options.capacity),
             content: Content::Memory(HashMap::new()),
-            max_items: options.max_items,
             max_item_bytes: options.max_item_bytes,
         }
     }
@@ -152,7 +149,6 @@ where
     /// entry again. Returns the new queue entry's id, which also names its
     /// item file.
     pub async fn enqueue(&mut self, item: Item<J, C>) -> Result<Uuid, DirQueueErr> {
-        self.verify_capacity(item.job.name())?;
         let bytes = serialize_item(&item)?;
         self.verify_item_size(bytes.len() as u64)?;
         let id = self.queue.enqueue(item.job.clone()).await?;
@@ -237,15 +233,6 @@ where
 
     fn is_queued(&self, id: Uuid) -> bool {
         self.queue.iter().any(|entry| entry.id == id)
-    }
-
-    fn verify_capacity(&self, name: String) -> Result<(), DirQueueErr> {
-        if self.queue.len() < self.max_items {
-            return Ok(());
-        }
-        let err = QueueFullErr::new(J::LABEL, self.max_items, name);
-        warn!("{err}");
-        Err(DirQueueErr::QueueFullErr(err))
     }
 
     fn verify_item_size(&self, item_bytes: u64) -> Result<(), DirQueueErr> {
@@ -361,7 +348,7 @@ async fn load_snapshot<J, C>(
     content_dir: &Dir,
 ) -> Result<QueueSnapshotFile<J>, DirQueueErr>
 where
-    J: DirQueueJob,
+    J: QueueJob,
     C: DeserializeOwned,
 {
     if !queue_file.exists() {
@@ -390,14 +377,14 @@ where
     Ok(QueueSnapshotFile::create(queue_file.clone(), &snapshot, Overwrite::Allow).await?)
 }
 
-/// A queue holding every readable item file under its own entry id, oldest
-/// [`DirQueueJob::received_at`] first. Attempt counts and backoff are lost, so
+/// A queue holding every readable item file under its own entry id, in id
+/// order, which is enqueue order since ids are UUIDv7. Attempt counts and backoff are lost, so
 /// every item is due at once. An item file that cannot be parsed is renamed
 /// with [`CORRUPT_EXT`] and skipped. A failed listing or read is returned,
 /// never rebuilt as a smaller queue.
 async fn rebuild_snapshot<J, C>(content_dir: &Dir) -> Result<QueueSnapshot<J>, DirQueueErr>
 where
-    J: DirQueueJob,
+    J: QueueJob,
     C: DeserializeOwned,
 {
     let mut entries = Vec::new();
@@ -421,7 +408,7 @@ where
             Err(err) => return Err(err.into()),
         }
     }
-    entries.sort_by_key(|entry| (entry.job.received_at(), entry.id));
+    entries.sort_by_key(|entry| entry.id);
     Ok(QueueSnapshot { entries })
 }
 

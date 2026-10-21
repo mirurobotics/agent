@@ -4,9 +4,7 @@
 // internal crates
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::filesys::{dirs, files, Dir, File, PathExt, WriteOptions};
-use miru_agent::queue::{
-    DirQueue, DirQueueErr, DirQueueJob, DirQueueOptions, Item, QueueEntry, QueueJob,
-};
+use miru_agent::queue::{DirQueue, DirQueueErr, DirQueueOptions, Item, QueueEntry, QueueJob};
 
 // external crates
 use chrono::{DateTime, TimeDelta, Utc};
@@ -17,7 +15,6 @@ use uuid::Uuid;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 struct TestJob {
     name: String,
-    received_at: DateTime<Utc>,
 }
 
 impl QueueJob for TestJob {
@@ -32,17 +29,11 @@ impl QueueJob for TestJob {
     }
 }
 
-impl DirQueueJob for TestJob {
-    fn received_at(&self) -> DateTime<Utc> {
-        self.received_at
-    }
-}
-
 type TestQueue = DirQueue<TestJob, Value>;
 type TestItem = Item<TestJob, Value>;
 
 const OPTIONS: DirQueueOptions = DirQueueOptions {
-    max_items: 1000,
+    capacity: 1000,
     max_item_bytes: 1024 * 1024,
 };
 
@@ -51,16 +42,15 @@ fn now() -> DateTime<Utc> {
 }
 
 /// A job told apart from others by its `name`.
-fn job(name: &str, received_at_secs: i64) -> TestJob {
+fn job(name: &str) -> TestJob {
     TestJob {
         name: name.to_string(),
-        received_at: DateTime::from_timestamp(received_at_secs, 0).unwrap(),
     }
 }
 
 fn item(name: &str) -> TestItem {
     Item {
-        job: job(name, 1000),
+        job: job(name),
         content: json!({ "format": "json", "data": { "name": name, "offset": [1, 2, 3] } }),
     }
 }
@@ -281,14 +271,9 @@ pub mod open {
         let mut ids = Vec::new();
         {
             let mut queue = fixture.open().await;
-            // enqueued out of received_at order; the rebuild orders by
-            // received_at since the lost queue order cannot be recovered
-            for (name, secs) in [("late", 3000), ("early", 1000), ("middle", 2000)] {
-                let item = Item {
-                    job: job(name, secs),
-                    ..item(name)
-                };
-                ids.push(queue.enqueue(item).await.unwrap());
+            // ids are UUIDv7, so the rebuild restores enqueue order from them
+            for name in ["late", "early", "middle"] {
+                ids.push(queue.enqueue(item(name)).await.unwrap());
             }
         }
         files::write_string(
@@ -310,14 +295,14 @@ pub mod open {
 
         let mut queue = fixture.open().await;
 
-        assert_eq!(names(&queue), strings(&["early", "middle", "late"]));
+        assert_eq!(names(&queue), strings(&["late", "early", "middle"]));
         assert_eq!(
             queue_on_disk(&fixture).await,
-            strings(&["early", "middle", "late"])
+            strings(&["late", "early", "middle"])
         );
         // each rebuilt entry keeps the id that names its item file
         let entry = queue.next_ready(now()).unwrap();
-        assert_eq!(entry.id, ids[1]);
+        assert_eq!(entry.id, ids[0]);
         let aside = fixture.root.file("queue.json.corrupt");
         assert_eq!(files::read_string(&aside).await.unwrap(), "{not json");
         let content = fixture.content();
@@ -325,7 +310,7 @@ pub mod open {
         assert!(!fixture.item_file(broken).exists());
         assert_eq!(
             drain(&mut queue).await,
-            strings(&["early", "middle", "late"])
+            strings(&["late", "early", "middle"])
         );
     }
 
@@ -391,10 +376,7 @@ pub mod open {
         let raw = files::read_string(&fixture.queue_file()).await.unwrap();
         assert_eq!(raw, "{not json");
         let queue = fixture.open().await;
-        // same received_at, so the rebuild's order between them is by id
-        let mut rebuilt = names(&queue);
-        rebuilt.sort();
-        assert_eq!(rebuilt, strings(&["a", "b"]));
+        assert_eq!(names(&queue), strings(&["a", "b"]));
     }
 
     /// A read error other than a parse failure may be transient, so the
@@ -479,7 +461,7 @@ pub mod open {
             enqueue_all(&mut queue, &["a", "b", "c"]).await;
         }
         let options = DirQueueOptions {
-            max_items: 2,
+            capacity: 2,
             ..OPTIONS
         };
 
@@ -611,7 +593,7 @@ pub mod enqueue {
     async fn rejects_at_the_report_cap() {
         let fixture = Fixture::new();
         let options = DirQueueOptions {
-            max_items: 2,
+            capacity: 2,
             ..OPTIONS
         };
         let mut queue = fixture.open_with(options).await;
@@ -632,7 +614,7 @@ pub mod enqueue {
     async fn rejects_an_item_over_the_size_cap() {
         let fixture = Fixture::new();
         let options = DirQueueOptions {
-            max_items: 100,
+            capacity: 100,
             max_item_bytes: 1000,
         };
         let mut queue = fixture.open_with(options).await;
@@ -654,7 +636,7 @@ pub mod enqueue {
     async fn accepts_again_once_a_report_is_removed() {
         let fixture = Fixture::new();
         let options = DirQueueOptions {
-            max_items: 1,
+            capacity: 1,
             ..OPTIONS
         };
         let mut queue = fixture.open_with(options).await;
@@ -716,7 +698,7 @@ pub mod enqueue {
         .unwrap();
 
         let item = Item {
-            job: job("a", 1000),
+            job: job("a"),
             content: Unserializable,
         };
         let err = queue.enqueue(item).await.unwrap_err();
@@ -1025,7 +1007,7 @@ pub mod in_memory {
     #[tokio::test]
     async fn rejects_at_the_item_cap() {
         let options = DirQueueOptions {
-            max_items: 1,
+            capacity: 1,
             ..OPTIONS
         };
         let mut queue = TestQueue::in_memory(options);
@@ -1055,7 +1037,7 @@ pub mod in_memory {
     async fn serialize_failure_rejects() {
         let mut queue = DirQueue::<TestJob, Unserializable>::in_memory(OPTIONS);
         let item = Item {
-            job: job("a", 1000),
+            job: job("a"),
             content: Unserializable,
         };
 

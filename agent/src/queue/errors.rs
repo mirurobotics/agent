@@ -94,9 +94,14 @@ impl From<crate::filesys::FileSysErr> for DirQueueErr {
     }
 }
 
+/// A full queue surfaces as [`DirQueueErr::QueueFullErr`]; any other enqueue
+/// error stays wrapped.
 impl From<EnqueueErr> for DirQueueErr {
     fn from(e: EnqueueErr) -> Self {
-        Self::EnqueueErr(e)
+        match e {
+            EnqueueErr::QueueFullErr(e) => Self::QueueFullErr(e),
+            other => Self::EnqueueErr(other),
+        }
     }
 }
 

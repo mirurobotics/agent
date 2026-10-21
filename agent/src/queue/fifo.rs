@@ -125,13 +125,14 @@ impl<J: QueueJob> Queue<J> {
 
     // ================ Mutators ================ //
 
-    /// Push a new job at the tail under a fresh id, which is returned. A full
+    /// Push a new job at the tail under a fresh id, which is returned. Ids are
+    /// UUIDv7, so they sort in enqueue order. A full
     /// queue rejects it with [`EnqueueErr::QueueFullErr`] and persists nothing.
     /// A failed snapshot write is handled as the queue's [`Persistence`] says:
     /// only a durable queue returns it, as [`EnqueueErr::FileSysErr`].
     pub async fn enqueue(&mut self, job: J) -> Result<Uuid, EnqueueErr> {
         self.verify_capacity(&job).await?;
-        let id = Uuid::new_v4();
+        let id = Uuid::now_v7();
         self.push(id, job);
         if let Err(err) = self.try_persist().await {
             if self.persistence == Persistence::Durable {
