@@ -1,5 +1,5 @@
 // internal crates
-use crate::filesys::state_file::SingleThreadStateFile;
+use crate::filesys::state_file_impl::StateFileImpl;
 use crate::models::Patch;
 
 // external crates
@@ -42,4 +42,4 @@ impl<J> Patch<QueueSnapshot<J>> for QueueSnapshot<J> {
 
 /// The queue's persistence handle: an atomically-written JSON snapshot with an
 /// in-memory cache. Mirrors the scanner's `ScanSnapshotFile`.
-pub type QueueSnapshotFile<J> = SingleThreadStateFile<QueueSnapshot<J>, QueueSnapshot<J>>;
+pub type QueueSnapshotFile<J> = StateFileImpl<QueueSnapshot<J>, QueueSnapshot<J>>;

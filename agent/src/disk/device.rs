@@ -5,11 +5,11 @@ use crate::disk::{
     errors::{DeviceNotActivatedErr, DiskErr, ResolveDeviceIDErr},
     layout::Layout,
 };
-use crate::filesys::{files, state_file::ConcurrentStateFile, PathExt};
+use crate::filesys::{files, state_file::StateFile, PathExt};
 use crate::models::{self, device};
 use crate::trace;
 
-pub type Device = ConcurrentStateFile<models::Device, device::Updates>;
+pub type Device = StateFile<models::Device, device::Updates>;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Activation {
