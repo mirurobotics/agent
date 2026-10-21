@@ -39,23 +39,10 @@ pub struct DirQueueOptions {
     pub max_item_bytes: u64,
 }
 
-/// A FIFO of accepted items that survives agent restarts until each one is
-/// [`DirQueue::remove`]d.
-///
-/// The queue (`queue_file`) holds each item's job, attempt count and backoff,
-/// and each item's content lives in its own file under `content_dir`, so a
-/// queue write never rewrites large content. An item is accepted only once
-/// both are on disk: the queue entry is written first (a durable [`FileQueue`])
-/// and the item file second, so a crash between the two leaves an entry
-/// without content, which the next [`DirQueue::open`] drops. Unlike a
-/// cache, the queue never evicts: when full it rejects new items. Disk use is
-/// bounded by `capacity` times `max_item_bytes`.
-///
-/// [`DirQueue::in_memory`] is the fallback for when the queue can't be opened
-/// on disk: the same queue, with nothing persisted, so it is empty after a
-/// restart.
-///
-/// The queue is single-owner (`&mut self`); callers that share it wrap it.
+/// A FIFO of items that survives restarts. Each item's job is an entry in a
+/// [`FileQueue`] at `queue_file`, and its content is its own file under
+/// `content_dir`, so large content is never rewritten. A full queue rejects
+/// new items rather than evicting old ones.
 pub struct DirQueue<J: QueueJob, C> {
     queue: FileQueue<J>,
     content: Content<J, C>,
@@ -141,13 +128,10 @@ where
 
     // ================ Mutators ================ //
 
-    /// Queue `item` durably. On success its queue entry and item file are
-    /// both on disk (or both in memory, for [`Self::in_memory`]). On any
-    /// error nothing is queued: a full queue returns [`QueueFullErr`] rather
-    /// than dropping an older item, an item file over `max_item_bytes`
-    /// returns [`ItemTooLargeErr`], and a failed item file write removes the
-    /// entry again. Returns the new queue entry's id, which also names its
-    /// item file.
+    /// Queue `item` and return its entry id, which also names its item file.
+    /// The entry is written before the file, so a crash between the two
+    /// leaves an entry that the next [`Self::open`] drops. On error nothing
+    /// is queued.
     pub async fn enqueue(&mut self, item: Item<J, C>) -> Result<Uuid, DirQueueErr> {
         let bytes = serialize_item(&item)?;
         self.verify_item_size(bytes.len() as u64)?;
