@@ -13,11 +13,18 @@ use chrono::{DateTime, Utc};
 use tracing::{info, warn};
 use uuid::Uuid;
 
-/// In-memory job queue with an optional single-file snapshot. Every mutation (`enqueue`,
-/// `dequeue`, `requeue`, `reset_invalid_deadlines`) persists as its last act,
-/// so there is exactly one persist implementation and no caller can forget
-/// to call it. Selection (`next_ready`, `count_ready`) never mutates and
-/// never persists.
+/// In-memory job queue with an optional single-file snapshot.
+///
+/// A worker takes a job in three steps: `next_ready` selects an entry without
+/// taking it out, the worker attempts the job, and then it settles the entry
+/// with `ack` (done with it, success or give up) or `retry` (try again later).
+/// The entry stays queued, and on disk, until it is settled, so a crash
+/// mid-attempt never loses a job.
+///
+/// Every mutation (`enqueue`, `ack`, `retry`, `reset_invalid_deadlines`)
+/// persists as its last act, so there is exactly one persist implementation
+/// and no caller can forget to call it. Selection (`next_ready`,
+/// `count_ready`) never mutates and never persists.
 pub struct FileQueue<J: QueueJob> {
     entries: VecDeque<QueueEntry<J>>,
     capacity: usize,
@@ -70,7 +77,7 @@ impl<J: QueueJob> FileQueue<J> {
             .iter()
             .find(|entry| Self::is_ready(entry, now))?;
         info!(
-            "{}: job dequeued; queue length {}",
+            "{}: job selected; queue length {}",
             J::LABEL,
             self.entries.len()
         );
@@ -99,12 +106,14 @@ impl<J: QueueJob> FileQueue<J> {
 
     // ================ Mutators ================ //
 
-    /// Push a new job at the tail under a fresh id. When the queue is full the
-    /// enqueue is rejected with [`QueueFullErr`] and nothing is persisted.
-    pub async fn enqueue(&mut self, job: J) -> Result<(), QueueFullErr> {
+    /// Push a new job at the tail under a fresh id and return that id. When
+    /// the queue is full the enqueue is rejected with [`QueueFullErr`] and
+    /// nothing is persisted.
+    pub async fn enqueue(&mut self, job: J) -> Result<Uuid, QueueFullErr> {
         self.verify_capacity(&job).await?;
+        let id = Uuid::new_v4();
         self.entries.push_back(QueueEntry {
-            id: Uuid::new_v4(),
+            id,
             job,
             attempts: 0,
             next_attempt_at: None,
@@ -115,44 +124,49 @@ impl<J: QueueJob> FileQueue<J> {
             J::LABEL,
             self.entries.len()
         );
-        Ok(())
+        Ok(id)
     }
 
-    /// Dequeue the entry with `id` and persist the shortened queue. The entry
-    /// need not be at the head, since `requeue` rotates entries to the tail.
-    /// This is the only point at which a job leaves durable storage, so call it
-    /// only once the worker has resolved the entry. Unknown ids are ignored.
-    pub async fn dequeue(&mut self, id: Uuid) -> Option<QueueEntry<J>> {
-        if let Some(entry) = self.remove_impl(id) {
-            self.persist().await;
-            info!(
-                "{}: job dequeued; queue length {}",
-                J::LABEL,
-                self.entries.len()
-            );
-            return Some(entry);
-        }
-        None
-    }
-
-    fn remove_impl(&mut self, id: Uuid) -> Option<QueueEntry<J>> {
-        let idx = self.entries.iter().position(|entry| entry.id == id)?;
-        self.entries.remove(idx)
-    }
-
-    /// Move `entry` to the tail, replacing whatever is queued under its id so
-    /// the caller's updated attempt count and backoff deadline are persisted.
-    /// This is a rotation of an entry the queue already holds, not an
-    /// admission, so it is not capacity-gated and cannot change [`Self::len`].
-    pub async fn requeue(&mut self, entry: QueueEntry<J>) {
-        self.remove_impl(entry.id);
-        self.entries.push_back(entry);
+    /// Settle the entry with `id` as finished, whether the job succeeded or
+    /// the worker gave up on it, and persist the shortened queue. This is the
+    /// only point at which a job leaves durable storage. The entry need not be
+    /// at the head, since `retry` rotates entries to the tail. Unknown ids are
+    /// ignored.
+    pub async fn ack(&mut self, id: Uuid) -> Option<QueueEntry<J>> {
+        let entry = self.take(id)?;
         self.persist().await;
         info!(
-            "{}: job requeued; queue length {}",
+            "{}: job acked; queue length {}",
             J::LABEL,
             self.entries.len()
         );
+        Some(entry)
+    }
+
+    /// Settle the entry with `id` for another try: record its `attempts` so
+    /// far, defer it until `next_attempt_at`, and rotate it to the tail. The
+    /// job itself is unchanged. The entry is already queued, so this is not
+    /// capacity-gated and cannot change [`Self::len`]. Returns `false`, and
+    /// persists nothing, for an unknown id.
+    pub async fn retry(&mut self, id: Uuid, attempts: u32, next_attempt_at: DateTime<Utc>) -> bool {
+        let Some(mut entry) = self.take(id) else {
+            return false;
+        };
+        entry.attempts = attempts;
+        entry.next_attempt_at = Some(next_attempt_at);
+        self.entries.push_back(entry);
+        self.persist().await;
+        info!(
+            "{}: job queued for retry; queue length {}",
+            J::LABEL,
+            self.entries.len()
+        );
+        true
+    }
+
+    fn take(&mut self, id: Uuid) -> Option<QueueEntry<J>> {
+        let idx = self.entries.iter().position(|entry| entry.id == id)?;
+        self.entries.remove(idx)
     }
 
     /// Pull every `next_attempt_at` strictly beyond `horizon` back to it, so no

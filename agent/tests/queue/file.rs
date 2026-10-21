@@ -39,18 +39,34 @@ async fn open<J: QueueJob>(path: &File) -> QueueSnapshotFile<J> {
         .unwrap()
 }
 
-/// `enqueue` without requiring the error to be `Debug`.
-pub async fn enqueue<J: QueueJob>(queue: &mut FileQueue<J>, job: J) {
-    assert!(queue.enqueue(job).await.is_ok(), "enqueue was rejected");
+/// `enqueue` without requiring the error to be `Debug`. Returns the new id.
+pub async fn enqueue<J: QueueJob>(queue: &mut FileQueue<J>, job: J) -> Uuid {
+    let Ok(id) = queue.enqueue(job).await else {
+        panic!("enqueue was rejected");
+    };
+    id
+}
+
+/// Enqueue `job` and retry it straight away, leaving it at the tail with
+/// `attempts` spent and deferred until `next_attempt_at`: the state a worker's
+/// failed attempt leaves behind.
+async fn enqueue_waiting<J: QueueJob>(
+    queue: &mut FileQueue<J>,
+    job: J,
+    attempts: u32,
+    next_attempt_at: DateTime<Utc>,
+) {
+    let id = enqueue(queue, job).await;
+    assert!(queue.retry(id, attempts, next_attempt_at).await);
 }
 
 /// The ready jobs, in selection order. `next_ready` leaves the entry in place,
-/// so draining without removing would return the same entry forever.
+/// so draining without acking would return the same entry forever.
 async fn drain<J: QueueJob>(queue: &mut FileQueue<J>) -> Vec<J> {
     let mut out = Vec::new();
     while let Some(entry) = queue.next_ready(now()) {
         out.push(entry.job);
-        queue.dequeue(entry.id).await;
+        queue.ack(entry.id).await;
     }
     out
 }
@@ -153,8 +169,8 @@ pub mod cases {
             let entry = queue.next_ready(now()).unwrap();
             assert_eq!(entry.attempts, 0);
             assert_eq!(entry.next_attempt_at, None);
-            // the minted id is a working handle for removal
-            assert!(queue.dequeue(entry.id).await.is_some());
+            // the minted id is a working handle for ack
+            assert!(queue.ack(entry.id).await.is_some());
             assert!(queue.is_empty());
         }
     }
@@ -201,7 +217,7 @@ pub mod cases {
             enqueue(&mut queue, job).await;
 
             let first = queue.next_ready(now()).unwrap();
-            queue.dequeue(first.id).await.unwrap();
+            queue.ack(first.id).await.unwrap();
             let second = queue.next_ready(now()).unwrap();
             assert_eq!(first.job, second.job);
             assert_ne!(first.id, second.id);
@@ -280,14 +296,7 @@ pub mod cases {
         pub async fn skips_waiting_entries<J: QueueJob>(make: fn(&str) -> J) {
             let mut queue = FileQueue::<J>::new(DEFAULT_CAPACITY);
             let deadline = now() + TimeDelta::hours(1);
-            queue
-                .requeue(QueueEntry {
-                    id: Uuid::new_v4(),
-                    job: make("waiting"),
-                    attempts: 1,
-                    next_attempt_at: Some(deadline),
-                })
-                .await;
+            enqueue_waiting(&mut queue, make("waiting"), 1, deadline).await;
             enqueue(&mut queue, make("ready_1")).await;
             enqueue(&mut queue, make("ready_2")).await;
 
@@ -304,7 +313,7 @@ pub mod cases {
             assert!(queue.next_ready(now()).is_none());
         }
 
-        pub async fn leaves_the_entry_on_disk_until_dequeued<J: QueueJob>(
+        pub async fn leaves_the_entry_on_disk_until_acked<J: QueueJob>(
             tmp: &str,
             make: fn(&str) -> J,
         ) {
@@ -316,22 +325,22 @@ pub mod cases {
             let entry = queue.next_ready(now()).unwrap();
             assert_eq!(on_disk::<J>(&path).await, jobs(make, &["a.log", "b.log"]));
 
-            let dequeued = queue.dequeue(entry.id).await.unwrap();
-            assert_eq!(dequeued.id, entry.id);
+            let acked = queue.ack(entry.id).await.unwrap();
+            assert_eq!(acked.id, entry.id);
             assert_eq!(on_disk::<J>(&path).await, jobs(make, &["b.log"]));
         }
     }
 
-    // --------------------------------- dequeue ----------------------------------- //
+    // ----------------------------------- ack ------------------------------------- //
 
-    pub mod dequeue {
+    pub mod ack {
         use super::*;
 
         pub async fn unknown_id_is_ignored<J: QueueJob>(make: fn(&str) -> J) {
             let mut queue = FileQueue::<J>::new(DEFAULT_CAPACITY);
             enqueue(&mut queue, make("a.log")).await;
 
-            assert!(queue.dequeue(Uuid::new_v4()).await.is_none());
+            assert!(queue.ack(Uuid::new_v4()).await.is_none());
             assert_eq!(queue.len(), 1);
         }
 
@@ -342,16 +351,16 @@ pub mod cases {
             enqueue(&mut queue, job).await;
 
             let entry = queue.next_ready(now()).unwrap();
-            queue.dequeue(entry.id).await.unwrap();
+            queue.ack(entry.id).await.unwrap();
 
             assert_eq!(queue.len(), 1);
             assert_ne!(queue.next_ready(now()).unwrap().id, entry.id);
         }
     }
 
-    // -------------------------------- requeue ------------------------------------ //
+    // --------------------------------- retry ------------------------------------- //
 
-    pub mod requeue {
+    pub mod retry {
         use super::*;
 
         pub async fn rotates_to_the_tail<J: QueueJob>(make: fn(&str) -> J) {
@@ -360,34 +369,35 @@ pub mod cases {
             enqueue(&mut queue, make("b.log")).await;
 
             let entry = queue.next_ready(now()).unwrap();
-            queue.requeue(entry).await;
+            assert!(queue.retry(entry.id, entry.attempts, now()).await);
             assert_eq!(queue.len(), 2);
 
             assert_eq!(drain(&mut queue).await, jobs(make, &["b.log", "a.log"]));
         }
 
-        pub async fn at_capacity_admits_a_new_entry<J: QueueJob>(make: fn(&str) -> J) {
+        pub async fn is_not_capacity_gated<J: QueueJob>(make: fn(&str) -> J) {
             let mut queue = FileQueue::<J>::new(1);
             enqueue(&mut queue, make("a.log")).await;
 
-            queue
-                .requeue(QueueEntry {
-                    id: Uuid::new_v4(),
-                    job: make("b.log"),
-                    attempts: 2,
-                    next_attempt_at: None,
-                })
-                .await;
+            let entry = queue.next_ready(now()).unwrap();
+            assert!(queue.retry(entry.id, 2, now()).await);
 
-            assert_eq!(queue.len(), 2);
+            assert_eq!(queue.len(), 1);
+            let entry = queue.next_ready(now()).unwrap();
+            assert_eq!(entry.job, make("a.log"));
+            assert_eq!(entry.attempts, 2);
+        }
 
-            // the appended entry lands at the tail carrying its attempt count
-            let head = queue.next_ready(now()).unwrap();
-            assert_eq!(head.job, make("a.log"));
-            queue.dequeue(head.id).await.unwrap();
-            let tail = queue.next_ready(now()).unwrap();
-            assert_eq!(tail.job, make("b.log"));
-            assert_eq!(tail.attempts, 2);
+        pub async fn unknown_id_is_ignored<J: QueueJob>(make: fn(&str) -> J) {
+            let mut queue = FileQueue::<J>::new(DEFAULT_CAPACITY);
+            enqueue(&mut queue, make("a.log")).await;
+
+            assert!(!queue.retry(Uuid::new_v4(), 1, now()).await);
+
+            assert_eq!(queue.len(), 1);
+            let entry = queue.next_ready(now()).unwrap();
+            assert_eq!(entry.attempts, 0);
+            assert_eq!(entry.next_attempt_at, None);
         }
 
         pub async fn order_survives_a_reload<J: QueueJob>(tmp: &str, make: fn(&str) -> J) {
@@ -401,7 +411,7 @@ pub mod cases {
                 enqueue(&mut queue, make("b.log")).await;
                 let entry = queue.next_ready(now()).unwrap();
                 id = entry.id;
-                queue.requeue(entry).await;
+                assert!(queue.retry(entry.id, entry.attempts, now()).await);
             }
 
             let reloaded = FileQueue::<J>::from_snapshot(DEFAULT_CAPACITY, open::<J>(&path).await);
@@ -421,13 +431,7 @@ pub mod cases {
                     FileQueue::<J>::from_snapshot(DEFAULT_CAPACITY, open::<J>(&path).await);
                 enqueue(&mut queue, make("a.log")).await;
                 let entry = queue.next_ready(now()).unwrap();
-                queue
-                    .requeue(QueueEntry {
-                        attempts: 5,
-                        next_attempt_at: Some(deadline),
-                        ..entry
-                    })
-                    .await;
+                assert!(queue.retry(entry.id, 5, deadline).await);
                 assert_eq!(queue.len(), 1);
             }
 
@@ -450,14 +454,7 @@ pub mod cases {
 
             enqueue(&mut queue, make("a.log")).await;
             enqueue(&mut queue, make("b.log")).await;
-            queue
-                .requeue(QueueEntry {
-                    id: Uuid::new_v4(),
-                    job: make("waiting"),
-                    attempts: 1,
-                    next_attempt_at: Some(now() + TimeDelta::hours(1)),
-                })
-                .await;
+            enqueue_waiting(&mut queue, make("waiting"), 1, now() + TimeDelta::hours(1)).await;
 
             assert_eq!(queue.count_ready(now()), 2);
             assert_eq!(queue.len(), 3);
@@ -475,14 +472,7 @@ pub mod cases {
             let inside = horizon - TimeDelta::seconds(1);
             let beyond = horizon + TimeDelta::seconds(1);
             for (name, deadline) in [("a.log", inside), ("b.log", horizon), ("c.log", beyond)] {
-                queue
-                    .requeue(QueueEntry {
-                        id: Uuid::new_v4(),
-                        job: make(name),
-                        attempts: 1,
-                        next_attempt_at: Some(deadline),
-                    })
-                    .await;
+                enqueue_waiting(&mut queue, make(name), 1, deadline).await;
             }
 
             queue.reset_invalid_deadlines(horizon).await;
@@ -490,7 +480,7 @@ pub mod cases {
             let mut drained = Vec::new();
             while let Some(entry) = queue.next_ready(beyond) {
                 drained.push((entry.job, entry.next_attempt_at));
-                queue.dequeue(entry.id).await;
+                queue.ack(entry.id).await;
             }
             assert_eq!(
                 drained,
@@ -520,14 +510,7 @@ pub mod cases {
             {
                 let mut queue =
                     FileQueue::<J>::from_snapshot(DEFAULT_CAPACITY, open::<J>(&path).await);
-                queue
-                    .requeue(QueueEntry {
-                        id: Uuid::new_v4(),
-                        job: make("a.log"),
-                        attempts: 1,
-                        next_attempt_at: Some(beyond),
-                    })
-                    .await;
+                enqueue_waiting(&mut queue, make("a.log"), 1, beyond).await;
                 queue.reset_invalid_deadlines(horizon).await;
             }
 
@@ -549,14 +532,7 @@ pub mod cases {
             let t1 = now() + TimeDelta::hours(1);
             let t2 = now() + TimeDelta::hours(2);
             for (name, deadline) in [("a.log", t2), ("b.log", t1)] {
-                queue
-                    .requeue(QueueEntry {
-                        id: Uuid::new_v4(),
-                        job: make(name),
-                        attempts: 1,
-                        next_attempt_at: Some(deadline),
-                    })
-                    .await;
+                enqueue_waiting(&mut queue, make(name), 1, deadline).await;
             }
             assert_eq!(queue.earliest_next_attempt(), Some(t1));
 
@@ -577,7 +553,7 @@ pub mod cases {
 
         /// A persist landing between an entry's selection and its resolution
         /// must not write the selected entry out of the snapshot. Stronger than
-        /// [`super::next_ready::leaves_the_entry_on_disk_until_dequeued`], which
+        /// [`super::next_ready::leaves_the_entry_on_disk_until_acked`], which
         /// only pins that selection itself does not write: here an unrelated
         /// mutation does the writing while the entry is in flight.
         ///
@@ -610,7 +586,7 @@ pub mod cases {
             );
 
             // `a` leaves disk only when the worker resolves it.
-            queue.dequeue(in_flight.id).await.unwrap();
+            queue.ack(in_flight.id).await.unwrap();
             assert_eq!(on_disk::<J>(&path).await, jobs(make, &["b.log", "c.log"]));
         }
     }
@@ -686,16 +662,20 @@ macro_rules! queue_suite {
                 ],
             },
             next_ready {
-                disk: [leaves_the_entry_on_disk_until_dequeued],
+                disk: [leaves_the_entry_on_disk_until_acked],
                 mem: [skips_waiting_entries, is_none_when_empty],
             },
-            dequeue {
+            ack {
                 disk: [],
                 mem: [unknown_id_is_ignored, one_duplicate_leaves_the_other],
             },
-            requeue {
+            retry {
                 disk: [order_survives_a_reload, attempts_and_deadline_survive_a_reload],
-                mem: [rotates_to_the_tail, at_capacity_admits_a_new_entry],
+                mem: [
+                    rotates_to_the_tail,
+                    is_not_capacity_gated,
+                    unknown_id_is_ignored,
+                ],
             },
             count_ready {
                 disk: [],

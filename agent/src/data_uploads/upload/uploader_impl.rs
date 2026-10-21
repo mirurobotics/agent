@@ -128,7 +128,8 @@ where
     }
 
     pub(crate) async fn enqueue(&mut self, job: Job) -> Result<(), UploadErr> {
-        self.queue.enqueue(job).await.map_err(Into::into)
+        self.queue.enqueue(job).await?;
+        Ok(())
     }
 
     pub(crate) fn len(&self) -> usize {
@@ -182,8 +183,8 @@ where
         }
     }
 
-    /// Resolve `entry` with the result of its attempt: dequeue it on success
-    /// or when it is dropped, otherwise requeue it at the tail.
+    /// Settle `entry` with the result of its attempt: ack it on success or
+    /// when it is dropped, otherwise retry it at the tail.
     pub(crate) async fn finish_attempt(
         &mut self,
         mut entry: QueueEntry,
@@ -194,7 +195,7 @@ where
                 entry.attempts += 1;
                 Self::log_success(&entry);
                 self.enqueue_delete_job(&entry).await;
-                self.queue.dequeue(entry.id).await;
+                self.queue.ack(entry.id).await;
             }
             Err(err) if err.is_network_conn_err() => self.handle_network_failure(entry, err).await,
             Err(err) => self.handle_counted_failure(entry, err).await,
@@ -240,7 +241,7 @@ where
         let age = (self.now_fn)() - entry.job.first_observed_at;
         if age >= self.options.max_job_age {
             Self::log_age_drop(&entry, age, &err);
-            self.queue.dequeue(entry.id).await;
+            self.queue.ack(entry.id).await;
             return;
         }
 
@@ -250,7 +251,7 @@ where
              retrying in {wait}s: {err:?}",
             entry.job.file
         );
-        self.requeue_after(entry, wait).await;
+        self.retry_after(&entry, wait).await;
     }
 
     /// Counted failures bump the attempt budget. Drop on a terminal error or
@@ -265,32 +266,28 @@ where
 
         if err.is_terminal() {
             Self::log_terminal_drop(&entry, &err);
-            self.queue.dequeue(entry.id).await;
+            self.queue.ack(entry.id).await;
             return;
         }
         if entry.attempts >= self.options.attempts {
             Self::log_dropped(&entry, &err);
-            self.queue.dequeue(entry.id).await;
+            self.queue.ack(entry.id).await;
             return;
         }
 
         let wait = cooldown::calc(&self.options.backoff, entry.attempts - 1).max(0);
         info!("upload: retrying {} in {wait}s", entry.job.file);
-        self.requeue_after(entry, wait).await;
+        self.retry_after(&entry, wait).await;
     }
 
-    /// Stamp `entry` eligible after `wait_secs` and append it at the tail.
-    async fn requeue_after(&mut self, mut entry: QueueEntry, wait_secs: i64) {
-        entry.next_attempt_at = Some((self.now_fn)() + TimeDelta::seconds(wait_secs));
-        self.requeue(entry).await;
-    }
-
-    /// Requeue `entry` at the tail with its attempt count preserved.
-    async fn requeue(&mut self, entry: QueueEntry) {
+    /// Retry `entry` at the tail once `wait_secs` have passed, recording its
+    /// attempt count.
+    async fn retry_after(&mut self, entry: &QueueEntry, wait_secs: i64) {
         let file = &entry.job.file;
         let attempts = entry.attempts;
         info!("upload: requeuing {file} at tail after {attempts} attempt(s)");
-        self.queue.requeue(entry).await;
+        let next_attempt_at = (self.now_fn)() + TimeDelta::seconds(wait_secs);
+        self.queue.retry(entry.id, attempts, next_attempt_at).await;
     }
 
     fn log_attempt(entry: &QueueEntry) {

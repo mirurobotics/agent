@@ -81,7 +81,8 @@ impl DeleterImpl {
     }
 
     pub(crate) async fn enqueue(&mut self, job: Job) -> Result<(), DeleteErr> {
-        Ok(self.queue.enqueue(job).await?)
+        self.queue.enqueue(job).await?;
+        Ok(())
     }
 
     pub(crate) async fn sweep(&mut self) -> Result<(), DeleteErr> {
@@ -97,7 +98,7 @@ impl DeleterImpl {
             match Self::sweep_entry(&entry.job).await {
                 SweepOutcome::Failed => self.handle_counted_failure(entry, now).await,
                 SweepOutcome::Deleted | SweepOutcome::AlreadyGone | SweepOutcome::Changed => {
-                    self.queue.dequeue(entry.id).await;
+                    self.queue.ack(entry.id).await;
                 }
             }
         }
@@ -110,7 +111,7 @@ impl DeleterImpl {
         entry.attempts += 1;
         if entry.attempts >= self.attempts {
             Self::log_exhausted_drop(&entry);
-            self.queue.dequeue(entry.id).await;
+            self.queue.ack(entry.id).await;
             return;
         }
 
@@ -119,8 +120,10 @@ impl DeleterImpl {
             "delete: attempt {} of {} failed for {}; retrying in {wait}s",
             entry.attempts, self.attempts, entry.job.file
         );
-        entry.next_attempt_at = Some(now + TimeDelta::seconds(wait));
-        self.queue.requeue(entry).await;
+        let next_attempt_at = now + TimeDelta::seconds(wait);
+        self.queue
+            .retry(entry.id, entry.attempts, next_attempt_at)
+            .await;
     }
 
     /// Consider one selected job: delete only when the on-disk file still
@@ -698,7 +701,7 @@ mod tests {
             deleter.sweep().await.unwrap();
             drop(deleter);
 
-            // the due job was dequeued-and-persisted (FileQueue::dequeue)
+            // the due job was acked-and-persisted (FileQueue::ack)
             // before the waiting job was considered, so a rebuild sees only
             // the waiting job.
             let restored = DeleterImpl::new(DeleterArgs {
