@@ -27,18 +27,9 @@ pub enum Persistence {
     Durable,
 }
 
-/// In-memory job queue with an optional single-file snapshot.
-///
-/// A worker takes a job in three steps: `next_ready` selects an entry without
-/// taking it out, the worker attempts the job, and then it settles the entry
-/// with `ack` (done with it, success or give up) or `retry` (try again later).
-/// The entry stays queued, and on disk, until it is settled, so a crash
-/// mid-attempt never loses a job.
-///
-/// Every mutation (`enqueue`, `ack`, `retry`, `reset_invalid_deadlines`)
-/// persists as its last act, so there is exactly one persist implementation
-/// and no caller can forget to call it. Selection (`next_ready`,
-/// `count_ready`) never mutates and never persists.
+/// In-memory job queue with an optional single-file snapshot. Workers select
+/// with `next_ready`, which leaves the entry queued, then settle it with `ack`
+/// or `retry`. Every mutation persists as its last act; selection never does.
 pub struct FileQueue<J: QueueJob> {
     entries: VecDeque<QueueEntry<J>>,
     capacity: usize,
@@ -162,11 +153,8 @@ impl<J: QueueJob> FileQueue<J> {
         );
     }
 
-    /// Settle the entry with `id` as finished, whether the job succeeded or
-    /// the worker gave up on it, and persist the shortened queue. This is the
-    /// only point at which a job leaves durable storage. The entry need not be
-    /// at the head, since `retry` rotates entries to the tail. Unknown ids are
-    /// ignored.
+    /// Remove the entry with `id` once the worker is done with it. Unknown ids
+    /// are ignored.
     pub async fn ack(&mut self, id: Uuid) -> Option<QueueEntry<J>> {
         let entry = self.take(id)?;
         let _ = self.persist().await;
@@ -178,11 +166,8 @@ impl<J: QueueJob> FileQueue<J> {
         Some(entry)
     }
 
-    /// Settle the entry with `id` for another try: record its `attempts` so
-    /// far, defer it until `next_attempt_at`, and rotate it to the tail. The
-    /// job itself is unchanged. The entry is already queued, so this is not
-    /// capacity-gated and cannot change [`Self::len`]. Returns `false`, and
-    /// persists nothing, for an unknown id.
+    /// Move the entry with `id` to the tail with updated `attempts` and
+    /// `next_attempt_at`. Returns `false` for an unknown id.
     pub async fn retry(&mut self, id: Uuid, attempts: u32, next_attempt_at: DateTime<Utc>) -> bool {
         let Some(mut entry) = self.take(id) else {
             return false;

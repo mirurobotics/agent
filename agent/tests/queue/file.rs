@@ -49,9 +49,7 @@ pub async fn enqueue<J: QueueJob>(queue: &mut FileQueue<J>, job: J) -> Uuid {
     id
 }
 
-/// Enqueue `job` and retry it straight away, leaving it at the tail with
-/// `attempts` spent and deferred until `next_attempt_at`: the state a worker's
-/// failed attempt leaves behind.
+/// Enqueue `job` already retried: `attempts` spent, waiting for `next_attempt_at`.
 async fn enqueue_waiting<J: QueueJob>(
     queue: &mut FileQueue<J>,
     job: J,
