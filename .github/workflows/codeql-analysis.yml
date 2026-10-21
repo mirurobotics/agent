@@ -32,7 +32,7 @@ jobs:
 
   codeql:
     needs: changes
-    if: needs.changes.outputs.scan == 'true'
+    if: ${{ !cancelled() && needs.changes.outputs.scan != 'false' }}
     runs-on: blacksmith-4vcpu-ubuntu-2404
 
     steps:
