@@ -6,25 +6,10 @@ use std::time::Duration;
 use crate::cooldown;
 use crate::filesys::{errors::*, file::File, files, Atomic, Overwrite, WriteOptions};
 use crate::models::Patch;
-use crate::trace;
 
 // external crates
 use serde::{de::DeserializeOwned, Serialize};
-use tokio::sync::{
-    mpsc::{self, Receiver, Sender},
-    oneshot,
-};
-use tokio::task::JoinHandle;
-use tracing::{error, info};
-
-macro_rules! dispatch {
-    ($op:expr, $respond_to:expr, $msg:expr) => {{
-        let result = $op;
-        if $respond_to.send(result).is_err() {
-            error!($msg);
-        }
-    }};
-}
+use tracing::error;
 
 /// Waits between retries of a state file read that failed for a reason other
 /// than "missing" or "unparseable" (e.g. a transient EIO).
@@ -34,9 +19,11 @@ const READ_RETRY_DELAYS: [Duration; 3] = [
     Duration::from_millis(1000),
 ];
 
-// ============================== SINGLE THREADED ================================== //
+/// Single-threaded state file: a JSON file plus its cached contents.
+/// [`crate::filesys::shared_state_file::SharedStateFile`] wraps it in an actor
+/// so several tasks can share one file.
 #[derive(Debug)]
-pub struct SingleThreadStateFile<ContentT, PatchT>
+pub struct StateFile<ContentT, PatchT>
 where
     ContentT: Clone + Serialize + DeserializeOwned + Patch<PatchT> + PartialEq,
 {
@@ -45,7 +32,7 @@ where
     _phantom: std::marker::PhantomData<PatchT>,
 }
 
-impl<ContentT, PatchT> SingleThreadStateFile<ContentT, PatchT>
+impl<ContentT, PatchT> StateFile<ContentT, PatchT>
 where
     ContentT: Clone + Serialize + DeserializeOwned + Patch<PatchT> + PartialEq,
 {
@@ -164,177 +151,5 @@ where
             return Ok(());
         }
         self.write(content).await
-    }
-}
-
-// ================================ CONCURRENT ===================================== //
-
-pub trait ConcurrentPatchT: Send + Sync + 'static {}
-impl<T> ConcurrentPatchT for T where T: Send + Sync + 'static {}
-
-pub trait ConcurrentContentT<PatchT>:
-    Clone + Serialize + DeserializeOwned + Patch<PatchT> + Send + Sync + 'static + PartialEq
-{
-}
-impl<T, U> ConcurrentContentT<U> for T where
-    T: Clone + Serialize + DeserializeOwned + Patch<U> + Send + Sync + 'static + PartialEq
-{
-}
-
-pub enum Command<ContentT, PatchT>
-where
-    ContentT: Clone + Serialize + DeserializeOwned + Patch<PatchT>,
-{
-    Shutdown {
-        respond_to: oneshot::Sender<Result<(), FileSysErr>>,
-    },
-    Read {
-        respond_to: oneshot::Sender<Arc<ContentT>>,
-    },
-    Write {
-        data: ContentT,
-        respond_to: oneshot::Sender<Result<(), FileSysErr>>,
-    },
-    Patch {
-        patch: PatchT,
-        respond_to: oneshot::Sender<Result<(), FileSysErr>>,
-    },
-}
-
-pub struct Worker<ContentT, PatchT>
-where
-    ContentT: Clone + Serialize + DeserializeOwned + Patch<PatchT> + PartialEq,
-{
-    pub file: SingleThreadStateFile<ContentT, PatchT>,
-    pub receiver: Receiver<Command<ContentT, PatchT>>,
-}
-
-impl<ContentT, PatchT> Worker<ContentT, PatchT>
-where
-    ContentT: Clone + Serialize + DeserializeOwned + Patch<PatchT> + PartialEq,
-{
-    pub async fn run(mut self) {
-        while let Some(cmd) = self.receiver.recv().await {
-            match cmd {
-                Command::Shutdown { respond_to } => {
-                    if let Err(e) = respond_to.send(Ok(())) {
-                        error!("Actor failed to send shutdown response: {:?}", e);
-                    }
-                    break;
-                }
-                Command::Read { respond_to } => {
-                    dispatch!(self.file.read(), respond_to, "Actor failed to read file");
-                }
-                Command::Write { data, respond_to } => {
-                    dispatch!(
-                        self.file.write(data).await,
-                        respond_to,
-                        "Actor failed to write file"
-                    );
-                }
-                Command::Patch { patch, respond_to } => {
-                    dispatch!(
-                        self.file.patch(patch).await,
-                        respond_to,
-                        "Actor failed to patch file"
-                    );
-                }
-            }
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct ConcurrentStateFile<ContentT, PatchT>
-where
-    PatchT: ConcurrentPatchT,
-    ContentT: ConcurrentContentT<PatchT>,
-{
-    sender: Sender<Command<ContentT, PatchT>>,
-}
-
-impl<ContentT, PatchT> ConcurrentStateFile<ContentT, PatchT>
-where
-    PatchT: ConcurrentPatchT,
-    ContentT: ConcurrentContentT<PatchT>,
-{
-    pub async fn spawn(
-        buffer_size: usize,
-        file: File,
-    ) -> Result<(Self, JoinHandle<()>), FileSysErr> {
-        let (sender, receiver) = mpsc::channel(buffer_size);
-        let worker = Worker {
-            file: SingleThreadStateFile::new(file).await?,
-            receiver,
-        };
-        let worker_handle = tokio::spawn(worker.run());
-        Ok((Self { sender }, worker_handle))
-    }
-
-    pub async fn spawn_with_default(
-        buffer_size: usize,
-        file: File,
-        default: ContentT,
-    ) -> Result<(Self, JoinHandle<()>), FileSysErr> {
-        let (sender, receiver) = mpsc::channel(buffer_size);
-        let worker = Worker {
-            file: SingleThreadStateFile::new_with_default(file, default).await?,
-            receiver,
-        };
-        let worker_handle = tokio::spawn(worker.run());
-        Ok((Self { sender }, worker_handle))
-    }
-
-    async fn send_command<R>(
-        &self,
-        op: &str,
-        make_cmd: impl FnOnce(oneshot::Sender<R>) -> Command<ContentT, PatchT>,
-    ) -> Result<R, FileSysErr> {
-        let (send, recv) = oneshot::channel();
-        self.sender.send(make_cmd(send)).await.map_err(|e| {
-            error!("Failed to send {op} command to actor: {e:?}");
-            FileSysErr::SendActorMessageErr(SendActorMessageErr {
-                source: Box::new(e),
-                trace: trace!(),
-            })
-        })?;
-        recv.await.map_err(|e| {
-            error!("Failed to receive {op} response from actor: {e:?}");
-            FileSysErr::ReceiveActorMessageErr(ReceiveActorMessageErr {
-                source: Box::new(e),
-                trace: trace!(),
-            })
-        })
-    }
-
-    pub async fn shutdown(&self) -> Result<(), FileSysErr> {
-        self.send_command("shutdown", |tx| Command::Shutdown { respond_to: tx })
-            .await??;
-        info!(
-            "{} state file shutdown complete",
-            std::any::type_name::<ContentT>()
-        );
-        Ok(())
-    }
-
-    pub async fn read(&self) -> Result<Arc<ContentT>, FileSysErr> {
-        self.send_command("read", |tx| Command::Read { respond_to: tx })
-            .await
-    }
-
-    pub async fn write(&self, data: ContentT) -> Result<(), FileSysErr> {
-        self.send_command("write", |tx| Command::Write {
-            data,
-            respond_to: tx,
-        })
-        .await?
-    }
-
-    pub async fn patch(&self, patch: PatchT) -> Result<(), FileSysErr> {
-        self.send_command("patch", |tx| Command::Patch {
-            patch,
-            respond_to: tx,
-        })
-        .await?
     }
 }
