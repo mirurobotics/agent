@@ -15,7 +15,7 @@ pub struct UploadSource {
     /// Absolute path of the file on the device. Its basename renders the `{file_name}` token in the upload path template.
     #[serde(rename = "file_path")]
     pub file_path: String,
-    /// The file's last-modified time (mtime) on the device, i.e. roughly when writing finished.
+    /// The file's last-modified time (mtime) on the device, i.e. roughly when writing finished. In a create-upload request the agent sends it with the device's local UTC offset at that instant (e.g. `2021-01-01T00:00:00-05:00`), which a rule with `upload.timestamp: mtime` and `upload.timezone: device` renders its path in; older agents send UTC. Responses return it in UTC.
     #[serde(rename = "mtime")]
     pub mtime: String,
     /// Timestamp of when the device agent first observed the file on the device.

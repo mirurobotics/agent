@@ -29,6 +29,9 @@ pub struct CreateUploadRequest {
     /// ID of the deployment the device is currently on.
     #[serde(rename = "deployment_id")]
     pub deployment_id: String,
+    /// The device's current UTC offset in its local time zone, as `+HH:MM` or `-HH:MM`. The agent resolves the zone from its `TZ` environment variable or, when `TZ` is unset, the system time zone. A rule with `upload.timestamp: upload_time` and `upload.timezone: device` renders its path in this offset. When omitted, such a rule renders in UTC.
+    #[serde(rename = "utc_offset", skip_serializing_if = "Option::is_none")]
+    pub utc_offset: Option<String>,
 }
 
 impl CreateUploadRequest {
@@ -40,6 +43,7 @@ impl CreateUploadRequest {
             size,
             incomplete: None,
             deployment_id,
+            utc_offset: None,
         }
     }
 }
