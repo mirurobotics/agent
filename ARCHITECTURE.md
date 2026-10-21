@@ -57,7 +57,7 @@ All source lives under `agent/src/`. The binary entry point is `main.rs`.
 
 `deploy` — deployment state machine. The FSM in `deploy/fsm` manages the lifecycle: download artifacts to a staging directory, apply to the target config directory, report status. `deploy/apply` handles the actual file operations.
 
-`data_uploads/` — parent module for the file-upload pipeline. Submodule `scan` watches rule-configured directories and emits stable files to sinks (the `StableFileSink` seam in `scan/sink.rs`); submodule `upload` queues and executes uploads to object storage. The drivers that schedule the scanner live in `workers/` (`scan.rs`, `sync_scan_bridge.rs`), not here.
+`data_uploads/` — parent module for the file-upload pipeline. Submodule `scan` watches rule-configured directories and emits stable files to sinks (the `StableFileSink` seam in `scan/sink.rs`); submodule `upload` queues and executes uploads to object storage; submodule `retention` queues files for deletion and deletes each once its TTL passes. In `retention`, the single-threaded queue state and sweep logic live in `DeleterImpl` (`deleter_impl.rs`), and `deleter.rs` wraps it with the actor worker and the `Deleter` handle. The drivers that schedule the scanner live in `workers/` (`scan.rs`, `sync_scan_bridge.rs`), not here.
 
 `queue` — the generic persisted job queue. Type `Queue<J: QueueJob>` is a FIFO with entry ids, attempt counts, `next_attempt_at` backoff and a capacity limit, saved as an atomically written JSON snapshot. The upload and retention workers in `data_uploads/` each instantiate it with their own job type.
 

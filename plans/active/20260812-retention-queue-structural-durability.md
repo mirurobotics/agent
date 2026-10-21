@@ -17,8 +17,8 @@ Base branch `main`; working branch `refactor/deleter-queue-identity-removal` (al
 Verified on `main`:
 
 - `Queue::pop_front` / `Queue::requeue` touch memory only; `Queue::persist` is separate and caller-driven.
-- `SingleThreadDeleter::sweep` (`agent/src/data_uploads/retention/deleter.rs:95`) pops an entry into ownership, does the stat/hash/delete work, and persists only once the entry has resolved (`deleter.rs:107`). Nothing persists between the pop and the resolution, so a crash mid-sweep leaves the entry on disk and it is retried.
-- `SingleThreadDeleter` owns `Queue` by value — no `Arc`, no `Mutex`. Exactly two production persist sites: `deleter.rs:86` (enqueue) and `deleter.rs:107` (sweep).
+- `DeleterImpl::sweep` (`agent/src/data_uploads/retention/deleter_impl.rs`) pops an entry into ownership, does the stat/hash/delete work, and persists only once the entry has resolved. Nothing persists between the pop and the resolution, so a crash mid-sweep leaves the entry on disk and it is retried.
+- `DeleterImpl` owns `Queue` by value — no `Arc`, no `Mutex`. Exactly two production persist sites, both in `deleter_impl.rs`: `enqueue` and `sweep`.
 - `Worker::run` is `while let Some(cmd) = self.receiver.recv().await` and awaits `sweep()` to completion inside its match arm, so no `Enqueue`/`Shutdown` can interleave with a sweep.
 - The Deleter is not wired into the application. `agent/src/data_uploads/mod.rs` declares the module; nothing outside `retention/` constructs a `Deleter` (the only external references are `agent/tests/data_uploads/retention/deleter.rs` and the test mock `agent/tests/mocks/deleter.rs`).
 
@@ -31,7 +31,7 @@ The reference implementation is the upload queue after `5a6cae2` ("fix(upload): 
 ## Progress
 
 - [x] M1: `Queue` gains entry identity, `next_ready`, `remove`; `persist` becomes private and every mutator persists.
-- [x] M2: `SingleThreadDeleter::sweep` becomes select-and-resolve; `SweepOutcome::NotDue` disappears; inline deleter tests updated.
+- [x] M2: `DeleterImpl::sweep` becomes select-and-resolve; `SweepOutcome::NotDue` disappears; inline deleter tests updated.
 - [x] M3: Queue tests move to `agent/tests/data_uploads/retention/queue.rs`, mirroring `agent/tests/data_uploads/upload/queue.rs`, plus the mid-sweep-persist durability test.
 - [ ] M4: Preflight CLEAN locally, pushed, draft PR opened, CI green on branch head before the PR leaves draft.
 
@@ -131,13 +131,13 @@ Rejected: `#[serde(flatten)] job` to preserve the flat on-disk shape and get tru
 
 **D5 — Persistence unifies inside `Queue`; `Deleter` stops persisting.**
 
-`Queue::persist` becomes private. `enqueue`, `remove`, and `requeue` each persist as their last act; `next_ready` and `count_ready` never persist and are not `async`. `SingleThreadDeleter::enqueue` loses its `self.queue.persist().await` line and becomes a thin `self.queue.enqueue(job).await`; `sweep` loses its `self.queue.persist().await` arm. After this there is exactly one persist implementation and no caller can forget to call it — which is the same structural move as the identity change, applied to the write path.
+`Queue::persist` becomes private. `enqueue`, `remove`, and `requeue` each persist as their last act; `next_ready` and `count_ready` never persist and are not `async`. `DeleterImpl::enqueue` loses its `self.queue.persist().await` line and becomes a thin `self.queue.enqueue(job).await`; `sweep` loses its `self.queue.persist().await` arm. After this there is exactly one persist implementation and no caller can forget to call it — which is the same structural move as the identity change, applied to the write path.
 
 Failure direction is safe in every case, as it is for the uploader: a swallowed persist failure on `remove` leaves a resolved entry on disk, which the next sweep drops as `AlreadyGone`; a swallowed failure on `requeue` leaves the entry in its pre-rotation position, which is retried. Every swallowed failure fails toward redundant work, never toward loss.
 
 ## Context and Orientation
 
-Retention is an actor: `Deleter` (handle) + `Worker` (loop) over `SingleThreadDeleter` in `agent/src/data_uploads/retention/deleter.rs`, holding a `Queue` from `agent/src/data_uploads/retention/queue.rs`. `Job::due_at()` (`job.rs:24`) is `last_observed_at + ttl_secs`, saturating to `DateTime::<Utc>::MAX_UTC` on overflow, i.e. "never due".
+Retention is an actor: `Deleter` (handle) + `Worker` (loop) in `agent/src/data_uploads/retention/deleter.rs`, over `DeleterImpl` in `agent/src/data_uploads/retention/deleter_impl.rs`, holding a `Queue` from `agent/src/data_uploads/retention/queue.rs`. `Job::due_at()` (`job.rs:24`) is `last_observed_at + ttl_secs`, saturating to `DateTime::<Utc>::MAX_UTC` on overflow, i.e. "never due".
 
 The reference implementation to mirror, method for method:
 
