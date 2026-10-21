@@ -90,7 +90,7 @@ impl Fixture {
     }
 
     async fn try_open(&self) -> Result<TestQueue, DirQueueErr> {
-        TestQueue::open(self.queue_file(), self.content(), OPTIONS).await
+        TestQueue::open(OPTIONS, self.queue_file(), self.content()).await
     }
 
     async fn open(&self) -> TestQueue {
@@ -98,7 +98,7 @@ impl Fixture {
     }
 
     async fn open_with(&self, options: DirQueueOptions) -> TestQueue {
-        TestQueue::open(self.queue_file(), self.content(), options)
+        TestQueue::open(options, self.queue_file(), self.content())
             .await
             .unwrap()
     }
@@ -110,11 +110,7 @@ impl Fixture {
 
 /// The queued items' names, oldest first.
 fn names(queue: &TestQueue) -> Vec<String> {
-    queue
-        .entries()
-        .into_iter()
-        .map(|entry| entry.job.name)
-        .collect()
+    queue.iter().map(|entry| entry.job.name.clone()).collect()
 }
 
 fn strings(names: &[&str]) -> Vec<String> {
@@ -690,9 +686,9 @@ pub mod enqueue {
     async fn serialize_failure_rejects_and_writes_nothing() {
         let fixture = Fixture::new();
         let mut queue = DirQueue::<TestJob, Unserializable>::open(
+            OPTIONS,
             fixture.queue_file(),
             fixture.content(),
-            OPTIONS,
         )
         .await
         .unwrap();
@@ -957,7 +953,7 @@ pub mod in_memory {
     use miru_agent::filesys::FileSysErr;
 
     fn queue() -> TestQueue {
-        TestQueue::in_memory(OPTIONS)
+        TestQueue::new(OPTIONS)
     }
 
     fn is_not_found(err: &DirQueueErr) -> bool {
@@ -1010,7 +1006,7 @@ pub mod in_memory {
             capacity: 1,
             ..OPTIONS
         };
-        let mut queue = TestQueue::in_memory(options);
+        let mut queue = TestQueue::new(options);
         enqueue_all(&mut queue, &["a"]).await;
 
         let err = queue.enqueue(item("b")).await.unwrap_err();
@@ -1025,7 +1021,7 @@ pub mod in_memory {
             max_item_bytes: 200,
             ..OPTIONS
         };
-        let mut queue = TestQueue::in_memory(options);
+        let mut queue = TestQueue::new(options);
 
         let err = queue.enqueue(item_of_size("a", 201)).await.unwrap_err();
 
@@ -1035,7 +1031,7 @@ pub mod in_memory {
 
     #[tokio::test]
     async fn serialize_failure_rejects() {
-        let mut queue = DirQueue::<TestJob, Unserializable>::in_memory(OPTIONS);
+        let mut queue = DirQueue::<TestJob, Unserializable>::new(OPTIONS);
         let item = Item {
             job: job("a"),
             content: Unserializable,

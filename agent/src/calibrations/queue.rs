@@ -24,5 +24,5 @@ pub async fn open(
     layout: &CalibrationsLayout,
     options: queue::DirQueueOptions,
 ) -> Result<DirQueue, CalibrationsErr> {
-    Ok(DirQueue::open(layout.queue(), layout.content(), options).await?)
+    Ok(DirQueue::open(options, layout.queue(), layout.content()).await?)
 }

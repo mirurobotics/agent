@@ -323,7 +323,7 @@ async fn init_calibrations(
             tracing::error!(
                 "failed to open the calibration queue; calibrations will run without persistence, so reports still queued at a restart are lost: {e}"
             );
-            calibrations::DirQueue::in_memory(options)
+            calibrations::DirQueue::new(options)
         }
     };
     let events = match syncer.subscribe().await {

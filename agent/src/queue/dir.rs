@@ -67,9 +67,9 @@ where
     /// [`CORRUPT_EXT`] and rebuilt the same way. Item files with no queue
     /// entry are deleted, and queue entries with no item file are dropped.
     pub async fn open(
+        options: DirQueueOptions,
         queue_file: File,
         content_dir: Dir,
-        options: DirQueueOptions,
     ) -> Result<Self, DirQueueErr> {
         dirs::create_if_absent(&content_dir).await?;
         let snapshot_file = load_snapshot::<J, C>(&queue_file, &content_dir).await?;
@@ -84,7 +84,7 @@ where
     }
 
     /// An empty queue that keeps everything in memory, with the same caps.
-    pub fn in_memory(options: DirQueueOptions) -> Self {
+    pub fn new(options: DirQueueOptions) -> Self {
         Self {
             queue: FileQueue::new(options.capacity),
             content: Content::Memory(HashMap::new()),
@@ -103,8 +103,8 @@ where
     }
 
     /// The queued items' entries, oldest first.
-    pub fn entries(&self) -> Vec<QueueEntry<J>> {
-        self.queue.iter().cloned().collect()
+    pub fn iter(&self) -> impl Iterator<Item = &QueueEntry<J>> {
+        self.queue.iter()
     }
 
     /// The oldest item that is due at `now`. The entry stays queued until
