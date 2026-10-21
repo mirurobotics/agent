@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cat \"$CLAUDE_PROJECT_DIR/../agents/AGENTS.md\" 2>/dev/null || echo 'Shared Miru rules and skills are missing: clone mirurobotics/agents next to this repo (../agents).'"
+          }
+        ]
+      }
+    ]
+  }
+}
