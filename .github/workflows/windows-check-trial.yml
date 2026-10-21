@@ -1,4 +1,4 @@
-# TEMPORARY: timing trial for windows-check (warm round 2). Never merged; the
+# TEMPORARY: timing trial for windows-check (warm round 3). Never merged; the
 # branch is deleted once the numbers are in.
 name: Windows check trial
 
@@ -31,12 +31,6 @@ jobs:
       - name: Install Rust Toolchain
         if: matrix.mode == 'current'
         uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
-
-      - name: Time toolchain and metadata
-        if: matrix.mode == 'lean'
-        run: |
-          "rustc -vV: {0:n1}s" -f (Measure-Command { rustc -vV | Out-Host }).TotalSeconds
-          "cargo metadata: {0:n1}s" -f (Measure-Command { cargo metadata --format-version 1 --all-features | Out-Null }).TotalSeconds
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
