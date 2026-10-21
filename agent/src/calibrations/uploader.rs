@@ -5,43 +5,21 @@ use std::time::Duration;
 
 // internal crates
 use crate::calibrations::{
-    errors::{CalibrationsErr, InvalidReportErr, ReceiveActorMessageErr, SendActorMessageErr},
+    errors::{CalibrationsErr, ReceiveActorMessageErr, SendActorMessageErr},
     queue::{DirQueue, Report},
     sender::Sender,
+    uploader_impl::{UploaderImpl, UploaderOptions},
 };
-use crate::cooldown;
-use crate::errors::Error;
-use crate::filesys::{errors::ParseJSONErr, Dir, FileSysErr};
-use crate::queue::DirQueueErr;
+use crate::filesys::Dir;
 use crate::sync::syncer::SyncEvent;
 use crate::trace;
 use crate::workers::next_sync_event;
 
 // external crates
-use chrono::Utc;
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 use uuid::Uuid;
-
-#[derive(Debug, Clone)]
-pub struct UploaderOptions {
-    pub backoff: cooldown::Backoff,
-}
-
-impl Default for UploaderOptions {
-    /// The data-upload backoff (`upload::UploaderOptions::default().backoff`):
-    /// 10 s, doubling, capped at 1 h.
-    fn default() -> Self {
-        Self {
-            backoff: cooldown::Backoff {
-                base_secs: 10,
-                growth_factor: 2,
-                max_secs: 3600,
-            },
-        }
-    }
-}
 
 pub struct UploaderArgs<S, F> {
     pub queue: DirQueue,
@@ -74,46 +52,12 @@ enum Flow {
     Shutdown,
 }
 
-/// How one attempt at the oldest queued report ended.
-enum Outcome {
-    /// Sent, parked or dropped: the report is no longer queued.
-    Resolved,
-    /// The report stays at the head of the queue and is retried after a wait.
-    Retry { network: bool },
-}
-
-/// The run of consecutive non-network failures, in memory only, so a restart
-/// retries at once.
-struct Streak(u32);
-
-impl Streak {
-    /// How long to wait after `outcome`. Network errors wait a flat
-    /// `base_secs` and leave the streak alone; other failures grow it.
-    fn next_wait(&mut self, outcome: &Outcome, backoff: &cooldown::Backoff) -> Option<Duration> {
-        let secs = match outcome {
-            Outcome::Resolved => {
-                self.0 = 0;
-                return None;
-            }
-            Outcome::Retry { network: true } => backoff.base_secs,
-            Outcome::Retry { network: false } => {
-                self.0 = self.0.saturating_add(1);
-                cooldown::calc(backoff, self.0 - 1)
-            }
-        };
-        Some(Duration::from_secs(secs.max(0) as u64))
-    }
-}
-
 struct Worker<S, F> {
     receiver: mpsc::Receiver<Command>,
-    queue: DirQueue,
-    failed: Dir,
+    uploader: UploaderImpl,
     sender: Arc<S>,
     events: Option<watch::Receiver<SyncEvent>>,
-    options: UploaderOptions,
     sleep_fn: F,
-    streak: Streak,
 }
 
 impl<S, F, Fut> Worker<S, F>
@@ -124,8 +68,7 @@ where
 {
     async fn run(mut self) {
         loop {
-            let next = self.queue.next_ready(Utc::now()).map(|entry| entry.id);
-            let flow = match next {
+            let flow = match self.uploader.next_ready() {
                 Some(id) => self.attempt(id).await,
                 None => self.idle().await,
             };
@@ -136,68 +79,24 @@ where
         info!("calibrations: uploader shutdown complete");
     }
 
-    /// Try report `id`, then wait out any backoff.
+    /// Send report `id`, settle it, then wait out any backoff. A shutdown
+    /// mid-send leaves the report queued, to be re-sent on the next boot.
     async fn attempt(&mut self, id: Uuid) -> Flow {
-        let Some(outcome) = self.upload(id).await else {
-            return Flow::Shutdown;
+        let result = match self.uploader.read(id).await {
+            Ok(Some(report)) => {
+                let sender = self.sender.clone();
+                let send = self.serve_until(async move { sender.send(&report).await });
+                let Some(result) = send.await else {
+                    return Flow::Shutdown;
+                };
+                result
+            }
+            Ok(None) => return Flow::Continue,
+            Err(err) => Err(err),
         };
-        match self.streak.next_wait(&outcome, &self.options.backoff) {
+        match self.uploader.finish(id, result).await {
             Some(wait) => self.back_off(wait).await,
             None => Flow::Continue,
-        }
-    }
-
-    /// Send report `id` and resolve it. `None` when a shutdown arrived
-    /// mid-send; the report stays queued and is re-sent on the next boot.
-    async fn upload(&mut self, id: Uuid) -> Option<Outcome> {
-        let result = match self.queue.read(id).await {
-            Ok(report) => {
-                let sender = self.sender.clone();
-                self.serve_until(async move { sender.send(&report).await })
-                    .await?
-            }
-            Err(DirQueueErr::FileSysErr(FileSysErr::PathDoesNotExistErr(_))) => {
-                return Some(self.drop_missing(id).await);
-            }
-            Err(DirQueueErr::FileSysErr(FileSysErr::ParseJSONErr(e))) => Err(unreadable(e)),
-            Err(e) => Err(e.into()),
-        };
-        Some(self.resolve(id, result).await)
-    }
-
-    /// A report whose file is gone has nothing left to send or park.
-    async fn drop_missing(&mut self, id: Uuid) -> Outcome {
-        error!("calibrations: dropping report {id}, whose file is missing");
-        self.queue.remove(id).await;
-        Outcome::Resolved
-    }
-
-    /// Remove a sent report, park one that can never be sent, and keep any
-    /// other at the head of the queue for a retry.
-    async fn resolve(&mut self, id: Uuid, result: Result<(), CalibrationsErr>) -> Outcome {
-        let err = match result {
-            Ok(()) => {
-                self.queue.remove(id).await;
-                info!("calibrations: uploaded report {id}");
-                return Outcome::Resolved;
-            }
-            Err(err) => err,
-        };
-        if !err.is_terminal() {
-            warn!("calibrations: failed to upload report {id}; will retry: {err}");
-            return Outcome::Retry {
-                network: err.is_network_conn_err(),
-            };
-        }
-        match self.queue.park(id, &self.failed).await {
-            Ok(_) => {
-                error!("calibrations: report {id} can never be uploaded; parked as failed/{id}.json: {err}");
-                Outcome::Resolved
-            }
-            Err(park_err) => {
-                error!("calibrations: failed to park report {id} ({err}): {park_err}");
-                Outcome::Retry { network: false }
-            }
         }
     }
 
@@ -273,10 +172,10 @@ where
         };
         match cmd {
             Command::Enqueue { report, respond_to } => {
-                let result = self.queue.enqueue(*report).await;
-                respond(respond_to, result.map_err(CalibrationsErr::from), "enqueue");
+                let result = self.uploader.enqueue(*report).await;
+                respond(respond_to, result, "enqueue");
             }
-            Command::Len { respond_to } => respond(respond_to, self.queue.len(), "len"),
+            Command::Len { respond_to } => respond(respond_to, self.uploader.len(), "len"),
             Command::Shutdown { respond_to } => {
                 respond(respond_to, (), "shutdown");
                 return Flow::Shutdown;
@@ -284,14 +183,6 @@ where
         }
         Flow::Continue
     }
-}
-
-/// A report file that cannot be parsed can never be sent.
-fn unreadable(e: ParseJSONErr) -> CalibrationsErr {
-    CalibrationsErr::InvalidReportErr(InvalidReportErr {
-        reason: format!("the report file cannot be parsed: {e}"),
-        trace: trace!(),
-    })
 }
 
 fn respond<T>(respond_to: oneshot::Sender<T>, value: T, op: &str) {
@@ -319,13 +210,10 @@ impl Uploader {
         let (sender, receiver) = mpsc::channel(buffer_size);
         let worker = Worker {
             receiver,
-            queue: args.queue,
-            failed: args.failed,
+            uploader: UploaderImpl::new(args.queue, args.failed, args.options),
             sender: args.sender,
             events: args.events,
-            options: args.options,
             sleep_fn: args.sleep_fn,
-            streak: Streak(0),
         };
         (Self { sender }, tokio::spawn(worker.run()))
     }
