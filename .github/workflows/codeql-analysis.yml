@@ -2,9 +2,10 @@ name: CodeQL
 
 on:
   push:
-    branches: [main, "release/*"]
+    branches: ["release/*"]
   schedule:
-    - cron: '31 7 * * 3'
+    - cron: '31 7 * * *'
+  workflow_dispatch:
   workflow_call:
 
 permissions:
@@ -14,7 +15,43 @@ permissions:
   security-events: write
 
 jobs:
+  changes:
+    name: Check for new commits
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 5
+    permissions:
+      actions: read
+    outputs:
+      scan: ${{ steps.check.outputs.scan }}
+    steps:
+      # The nightly run skips the scan when main hasn't moved since the last
+      # successful run, so quiet repos don't rescan the same commit.
+      - name: Check for commits since the last scan
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          SHA: ${{ github.sha }}
+        run: |
+          scan=true
+          if [ "$EVENT" = "schedule" ]; then
+            workflow_id=$(gh api "repos/$REPO/actions/runs/$RUN_ID" \
+              --jq .workflow_id) || true
+            runs="repos/$REPO/actions/workflows/$workflow_id/runs"
+            last_sha=$(gh api "$runs?branch=main&status=success&per_page=1" \
+              --jq '.workflow_runs[0].head_sha // ""') || true
+            if [ -n "$last_sha" ] && [ "$last_sha" = "$SHA" ]; then
+              echo "main is still at $SHA, which was already scanned."
+              scan=false
+            fi
+          fi
+          echo "scan=$scan" >> "$GITHUB_OUTPUT"
+
   codeql:
+    needs: changes
+    if: needs.changes.outputs.scan == 'true'
     runs-on: blacksmith-4vcpu-ubuntu-2404
 
     steps:
