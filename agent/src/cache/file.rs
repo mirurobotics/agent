@@ -1,141 +1,21 @@
-// standard crates
-use std::collections::HashMap;
-use std::fmt::Debug;
-
 // internal crates
 use crate::cache::{
-    concurrent::{Command, ConcurrentCache, ConcurrentCacheKey, ConcurrentCacheValue, Worker},
-    entry::CacheEntry,
-    errors::{CacheErr, CannotOverwriteCacheElement},
-    single_thread::{CacheKey, CacheValue, SingleThreadCache},
+    errors::CacheErr,
+    file_impl::FileCacheImpl,
+    shared::{Cache, CacheKey, CacheValue, Command, Worker},
 };
-use crate::filesys::{file::File, files, path::PathExt, Overwrite, WriteOptions};
-use crate::trace;
+use crate::filesys::file::File;
 
 // external crates
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
-#[derive(Debug)]
-pub struct SingleThreadFileCache<K, V>
-where
-    K: CacheKey,
-    V: CacheValue,
-{
-    file: File,
-    capacity: usize,
-    _phantom: std::marker::PhantomData<K>,
-    _phantom2: std::marker::PhantomData<V>,
-}
-
-impl<K, V> SingleThreadFileCache<K, V>
-where
-    K: CacheKey,
-    V: CacheValue,
-{
-    pub async fn new(file: File, capacity: usize) -> Result<Self, CacheErr> {
-        if !file.exists() {
-            let empty_cache: HashMap<K, CacheEntry<K, V>> = HashMap::new();
-            files::write_json(&file, &empty_cache, WriteOptions::OVERWRITE_ATOMIC).await?;
-        }
-
-        Ok(Self {
-            file,
-            capacity,
-            _phantom: std::marker::PhantomData,
-            _phantom2: std::marker::PhantomData,
-        })
-    }
-
-    async fn read_cache(&self) -> Result<HashMap<K, CacheEntry<K, V>>, CacheErr> {
-        files::read_json::<HashMap<K, CacheEntry<K, V>>>(&self.file)
-            .await
-            .map_err(CacheErr::from)
-    }
-
-    async fn write_cache(&self, cache: &HashMap<K, CacheEntry<K, V>>) -> Result<(), CacheErr> {
-        files::write_json(&self.file, cache, WriteOptions::OVERWRITE_ATOMIC)
-            .await
-            .map_err(CacheErr::from)
-    }
-}
-
-impl<K, V> SingleThreadCache<K, V> for SingleThreadFileCache<K, V>
-where
-    K: CacheKey,
-    V: CacheValue,
-{
-    async fn read_entry_impl(&self, key: &K) -> Result<Option<CacheEntry<K, V>>, CacheErr> {
-        let cache = self.read_cache().await?;
-        Ok(cache.get(key).cloned())
-    }
-
-    async fn write_entry_impl(
-        &mut self,
-        entry: &CacheEntry<K, V>,
-        overwrite: Overwrite,
-    ) -> Result<(), CacheErr> {
-        let mut cache = self.read_cache().await?;
-        if overwrite == Overwrite::Deny && cache.contains_key(&entry.key) {
-            return Err(CacheErr::CannotOverwriteCacheElement(
-                CannotOverwriteCacheElement {
-                    key: entry.key.to_string(),
-                    trace: trace!(),
-                },
-            ));
-        }
-        cache.insert(entry.key.clone(), entry.clone());
-        self.write_cache(&cache).await?;
-        Ok(())
-    }
-
-    async fn delete_entry_impl(&mut self, key: &K) -> Result<(), CacheErr> {
-        let mut cache = self.read_cache().await?;
-        if cache.remove(key).is_some() {
-            self.write_cache(&cache).await?;
-        }
-        Ok(())
-    }
-
-    async fn size(&self) -> Result<usize, CacheErr> {
-        let cache = self.read_cache().await?;
-        Ok(cache.len())
-    }
-
-    async fn capacity(&self) -> Result<usize, CacheErr> {
-        Ok(self.capacity)
-    }
-
-    async fn prune_invalid_entries(&self) -> Result<(), CacheErr> {
-        Ok(())
-    }
-
-    async fn entries(&self) -> Result<Vec<CacheEntry<K, V>>, CacheErr> {
-        let cache = self.read_cache().await?;
-        Ok(cache.values().cloned().collect())
-    }
-
-    async fn values(&self) -> Result<Vec<V>, CacheErr> {
-        let cache = self.read_cache().await?;
-        Ok(cache.values().map(|v| v.value.clone()).collect())
-    }
-
-    async fn entry_map(&self) -> Result<HashMap<K, CacheEntry<K, V>>, CacheErr> {
-        self.read_cache().await
-    }
-
-    async fn value_map(&self) -> Result<HashMap<K, V>, CacheErr> {
-        let cache = self.read_cache().await?;
-        Ok(cache.into_iter().map(|(k, v)| (k, v.value)).collect())
-    }
-}
-
-pub type FileCache<K, V> = ConcurrentCache<SingleThreadFileCache<K, V>, K, V>;
+pub type FileCache<K, V> = Cache<FileCacheImpl<K, V>, K, V>;
 
 impl<K, V> FileCache<K, V>
 where
-    K: ConcurrentCacheKey,
-    V: ConcurrentCacheValue,
+    K: CacheKey,
+    V: CacheValue,
 {
     pub async fn spawn(
         buffer_size: usize,
@@ -144,7 +24,7 @@ where
     ) -> Result<(Self, JoinHandle<()>), CacheErr> {
         let (sender, receiver) = mpsc::channel::<Command<K, V>>(buffer_size);
         let worker = Worker {
-            cache: SingleThreadFileCache::new(file, capacity).await?,
+            cache: FileCacheImpl::new(file, capacity).await?,
             receiver,
         };
         let worker_handle = tokio::spawn(worker.run());
