@@ -49,7 +49,7 @@ Final semantics (per #234, which supersedes the intermediate policy-enum shapes)
   `resources/releases.json` (`upload_rule_ids`), `scanner.json` (embeds *whole* rules per
   collection + `StableFile.upload_rule_id`/`delete_policy` ledger), `upload_queue.json`
   (`Job.upload_rule_id` + `delete_policy`). Snapshot loaders start fresh on parse failure.
-- **Scan:** `scan/scanner.rs` keys collections by `upload_collection_id` (rejects
+- **Scan:** `scan/scanner_impl.rs` keys collections by `upload_collection_id` (rejects
   duplicates); `scan/collection.rs` stamps `destination.delete_policy` onto `StableFile`s.
 - **Upload:** `upload/executor.rs` builds `CreateUploadRequest { upload_rule_id, .. }` and
   — the *only* deletion path today — deletes the source file after upload confirm iff
@@ -109,7 +109,7 @@ when the backend is ready.
 
 ### PR 2 — Scanner re-keying + upload-less rules
 
-- Key `scan/scanner.rs` collections by **rule ID**, drop the duplicate-collection-ID
+- Key `scan/scanner_impl.rs` collections by **rule ID**, drop the duplicate-collection-ID
   invariant, and make the scan→upload bridge mint upload jobs only when
   `rule.upload.is_some()`.
 - Scanning (glob + stability window + ledger) now runs for every rule regardless of
