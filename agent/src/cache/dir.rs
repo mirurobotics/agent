@@ -1,8 +1,8 @@
 // internal crates
 use crate::cache::{
-    concurrent::{Cache, CacheKey, CacheValue, Command, Worker},
     dir_impl::DirCacheImpl,
     errors::CacheErr,
+    shared::{Cache, CacheKey, CacheValue, Command, Worker},
 };
 use crate::filesys::dir::Dir;
 

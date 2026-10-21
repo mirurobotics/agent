@@ -2,7 +2,7 @@
 use std::path::PathBuf;
 
 // internal crates
-use crate::concurrent_cache_tests;
+use crate::shared_cache_tests;
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::cache::DirCache;
 use miru_agent::filesys::{files, Overwrite, PathExt, WriteOptions};
@@ -27,7 +27,7 @@ async fn spawn_cache() -> (test_dirs::TempDir, TestCache, JoinHandle<()>) {
     spawn_cache_with_capacity(1000).await
 }
 
-concurrent_cache_tests!(spawn_cache, spawn_cache_with_capacity);
+shared_cache_tests!(spawn_cache, spawn_cache_with_capacity);
 
 #[tokio::test]
 async fn spawn() {

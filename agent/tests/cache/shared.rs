@@ -2,7 +2,7 @@
 use std::future::Future;
 
 // internal crates
-use miru_agent::cache::{cache_impl::CacheImpl, concurrent::Cache, CacheEntry, CacheErr};
+use miru_agent::cache::{cache_impl::CacheImpl, shared::Cache, CacheEntry, CacheErr};
 use miru_agent::filesys::Overwrite;
 
 // external crates
@@ -10,14 +10,14 @@ use chrono::Utc;
 use tokio::task::JoinHandle;
 
 #[macro_export]
-macro_rules! concurrent_cache_tests {
+macro_rules! shared_cache_tests {
     ($spawn_cache:expr, $spawn_cache_with_capacity:expr) => {
         pub mod shutdown {
             use super::*;
 
             #[tokio::test]
             async fn test_shutdown() {
-                $crate::cache::concurrent::shutdown::shutdown_impl($spawn_cache).await;
+                $crate::cache::shared::shutdown::shutdown_impl($spawn_cache).await;
             }
         }
 
@@ -26,7 +26,7 @@ macro_rules! concurrent_cache_tests {
 
             #[tokio::test]
             async fn test_size() {
-                $crate::cache::concurrent::size::size_impl($spawn_cache).await;
+                $crate::cache::shared::size::size_impl($spawn_cache).await;
             }
         }
 
@@ -35,7 +35,7 @@ macro_rules! concurrent_cache_tests {
 
             #[tokio::test]
             async fn test_entry_map() {
-                $crate::cache::concurrent::entry_map::entry_map_impl($spawn_cache).await;
+                $crate::cache::shared::entry_map::entry_map_impl($spawn_cache).await;
             }
         }
 
@@ -44,7 +44,7 @@ macro_rules! concurrent_cache_tests {
 
             #[tokio::test]
             async fn test_value_map() {
-                $crate::cache::concurrent::value_map::value_map_impl($spawn_cache).await;
+                $crate::cache::shared::value_map::value_map_impl($spawn_cache).await;
             }
         }
 
@@ -53,7 +53,7 @@ macro_rules! concurrent_cache_tests {
 
             #[tokio::test]
             async fn test_entries() {
-                $crate::cache::concurrent::entries::entries_impl($spawn_cache).await;
+                $crate::cache::shared::entries::entries_impl($spawn_cache).await;
             }
         }
 
@@ -62,7 +62,7 @@ macro_rules! concurrent_cache_tests {
 
             #[tokio::test]
             async fn test_values() {
-                $crate::cache::concurrent::values::values_impl($spawn_cache).await;
+                $crate::cache::shared::values::values_impl($spawn_cache).await;
             }
         }
 
@@ -71,13 +71,12 @@ macro_rules! concurrent_cache_tests {
 
             #[tokio::test]
             async fn doesnt_exist() {
-                $crate::cache::concurrent::read_entry_optional::doesnt_exist_impl($spawn_cache)
-                    .await;
+                $crate::cache::shared::read_entry_optional::doesnt_exist_impl($spawn_cache).await;
             }
 
             #[tokio::test]
             async fn exists() {
-                $crate::cache::concurrent::read_entry_optional::exists_impl($spawn_cache).await;
+                $crate::cache::shared::read_entry_optional::exists_impl($spawn_cache).await;
             }
         }
 
@@ -86,12 +85,12 @@ macro_rules! concurrent_cache_tests {
 
             #[tokio::test]
             async fn doesnt_exist() {
-                $crate::cache::concurrent::read_entry::doesnt_exist_impl($spawn_cache).await;
+                $crate::cache::shared::read_entry::doesnt_exist_impl($spawn_cache).await;
             }
 
             #[tokio::test]
             async fn exists() {
-                $crate::cache::concurrent::read_entry::exists_impl($spawn_cache).await;
+                $crate::cache::shared::read_entry::exists_impl($spawn_cache).await;
             }
         }
 
@@ -100,12 +99,12 @@ macro_rules! concurrent_cache_tests {
 
             #[tokio::test]
             async fn doesnt_exist() {
-                $crate::cache::concurrent::read_optional::doesnt_exist_impl($spawn_cache).await;
+                $crate::cache::shared::read_optional::doesnt_exist_impl($spawn_cache).await;
             }
 
             #[tokio::test]
             async fn exists() {
-                $crate::cache::concurrent::read_optional::exists_impl($spawn_cache).await;
+                $crate::cache::shared::read_optional::exists_impl($spawn_cache).await;
             }
         }
 
@@ -114,12 +113,12 @@ macro_rules! concurrent_cache_tests {
 
             #[tokio::test]
             async fn doesnt_exist() {
-                $crate::cache::concurrent::read::doesnt_exist_impl($spawn_cache).await;
+                $crate::cache::shared::read::doesnt_exist_impl($spawn_cache).await;
             }
 
             #[tokio::test]
             async fn exists() {
-                $crate::cache::concurrent::read::exists_impl($spawn_cache).await;
+                $crate::cache::shared::read::exists_impl($spawn_cache).await;
             }
         }
 
@@ -128,30 +127,27 @@ macro_rules! concurrent_cache_tests {
 
             #[tokio::test]
             async fn doesnt_exist_overwrite_false() {
-                $crate::cache::concurrent::write::doesnt_exist_overwrite_false_impl($spawn_cache)
-                    .await;
+                $crate::cache::shared::write::doesnt_exist_overwrite_false_impl($spawn_cache).await;
             }
 
             #[tokio::test]
             async fn doesnt_exist_overwrite_true() {
-                $crate::cache::concurrent::write::doesnt_exist_overwrite_true_impl($spawn_cache)
-                    .await;
+                $crate::cache::shared::write::doesnt_exist_overwrite_true_impl($spawn_cache).await;
             }
 
             #[tokio::test]
             async fn exists_overwrite_false() {
-                $crate::cache::concurrent::write::exists_overwrite_false_impl($spawn_cache).await;
+                $crate::cache::shared::write::exists_overwrite_false_impl($spawn_cache).await;
             }
 
             #[tokio::test]
             async fn exists_overwrite_true() {
-                $crate::cache::concurrent::write::exists_overwrite_true_impl($spawn_cache).await;
+                $crate::cache::shared::write::exists_overwrite_true_impl($spawn_cache).await;
             }
 
             #[tokio::test]
             async fn trigger_prune() {
-                $crate::cache::concurrent::write::trigger_prune_impl($spawn_cache_with_capacity)
-                    .await;
+                $crate::cache::shared::write::trigger_prune_impl($spawn_cache_with_capacity).await;
             }
         }
 
@@ -160,14 +156,13 @@ macro_rules! concurrent_cache_tests {
 
             #[tokio::test]
             async fn inserts_when_absent() {
-                $crate::cache::concurrent::write_if_absent::inserts_when_absent_impl($spawn_cache)
+                $crate::cache::shared::write_if_absent::inserts_when_absent_impl($spawn_cache)
                     .await;
             }
 
             #[tokio::test]
             async fn noop_when_present() {
-                $crate::cache::concurrent::write_if_absent::noop_when_present_impl($spawn_cache)
-                    .await;
+                $crate::cache::shared::write_if_absent::noop_when_present_impl($spawn_cache).await;
             }
         }
 
@@ -176,12 +171,12 @@ macro_rules! concurrent_cache_tests {
 
             #[tokio::test]
             async fn doesnt_exist() {
-                $crate::cache::concurrent::delete::doesnt_exist_impl($spawn_cache).await;
+                $crate::cache::shared::delete::doesnt_exist_impl($spawn_cache).await;
             }
 
             #[tokio::test]
             async fn exists() {
-                $crate::cache::concurrent::delete::exists_impl($spawn_cache).await;
+                $crate::cache::shared::delete::exists_impl($spawn_cache).await;
             }
         }
 
@@ -190,13 +185,12 @@ macro_rules! concurrent_cache_tests {
 
             #[tokio::test]
             async fn empty_cache() {
-                $crate::cache::concurrent::prune::empty_cache_impl($spawn_cache_with_capacity)
-                    .await;
+                $crate::cache::shared::prune::empty_cache_impl($spawn_cache_with_capacity).await;
             }
 
             #[tokio::test]
             async fn cache_equal_to_max_size() {
-                $crate::cache::concurrent::prune::cache_equal_to_max_size_impl(
+                $crate::cache::shared::prune::cache_equal_to_max_size_impl(
                     $spawn_cache_with_capacity,
                 )
                 .await;
@@ -204,7 +198,7 @@ macro_rules! concurrent_cache_tests {
 
             #[tokio::test]
             async fn remove_oldest_entries() {
-                $crate::cache::concurrent::prune::remove_oldest_entries_impl(
+                $crate::cache::shared::prune::remove_oldest_entries_impl(
                     $spawn_cache_with_capacity,
                 )
                 .await;
@@ -216,10 +210,8 @@ macro_rules! concurrent_cache_tests {
 
             #[tokio::test]
             async fn find_entries_where() {
-                $crate::cache::concurrent::find_entries_where::find_entries_where_impl(
-                    $spawn_cache,
-                )
-                .await;
+                $crate::cache::shared::find_entries_where::find_entries_where_impl($spawn_cache)
+                    .await;
             }
         }
 
@@ -228,7 +220,7 @@ macro_rules! concurrent_cache_tests {
 
             #[tokio::test]
             async fn find_where() {
-                $crate::cache::concurrent::find_where::find_where_impl($spawn_cache).await;
+                $crate::cache::shared::find_where::find_where_impl($spawn_cache).await;
             }
         }
 
@@ -237,7 +229,7 @@ macro_rules! concurrent_cache_tests {
 
             #[tokio::test]
             async fn find_one_entry_optional() {
-                $crate::cache::concurrent::find_one_entry_optional::find_one_entry_optional_impl(
+                $crate::cache::shared::find_one_entry_optional::find_one_entry_optional_impl(
                     $spawn_cache,
                 )
                 .await;
@@ -249,7 +241,7 @@ macro_rules! concurrent_cache_tests {
 
             #[tokio::test]
             async fn find_one_optional() {
-                $crate::cache::concurrent::find_one_optional::find_one_optional_impl($spawn_cache)
+                $crate::cache::shared::find_one_optional::find_one_optional_impl($spawn_cache)
                     .await;
             }
         }
@@ -259,7 +251,7 @@ macro_rules! concurrent_cache_tests {
 
             #[tokio::test]
             async fn find_one_entry() {
-                $crate::cache::concurrent::find_one_entry::find_one_entry_impl($spawn_cache).await;
+                $crate::cache::shared::find_one_entry::find_one_entry_impl($spawn_cache).await;
             }
         }
 
@@ -268,7 +260,7 @@ macro_rules! concurrent_cache_tests {
 
             #[tokio::test]
             async fn find_one() {
-                $crate::cache::concurrent::find_one::find_one_impl($spawn_cache).await;
+                $crate::cache::shared::find_one::find_one_impl($spawn_cache).await;
             }
         }
 
@@ -277,7 +269,7 @@ macro_rules! concurrent_cache_tests {
 
             #[tokio::test]
             async fn get_dirty_entries() {
-                $crate::cache::concurrent::get_dirty_entries::get_dirty_entries_impl($spawn_cache)
+                $crate::cache::shared::get_dirty_entries::get_dirty_entries_impl($spawn_cache)
                     .await;
             }
         }

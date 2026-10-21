@@ -1,8 +1,8 @@
 // internal crates
 use crate::cache::{
-    concurrent::{Cache, CacheKey, CacheValue, Command, Worker},
     errors::CacheErr,
     file_impl::FileCacheImpl,
+    shared::{Cache, CacheKey, CacheValue, Command, Worker},
 };
 use crate::filesys::file::File;
 
