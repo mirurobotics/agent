@@ -167,9 +167,4 @@ impl CalibrationsLayout {
     pub fn content(&self) -> filesys::Dir {
         self.root.subdir("content")
     }
-
-    /// Where reports Miru permanently rejected are parked for inspection.
-    pub fn failed(&self) -> filesys::Dir {
-        self.root.subdir("failed")
-    }
 }

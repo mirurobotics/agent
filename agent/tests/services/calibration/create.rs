@@ -42,7 +42,6 @@ impl Fixture {
             queue: calibrations::open(&calibrations_layout, options)
                 .await
                 .unwrap(),
-            failed: calibrations_layout.failed(),
             sender: sender.clone(),
             events: None,
             options: Default::default(),

@@ -54,7 +54,7 @@ impl crate::errors::Error for CalibrationTooLargeErr {
 
 /// A buffered report that can never be sent: its content is not a valid
 /// `{ format, data }` instance content, or its file cannot be parsed. Terminal,
-/// so the worker parks it instead of retrying.
+/// so the worker drops it instead of retrying.
 #[derive(Debug, thiserror::Error)]
 #[error("invalid calibration report: {reason}")]
 pub struct InvalidReportErr {
@@ -70,7 +70,7 @@ impl crate::errors::Error for InvalidReportErr {
 
 /// Getting a device token for an upload failed. Never terminal, whatever the
 /// token request's status: a token failure says nothing about the report, so
-/// the report is retried, never parked.
+/// the report is retried, never dropped.
 #[derive(Debug, thiserror::Error)]
 #[error("failed to get a token to upload a calibration: {0}")]
 pub struct TokenErr(pub AuthnErr);

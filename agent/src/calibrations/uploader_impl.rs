@@ -8,7 +8,7 @@ use crate::calibrations::{
 };
 use crate::cooldown;
 use crate::errors::Error;
-use crate::filesys::{errors::ParseJSONErr, Dir, FileSysErr};
+use crate::filesys::{errors::ParseJSONErr, FileSysErr};
 use crate::queue::DirQueueErr;
 use crate::trace;
 
@@ -38,7 +38,7 @@ impl Default for UploaderOptions {
 
 /// How one attempt at the oldest queued report ended.
 enum Outcome {
-    /// Sent, parked or dropped: the report is no longer queued.
+    /// Sent or dropped: the report is no longer queued.
     Resolved,
     /// The report stays at the head of the queue and is retried after a wait.
     Retry { network: bool },
@@ -67,23 +67,21 @@ impl Streak {
     }
 }
 
-/// Single-threaded calibration uploader state and logic: the queue, where
-/// rejected reports are parked, and the retry streak. [`Uploader`] runs it
+/// Single-threaded calibration uploader state and logic: the queue and the
+/// retry streak. [`Uploader`] runs it
 /// inside an actor and does the sending and waiting.
 ///
 /// [`Uploader`]: crate::calibrations::Uploader
 pub struct UploaderImpl {
     queue: DirQueue,
-    failed: Dir,
     options: UploaderOptions,
     streak: Streak,
 }
 
 impl UploaderImpl {
-    pub(crate) fn new(queue: DirQueue, failed: Dir, options: UploaderOptions) -> Self {
+    pub(crate) fn new(queue: DirQueue, options: UploaderOptions) -> Self {
         Self {
             queue,
-            failed,
             options,
             streak: Streak(0),
         }
@@ -103,7 +101,7 @@ impl UploaderImpl {
     }
 
     /// The report to send for `id`. `Ok(None)` when its file is gone: the
-    /// entry is dropped, since there is nothing left to send or park.
+    /// entry is dropped, since there is nothing left to send.
     pub(crate) async fn read(&mut self, id: Uuid) -> Result<Option<Report>, CalibrationsErr> {
         match self.queue.read(id).await {
             Ok(report) => Ok(Some(report)),
@@ -121,7 +119,7 @@ impl UploaderImpl {
 
     /// Settle report `id` once its send (or read) ended in `result`, and
     /// return how long to wait before the next attempt. A sent report is
-    /// removed, one that can never be sent is parked, and any other stays at
+    /// removed, one that can never be sent is dropped, and any other stays at
     /// the head of the queue for a retry.
     pub(crate) async fn finish(
         &mut self,
@@ -147,16 +145,9 @@ impl UploaderImpl {
                 network: err.is_network_conn_err(),
             };
         }
-        match self.queue.park(id, &self.failed).await {
-            Ok(_) => {
-                error!("calibrations: report {id} can never be uploaded; parked as failed/{id}.json: {err}");
-                Outcome::Resolved
-            }
-            Err(park_err) => {
-                error!("calibrations: failed to park report {id} ({err}): {park_err}");
-                Outcome::Retry { network: false }
-            }
-        }
+        self.queue.remove(id).await;
+        error!("calibrations: dropping report {id}, which can never be uploaded: {err}");
+        Outcome::Resolved
     }
 }
 

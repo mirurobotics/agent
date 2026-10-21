@@ -1,4 +1,4 @@
-//! The calibration uploader: drain order, backoff, parking, reconnect,
+//! The calibration uploader: drain order, backoff, dropping, reconnect,
 //! serving intake while busy, and shutdown.
 
 // standard crates
@@ -76,7 +76,6 @@ impl Harness {
     fn spawn_with(&mut self, queue: DirQueue) {
         let args = UploaderArgs {
             queue,
-            failed: self.layout.failed(),
             sender: self.sender.clone(),
             events: self.events.as_ref().map(watch::Sender::subscribe),
             options: UploaderOptions::default(),
@@ -105,10 +104,6 @@ impl Harness {
 
     fn content_file(&self, id: Uuid) -> File {
         self.layout.content().file(&format!("{id}.json"))
-    }
-
-    fn failed_file(&self, id: Uuid) -> File {
-        self.layout.failed().file(&format!("{id}.json"))
     }
 
     async fn await_sleep(&self) {
@@ -352,14 +347,13 @@ async fn a_success_resets_the_backoff() {
 }
 
 #[tokio::test]
-async fn terminal_rejection_is_parked_not_retried() {
+async fn terminal_rejection_is_dropped_not_retried() {
     let mut h = Harness::new();
     h.sender.push(Step::Terminal);
     h.spawn().await;
     let id = h.enqueue("a").await;
 
     h.await_drained(&["a"]).await;
-    assert!(h.failed_file(id).exists());
     assert!(!h.content_file(id).exists());
 
     h.enqueue("b").await;
@@ -369,7 +363,7 @@ async fn terminal_rejection_is_parked_not_retried() {
 }
 
 #[tokio::test]
-async fn an_unreadable_report_is_parked_without_sending() {
+async fn an_unreadable_report_is_dropped_without_sending() {
     let mut h = Harness::new();
     let (queue, ids) = preloaded(&h, &["a", "b"]).await;
     files::write_string(
@@ -382,8 +376,7 @@ async fn an_unreadable_report_is_parked_without_sending() {
     h.spawn_with(queue);
 
     h.await_drained(&["b"]).await;
-    let parked = files::read_string(&h.failed_file(ids[0])).await.unwrap();
-    assert_eq!(parked, "not json");
+    assert!(!h.content_file(ids[0]).exists());
 }
 
 #[tokio::test]
@@ -394,31 +387,7 @@ async fn a_report_whose_file_is_missing_is_dropped() {
     h.spawn_with(queue);
 
     h.await_drained(&["b"]).await;
-    assert!(!h.failed_file(ids[0]).exists());
-}
-
-#[tokio::test]
-async fn a_failed_park_is_retried() {
-    let mut h = Harness::new();
-    h.sender.push(Step::Terminal);
-    // a file where the failed directory should be
-    files::write_string(
-        &File::new(h.layout.failed().path().clone()),
-        "x",
-        WriteOptions::OVERWRITE_ATOMIC,
-    )
-    .await
-    .unwrap();
-    h.spawn().await;
-    let id = h.enqueue("a").await;
-
-    h.await_sleep().await;
-    assert_eq!(h.sleeps_secs(), [10]);
-    assert!(h.content_file(id).exists());
-    h.sleep.release().await;
-
-    // the retry succeeds, since the mock's script is now empty
-    h.await_drained(&["a", "a"]).await;
+    assert_eq!(h.len().await, 0);
 }
 
 #[tokio::test]

@@ -335,7 +335,6 @@ async fn init_calibrations(
     };
     let args = calibrations::UploaderArgs {
         queue,
-        failed: layout.failed(),
         sender: Arc::new(calibrations::HttpSender::new(http_client, token_mngr)),
         events,
         options: calibrations::UploaderOptions::default(),

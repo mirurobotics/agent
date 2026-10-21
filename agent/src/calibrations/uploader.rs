@@ -10,7 +10,6 @@ use crate::calibrations::{
     sender::Sender,
     uploader_impl::{UploaderImpl, UploaderOptions},
 };
-use crate::filesys::Dir;
 use crate::sync::syncer::SyncEvent;
 use crate::trace;
 use crate::workers::next_sync_event;
@@ -23,8 +22,6 @@ use uuid::Uuid;
 
 pub struct UploaderArgs<S, F> {
     pub queue: DirQueue,
-    /// Where reports Miru permanently rejected are parked.
-    pub failed: Dir,
     pub sender: Arc<S>,
     /// Sync events; a successful sync ends a backoff early. `None` disables
     /// the early retry.
@@ -210,7 +207,7 @@ impl Uploader {
         let (sender, receiver) = mpsc::channel(buffer_size);
         let worker = Worker {
             receiver,
-            uploader: UploaderImpl::new(args.queue, args.failed, args.options),
+            uploader: UploaderImpl::new(args.queue, args.options),
             sender: args.sender,
             events: args.events,
             sleep_fn: args.sleep_fn,
