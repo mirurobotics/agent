@@ -18,8 +18,8 @@ impl queue::QueueJob for Job {
     }
 }
 
-/// The uploader's job queue: the shared [`queue::Queue`] carrying upload jobs.
-pub type Queue = queue::Queue<Job>;
+/// The uploader's job queue: the shared [`queue::FileQueue`] carrying upload jobs.
+pub type Queue = queue::FileQueue<Job>;
 
 pub type QueueEntry = queue::QueueEntry<Job>;
 

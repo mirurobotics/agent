@@ -17,9 +17,9 @@ impl queue::QueueJob for Job {
     }
 }
 
-/// The retention deleter's job queue: the shared [`queue::Queue`] carrying
+/// The retention deleter's job queue: the shared [`queue::FileQueue`] carrying
 /// delete jobs.
-pub type Queue = queue::Queue<Job>;
+pub type Queue = queue::FileQueue<Job>;
 
 pub type QueueEntry = queue::QueueEntry<Job>;
 
