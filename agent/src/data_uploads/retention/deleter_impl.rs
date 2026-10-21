@@ -11,6 +11,7 @@ use crate::data_uploads::retention::{
     queue::{DeleteQueueSnapshotFile, Queue, QueueEntry},
 };
 use crate::filesys::{errors::FileSysErr, files};
+use crate::queue::Persistence;
 
 // external crates
 use chrono::{DateTime, TimeDelta, Utc};
@@ -65,7 +66,9 @@ enum SweepOutcome {
 impl DeleterImpl {
     pub fn new(args: DeleterArgs) -> Self {
         let queue = match args.snapshot_file {
-            Some(snapshot_file) => Queue::from_snapshot(args.queue_capacity, snapshot_file),
+            Some(snapshot_file) => {
+                Queue::from_snapshot(args.queue_capacity, snapshot_file, Persistence::BestEffort)
+            }
             None => Queue::new(args.queue_capacity),
         };
         Self {
@@ -346,7 +349,7 @@ mod tests {
 
     mod enqueue {
         use super::*;
-        use crate::data_uploads::retention::errors::DeleteErr;
+        use crate::data_uploads::retention::errors::{DeleteErr, EnqueueErr};
 
         #[tokio::test]
         async fn appends_the_job() {
@@ -399,7 +402,7 @@ mod tests {
                 .enqueue(make_job(tmp_b.file(), 1000, 0).await)
                 .await
                 .unwrap_err();
-            let DeleteErr::QueueFullErr(full) = err else {
+            let DeleteErr::EnqueueErr(EnqueueErr::QueueFullErr(full)) = err else {
                 panic!("expected QueueFullErr, got: {err:?}");
             };
             assert_eq!(full.capacity, 1);

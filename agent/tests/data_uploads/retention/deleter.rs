@@ -4,6 +4,7 @@ use crate::test_utils::{
     retention::undeletable_dir_job,
 };
 use miru_agent::cooldown;
+use miru_agent::data_uploads::retention::errors::EnqueueErr;
 use miru_agent::data_uploads::retention::{DeleteErr, Deleter, DeleterArgs, DeleterExt, Job};
 use miru_agent::filesys::{files, File, PathExt, WriteOptions};
 
@@ -82,7 +83,7 @@ async fn enqueue_on_full_queue_errors_through_the_handle() {
         .await
         .unwrap_err();
 
-    let DeleteErr::QueueFullErr(err) = err else {
+    let DeleteErr::EnqueueErr(EnqueueErr::QueueFullErr(err)) = err else {
         panic!("expected QueueFullErr, got: {err:?}");
     };
     assert_eq!(err.capacity, 1);

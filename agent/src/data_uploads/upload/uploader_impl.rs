@@ -15,6 +15,7 @@ use crate::data_uploads::{
     },
 };
 use crate::errors::Error;
+use crate::queue::Persistence;
 use crate::trace;
 
 // external crates
@@ -115,7 +116,9 @@ where
         now_fn: N,
     ) -> Self {
         let queue = match snapshot_file {
-            Some(file) => Queue::from_snapshot(options.queue_capacity, file),
+            Some(file) => {
+                Queue::from_snapshot(options.queue_capacity, file, Persistence::BestEffort)
+            }
             None => Queue::new(options.queue_capacity),
         };
         Self {
@@ -128,8 +131,7 @@ where
     }
 
     pub(crate) async fn enqueue(&mut self, job: Job) -> Result<(), UploadErr> {
-        self.queue.enqueue(job).await?;
-        Ok(())
+        self.queue.enqueue(job).await.map(drop).map_err(Into::into)
     }
 
     pub(crate) fn len(&self) -> usize {
