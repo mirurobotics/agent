@@ -4,7 +4,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 // internal crates
-use crate::actor::{self, Actor, Flow, Mailbox};
 use crate::cooldown;
 use crate::data_uploads::{
     retention::{DeleterExt, Job as DeleteJob},
@@ -21,11 +20,19 @@ use crate::trace;
 
 // external crates
 use chrono::{DateTime, TimeDelta, Utc};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::mpsc::{self, Receiver, Sender};
+use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
 
-const LABEL: &str = "upload";
+macro_rules! dispatch {
+    ($op:expr, $respond_to:expr, $msg:expr) => {{
+        let result = $op;
+        if $respond_to.send(result).is_err() {
+            error!($msg);
+        }
+    }};
+}
 
 #[derive(Clone, Debug)]
 pub struct UploaderOptions {
@@ -109,6 +116,12 @@ pub(crate) enum Command {
     },
 }
 
+/// Whether the run loop should keep going after handling a command or job.
+enum Flow {
+    Continue,
+    Shutdown,
+}
+
 /// Outcome of driving a single executor attempt to completion (or shutdown).
 enum AttemptOutcome {
     /// The upload succeeded; the attempt is done.
@@ -127,7 +140,7 @@ where
     Fut: Future<Output = ()> + Send + 'static,
     N: Fn() -> DateTime<Utc> + Send + Sync + 'static,
 {
-    commands: mpsc::Receiver<Command>,
+    receiver: Receiver<Command>,
     queue: Queue,
     executor: Arc<ExecutorT>,
     deleter: Arc<D>,
@@ -156,8 +169,14 @@ where
                 // idle: nothing to interleave, just wait for the next command
                 None if self.queue.is_empty() => {
                     info!("upload: queue empty; awaiting next command");
-                    if let Flow::Shutdown = actor::serve_next(&mut self).await {
-                        break;
+                    match self.receiver.recv().await {
+                        // all senders dropped
+                        None => break,
+                        Some(cmd) => {
+                            if let Flow::Shutdown = self.handle_command(cmd).await {
+                                break;
+                            }
+                        }
                     }
                 }
                 // every queued entry is waiting out its backoff: sleep until
@@ -288,7 +307,7 @@ where
     }
 
     /// Sleep for `wait`, staying responsive to commands. Deliberately NOT
-    /// [`actor::serve_until`]: that helper keeps driving its future after
+    /// [`Self::run_until_shutdown`]: that helper keeps driving its future after
     /// handling a command, but an enqueue here must return to the run loop
     /// immediately so a newly eligible entry is re-evaluated rather than
     /// waiting out the sleep.
@@ -296,7 +315,11 @@ where
         let sleep_fut = (self.sleep_fn)(wait);
         tokio::select! {
             biased;
-            cmd = self.commands.recv() => actor::serve(self, cmd).await,
+            cmd = self.receiver.recv() => match cmd {
+                // all senders dropped
+                None => Flow::Shutdown,
+                Some(cmd) => self.handle_command(cmd).await,
+            },
             () = sleep_fut => Flow::Continue,
         }
     }
@@ -319,7 +342,7 @@ where
                 })),
             }
         };
-        match actor::serve_until(self, attempt).await {
+        match self.run_until_shutdown(attempt).await {
             None => AttemptOutcome::ShuttingDown,
             Some(Ok(())) => AttemptOutcome::Succeeded,
             Some(Err(err)) => AttemptOutcome::Failed(err),
@@ -377,44 +400,60 @@ where
             entry.job.file_rule_id, entry.job.file, entry.job.digest, entry.attempts
         );
     }
-}
 
-impl<ExecutorT, D, F, Fut, N> Actor for Worker<ExecutorT, D, F, Fut, N>
-where
-    ExecutorT: UploadExecutor,
-    D: DeleterExt + 'static,
-    F: Fn(Duration) -> Fut + Send + Sync + 'static,
-    Fut: Future<Output = ()> + Send + 'static,
-    N: Fn() -> DateTime<Utc> + Send + Sync + 'static,
-{
-    type Command = Command;
-
-    fn commands(&mut self) -> &mut mpsc::Receiver<Command> {
-        &mut self.commands
-    }
-
-    async fn handle(&mut self, cmd: Command) -> Flow {
-        match cmd {
-            Command::Shutdown { respond_to } => {
-                actor::respond(LABEL, "shutdown", respond_to, Ok(()));
-                return Flow::Shutdown;
-            }
-            Command::Enqueue { job, respond_to } => {
-                let result = self.queue.enqueue(job).await.map(drop).map_err(Into::into);
-                actor::respond(LABEL, "enqueue", respond_to, result);
-            }
-            Command::Len { respond_to } => {
-                actor::respond(LABEL, "len", respond_to, Ok(self.queue.len()));
+    /// Run `fut` to completion while continuing to serve commands. Returns
+    /// `None` when a shutdown arrived (or all senders dropped), in which case
+    /// `fut` is dropped — cancelling an in-flight upload.
+    async fn run_until_shutdown<T>(&mut self, fut: impl Future<Output = T>) -> Option<T> {
+        tokio::pin!(fut);
+        loop {
+            tokio::select! {
+                result = &mut fut => return Some(result),
+                // recv is cancel-safe: losing the race never drops a command
+                cmd = self.receiver.recv() => match cmd {
+                    None => return None,
+                    Some(cmd) => {
+                        if let Flow::Shutdown = self.handle_command(cmd).await {
+                            return None;
+                        }
+                    }
+                }
             }
         }
-        Flow::Continue
+    }
+
+    async fn handle_command(&mut self, cmd: Command) -> Flow {
+        match cmd {
+            Command::Shutdown { respond_to } => {
+                if respond_to.send(Ok(())).is_err() {
+                    error!("Actor failed to send shutdown response");
+                }
+                Flow::Shutdown
+            }
+            Command::Enqueue { job, respond_to } => {
+                dispatch!(
+                    self.queue.enqueue(job).await.map(drop).map_err(Into::into),
+                    respond_to,
+                    "Actor failed to send enqueue response"
+                );
+                Flow::Continue
+            }
+            Command::Len { respond_to } => {
+                dispatch!(
+                    Ok(self.queue.len()),
+                    respond_to,
+                    "Actor failed to send len response"
+                );
+                Flow::Continue
+            }
+        }
     }
 }
 
 // ================================== HANDLE ======================================= //
 #[derive(Debug)]
 pub struct Uploader {
-    mailbox: Mailbox<Command>,
+    sender: Sender<Command>,
 }
 
 impl Uploader {
@@ -434,7 +473,7 @@ impl Uploader {
         Fut: Future<Output = ()> + Send + 'static,
         N: Fn() -> DateTime<Utc> + Send + Sync + 'static,
     {
-        let (mailbox, commands) = actor::channel(LABEL, buffer_size);
+        let (sender, receiver) = mpsc::channel(buffer_size);
         let queue = match snapshot_file {
             Some(file) => {
                 Queue::from_snapshot(options.queue_capacity, file, Persistence::BestEffort)
@@ -442,7 +481,7 @@ impl Uploader {
             None => Queue::new(options.queue_capacity),
         };
         let worker = Worker {
-            commands,
+            receiver,
             queue,
             executor,
             deleter,
@@ -451,7 +490,7 @@ impl Uploader {
             now_fn,
         };
         let worker_handle = tokio::spawn(worker.run());
-        Ok((Self { mailbox }, worker_handle))
+        Ok((Self { sender }, worker_handle))
     }
 
     async fn send_command<R>(
@@ -459,7 +498,21 @@ impl Uploader {
         op: &str,
         make_cmd: impl FnOnce(oneshot::Sender<R>) -> Command,
     ) -> Result<R, UploadErr> {
-        Ok(self.mailbox.request(op, make_cmd).await?)
+        let (send, recv) = oneshot::channel();
+        self.sender.send(make_cmd(send)).await.map_err(|e| {
+            error!("Failed to send {op} command to actor: {e:?}");
+            UploadErr::SendActorMessageErr(SendActorMessageErr {
+                source: Box::new(e),
+                trace: trace!(),
+            })
+        })?;
+        recv.await.map_err(|e| {
+            error!("Failed to receive {op} response from actor: {e:?}");
+            UploadErr::ReceiveActorMessageErr(ReceiveActorMessageErr {
+                source: Box::new(e),
+                trace: trace!(),
+            })
+        })
     }
 }
 

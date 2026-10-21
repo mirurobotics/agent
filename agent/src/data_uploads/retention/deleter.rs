@@ -4,7 +4,6 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 // internal crates
-use crate::actor::{self, Actor, Flow, Mailbox};
 use crate::cooldown;
 use crate::data_uploads::retention::{
     errors::*,
@@ -13,6 +12,7 @@ use crate::data_uploads::retention::{
 };
 use crate::filesys::{errors::FileSysErr, files};
 use crate::queue::Persistence;
+use crate::trace;
 
 // external crates
 use chrono::{DateTime, TimeDelta, Utc};
@@ -23,7 +23,14 @@ use tracing::{error, info, warn};
 const DEFAULT_QUEUE_CAPACITY: usize = 4096;
 const DEFAULT_ATTEMPTS: u32 = 10;
 
-const LABEL: &str = "delete";
+macro_rules! dispatch {
+    ($op:expr, $respond_to:expr, $msg:expr) => {{
+        let result = $op;
+        if $respond_to.send(result).is_err() {
+            error!($msg);
+        }
+    }};
+}
 
 // ======================== SINGLE-THREADED IMPLEMENTATION ========================= //
 pub struct DeleterArgs {
@@ -264,41 +271,42 @@ pub(crate) enum Command {
 
 pub(crate) struct Worker {
     deleter: SingleThreadDeleter,
-    commands: mpsc::Receiver<Command>,
+    receiver: mpsc::Receiver<Command>,
 }
 
 impl Worker {
     pub(crate) async fn run(mut self) {
-        while let Flow::Continue = actor::serve_next(&mut self).await {}
-    }
-}
-
-impl Actor for Worker {
-    type Command = Command;
-
-    fn commands(&mut self) -> &mut mpsc::Receiver<Command> {
-        &mut self.commands
-    }
-
-    async fn handle(&mut self, cmd: Command) -> Flow {
-        match cmd {
-            Command::Shutdown { respond_to } => {
-                actor::respond(LABEL, "shutdown", respond_to, Ok(()));
-                return Flow::Shutdown;
-            }
-            Command::Enqueue { job, respond_to } => {
-                let result = self.deleter.enqueue(job).await;
-                actor::respond(LABEL, "enqueue", respond_to, result);
-            }
-            Command::Sweep { respond_to } => {
-                let result = self.deleter.sweep().await;
-                actor::respond(LABEL, "sweep", respond_to, result);
-            }
-            Command::Len { respond_to } => {
-                actor::respond(LABEL, "len", respond_to, Ok(self.deleter.len()));
+        while let Some(cmd) = self.receiver.recv().await {
+            match cmd {
+                Command::Shutdown { respond_to } => {
+                    if let Err(e) = respond_to.send(Ok(())) {
+                        error!("Actor failed to send shutdown response: {:?}", e);
+                    }
+                    break;
+                }
+                Command::Enqueue { job, respond_to } => {
+                    dispatch!(
+                        self.deleter.enqueue(job).await,
+                        respond_to,
+                        "Actor failed to send enqueue response"
+                    );
+                }
+                Command::Sweep { respond_to } => {
+                    dispatch!(
+                        self.deleter.sweep().await,
+                        respond_to,
+                        "Actor failed to send sweep response"
+                    );
+                }
+                Command::Len { respond_to } => {
+                    dispatch!(
+                        Ok(self.deleter.len()),
+                        respond_to,
+                        "Actor failed to send len response"
+                    );
+                }
             }
         }
-        Flow::Continue
     }
 }
 
@@ -312,7 +320,7 @@ impl Actor for Worker {
 /// in-flight job out of the snapshot.
 #[derive(Debug)]
 pub struct Deleter {
-    mailbox: Mailbox<Command>,
+    sender: mpsc::Sender<Command>,
 }
 
 impl Deleter {
@@ -320,27 +328,38 @@ impl Deleter {
         buffer_size: usize,
         args: DeleterArgs,
     ) -> Result<(Self, JoinHandle<()>), DeleteErr> {
-        let (mailbox, commands) = actor::channel(LABEL, buffer_size);
+        let (sender, receiver) = mpsc::channel(buffer_size);
         let worker = Worker {
             deleter: SingleThreadDeleter::new(args),
-            commands,
+            receiver,
         };
         let worker_handle = tokio::spawn(worker.run());
-        Ok((Self { mailbox }, worker_handle))
+        Ok((Self { sender }, worker_handle))
     }
 
     async fn send_command<R>(
         &self,
-        op: &str,
-        make_cmd: impl FnOnce(oneshot::Sender<R>) -> Command,
+        cmd: impl FnOnce(oneshot::Sender<R>) -> Command,
     ) -> Result<R, DeleteErr> {
-        Ok(self.mailbox.request(op, make_cmd).await?)
+        let (send, recv) = oneshot::channel();
+        self.sender.send(cmd(send)).await.map_err(|e| {
+            DeleteErr::SendActorMessageErr(SendActorMessageErr {
+                source: Box::new(e),
+                trace: trace!(),
+            })
+        })?;
+        recv.await.map_err(|e| {
+            DeleteErr::ReceiveActorMessageErr(ReceiveActorMessageErr {
+                source: Box::new(e),
+                trace: trace!(),
+            })
+        })
     }
 }
 
 impl DeleterExt for Deleter {
     async fn enqueue(&self, job: Job) -> Result<(), DeleteErr> {
-        self.send_command("enqueue", |tx| Command::Enqueue {
+        self.send_command(|tx| Command::Enqueue {
             job,
             respond_to: tx,
         })
@@ -348,17 +367,17 @@ impl DeleterExt for Deleter {
     }
 
     async fn sweep(&self) -> Result<(), DeleteErr> {
-        self.send_command("sweep", |tx| Command::Sweep { respond_to: tx })
+        self.send_command(|tx| Command::Sweep { respond_to: tx })
             .await?
     }
 
     async fn len(&self) -> Result<usize, DeleteErr> {
-        self.send_command("len", |tx| Command::Len { respond_to: tx })
+        self.send_command(|tx| Command::Len { respond_to: tx })
             .await?
     }
 
     async fn shutdown(&self) -> Result<(), DeleteErr> {
-        self.send_command("shutdown", |tx| Command::Shutdown { respond_to: tx })
+        self.send_command(|tx| Command::Shutdown { respond_to: tx })
             .await??;
         info!("delete: deleter shutdown complete");
         Ok(())

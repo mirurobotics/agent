@@ -4,9 +4,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 // internal crates
-use crate::actor::{self, Actor, Flow, Mailbox};
 use crate::calibrations::{
-    errors::{CalibrationsErr, InvalidReportErr},
+    errors::{CalibrationsErr, InvalidReportErr, ReceiveActorMessageErr, SendActorMessageErr},
     queue::{DirQueue, Report},
     sender::Sender,
 };
@@ -70,6 +69,11 @@ enum Command {
     },
 }
 
+enum Flow {
+    Continue,
+    Shutdown,
+}
+
 /// How one attempt at the oldest queued report ended.
 enum Outcome {
     /// Sent, parked or dropped: the report is no longer queued.
@@ -101,10 +105,8 @@ impl Streak {
     }
 }
 
-const LABEL: &str = "calibrations";
-
 struct Worker<S, F> {
-    commands: mpsc::Receiver<Command>,
+    receiver: mpsc::Receiver<Command>,
     queue: DirQueue,
     failed: Dir,
     sender: Arc<S>,
@@ -151,7 +153,8 @@ where
         let result = match self.queue.read(id).await {
             Ok(report) => {
                 let sender = self.sender.clone();
-                actor::serve_until(self, async move { sender.send(&report).await }).await?
+                self.serve_until(async move { sender.send(&report).await })
+                    .await?
             }
             Err(DirQueueErr::FileSysErr(FileSysErr::PathDoesNotExistErr(_))) => {
                 return Some(self.drop_missing(id).await);
@@ -198,6 +201,23 @@ where
         }
     }
 
+    /// Drive `fut` to completion while serving commands, so intake never
+    /// waits on Miru. `None` when a shutdown arrived; `fut` is then dropped.
+    async fn serve_until<T>(&mut self, fut: impl Future<Output = T>) -> Option<T> {
+        tokio::pin!(fut);
+        loop {
+            tokio::select! {
+                result = &mut fut => return Some(result),
+                // recv is cancel-safe: losing the race never drops a command
+                cmd = self.receiver.recv() => {
+                    if let Flow::Shutdown = self.handle(cmd).await {
+                        return None;
+                    }
+                }
+            }
+        }
+    }
+
     /// Wait out `wait` while serving commands, ending early when a sync
     /// succeeds (Miru is reachable again). The sleep is never restarted, so
     /// intake can't extend a backoff.
@@ -207,8 +227,8 @@ where
         loop {
             tokio::select! {
                 _ = &mut sleep => return Flow::Continue,
-                cmd = self.commands.recv() => {
-                    if let Flow::Shutdown = actor::serve(self, cmd).await {
+                cmd = self.receiver.recv() => {
+                    if let Flow::Shutdown = self.handle(cmd).await {
                         return Flow::Shutdown;
                     }
                 }
@@ -224,7 +244,7 @@ where
     /// Wait for a command or a sync event with nothing ready to send.
     async fn idle(&mut self) -> Flow {
         tokio::select! {
-            cmd = self.commands.recv() => actor::serve(self, cmd).await,
+            cmd = self.receiver.recv() => self.handle(cmd).await,
             event = next_sync_event(&mut self.events) => {
                 self.reconnected(event);
                 Flow::Continue
@@ -245,26 +265,20 @@ where
             }
         }
     }
-}
 
-impl<S, F> Actor for Worker<S, F> {
-    type Command = Command;
-
-    fn commands(&mut self) -> &mut mpsc::Receiver<Command> {
-        &mut self.commands
-    }
-
-    async fn handle(&mut self, cmd: Command) -> Flow {
+    /// Serve `cmd`. Every handle dropping counts as a shutdown.
+    async fn handle(&mut self, cmd: Option<Command>) -> Flow {
+        let Some(cmd) = cmd else {
+            return Flow::Shutdown;
+        };
         match cmd {
             Command::Enqueue { report, respond_to } => {
                 let result = self.queue.enqueue(*report).await;
-                actor::respond(LABEL, "enqueue", respond_to, result.map_err(Into::into));
+                respond(respond_to, result.map_err(CalibrationsErr::from), "enqueue");
             }
-            Command::Len { respond_to } => {
-                actor::respond(LABEL, "len", respond_to, self.queue.len());
-            }
+            Command::Len { respond_to } => respond(respond_to, self.queue.len(), "len"),
             Command::Shutdown { respond_to } => {
-                actor::respond(LABEL, "shutdown", respond_to, ());
+                respond(respond_to, (), "shutdown");
                 return Flow::Shutdown;
             }
         }
@@ -280,13 +294,19 @@ fn unreadable(e: ParseJSONErr) -> CalibrationsErr {
     })
 }
 
+fn respond<T>(respond_to: oneshot::Sender<T>, value: T, op: &str) {
+    if respond_to.send(value).is_err() {
+        error!("calibrations: failed to send the {op} response");
+    }
+}
+
 // ================================== HANDLE ======================================= //
 /// Handle to the calibration uploader: one task that owns the calibration
 /// queue, queues what intake sends it, and uploads reports to Miru one at a
 /// time, oldest first. It keeps serving intake during an upload or a backoff.
 #[derive(Debug)]
 pub struct Uploader {
-    mailbox: Mailbox<Command>,
+    sender: mpsc::Sender<Command>,
 }
 
 impl Uploader {
@@ -296,9 +316,9 @@ impl Uploader {
         F: Fn(Duration) -> Fut + Send + 'static,
         Fut: Future<Output = ()> + Send + 'static,
     {
-        let (mailbox, commands) = actor::channel(LABEL, buffer_size);
+        let (sender, receiver) = mpsc::channel(buffer_size);
         let worker = Worker {
-            commands,
+            receiver,
             queue: args.queue,
             failed: args.failed,
             sender: args.sender,
@@ -307,7 +327,7 @@ impl Uploader {
             sleep_fn: args.sleep_fn,
             streak: Streak(0),
         };
-        (Self { mailbox }, tokio::spawn(worker.run()))
+        (Self { sender }, tokio::spawn(worker.run()))
     }
 
     /// Queue `report` durably. A full queue is the 507
@@ -342,6 +362,20 @@ impl Uploader {
         op: &str,
         make_cmd: impl FnOnce(oneshot::Sender<R>) -> Command,
     ) -> Result<R, CalibrationsErr> {
-        Ok(self.mailbox.request(op, make_cmd).await?)
+        let (send, recv) = oneshot::channel();
+        self.sender.send(make_cmd(send)).await.map_err(|e| {
+            error!("calibrations: failed to send the {op} command to the uploader: {e}");
+            CalibrationsErr::SendActorMessageErr(SendActorMessageErr {
+                source: Box::new(e),
+                trace: trace!(),
+            })
+        })?;
+        recv.await.map_err(|e| {
+            error!("calibrations: failed to receive the {op} response from the uploader: {e}");
+            CalibrationsErr::ReceiveActorMessageErr(ReceiveActorMessageErr {
+                source: Box::new(e),
+                trace: trace!(),
+            })
+        })
     }
 }

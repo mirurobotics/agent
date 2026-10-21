@@ -1,5 +1,4 @@
 // internal crates
-pub use crate::actor::errors::{ReceiveActorMessageErr, SendActorMessageErr};
 use crate::errors::Trace;
 use crate::filesys;
 
@@ -38,6 +37,26 @@ pub struct CannotOverwriteCacheElement {
 }
 
 impl crate::errors::Error for CannotOverwriteCacheElement {}
+
+#[derive(Debug, thiserror::Error)]
+#[error("failed to send actor message: {source:?}")]
+pub struct SendActorMessageErr {
+    #[source]
+    pub source: Box<dyn std::error::Error + Send + Sync>,
+    pub trace: Box<Trace>,
+}
+
+impl crate::errors::Error for SendActorMessageErr {}
+
+#[derive(Debug, thiserror::Error)]
+#[error("failed to receive actor message: {source}")]
+pub struct ReceiveActorMessageErr {
+    #[source]
+    pub source: Box<dyn std::error::Error + Send + Sync>,
+    pub trace: Box<Trace>,
+}
+
+impl crate::errors::Error for ReceiveActorMessageErr {}
 
 #[derive(Debug, thiserror::Error)]
 pub enum CacheErr {

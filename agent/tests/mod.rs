@@ -1,4 +1,3 @@
-pub mod actor;
 pub mod app;
 pub mod authn;
 pub mod cache;
