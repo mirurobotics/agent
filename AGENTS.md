@@ -60,7 +60,7 @@ Pick the enum facility by what the enum needs to do:
 
 ## Testing
 
-AI agents: don't run the commands in this section or in Linting locally. Push the branch and let CI run them, then fix failures from the CI logs. They are documented here for humans and so you know what CI checks.
+AI agents may run the commands in this section and in Linting locally for fast feedback, preferring targeted runs (one test or module). CI stays final: a change is validated only when CI is green on the pushed head.
 
 Ordinary Cargo tests and the logging-suppressed wrapper are supported:
 
