@@ -2,8 +2,8 @@
 //! they reach Miru.
 
 pub mod errors;
-pub mod job;
 pub mod queue;
+pub mod report;
 pub mod sender;
 pub mod uploader;
 mod uploader_impl;
@@ -11,8 +11,8 @@ mod uploader_impl;
 pub use self::errors::{
     CalibrationBufferFullErr, CalibrationTooLargeErr, CalibrationsErr, InvalidReportErr, TokenErr,
 };
-pub use self::job::{Job, Queue, QueueEntry, QueueSnapshot, QueueSnapshotFile};
 pub use self::queue::{open, DirQueue, Report, DEFAULT_OPTIONS};
+pub use self::report::{Queue, QueueEntry, QueueSnapshot, QueueSnapshotFile, ReportMetadata};
 pub use self::sender::{HttpSender, Sender};
 pub use self::uploader::{Uploader, UploaderArgs};
 pub use self::uploader_impl::UploaderOptions;

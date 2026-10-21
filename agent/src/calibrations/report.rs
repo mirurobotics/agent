@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 /// content itself lives in the report file named by the queue entry's id
 /// (see [`crate::queue::DirQueue`]).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Job {
+pub struct ReportMetadata {
     pub component_slug: String,
     #[serde(default)]
     pub role: Option<String>,
@@ -26,7 +26,7 @@ pub struct Job {
     pub calibrated_at: DateTime<Utc>,
 }
 
-impl queue::QueueJob for Job {
+impl queue::QueueJob for ReportMetadata {
     const LABEL: &'static str = "calibration";
 
     /// A calibration is uploadable the moment it is queued.
@@ -46,10 +46,10 @@ impl queue::QueueJob for Job {
     }
 }
 
-pub type Queue = queue::FileQueue<Job>;
+pub type Queue = queue::FileQueue<ReportMetadata>;
 
-pub type QueueEntry = queue::QueueEntry<Job>;
+pub type QueueEntry = queue::QueueEntry<ReportMetadata>;
 
-pub type QueueSnapshot = queue::QueueSnapshot<Job>;
+pub type QueueSnapshot = queue::QueueSnapshot<ReportMetadata>;
 
-pub type QueueSnapshotFile = queue::QueueSnapshotFile<Job>;
+pub type QueueSnapshotFile = queue::QueueSnapshotFile<ReportMetadata>;

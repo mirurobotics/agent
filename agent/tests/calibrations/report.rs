@@ -1,10 +1,10 @@
-//! The calibration queue: the generic suite instantiated for `Job`,
+//! The calibration queue: the generic suite instantiated for `ReportMetadata`,
 //! plus the on-disk wire pin for `calibrations/queue.json`.
 
 // internal crates
 use crate::queue::file::queue_suite;
 use crate::test_utils::filesys::dirs as test_dirs;
-use miru_agent::calibrations::{Job, Queue, QueueSnapshot, QueueSnapshotFile};
+use miru_agent::calibrations::{Queue, QueueSnapshot, QueueSnapshotFile, ReportMetadata};
 use miru_agent::filesys::{files, File, WriteOptions};
 use miru_agent::queue::{Persistence, QueueJob};
 
@@ -12,9 +12,9 @@ use miru_agent::queue::{Persistence, QueueJob};
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-/// A deterministic calibration job, due the moment it arrives.
-fn calibration_job(name: &str) -> Job {
-    Job {
+/// Deterministic report metadata, due the moment it arrives.
+fn metadata(name: &str) -> ReportMetadata {
+    ReportMetadata {
         component_slug: name.to_string(),
         role: Some("aligner-1".to_string()),
         aspect: Some("pose".to_string()),
@@ -24,35 +24,32 @@ fn calibration_job(name: &str) -> Job {
     }
 }
 
-queue_suite!(calibration_job, "calibration-generic-queue-test");
+queue_suite!(metadata, "calibration-generic-queue-test");
 
 #[test]
 fn due_at_is_min_utc() {
-    assert_eq!(
-        QueueJob::due_at(&calibration_job("arm")),
-        DateTime::<Utc>::MIN_UTC
-    );
+    assert_eq!(QueueJob::due_at(&metadata("arm")), DateTime::<Utc>::MIN_UTC);
 }
 
 #[test]
 fn name_is_the_component_role_aspect_and_time() {
     assert_eq!(
         "calibration of arm (role aligner-1) (aspect pose) received at 1970-01-01T00:16:40+00:00",
-        QueueJob::name(&calibration_job("arm"))
+        QueueJob::name(&metadata("arm"))
     );
 }
 
 #[test]
 fn name_leaves_out_a_missing_role_and_aspect() {
-    let job = Job {
+    let report = ReportMetadata {
         role: None,
         aspect: None,
-        ..calibration_job("arm")
+        ..metadata("arm")
     };
 
     assert_eq!(
         "calibration of arm received at 1970-01-01T00:16:40+00:00",
-        QueueJob::name(&job)
+        QueueJob::name(&report)
     );
 }
 
@@ -91,7 +88,7 @@ mod wire {
 
         let entry = queue.next_ready(Utc::now()).unwrap();
         assert_eq!(entry.id, id);
-        assert_eq!(entry.job, calibration_job("arm"));
+        assert_eq!(entry.job, metadata("arm"));
     }
 
     /// The optional fields may be absent, as for a calibration taken with no
@@ -110,30 +107,30 @@ mod wire {
 
         let queue = Queue::from_snapshot(8, open(&path).await, Persistence::BestEffort);
 
-        let job = queue.next_ready(Utc::now()).unwrap().job;
-        let expected = Job {
+        let found = queue.next_ready(Utc::now()).unwrap().job;
+        let expected = ReportMetadata {
             role: None,
             aspect: None,
             serial_number: None,
             deployment_id: None,
-            ..calibration_job("arm")
+            ..metadata("arm")
         };
-        assert_eq!(job, expected);
+        assert_eq!(found, expected);
     }
 
     #[tokio::test]
-    async fn enqueue_writes_the_pinned_job_keys() {
+    async fn enqueue_writes_the_pinned_metadata_keys() {
         let dir = test_dirs::temp("calibration_queue_test").unwrap();
         let path = dir.to_dir().file("queue.json");
         {
             let mut queue = Queue::from_snapshot(8, open(&path).await, Persistence::BestEffort);
-            queue.enqueue(calibration_job("arm")).await.unwrap();
+            queue.enqueue(metadata("arm")).await.unwrap();
         }
 
         let raw = files::read_string(&path).await.unwrap();
         let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
-        let job = value["entries"][0]["job"].as_object().unwrap();
-        let mut keys: Vec<&str> = job.keys().map(String::as_str).collect();
+        let metadata = value["entries"][0]["job"].as_object().unwrap();
+        let mut keys: Vec<&str> = metadata.keys().map(String::as_str).collect();
         keys.sort_unstable();
         assert_eq!(
             keys,

@@ -53,7 +53,7 @@ pub mod new_request {
     use super::*;
 
     #[test]
-    fn maps_the_job() {
+    fn maps_the_metadata() {
         let request = new_request(&full_report()).unwrap();
 
         assert_eq!(request.component_slug, "arm");
