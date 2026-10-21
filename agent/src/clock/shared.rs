@@ -22,10 +22,10 @@ type InstantFn = Arc<dyn Fn() -> Instant + Send + Sync>;
 /// at the same moment.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Anchor {
-    /// The server's time, from its `Date` header.
-    server_time: DateTime<Utc>,
     /// The monotonic instant the reading was taken.
     observed_at: Instant,
+    /// The server's time at that moment.
+    server_time: DateTime<Utc>,
     /// The robot's system clock when the reading was taken.
     system_time: DateTime<Utc>,
 }
@@ -87,8 +87,8 @@ impl Clock {
     /// replace earlier ones.
     pub fn observe_server_time(&self, server_time: DateTime<Utc>) {
         let anchor = Anchor {
-            server_time,
             observed_at: self.monotonic_now(),
+            server_time,
             system_time: self.system_now(),
         };
         let previous = self.set_anchor(anchor);
