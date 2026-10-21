@@ -1,5 +1,5 @@
 // internal crates
-pub use crate::queue::QueueFullErr;
+pub use crate::queue::{EnqueueErr, QueueFullErr};
 
 pub type SendActorMessageErr = crate::cache::errors::SendActorMessageErr;
 pub type ReceiveActorMessageErr = crate::cache::errors::ReceiveActorMessageErr;
@@ -7,7 +7,7 @@ pub type ReceiveActorMessageErr = crate::cache::errors::ReceiveActorMessageErr;
 #[derive(Debug, thiserror::Error)]
 pub enum DeleteErr {
     #[error(transparent)]
-    QueueFullErr(#[from] QueueFullErr),
+    EnqueueErr(#[from] EnqueueErr),
     #[error(transparent)]
     SendActorMessageErr(SendActorMessageErr),
     #[error(transparent)]
@@ -15,7 +15,7 @@ pub enum DeleteErr {
 }
 
 crate::impl_error!(DeleteErr {
-    QueueFullErr,
+    EnqueueErr,
     SendActorMessageErr,
     ReceiveActorMessageErr
 });

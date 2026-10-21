@@ -1,6 +1,6 @@
 // internal crates
 use crate::errors::Trace;
-pub use crate::queue::QueueFullErr;
+pub use crate::queue::{EnqueueErr, QueueFullErr};
 
 pub type SendActorMessageErr = crate::cache::errors::SendActorMessageErr;
 pub type ReceiveActorMessageErr = crate::cache::errors::ReceiveActorMessageErr;
@@ -54,7 +54,7 @@ impl crate::errors::Error for TransferErr {}
 #[derive(Debug, thiserror::Error)]
 pub enum UploadErr {
     #[error(transparent)]
-    QueueFullErr(#[from] QueueFullErr),
+    EnqueueErr(#[from] EnqueueErr),
     #[error(transparent)]
     ExecutorErr(ExecutorErr),
     #[error(transparent)]
@@ -66,7 +66,7 @@ pub enum UploadErr {
 }
 
 crate::impl_error!(UploadErr {
-    QueueFullErr,
+    EnqueueErr,
     ExecutorErr,
     AttemptTimeoutErr,
     SendActorMessageErr,
