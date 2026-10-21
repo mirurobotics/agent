@@ -10,7 +10,7 @@ use crate::mocks::{
 };
 use crate::test_utils::{filesys::dirs as test_dirs, upload::make_job};
 use miru_agent::data_uploads::retention::Job as DeleteJob;
-use miru_agent::data_uploads::upload::errors::ExecutorErr;
+use miru_agent::data_uploads::upload::errors::{EnqueueErr, ExecutorErr};
 use miru_agent::data_uploads::upload::{
     Job, QueueEntry, QueueSnapshot, QueueSnapshotFile, UploadErr, Uploader, UploaderExt,
     UploaderOptions,
@@ -542,7 +542,7 @@ async fn in_flight_job_holds_its_capacity_slot() {
         .await
         .unwrap_err();
     assert!(
-        matches!(err, UploadErr::QueueFullErr(_)),
+        matches!(err, UploadErr::EnqueueErr(EnqueueErr::QueueFullErr(_))),
         "expected QueueFullErr, got: {err:?}"
     );
 

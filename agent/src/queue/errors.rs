@@ -1,8 +1,8 @@
 // internal crates
 use crate::errors::Trace;
 
-/// Returned by [`super::Queue::enqueue`] and [`super::DirQueue::enqueue`] when
-/// the queue is at capacity. Nothing was written and nothing already queued
+/// Returned (inside [`EnqueueErr`]) by [`super::Queue::enqueue`], and by
+/// [`super::DirQueue::enqueue`], when the queue is at capacity. Nothing was written and nothing already queued
 /// was dropped.
 /// Workers wrap this in their own error enum via `From`.
 #[derive(Debug, thiserror::Error)]
@@ -27,8 +27,8 @@ impl QueueFullErr {
     }
 }
 
-/// Returned by [`super::Queue::enqueue_durable`]: either the queue is full or
-/// the snapshot holding the new entry could not be written.
+/// Returned by [`super::Queue::enqueue`]: either the queue is full or, for a
+/// durable queue, the snapshot holding the new entry could not be written.
 #[derive(Debug, thiserror::Error)]
 pub enum EnqueueErr {
     #[error(transparent)]
@@ -62,10 +62,10 @@ pub struct ItemTooLargeErr {
 impl crate::errors::Error for ItemTooLargeErr {}
 
 #[derive(Debug, thiserror::Error)]
-#[error("failed to serialize {label} item {id}: {source}")]
+#[error("failed to serialize {label} item {name}: {source}")]
 pub struct SerializeItemErr {
     pub label: &'static str,
-    pub id: uuid::Uuid,
+    pub name: String,
     #[source]
     pub source: serde_json::Error,
     pub trace: Box<Trace>,

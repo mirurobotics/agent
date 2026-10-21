@@ -12,7 +12,7 @@ use crate::queue::{
     errors::{DirQueueErr, ItemTooLargeErr, QueueFullErr, SerializeItemErr},
     item::Item,
     job::{DirQueueJob, QueueJob},
-    Queue, QueueEntry, QueueSnapshot, QueueSnapshotFile,
+    Persistence, Queue, QueueEntry, QueueSnapshot, QueueSnapshotFile,
 };
 use crate::trace;
 
@@ -45,9 +45,9 @@ pub struct DirQueueOptions {
 /// The queue (`queue_file`) holds each item's job, attempt count and backoff,
 /// and each item's content lives in its own file under `content_dir`, so a
 /// queue write never rewrites large content. An item is accepted only once
-/// both are on disk: the item file is written first and the queue entry
-/// second, so a crash between the two leaves an orphan file that the next
-/// [`DirQueue::open`] removes, never a queue entry without content. Unlike a
+/// both are on disk: the queue entry is written first (a durable [`Queue`])
+/// and the item file second, so a crash between the two leaves an entry
+/// without content, which the next [`DirQueue::open`] drops. Unlike a
 /// cache, the queue never evicts: when full it rejects new items. Disk use is
 /// bounded by `max_items` times `max_item_bytes`.
 ///
@@ -88,7 +88,7 @@ where
         dirs::create_if_absent(&content_dir).await?;
         let snapshot_file = load_snapshot::<J, C>(&queue_file, &content_dir).await?;
         let mut queue = Self {
-            queue: Queue::from_snapshot(options.max_items, snapshot_file),
+            queue: Queue::from_snapshot(options.max_items, snapshot_file, Persistence::Durable),
             content: Content::Dir(content_dir.clone()),
             max_items: options.max_items,
             max_item_bytes: options.max_item_bytes,
@@ -144,31 +144,29 @@ where
 
     // ================ Mutators ================ //
 
-    /// Queue `item` durably. On success the item file and its queue entry are
-    /// both on disk (or both in memory, for [`Self::in_memory`]). On any error nothing is queued: a full queue returns
-    /// [`QueueFullErr`] rather than dropping an older item, and an item file
-    /// over `max_item_bytes` returns [`ItemTooLargeErr`]. Returns
-    /// the new queue entry's id, which also names its item file.
+    /// Queue `item` durably. On success its queue entry and item file are
+    /// both on disk (or both in memory, for [`Self::in_memory`]). On any
+    /// error nothing is queued: a full queue returns [`QueueFullErr`] rather
+    /// than dropping an older item, an item file over `max_item_bytes`
+    /// returns [`ItemTooLargeErr`], and a failed item file write removes the
+    /// entry again. Returns the new queue entry's id, which also names its
+    /// item file.
     pub async fn enqueue(&mut self, item: Item<J, C>) -> Result<Uuid, DirQueueErr> {
-        let id = Uuid::new_v4();
         self.verify_capacity(item.job.name())?;
-        let bytes = serialize_item(id, &item)?;
+        let bytes = serialize_item(&item)?;
         self.verify_item_size(bytes.len() as u64)?;
+        let id = self.queue.enqueue(item.job.clone()).await?;
         match &mut self.content {
             Content::Dir(dir) => {
-                let file = item_file(dir, id);
-                // content first: a crash before the queue entry lands leaves
-                // only an orphan file, which the next open removes
-                files::write_bytes(&file, &bytes, WriteOptions::OVERWRITE_ATOMIC).await?;
-                if let Err(err) = self.queue.enqueue_durable(id, item.job).await {
-                    delete_item_file::<J>(&file).await;
+                let written =
+                    files::write_bytes(&item_file(dir, id), &bytes, WriteOptions::OVERWRITE_ATOMIC)
+                        .await;
+                if let Err(err) = written {
+                    self.queue.remove(id).await;
                     return Err(err.into());
                 }
             }
-            Content::Memory(items) => {
-                self.queue.enqueue_durable(id, item.job.clone()).await?;
-                items.insert(id, item);
-            }
+            Content::Memory(items) => drop(items.insert(id, item)),
         }
         Ok(id)
     }
@@ -211,7 +209,7 @@ where
             }
             Content::Memory(items) => {
                 if let Some(item) = items.get(&id) {
-                    let bytes = serialize_item(id, item)?;
+                    let bytes = serialize_item(item)?;
                     files::write_bytes(&dest, &bytes, WriteOptions::OVERWRITE_ATOMIC).await?;
                     items.remove(&id);
                 }
@@ -319,14 +317,11 @@ fn not_found(id: Uuid) -> DirQueueErr {
     }))
 }
 
-fn serialize_item<J: QueueJob, C: Serialize>(
-    id: Uuid,
-    item: &Item<J, C>,
-) -> Result<Vec<u8>, DirQueueErr> {
+fn serialize_item<J: QueueJob, C: Serialize>(item: &Item<J, C>) -> Result<Vec<u8>, DirQueueErr> {
     serde_json::to_vec(item).map_err(|source| {
         DirQueueErr::SerializeItemErr(SerializeItemErr {
             label: J::LABEL,
-            id,
+            name: item.job.name(),
             source,
             trace: trace!(),
         })

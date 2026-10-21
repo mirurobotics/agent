@@ -6,7 +6,7 @@ use crate::queue::queue_suite;
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::calibrations::{Job, Queue, QueueSnapshot, QueueSnapshotFile};
 use miru_agent::filesys::{files, File, WriteOptions};
-use miru_agent::queue::{DirQueueJob, QueueJob};
+use miru_agent::queue::{DirQueueJob, Persistence, QueueJob};
 
 // external crates
 use chrono::{DateTime, Utc};
@@ -93,7 +93,7 @@ mod wire {
             .await
             .unwrap();
 
-        let queue = Queue::from_snapshot(8, open(&path).await);
+        let queue = Queue::from_snapshot(8, open(&path).await, Persistence::BestEffort);
 
         let entry = queue.next_ready(Utc::now()).unwrap();
         assert_eq!(entry.id, id);
@@ -114,7 +114,7 @@ mod wire {
             .await
             .unwrap();
 
-        let queue = Queue::from_snapshot(8, open(&path).await);
+        let queue = Queue::from_snapshot(8, open(&path).await, Persistence::BestEffort);
 
         let job = queue.next_ready(Utc::now()).unwrap().job;
         let expected = Job {
@@ -132,7 +132,7 @@ mod wire {
         let dir = test_dirs::temp("calibration_queue_test").unwrap();
         let path = dir.to_dir().file("queue.json");
         {
-            let mut queue = Queue::from_snapshot(8, open(&path).await);
+            let mut queue = Queue::from_snapshot(8, open(&path).await, Persistence::BestEffort);
             queue.enqueue(calibration_job("arm")).await.unwrap();
         }
 

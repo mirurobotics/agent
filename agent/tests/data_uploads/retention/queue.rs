@@ -5,6 +5,7 @@ use miru_agent::data_uploads::retention::{
     DeleteQueueSnapshot, DeleteQueueSnapshotFile, Job, Queue,
 };
 use miru_agent::filesys::{files, File, WriteOptions};
+use miru_agent::queue::Persistence;
 
 // external crates
 use chrono::{DateTime, TimeDelta, Utc};
@@ -102,7 +103,7 @@ mod wire {
             .await
             .unwrap();
 
-        let queue = Queue::from_snapshot(8, open(&path).await);
+        let queue = Queue::from_snapshot(8, open(&path).await, Persistence::BestEffort);
 
         assert_eq!(queue.len(), 1);
         let entry = queue.next_ready(now()).unwrap();

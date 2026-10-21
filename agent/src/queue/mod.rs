@@ -14,7 +14,7 @@ pub mod snapshot;
 
 pub use self::dir::{DirQueue, DirQueueOptions};
 pub use self::errors::{DirQueueErr, EnqueueErr, ItemTooLargeErr, QueueFullErr, SerializeItemErr};
-pub use self::fifo::Queue;
+pub use self::fifo::{Persistence, Queue};
 pub use self::item::Item;
 pub use self::job::{DirQueueJob, QueueJob};
 pub use self::snapshot::{QueueEntry, QueueSnapshot, QueueSnapshotFile};

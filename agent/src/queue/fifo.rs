@@ -14,6 +14,19 @@ use chrono::{DateTime, Utc};
 use tracing::{info, warn};
 use uuid::Uuid;
 
+/// What [`Queue::enqueue`] does when the snapshot write fails. Chosen once per
+/// queue, by what the queue promises the producers that fill it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Persistence {
+    /// Keep the entry in memory and log the failure; the next successful
+    /// write saves it. For producers that never hear back, such as a scanner.
+    BestEffort,
+    /// Admit the entry only once the snapshot holding it is written; a failed
+    /// write rolls it back and is returned. For producers told their job is
+    /// safe, such as an HTTP caller answered 201.
+    Durable,
+}
+
 /// In-memory job queue with an optional snapshot. Every mutation (`enqueue`,
 /// `remove`, `requeue`, `reset_invalid_deadlines`) persists as its last act,
 /// so there is exactly one persist implementation and no caller can forget
@@ -23,6 +36,7 @@ pub struct Queue<J: QueueJob> {
     entries: VecDeque<QueueEntry<J>>,
     capacity: usize,
     snapshot_file: Option<QueueSnapshotFile<J>>,
+    persistence: Persistence,
 }
 
 impl<J: QueueJob> Queue<J> {
@@ -32,15 +46,21 @@ impl<J: QueueJob> Queue<J> {
             entries: VecDeque::new(),
             capacity,
             snapshot_file: None,
+            persistence: Persistence::BestEffort,
         }
     }
 
-    pub fn from_snapshot(capacity: usize, snapshot_file: QueueSnapshotFile<J>) -> Self {
+    pub fn from_snapshot(
+        capacity: usize,
+        snapshot_file: QueueSnapshotFile<J>,
+        persistence: Persistence,
+    ) -> Self {
         let entries = snapshot_file.read().entries.iter().cloned().collect();
         Self {
             entries,
             capacity,
             snapshot_file: Some(snapshot_file),
+            persistence,
         }
     }
 
@@ -105,32 +125,23 @@ impl<J: QueueJob> Queue<J> {
 
     // ================ Mutators ================ //
 
-    /// Push a new job at the tail under a fresh id. When the queue is full the
-    /// enqueue is rejected with [`QueueFullErr`] and nothing is persisted.
-    pub async fn enqueue(&mut self, job: J) -> Result<(), QueueFullErr> {
+    /// Push a new job at the tail under a fresh id, which is returned. A full
+    /// queue rejects it with [`EnqueueErr::QueueFullErr`] and persists nothing.
+    /// A failed snapshot write is handled as the queue's [`Persistence`] says:
+    /// only a durable queue returns it, as [`EnqueueErr::FileSysErr`].
+    pub async fn enqueue(&mut self, job: J) -> Result<Uuid, EnqueueErr> {
         self.verify_capacity(&job).await?;
-        self.push(Uuid::new_v4(), job);
-        self.persist().await;
-        self.log_enqueued();
-        Ok(())
-    }
-
-    /// Push a new job at the tail, like [`Self::enqueue`], but admit it only
-    /// once the snapshot holding it is on disk. A failed write rolls the entry
-    /// back and returns the error for the caller to report, so memory never
-    /// holds an entry that a restart would lose. Use it when the caller
-    /// promises durability to someone else. The caller supplies a fresh `id`
-    /// (for example to name a file it writes before the entry); reusing a
-    /// queued id is a caller bug.
-    pub async fn enqueue_durable(&mut self, id: Uuid, job: J) -> Result<(), EnqueueErr> {
-        self.verify_capacity(&job).await?;
+        let id = Uuid::new_v4();
         self.push(id, job);
         if let Err(err) = self.try_persist().await {
-            self.remove_impl(id);
-            return Err(EnqueueErr::FileSysErr(err));
+            if self.persistence == Persistence::Durable {
+                self.remove_impl(id);
+                return Err(EnqueueErr::FileSysErr(err));
+            }
+            self.log_persist_failure(&err);
         }
         self.log_enqueued();
-        Ok(())
+        Ok(id)
     }
 
     fn push(&mut self, id: Uuid, job: J) {
@@ -217,15 +228,20 @@ impl<J: QueueJob> Queue<J> {
         snapshot_file.patch(snapshot).await
     }
 
-    /// Called by every best-effort mutator as its last act: a failed write is
-    /// logged and the in-memory queue stays authoritative.
+    /// Called by `remove`, `requeue` and `reset_invalid_deadlines` as their
+    /// last act: a failed write is logged and the in-memory queue stays
+    /// authoritative.
     async fn persist(&mut self) {
         if let Err(err) = self.try_persist().await {
-            warn!(
-                "{label}: failed to persist {label} queue: {err}",
-                label = J::LABEL
-            );
+            self.log_persist_failure(&err);
         }
+    }
+
+    fn log_persist_failure(&self, err: &FileSysErr) {
+        warn!(
+            "{label}: failed to persist {label} queue: {err}",
+            label = J::LABEL
+        );
     }
 
     /// The queued jobs, oldest enqueue first (test observability only).

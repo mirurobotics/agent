@@ -16,6 +16,7 @@ use crate::data_uploads::{
     },
 };
 use crate::errors::Error;
+use crate::queue::Persistence;
 use crate::trace;
 
 // external crates
@@ -399,7 +400,7 @@ where
                 return Flow::Shutdown;
             }
             Command::Enqueue { job, respond_to } => {
-                let result = self.queue.enqueue(job).await.map_err(Into::into);
+                let result = self.queue.enqueue(job).await.map(drop).map_err(Into::into);
                 actor::respond(LABEL, "enqueue", respond_to, result);
             }
             Command::Len { respond_to } => {
@@ -435,7 +436,9 @@ impl Uploader {
     {
         let (mailbox, commands) = actor::channel(LABEL, buffer_size);
         let queue = match snapshot_file {
-            Some(file) => Queue::from_snapshot(options.queue_capacity, file),
+            Some(file) => {
+                Queue::from_snapshot(options.queue_capacity, file, Persistence::BestEffort)
+            }
             None => Queue::new(options.queue_capacity),
         };
         let worker = Worker {
