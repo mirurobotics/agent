@@ -1,12 +1,8 @@
 name: CI
 
 on:
-  # No push trigger for main: branches must be up to date before merging, so
-  # main gets the exact tree its PR already passed. The weekly run keeps the
-  # main-scoped caches that PR runs restore from fresh. release/* branches
-  # still run on push.
   schedule:
-    - cron: '17 6 * * 1'
+    - cron: '17 6 * * *'
   push:
     branches: ["release/*"]
   pull_request:
