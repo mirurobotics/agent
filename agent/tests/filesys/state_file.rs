@@ -1,7 +1,9 @@
 // internal crates
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::authn::token::{Token, Updates};
-use miru_agent::filesys::{files, state_file::StateFile, FileSysErr, PathExt, WriteOptions};
+use miru_agent::filesys::{
+    dirs, files, state_file::StateFile, Dir, File, FileSysErr, Overwrite, PathExt, WriteOptions,
+};
 
 // external crates
 use chrono::{Duration, Utc};
@@ -10,14 +12,26 @@ use tracing::{debug, error, info, trace, warn};
 
 type TokenFile = StateFile<Token, Updates>;
 
-pub mod spawn {
+/// The `.corrupt-<uuid>` siblings a recovery copied aside in `dir`.
+async fn corrupt_siblings(dir: &Dir) -> Vec<File> {
+    let mut found = Vec::new();
+    let mut entries = tokio::fs::read_dir(dir.path()).await.unwrap();
+    while let Some(entry) = entries.next_entry().await.unwrap() {
+        if entry.file_name().to_string_lossy().contains(".corrupt-") {
+            found.push(File::new(entry.path()));
+        }
+    }
+    found
+}
+
+pub mod new {
     use super::*;
 
     #[tokio::test]
     async fn doesnt_exist() {
         let dir = test_dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
-        let result = TokenFile::spawn(64, file).await;
+        let result = TokenFile::new(file).await;
         assert!(matches!(result, Err(FileSysErr::PathDoesNotExistErr(_))));
     }
 
@@ -31,7 +45,8 @@ pub mod spawn {
             .await
             .unwrap();
 
-        let result = TokenFile::spawn(64, file).await;
+        // ensure the contents is correct
+        let result = TokenFile::new(file).await;
         assert!(matches!(result, Err(FileSysErr::ParseJSONErr(_))));
     }
 
@@ -49,12 +64,13 @@ pub mod spawn {
             .await
             .unwrap();
 
-        let (state_file, _) = TokenFile::spawn(64, file).await.unwrap();
-        assert_eq!(state_file.read().await.unwrap().as_ref(), &token);
+        // ensure the contents is correct
+        let state_file = TokenFile::new(file).await.unwrap();
+        assert_eq!(state_file.read().as_ref(), &token);
     }
 }
 
-pub mod spawn_with_default {
+pub mod new_with_default {
     use super::*;
 
     #[tokio::test]
@@ -62,10 +78,10 @@ pub mod spawn_with_default {
         let dir = test_dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
 
-        let (state_file, _) = TokenFile::spawn_with_default(64, file, Token::default())
+        let state_file = TokenFile::new_with_default(file, Token::default())
             .await
             .unwrap();
-        assert_eq!(state_file.read().await.unwrap().as_ref(), &Token::default());
+        assert_eq!(state_file.read().as_ref(), &Token::default());
     }
 
     #[tokio::test]
@@ -78,10 +94,65 @@ pub mod spawn_with_default {
             .await
             .unwrap();
 
-        let (state_file, _) = TokenFile::spawn_with_default(64, file, Token::default())
+        let state_file = TokenFile::new_with_default(file.clone(), Token::default())
             .await
             .unwrap();
-        assert_eq!(state_file.read().await.unwrap().as_ref(), &Token::default());
+        assert_eq!(state_file.read().as_ref(), &Token::default());
+
+        // the unparseable contents were copied aside, not destroyed
+        let aside = corrupt_siblings(&dir).await;
+        assert_eq!(aside.len(), 1, "{aside:?}");
+        assert_eq!(files::read_string(&aside[0]).await.unwrap(), "invalid-data");
+        assert_eq!(
+            files::read_json::<Token>(&file).await.unwrap(),
+            Token::default()
+        );
+    }
+
+    // An error other than "missing" or "unparseable" (here: the path is a
+    // directory) is retried, then returned, and nothing is overwritten.
+    #[tokio::test(start_paused = true)]
+    async fn unreadable_file_is_left_untouched() {
+        let dir = test_dirs::temp("testing").unwrap();
+        let file = dir.file("test-file");
+        dirs::create(&Dir::new(file.path().clone())).await.unwrap();
+
+        let result = TokenFile::new_with_default(file.clone(), Token::default()).await;
+
+        assert!(result.is_err());
+        assert!(Dir::new(file.path().clone()).exists());
+        assert!(corrupt_siblings(&dir).await.is_empty());
+    }
+
+    // A read error that clears while retrying (here: a directory at the path
+    // is replaced by a valid file) reads the file instead of failing. Time is
+    // paused, so the fix runs at 10 ms, strictly between the first read and
+    // the first retry at 50 ms.
+    #[tokio::test(start_paused = true)]
+    async fn transient_read_error_is_retried() {
+        let dir = test_dirs::temp("testing").unwrap();
+        let file = dir.file("test-file");
+        let blocker = Dir::new(file.path().clone());
+        dirs::create(&blocker).await.unwrap();
+        let token = Token {
+            token: "test-token".to_string(),
+            expires_at: Utc::now() + Duration::days(1),
+        };
+
+        let (fix_file, fix_token) = (file.clone(), token.clone());
+        let fixer = tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            tokio::fs::remove_dir(blocker.path()).await.unwrap();
+            files::write_json(&fix_file, &fix_token, WriteOptions::OVERWRITE_ATOMIC)
+                .await
+                .unwrap();
+        });
+
+        let state_file = TokenFile::new_with_default(file, Token::default())
+            .await
+            .unwrap();
+        fixer.await.unwrap();
+        assert_eq!(state_file.read().as_ref(), &token);
     }
 
     #[tokio::test]
@@ -89,6 +160,7 @@ pub mod spawn_with_default {
         let dir = test_dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
 
+        // create the file
         let token = Token {
             token: "test-token".to_string(),
             expires_at: Utc::now() + Duration::days(1),
@@ -97,117 +169,96 @@ pub mod spawn_with_default {
             .await
             .unwrap();
 
-        let (state_file, _) = TokenFile::spawn_with_default(64, file, Token::default())
+        // ensure the contents is correct
+        let state_file = TokenFile::new_with_default(file, Token::default())
             .await
             .unwrap();
-        assert_eq!(state_file.read().await.unwrap().as_ref(), &token);
+        assert_eq!(state_file.read().as_ref(), &token);
+    }
+
+    // Each recovery keeps its own aside copy instead of overwriting an
+    // earlier one.
+    #[tokio::test]
+    async fn repeated_recoveries_keep_every_aside_copy() {
+        let dir = test_dirs::temp("testing").unwrap();
+        let file = dir.file("test-file");
+
+        for contents in ["first-bad", "second-bad"] {
+            files::write_string(&file, contents, WriteOptions::OVERWRITE_ATOMIC)
+                .await
+                .unwrap();
+            TokenFile::new_with_default(file.clone(), Token::default())
+                .await
+                .unwrap();
+        }
+
+        let mut kept = Vec::new();
+        for aside in corrupt_siblings(&dir).await {
+            kept.push(files::read_string(&aside).await.unwrap());
+        }
+        kept.sort();
+        assert_eq!(kept, vec!["first-bad", "second-bad"]);
     }
 }
 
-pub mod shutdown {
+pub mod create {
     use super::*;
 
     #[tokio::test]
-    async fn exists() {
+    async fn doesnt_exist_overwrite_false() {
         let dir = test_dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
 
-        let token = Token {
-            token: "test-token".to_string(),
-            expires_at: Utc::now() + Duration::days(1),
-        };
-        files::write_json(&file, &token, WriteOptions::default())
+        let state_file = TokenFile::create(file, &Token::default(), Overwrite::Deny)
             .await
             .unwrap();
-
-        let (state_file, handle) = TokenFile::spawn_with_default(64, file, Token::default())
-            .await
-            .unwrap();
-        assert_eq!(state_file.read().await.unwrap().as_ref(), &token);
-
-        // shutdown the file
-        state_file.shutdown().await.unwrap();
-        handle.await.unwrap();
+        assert_eq!(state_file.read().as_ref(), &Token::default());
     }
-}
-
-pub mod after_shutdown {
-    use super::*;
 
     #[tokio::test]
-    async fn read_fails() {
+    async fn doesnt_exist_overwrite_true() {
         let dir = test_dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
 
-        let (state_file, handle) = TokenFile::spawn_with_default(64, file, Token::default())
+        let state_file = TokenFile::create(file, &Token::default(), Overwrite::Allow)
+            .await
+            .unwrap();
+        assert_eq!(state_file.read().as_ref(), &Token::default());
+    }
+
+    #[tokio::test]
+    async fn exists_overwrite_false() {
+        let dir = test_dirs::temp("testing").unwrap();
+        let file = dir.file("test-file");
+
+        // create the file
+        files::write_string(&file, "invalid-data", WriteOptions::default())
             .await
             .unwrap();
 
-        state_file.shutdown().await.unwrap();
-        handle.await.unwrap();
-
+        // should throw an error since already exists
+        let result = TokenFile::create(file, &Token::default(), Overwrite::Deny).await;
         assert!(matches!(
-            state_file.read().await.unwrap_err(),
-            FileSysErr::SendActorMessageErr { .. }
+            result,
+            Err(FileSysErr::InvalidFileOverwriteErr(_))
         ));
     }
 
     #[tokio::test]
-    async fn write_fails() {
+    async fn exists_overwrite_true() {
         let dir = test_dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
 
-        let (state_file, handle) = TokenFile::spawn_with_default(64, file, Token::default())
+        // create the file
+        files::write_string(&file, "invalid-data", WriteOptions::default())
             .await
             .unwrap();
 
-        state_file.shutdown().await.unwrap();
-        handle.await.unwrap();
-
-        assert!(matches!(
-            state_file.write(Token::default()).await.unwrap_err(),
-            FileSysErr::SendActorMessageErr { .. }
-        ));
-    }
-
-    #[tokio::test]
-    async fn patch_fails() {
-        let dir = test_dirs::temp("testing").unwrap();
-        let file = dir.file("test-file");
-
-        let (state_file, handle) = TokenFile::spawn_with_default(64, file, Token::default())
+        // should throw an error since already exists
+        let state_file = TokenFile::create(file, &Token::default(), Overwrite::Allow)
             .await
             .unwrap();
-
-        state_file.shutdown().await.unwrap();
-        handle.await.unwrap();
-
-        let updates = Updates {
-            token: Some("new-token".to_string()),
-            expires_at: None,
-        };
-        assert!(matches!(
-            state_file.patch(updates).await.unwrap_err(),
-            FileSysErr::SendActorMessageErr { .. }
-        ));
-    }
-
-    #[tokio::test]
-    async fn double_shutdown_fails() {
-        let dir = test_dirs::temp("testing").unwrap();
-        let file = dir.file("test-file");
-
-        let (state_file, handle) = TokenFile::spawn_with_default(64, file, Token::default())
-            .await
-            .unwrap();
-
-        state_file.shutdown().await.unwrap();
-        handle.await.unwrap();
-
-        assert!(matches!(
-            state_file.shutdown().await.unwrap_err(),
-            FileSysErr::SendActorMessageErr { .. }
-        ));
+        assert_eq!(state_file.read().as_ref(), &Token::default());
     }
 }
 
@@ -219,10 +270,10 @@ pub mod read {
         let dir = test_dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
 
-        let (state_file, _) = TokenFile::spawn_with_default(64, file, Token::default())
+        let state_file = TokenFile::create(file, &Token::default(), Overwrite::Deny)
             .await
             .unwrap();
-        assert_eq!(state_file.read().await.unwrap().as_ref(), &Token::default());
+        assert_eq!(state_file.read().as_ref(), &Token::default());
     }
 
     #[tokio::test]
@@ -230,7 +281,8 @@ pub mod read {
         let dir = test_dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
 
-        let (state_file, _) = TokenFile::spawn_with_default(64, file.clone(), Token::default())
+        // create the file
+        let state_file = TokenFile::create(file.clone(), &Token::default(), Overwrite::Allow)
             .await
             .unwrap();
 
@@ -239,7 +291,7 @@ pub mod read {
         assert!(!file.exists());
 
         // should still be able to read the file since it's cached in memory
-        assert_eq!(state_file.read().await.unwrap().as_ref(), &Token::default());
+        assert_eq!(state_file.read().as_ref(), &Token::default());
     }
 }
 
@@ -251,10 +303,11 @@ pub mod write {
         let dir = test_dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
 
-        let (state_file, _) = TokenFile::spawn_with_default(64, file.clone(), Token::default())
+        // create the file
+        let mut state_file = TokenFile::create(file, &Token::default(), Overwrite::Deny)
             .await
             .unwrap();
-        assert_eq!(state_file.read().await.unwrap().as_ref(), &Token::default());
+        assert_eq!(state_file.read().as_ref(), &Token::default());
 
         // write to the file
         let token = Token {
@@ -262,7 +315,7 @@ pub mod write {
             expires_at: Utc::now() + Duration::days(1),
         };
         state_file.write(token.clone()).await.unwrap();
-        assert_eq!(state_file.read().await.unwrap().as_ref(), &token);
+        assert_eq!(state_file.read().as_ref(), &token);
     }
 
     #[tokio::test]
@@ -270,10 +323,11 @@ pub mod write {
         let dir = test_dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
 
-        let (state_file, _) = TokenFile::spawn_with_default(64, file.clone(), Token::default())
+        // create the file
+        let mut state_file = TokenFile::create(file.clone(), &Token::default(), Overwrite::Deny)
             .await
             .unwrap();
-        assert_eq!(state_file.read().await.unwrap().as_ref(), &Token::default());
+        assert_eq!(state_file.read().as_ref(), &Token::default());
 
         // delete the file
         files::delete(&file).await.unwrap();
@@ -285,7 +339,7 @@ pub mod write {
             expires_at: Utc::now() + Duration::days(1),
         };
         state_file.write(token.clone()).await.unwrap();
-        assert_eq!(state_file.read().await.unwrap().as_ref(), &token);
+        assert_eq!(state_file.read().as_ref(), &token);
     }
 }
 
@@ -297,13 +351,12 @@ pub mod patch {
         let dir = test_dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
 
-        let (state_file, _) = TokenFile::spawn_with_default(64, file.clone(), Token::default())
+        let mut state_file = TokenFile::create(file, &Token::default(), Overwrite::Deny)
             .await
             .unwrap();
-        assert_eq!(state_file.read().await.unwrap().as_ref(), &Token::default());
+        assert_eq!(state_file.read().as_ref(), &Token::default());
 
         // patch the file
-
         let updates = Updates {
             token: Some("test-token".to_string()),
             expires_at: Some(Utc::now() + Duration::days(1)),
@@ -313,7 +366,7 @@ pub mod patch {
             expires_at: updates.expires_at.unwrap(),
         };
         state_file.patch(updates).await.unwrap();
-        assert_eq!(&expected, state_file.read().await.unwrap().as_ref());
+        assert_eq!(&expected, state_file.read().as_ref());
     }
 
     #[tokio::test]
@@ -325,11 +378,9 @@ pub mod patch {
             token: "test-token".to_string(),
             expires_at: Utc::now() + Duration::days(1),
         };
-        files::write_json(&file, &token, WriteOptions::default())
+        let mut state_file = TokenFile::create(file.clone(), &token, Overwrite::Deny)
             .await
             .unwrap();
-
-        let (state_file, _) = TokenFile::spawn(64, file.clone()).await.unwrap();
 
         // delete the backing file so any real write would fail
         files::delete(&file).await.unwrap();
@@ -337,7 +388,7 @@ pub mod patch {
 
         // patch with empty updates — merge produces no change, so write is skipped
         state_file.patch(Updates::empty()).await.unwrap();
-        assert_eq!(state_file.read().await.unwrap().as_ref(), &token);
+        assert_eq!(state_file.read().as_ref(), &token);
 
         // backing file should still not exist (no write occurred)
         assert!(!file.exists());
@@ -348,10 +399,10 @@ pub mod patch {
         let dir = test_dirs::temp("testing").unwrap();
         let file = dir.file("test-file");
 
-        let (state_file, _) = TokenFile::spawn_with_default(64, file.clone(), Token::default())
+        let mut state_file = TokenFile::create(file.clone(), &Token::default(), Overwrite::Deny)
             .await
             .unwrap();
-        assert_eq!(state_file.read().await.unwrap().as_ref(), &Token::default());
+        assert_eq!(state_file.read().as_ref(), &Token::default());
 
         // delete the file
         files::delete(&file).await.unwrap();
@@ -367,6 +418,6 @@ pub mod patch {
             expires_at: updates.expires_at.unwrap(),
         };
         state_file.patch(updates).await.unwrap();
-        assert_eq!(&expected, state_file.read().await.unwrap().as_ref());
+        assert_eq!(&expected, state_file.read().as_ref());
     }
 }
