@@ -92,7 +92,6 @@ impl Clock {
             system_time: self.system_now(),
         };
         let previous = self.set_anchor(anchor);
-        // computed up front: arguments of a disabled log macro never run
         let offset_secs = (server_time - anchor.system_time).num_seconds();
         if offset_secs.abs() > SYNC_TOLERANCE.num_seconds() && previous.is_none() {
             warn!(
