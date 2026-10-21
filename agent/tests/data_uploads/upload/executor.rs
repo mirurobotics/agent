@@ -23,7 +23,7 @@ use miru_agent::http::errors::{HTTPErr, MockErr as HttpMockErr, RequestFailed};
 use miru_agent::http::request::Params;
 
 // external crates
-use chrono::{TimeZone, Utc};
+use chrono::{FixedOffset, Local, TimeZone, Utc};
 
 // ================================ HELPERS ======================================== //
 
@@ -107,7 +107,7 @@ async fn happy_path_creates_transfers_confirms() {
     );
     let sent: CreateUploadRequest =
         serde_json::from_str(requests[0].body.as_deref().unwrap()).unwrap();
-    assert_eq!(sent, new_upl_request(&job));
+    assert_eq!(sent, new_upl_request(&job, &Local));
     assert_eq!(requests[0].token.as_deref(), Some("test-token"));
     assert_eq!(requests[1].path, "/uploads/upl_1/confirm");
     assert_eq!(requests[1].token.as_deref(), Some("test-token"));
@@ -287,6 +287,31 @@ fn create_request_maps_job_fields() {
         size: 42,
         incomplete: None,
         deployment_id: "dpl_1".to_string(),
+        utc_offset: Some("+00:00".to_string()),
     };
-    assert_eq!(new_upl_request(&job), expected);
+    assert_eq!(new_upl_request(&job, &Utc), expected);
+}
+
+#[test]
+fn new_upl_request_sends_device_local_offsets() {
+    let file = File::new("/data/a.log");
+    let job = Job {
+        file,
+        size: 42,
+        digest: "sha256:abc".to_string(),
+        // 01:30 UTC is 20:30 the evening before in New York (EST)
+        mtime: Utc.with_ymd_and_hms(2026, 1, 15, 1, 30, 0).unwrap(),
+        first_observed_at: Utc.with_ymd_and_hms(2026, 1, 15, 1, 31, 0).unwrap(),
+        last_observed_at: Utc.with_ymd_and_hms(2026, 1, 15, 1, 32, 0).unwrap(),
+        file_rule_id: "rule_1".to_string(),
+        deployment_id: "dpl_1".to_string(),
+        retention: None,
+    };
+    let est = FixedOffset::west_opt(5 * 3600).unwrap();
+
+    let req = new_upl_request(&job, &est);
+
+    assert_eq!(req.source.mtime, "2026-01-14T20:30:00-05:00");
+    assert_eq!(req.source.first_observed_at, "2026-01-15T01:31:00+00:00");
+    assert_eq!(req.utc_offset.as_deref(), Some("-05:00"));
 }

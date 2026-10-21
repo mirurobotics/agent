@@ -1,4 +1,5 @@
 // standard crates
+use std::fmt::Display;
 use std::sync::Arc;
 
 // internal crates
@@ -12,6 +13,7 @@ use crate::http::{self, ClientI};
 use backend_api::models::{CreateUploadRequest, UploadSource, UploadWithCredentials};
 
 // external crates
+use chrono::{Local, TimeZone, Utc};
 use tracing::info;
 
 /// The seam between the upload actor and the transfer mechanics.
@@ -56,7 +58,7 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> LiveExecutor<C, T, X> {
 
     async fn create_upload(&self, job: &Job) -> Result<UploadWithCredentials, UploadErr> {
         let token = self.token().await?;
-        let payload = new_upl_request(job);
+        let payload = new_upl_request(job, &Local);
         http::with_retry(|| async {
             let params = http::uploads::CreateParams {
                 payload: &payload,
@@ -113,12 +115,20 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> UploadExecutor for LiveE
     }
 }
 
-pub fn new_upl_request(job: &Job) -> CreateUploadRequest {
+/// Builds the create-upload request. `tz` is the device's time zone (`Local` in
+/// production, which honors `TZ` and then the system zone): the mtime carries
+/// its offset at that instant and `utc_offset` its current offset, so the
+/// backend can render upload paths in the device's local time.
+pub fn new_upl_request<Tz>(job: &Job, tz: &Tz) -> CreateUploadRequest
+where
+    Tz: TimeZone,
+    Tz::Offset: Display,
+{
     CreateUploadRequest {
         file_rule_id: job.file_rule_id.clone(),
         source: Box::new(UploadSource {
             file_path: job.file.to_string(),
-            mtime: job.mtime.to_rfc3339(),
+            mtime: job.mtime.with_timezone(tz).to_rfc3339(),
             first_observed_at: job.first_observed_at.to_rfc3339(),
             last_observed_at: job.last_observed_at.to_rfc3339(),
         }),
@@ -126,6 +136,7 @@ pub fn new_upl_request(job: &Job) -> CreateUploadRequest {
         size: i64::try_from(job.size).unwrap_or(i64::MAX),
         incomplete: None,
         deployment_id: job.deployment_id.clone(),
+        utc_offset: Some(Utc::now().with_timezone(tz).format("%:z").to_string()),
     }
 }
 
