@@ -3,7 +3,7 @@
     "deny": [
       "Edit(/libs/backend-api/src/models/**)",
       "Edit(/libs/device-api/src/models/**)",
-      "Edit(/Cargo.lock)"
+      "Edit(/**/Cargo.lock)"
     ]
   }
 }
