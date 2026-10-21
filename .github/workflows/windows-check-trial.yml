@@ -17,7 +17,7 @@ jobs:
       matrix:
         vcpu: [4, 8]
         # current: the windows-check steps as on main.
-        # lean: prebuilt aws-lc NASM objects, no unused stable toolchain install.
+        # lean: no choco NASM (image NASM, prebuilt objects as fallback), no unused stable toolchain install.
         mode: [current, lean]
     runs-on: blacksmith-${{ matrix.vcpu }}vcpu-windows-2025
     timeout-minutes: 60
@@ -35,7 +35,7 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
-          key: trial-${{ matrix.vcpu }}-${{ matrix.mode }}
+          key: trial2-${{ matrix.vcpu }}-${{ matrix.mode }}
           cache-on-failure: true
           env-vars: AWS_LC_SYS
 
@@ -45,11 +45,11 @@ jobs:
           choco install nasm -y
           echo "C:\Program Files\NASM" >> $env:GITHUB_PATH
 
-      - name: Confirm NASM is absent
+      - name: Show NASM on the image
         if: matrix.mode == 'lean'
         run: |
-          if (Get-Command nasm -ErrorAction SilentlyContinue) { throw "nasm is on PATH; prebuilt objects would not be used" }
-          rustc --version
+          Get-Command nasm -All -ErrorAction SilentlyContinue | Format-List Source, Version
+          nasm -v
 
       - name: Run Windows Tests
         env:
