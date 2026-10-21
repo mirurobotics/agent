@@ -787,7 +787,7 @@ mod retention_producer {
         }
     }
 
-    /// Wait until the queue is empty: the job's `queue.remove` — which runs
+    /// Wait until the queue is empty: the job's `queue.ack` — which runs
     /// after the producer's enqueue — has happened.
     async fn await_drained(uploader: &Uploader) {
         timed(async {

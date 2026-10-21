@@ -142,7 +142,7 @@ where
                     files::write_bytes(&item_file(dir, id), &bytes, WriteOptions::OVERWRITE_ATOMIC)
                         .await;
                 if let Err(err) = written {
-                    self.queue.remove(id).await;
+                    self.queue.ack(id).await;
                     return Err(err.into());
                 }
             }
@@ -151,12 +151,11 @@ where
         Ok(id)
     }
 
-    /// Drop the entry with `id` and its item file, once the item has been
-    /// resolved. The queue entry goes first, so a crash between the two leaves
-    /// an orphan file rather than an entry without content. Unknown ids are
-    /// ignored.
-    pub async fn remove(&mut self, id: Uuid) -> Option<QueueEntry<J>> {
-        let entry = self.queue.remove(id).await?;
+    /// Remove the entry with `id` and its item file once the item is done.
+    /// The entry goes first, so a crash between the two leaves an orphan file
+    /// rather than an entry without content. Unknown ids are ignored.
+    pub async fn ack(&mut self, id: Uuid) -> Option<QueueEntry<J>> {
+        let entry = self.queue.ack(id).await?;
         match &mut self.content {
             Content::Dir(dir) => delete_item_file::<J>(&item_file(dir, id)).await,
             Content::Memory(items) => drop(items.remove(&id)),
@@ -164,26 +163,13 @@ where
         Some(entry)
     }
 
-    /// Move `entry` to the tail with its updated attempt count and deadline.
-    /// An entry that is no longer queued (already removed, or stale) is
-    /// ignored, so it can't come back without its item file.
-    pub async fn requeue(&mut self, entry: QueueEntry<J>) {
-        if !self.is_queued(entry.id) {
-            warn!(
-                "{}: ignoring requeue of {}, which is not queued",
-                J::LABEL,
-                entry.job.name()
-            );
-            return;
-        }
-        self.queue.requeue(entry).await;
+    /// Move the entry with `id` to the tail with updated `attempts` and
+    /// `next_attempt_at`. Returns `false` for an unknown id.
+    pub async fn retry(&mut self, id: Uuid, attempts: u32, next_attempt_at: DateTime<Utc>) -> bool {
+        self.queue.retry(id, attempts, next_attempt_at).await
     }
 
     // ================ Internals ================ //
-
-    fn is_queued(&self, id: Uuid) -> bool {
-        self.queue.iter().any(|entry| entry.id == id)
-    }
 
     fn verify_item_size(&self, item_bytes: u64) -> Result<(), DirQueueErr> {
         if item_bytes <= self.max_item_bytes {
@@ -232,7 +218,7 @@ where
                 J::LABEL,
                 entry.job.name()
             );
-            self.queue.remove(entry.id).await;
+            self.queue.ack(entry.id).await;
         }
         Ok(())
     }

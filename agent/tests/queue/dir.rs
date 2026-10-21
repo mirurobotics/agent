@@ -4,7 +4,7 @@
 // internal crates
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::filesys::{dirs, files, Dir, File, PathExt, WriteOptions};
-use miru_agent::queue::{DirQueue, DirQueueErr, DirQueueOptions, Item, QueueEntry, QueueJob};
+use miru_agent::queue::{DirQueue, DirQueueErr, DirQueueOptions, Item, QueueJob};
 
 // external crates
 use chrono::{DateTime, TimeDelta, Utc};
@@ -122,7 +122,7 @@ async fn drain(queue: &mut TestQueue) -> Vec<String> {
     let mut out = Vec::new();
     while let Some(entry) = queue.next_ready(now()) {
         out.push(entry.job.name.clone());
-        queue.remove(entry.id).await.unwrap();
+        queue.ack(entry.id).await.unwrap();
     }
     out
 }
@@ -629,7 +629,7 @@ pub mod enqueue {
     }
 
     #[tokio::test]
-    async fn accepts_again_once_a_report_is_removed() {
+    async fn accepts_again_once_a_report_is_acked() {
         let fixture = Fixture::new();
         let options = DirQueueOptions {
             capacity: 1,
@@ -640,7 +640,7 @@ pub mod enqueue {
         assert!(queue.enqueue(item("b")).await.is_err());
 
         let entry = queue.next_ready(now()).unwrap();
-        queue.remove(entry.id).await.unwrap();
+        queue.ack(entry.id).await.unwrap();
 
         queue.enqueue(item("b")).await.unwrap();
         assert_eq!(names(&queue), strings(&["b"]));
@@ -728,7 +728,7 @@ pub mod enqueue {
     }
 }
 
-pub mod remove {
+pub mod ack {
     use super::*;
 
     #[tokio::test]
@@ -737,9 +737,9 @@ pub mod remove {
         let mut queue = fixture.open().await;
         let ids = enqueue_all(&mut queue, &["a", "b"]).await;
 
-        let removed = queue.remove(ids[0]).await.unwrap();
+        let acked = queue.ack(ids[0]).await.unwrap();
 
-        assert_eq!(removed.job.name, "a");
+        assert_eq!(acked.job.name, "a");
         assert!(!fixture.item_file(ids[0]).exists());
         assert!(fixture.item_file(ids[1]).exists());
         assert_eq!(queue_on_disk(&fixture).await, strings(&["b"]));
@@ -754,9 +754,9 @@ pub mod remove {
         files::delete(&file).await.unwrap();
         block_with_a_dir(&file).await;
 
-        let removed = queue.remove(ids[0]).await.unwrap();
+        let acked = queue.ack(ids[0]).await.unwrap();
 
-        assert_eq!(removed.job.name, "a");
+        assert_eq!(acked.job.name, "a");
         assert!(queue.is_empty());
         assert!(queue_on_disk(&fixture).await.is_empty());
     }
@@ -767,12 +767,12 @@ pub mod remove {
         let mut queue = fixture.open().await;
         enqueue_all(&mut queue, &["a"]).await;
 
-        assert!(queue.remove(Uuid::new_v4()).await.is_none());
+        assert!(queue.ack(Uuid::new_v4()).await.is_none());
         assert_eq!(queue.len(), 1);
     }
 }
 
-pub mod requeue {
+pub mod retry {
     use super::*;
 
     #[tokio::test]
@@ -783,13 +783,7 @@ pub mod requeue {
             let mut queue = fixture.open().await;
             let ids = enqueue_all(&mut queue, &["a", "b"]).await;
             let entry = queue.next_ready(now()).unwrap();
-            queue
-                .requeue(QueueEntry {
-                    attempts: 3,
-                    next_attempt_at: Some(deadline),
-                    ..entry
-                })
-                .await;
+            assert!(queue.retry(entry.id, 3, deadline).await);
             assert_eq!(
                 queue.earliest_next_attempt(),
                 Some(DateTime::<Utc>::MIN_UTC)
@@ -802,7 +796,7 @@ pub mod requeue {
         assert_eq!(names(&queue), strings(&["b", "a"]));
         let ready = queue.next_ready(now()).unwrap();
         assert_eq!(ready.id, ids[1]);
-        queue.remove(ready.id).await.unwrap();
+        queue.ack(ready.id).await.unwrap();
         // `a` waits out its backoff, then comes back with its attempt count
         assert!(queue.next_ready(now()).is_none());
         assert_eq!(queue.earliest_next_attempt(), Some(deadline));
@@ -813,14 +807,13 @@ pub mod requeue {
     }
 
     #[tokio::test]
-    async fn an_entry_that_was_removed_is_ignored() {
+    async fn an_acked_entry_is_not_retried() {
         let fixture = Fixture::new();
         let mut queue = fixture.open().await;
         let ids = enqueue_all(&mut queue, &["a", "b"]).await;
-        let stale = queue.next_ready(now()).unwrap();
-        queue.remove(ids[0]).await.unwrap();
+        queue.ack(ids[0]).await.unwrap();
 
-        queue.requeue(stale).await;
+        assert!(!queue.retry(ids[0], 1, now()).await);
 
         assert_eq!(names(&queue), strings(&["b"]));
         assert_eq!(queue_on_disk(&fixture).await, strings(&["b"]));
@@ -888,11 +881,11 @@ pub mod in_memory {
     }
 
     #[tokio::test]
-    async fn remove_drops_the_item() {
+    async fn ack_drops_the_item() {
         let mut queue = queue();
         let ids = enqueue_all(&mut queue, &["a"]).await;
 
-        queue.remove(ids[0]).await.unwrap();
+        queue.ack(ids[0]).await.unwrap();
 
         assert!(queue.is_empty());
         let err = queue.read(ids[0]).await.unwrap_err();

@@ -27,11 +27,9 @@ pub enum Persistence {
     Durable,
 }
 
-/// In-memory job queue with an optional single-file snapshot. Every mutation (`enqueue`,
-/// `remove`, `requeue`, `reset_invalid_deadlines`) persists as its last act,
-/// so there is exactly one persist implementation and no caller can forget
-/// to call it. Selection (`next_ready`, `count_ready`) never mutates and
-/// never persists.
+/// In-memory job queue with an optional single-file snapshot. Workers select
+/// with `next_ready`, which leaves the entry queued, then settle it with `ack`
+/// or `retry`. Every mutation persists as its last act; selection never does.
 pub struct FileQueue<J: QueueJob> {
     entries: VecDeque<QueueEntry<J>>,
     capacity: usize,
@@ -96,7 +94,7 @@ impl<J: QueueJob> FileQueue<J> {
             .iter()
             .find(|entry| Self::is_ready(entry, now))?;
         info!(
-            "{}: job dequeued; queue length {}",
+            "{}: job selected; queue length {}",
             J::LABEL,
             self.entries.len()
         );
@@ -136,7 +134,7 @@ impl<J: QueueJob> FileQueue<J> {
         self.push(id, job);
         if let Err(err) = self.persist().await {
             if self.persistence == Persistence::Durable {
-                self.remove_impl(id);
+                self.take(id);
                 return Err(EnqueueErr::FileSysErr(err));
             }
         }
@@ -161,40 +159,40 @@ impl<J: QueueJob> FileQueue<J> {
         );
     }
 
-    /// Drop the entry with `id` and persist the shortened queue. This is the
-    /// only point at which a job leaves durable storage, so call it only once
-    /// the worker has resolved the entry. Unknown ids are ignored.
-    pub async fn remove(&mut self, id: Uuid) -> Option<QueueEntry<J>> {
-        if let Some(entry) = self.remove_impl(id) {
-            let _ = self.persist().await;
-            info!(
-                "{}: job removed; queue length {}",
-                J::LABEL,
-                self.entries.len()
-            );
-            return Some(entry);
-        }
-        None
-    }
-
-    fn remove_impl(&mut self, id: Uuid) -> Option<QueueEntry<J>> {
-        let idx = self.entries.iter().position(|entry| entry.id == id)?;
-        self.entries.remove(idx)
-    }
-
-    /// Move `entry` to the tail, replacing whatever is queued under its id so
-    /// the caller's updated attempt count and backoff deadline are persisted.
-    /// This is a rotation of an entry the queue already holds, not an
-    /// admission, so it is not capacity-gated and cannot change [`Self::len`].
-    pub async fn requeue(&mut self, entry: QueueEntry<J>) {
-        self.remove_impl(entry.id);
-        self.entries.push_back(entry);
+    /// Remove the entry with `id` once the worker is done with it. Unknown ids
+    /// are ignored.
+    pub async fn ack(&mut self, id: Uuid) -> Option<QueueEntry<J>> {
+        let entry = self.take(id)?;
         let _ = self.persist().await;
         info!(
-            "{}: job requeued; queue length {}",
+            "{}: job acked; queue length {}",
             J::LABEL,
             self.entries.len()
         );
+        Some(entry)
+    }
+
+    /// Move the entry with `id` to the tail with updated `attempts` and
+    /// `next_attempt_at`. Returns `false` for an unknown id.
+    pub async fn retry(&mut self, id: Uuid, attempts: u32, next_attempt_at: DateTime<Utc>) -> bool {
+        let Some(mut entry) = self.take(id) else {
+            return false;
+        };
+        entry.attempts = attempts;
+        entry.next_attempt_at = Some(next_attempt_at);
+        self.entries.push_back(entry);
+        let _ = self.persist().await;
+        info!(
+            "{}: job queued for retry; queue length {}",
+            J::LABEL,
+            self.entries.len()
+        );
+        true
+    }
+
+    fn take(&mut self, id: Uuid) -> Option<QueueEntry<J>> {
+        let idx = self.entries.iter().position(|entry| entry.id == id)?;
+        self.entries.remove(idx)
     }
 
     /// Pull every `next_attempt_at` strictly beyond `horizon` back to it, so no

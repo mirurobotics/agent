@@ -107,7 +107,7 @@ impl UploaderImpl {
             Ok(report) => Ok(Some(report)),
             Err(DirQueueErr::FileSysErr(FileSysErr::PathDoesNotExistErr(_))) => {
                 error!("calibrations: dropping report {id}, whose file is missing");
-                self.queue.remove(id).await;
+                self.queue.ack(id).await;
                 self.streak
                     .next_wait(&Outcome::Resolved, &self.options.backoff);
                 Ok(None)
@@ -133,7 +133,7 @@ impl UploaderImpl {
     async fn resolve(&mut self, id: Uuid, result: Result<(), CalibrationsErr>) -> Outcome {
         let err = match result {
             Ok(()) => {
-                self.queue.remove(id).await;
+                self.queue.ack(id).await;
                 info!("calibrations: uploaded report {id}");
                 return Outcome::Resolved;
             }
@@ -145,7 +145,7 @@ impl UploaderImpl {
                 network: err.is_network_conn_err(),
             };
         }
-        self.queue.remove(id).await;
+        self.queue.ack(id).await;
         error!("calibrations: dropping report {id}, which can never be uploaded: {err}");
         Outcome::Resolved
     }
