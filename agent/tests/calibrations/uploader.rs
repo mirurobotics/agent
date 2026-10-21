@@ -12,15 +12,17 @@ use crate::mocks::error::SleepController;
 use crate::test_utils::calibrations::{layout, report};
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::calibrations::{
-    self, CalibrationsErr, DirQueue, Uploader, UploaderArgs, UploaderOptions,
+    CalibrationsErr, Queue, QueueSnapshotFile, Uploader, UploaderArgs, UploaderOptions,
 };
 use miru_agent::disk::layout::CalibrationsLayout;
+use miru_agent::errors::{Code, Error, HTTPCode};
 use miru_agent::filesys::{dirs, files, File, PathExt, WriteOptions};
-use miru_agent::queue::DirQueueOptions;
+use miru_agent::queue::Persistence;
 use miru_agent::sync::syncer::{CooldownEnd, SyncEvent};
 
 // external crates
 use futures::FutureExt;
+use serde_json::json;
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
@@ -59,26 +61,29 @@ impl Harness {
         }
     }
 
-    async fn open(&self) -> DirQueue {
-        self.open_with(calibrations::DEFAULT_OPTIONS).await
+    async fn snapshot_file(&self) -> QueueSnapshotFile {
+        QueueSnapshotFile::new_with_default(self.layout.queue(), Default::default())
+            .await
+            .unwrap()
     }
 
-    async fn open_with(&self, options: DirQueueOptions) -> DirQueue {
-        calibrations::open(&self.layout, options).await.unwrap()
+    /// The number of reports in the queue file, as the next boot would load it.
+    async fn queued_on_disk(&self) -> usize {
+        Queue::from_snapshot(1000, self.snapshot_file().await, Persistence::Durable).len()
     }
 
-    /// Open the queue and run an uploader on it until the test ends.
+    /// Run an uploader on the queue at the layout until the test ends.
     async fn spawn(&mut self) {
-        let queue = self.open().await;
-        self.spawn_with(queue);
+        self.spawn_with(UploaderOptions::default()).await;
     }
 
-    fn spawn_with(&mut self, queue: DirQueue) {
+    async fn spawn_with(&mut self, options: UploaderOptions) {
         let args = UploaderArgs {
-            queue,
+            snapshot_file: Some(self.snapshot_file().await),
+            reports: self.layout.reports(),
             sender: self.sender.clone(),
             events: self.events.as_ref().map(watch::Sender::subscribe),
-            options: UploaderOptions::default(),
+            options,
             sleep_fn: self.sleep.sleep_fn(),
         };
         let (uploader, handle) = Uploader::spawn(64, args);
@@ -102,8 +107,8 @@ impl Harness {
         self.events.as_ref().unwrap().send(event).unwrap();
     }
 
-    fn content_file(&self, id: Uuid) -> File {
-        self.layout.content().file(&format!("{id}.json"))
+    fn report_file(&self, id: Uuid) -> File {
+        self.layout.reports().file(&format!("{id}.json"))
     }
 
     async fn await_sleep(&self) {
@@ -130,14 +135,21 @@ impl Harness {
     }
 }
 
-/// A queue at `h`'s layout holding a report per slug, oldest first.
-async fn preloaded(h: &Harness, slugs: &[&str]) -> (DirQueue, Vec<Uuid>) {
-    let mut queue = h.open().await;
+/// Queue a report per slug at `h`'s layout, oldest first, as a previous run
+/// would have left them: metadata in `queue.json`, content in `reports/`.
+async fn preloaded(h: &Harness, slugs: &[&str]) -> Vec<Uuid> {
+    let mut queue = Queue::from_snapshot(1000, h.snapshot_file().await, Persistence::Durable);
     let mut ids = Vec::with_capacity(slugs.len());
     for slug in slugs {
-        ids.push(queue.enqueue(report(slug)).await.unwrap());
+        let report = report(slug);
+        let id = queue.enqueue(report.metadata).await.unwrap();
+        let file = h.report_file(id);
+        files::write_json(&file, &report.content, WriteOptions::OVERWRITE_ATOMIC)
+            .await
+            .unwrap();
+        ids.push(id);
     }
-    (queue, ids)
+    ids
 }
 
 async fn guard<T>(future: impl Future<Output = T>) -> T {
@@ -167,12 +179,12 @@ fn strings(names: &[&str]) -> Vec<String> {
 #[tokio::test]
 async fn drains_reports_buffered_before_start_in_order() {
     let mut h = Harness::new();
-    let (queue, _) = preloaded(&h, &["a", "b", "c"]).await;
+    preloaded(&h, &["a", "b", "c"]).await;
 
-    h.spawn_with(queue);
+    h.spawn().await;
 
     h.await_drained(&["a", "b", "c"]).await;
-    assert!(dirs::files(&h.layout.content()).await.unwrap().is_empty());
+    assert!(dirs::files(&h.layout.reports()).await.unwrap().is_empty());
     assert!(h.sleeps_secs().is_empty());
 }
 
@@ -227,27 +239,147 @@ async fn a_full_queue_is_507_and_keeps_what_it_holds() {
     let mut h = Harness::new();
     let (_hold, hang) = oneshot::channel::<()>();
     h.sender.push(Step::Hang(hang));
-    let options = DirQueueOptions {
+    let options = UploaderOptions {
         capacity: 1,
-        ..calibrations::DEFAULT_OPTIONS
+        ..UploaderOptions::default()
     };
-    let queue = h.open_with(options).await;
-    h.spawn_with(queue);
+    h.spawn_with(options).await;
     h.enqueue("a").await;
     h.await_started().await;
 
     let err = h.uploader().enqueue(report("b")).await.unwrap_err();
 
     assert!(matches!(err, CalibrationsErr::QueueFullErr(_)), "{err:?}");
+    assert_eq!(err.code().as_str(), "calibration_buffer_full");
+    assert_eq!(err.http_status(), HTTPCode::INSUFFICIENT_STORAGE);
+    assert_eq!(err.params(), Some(json!({ "max_reports": 1 })));
     assert_eq!(h.len().await, 1);
+}
+
+#[test]
+fn default_options_are_1000_reports_of_2_mib() {
+    let options = UploaderOptions::default();
+    assert_eq!(options.capacity, 1000);
+    assert_eq!(options.max_report_bytes, 2 * 1024 * 1024);
+}
+
+#[tokio::test]
+async fn an_oversized_report_is_413_and_writes_nothing() {
+    let mut h = Harness::new();
+    let options = UploaderOptions {
+        max_report_bytes: 100,
+        ..UploaderOptions::default()
+    };
+    h.spawn_with(options).await;
+    let mut big = report("arm");
+    big.content = json!({ "format": "text", "data": "x".repeat(200) });
+
+    let err = h.uploader().enqueue(big).await.unwrap_err();
+
+    assert!(matches!(err, CalibrationsErr::TooLargeErr(_)), "{err:?}");
+    assert!(matches!(err.code(), Code::CalibrationTooLarge));
+    assert_eq!(err.code().as_str(), "calibration_too_large");
+    assert_eq!(err.http_status(), HTTPCode::PAYLOAD_TOO_LARGE);
+    assert_eq!(err.params(), Some(json!({ "max_bytes": 100 })));
+    assert_eq!(h.len().await, 0);
+    assert!(!h.layout.reports().exists());
+}
+
+#[tokio::test]
+async fn a_report_file_write_failure_queues_nothing() {
+    let mut h = Harness::new();
+    // a regular file where the reports directory should be
+    let blocker = File::new(h.layout.reports().path().clone());
+    files::write_string(&blocker, "x", WriteOptions::OVERWRITE_ATOMIC)
+        .await
+        .unwrap();
+    h.spawn().await;
+
+    let err = h.uploader().enqueue(report("a")).await.unwrap_err();
+
+    assert!(matches!(err, CalibrationsErr::FileSysErr(_)), "{err:?}");
+    assert!(matches!(err.code(), Code::InternalServerError), "{err}");
+    assert_eq!(h.len().await, 0);
+}
+
+#[tokio::test]
+async fn a_queue_write_failure_queues_nothing() {
+    let mut h = Harness::new();
+    h.spawn().await;
+    // a non-empty directory where the queue file should be can't be replaced
+    files::delete(&h.layout.queue()).await.unwrap();
+    let blocker = h.layout.root.subdir("queue.json");
+    files::write_string(&blocker.file("x"), "x", WriteOptions::OVERWRITE_ATOMIC)
+        .await
+        .unwrap();
+
+    let err = h.uploader().enqueue(report("a")).await.unwrap_err();
+
+    assert!(matches!(err, CalibrationsErr::FileSysErr(_)), "{err:?}");
+    assert_eq!(h.len().await, 0);
+    assert!(!h.layout.reports().exists());
+}
+
+/// A report file that can't be deleted is left for the next boot's sweep;
+/// the report itself is still dequeued.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_report_file_that_cannot_be_deleted_still_dequeues_the_report() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let mut h = Harness::new();
+    preloaded(&h, &["a"]).await;
+    let reports = h.layout.reports();
+    let mode = |m| std::fs::set_permissions(reports.path(), std::fs::Permissions::from_mode(m));
+    mode(0o555).unwrap();
+
+    h.spawn().await;
+    h.await_drained(&["a"]).await;
+
+    mode(0o755).unwrap();
+    assert_eq!(h.queued_on_disk().await, 0);
+}
+
+#[tokio::test]
+async fn stores_metadata_in_the_queue_and_content_in_a_report_file() {
+    let mut h = Harness::new();
+    let (_hold, hang) = oneshot::channel::<()>();
+    h.sender.push(Step::Hang(hang));
+    h.spawn().await;
+
+    let id = h.enqueue("a").await;
+
+    let snapshot: serde_json::Value = files::read_json(&h.layout.queue()).await.unwrap();
+    assert_eq!(snapshot["entries"][0]["id"], json!(id.to_string()));
+    assert_eq!(snapshot["entries"][0]["job"]["component_slug"], json!("a"));
+    let content: serde_json::Value = files::read_json(&h.report_file(id)).await.unwrap();
+    assert_eq!(content, report("a").content);
+}
+
+#[tokio::test]
+async fn report_files_with_no_queue_entry_are_deleted_at_start() {
+    let mut h = Harness::new();
+    preloaded(&h, &["a"]).await;
+    let stray = h.report_file(Uuid::new_v4());
+    let other = h.layout.reports().file("notes.txt");
+    for file in [&stray, &other] {
+        files::write_string(file, "{}", WriteOptions::OVERWRITE_ATOMIC)
+            .await
+            .unwrap();
+    }
+
+    h.spawn().await;
+
+    h.await_drained(&["a"]).await;
+    assert!(dirs::files(&h.layout.reports()).await.unwrap().is_empty());
 }
 
 #[tokio::test]
 async fn offline_then_online_uploads_in_order() {
     let mut h = Harness::new();
     h.sender.push(Step::Network);
-    let (queue, _) = preloaded(&h, &["a", "b"]).await;
-    h.spawn_with(queue);
+    preloaded(&h, &["a", "b"]).await;
+    h.spawn().await;
 
     h.await_sleep().await;
     assert_eq!(h.sleeps_secs(), [10]);
@@ -334,8 +466,8 @@ async fn a_success_resets_the_backoff() {
     h.sender.push(Step::Server);
     h.sender.push(Step::Ok);
     h.sender.push(Step::Server);
-    let (queue, _) = preloaded(&h, &["a", "b"]).await;
-    h.spawn_with(queue);
+    preloaded(&h, &["a", "b"]).await;
+    h.spawn().await;
 
     for _ in 0..2 {
         h.await_sleep().await;
@@ -354,7 +486,7 @@ async fn terminal_rejection_is_dropped_not_retried() {
     let id = h.enqueue("a").await;
 
     h.await_drained(&["a"]).await;
-    assert!(!h.content_file(id).exists());
+    assert!(!h.report_file(id).exists());
 
     h.enqueue("b").await;
 
@@ -365,26 +497,26 @@ async fn terminal_rejection_is_dropped_not_retried() {
 #[tokio::test]
 async fn an_unreadable_report_is_dropped_without_sending() {
     let mut h = Harness::new();
-    let (queue, ids) = preloaded(&h, &["a", "b"]).await;
+    let ids = preloaded(&h, &["a", "b"]).await;
     files::write_string(
-        &h.content_file(ids[0]),
+        &h.report_file(ids[0]),
         "not json",
         WriteOptions::OVERWRITE_ATOMIC,
     )
     .await
     .unwrap();
-    h.spawn_with(queue);
+    h.spawn().await;
 
     h.await_drained(&["b"]).await;
-    assert!(!h.content_file(ids[0]).exists());
+    assert!(!h.report_file(ids[0]).exists());
 }
 
 #[tokio::test]
 async fn a_report_whose_file_is_missing_is_dropped() {
     let mut h = Harness::new();
-    let (queue, ids) = preloaded(&h, &["a", "b"]).await;
-    files::delete(&h.content_file(ids[0])).await.unwrap();
-    h.spawn_with(queue);
+    let ids = preloaded(&h, &["a", "b"]).await;
+    files::delete(&h.report_file(ids[0])).await.unwrap();
+    h.spawn().await;
 
     h.await_drained(&["b"]).await;
     assert_eq!(h.len().await, 0);
@@ -393,12 +525,12 @@ async fn a_report_whose_file_is_missing_is_dropped() {
 #[tokio::test]
 async fn a_read_error_is_retried() {
     let mut h = Harness::new();
-    let (queue, ids) = preloaded(&h, &["a"]).await;
+    let ids = preloaded(&h, &["a"]).await;
     // a directory where the report file should be cannot be read
-    files::delete(&h.content_file(ids[0])).await.unwrap();
-    let dir = h.layout.content().subdir(format!("{}.json", ids[0]));
+    files::delete(&h.report_file(ids[0])).await.unwrap();
+    let dir = h.layout.reports().subdir(format!("{}.json", ids[0]));
     dirs::create(&dir).await.unwrap();
-    h.spawn_with(queue);
+    h.spawn().await;
 
     h.await_sleep().await;
     assert_eq!(h.sleeps_secs(), [10]);
@@ -407,8 +539,8 @@ async fn a_read_error_is_retried() {
 
     dirs::delete(&dir).await.unwrap();
     files::write_json(
-        &h.content_file(ids[0]),
-        &report("a"),
+        &h.report_file(ids[0]),
+        &report("a").content,
         WriteOptions::OVERWRITE_ATOMIC,
     )
     .await
@@ -429,7 +561,7 @@ async fn shutdown_mid_upload_keeps_the_report_for_replay() {
 
     h.stop().await;
 
-    assert_eq!(h.open().await.len(), 1);
+    assert_eq!(h.queued_on_disk().await, 1);
     // the next boot sends it again: two sends in total, which Miru may store
     // twice (dedup is out of scope)
     h.spawn().await;
@@ -446,7 +578,7 @@ async fn shutdown_during_a_backoff() {
 
     h.stop().await;
 
-    assert_eq!(h.open().await.len(), 1);
+    assert_eq!(h.queued_on_disk().await, 1);
 }
 
 #[tokio::test]
@@ -541,5 +673,5 @@ async fn a_command_queued_behind_shutdown_fails() {
         "{err:?}"
     );
     guard(h.handle.take().unwrap()).await.unwrap();
-    assert_eq!(h.open().await.len(), 0);
+    assert_eq!(h.queued_on_disk().await, 0);
 }

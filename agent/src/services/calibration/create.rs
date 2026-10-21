@@ -37,7 +37,7 @@ pub async fn create(
         .await?
         .map(|deployment| deployment.id);
     let report = Report {
-        job: ReportMetadata {
+        metadata: ReportMetadata {
             component_slug: params.component_slug,
             role: params.role,
             aspect: params.aspect,

@@ -8,11 +8,12 @@ use std::time::Duration;
 use crate::mocks::calibration_sender::{MockCalibrationSender, Step};
 use crate::test_utils::calibrations::layout;
 use crate::test_utils::filesys::dirs as test_dirs;
-use miru_agent::calibrations::{self, Report, ReportMetadata, Uploader, UploaderArgs};
+use miru_agent::calibrations::{
+    QueueSnapshotFile, Report, ReportMetadata, Uploader, UploaderArgs, UploaderOptions,
+};
 use miru_agent::disk::{self, Layout};
 use miru_agent::errors::{Error, HTTPCode};
 use miru_agent::models::{Deployment, DplActivity};
-use miru_agent::queue::DirQueueOptions;
 use miru_agent::services::calibration::{self, CreateParams, Created};
 use miru_agent::services::ServiceErr;
 
@@ -31,20 +32,26 @@ struct Fixture {
 
 impl Fixture {
     async fn new() -> Self {
-        Self::with_options(calibrations::DEFAULT_OPTIONS).await
+        Self::with_options(UploaderOptions::default()).await
     }
 
-    async fn with_options(options: DirQueueOptions) -> Self {
+    async fn with_options(options: UploaderOptions) -> Self {
         let dir = test_dirs::temp("calibration_service_test").unwrap();
         let calibrations_layout = layout(&dir);
         let (sender, started) = MockCalibrationSender::new();
         let args = UploaderArgs {
-            queue: calibrations::open(&calibrations_layout, options)
+            snapshot_file: Some(
+                QueueSnapshotFile::new_with_default(
+                    calibrations_layout.queue(),
+                    Default::default(),
+                )
                 .await
                 .unwrap(),
+            ),
+            reports: calibrations_layout.reports(),
             sender: sender.clone(),
             events: None,
-            options: Default::default(),
+            options,
             sleep_fn: tokio::time::sleep,
         };
         let (uploader, _) = Uploader::spawn(64, args);
@@ -120,7 +127,7 @@ async fn accepted_while_offline() {
         calibrated_at: now(),
     };
     let uploaded = fixture.uploaded().await;
-    assert_eq!(uploaded.job, expected);
+    assert_eq!(uploaded.metadata, expected);
     assert_eq!(uploaded.content, params().content);
 }
 
@@ -133,7 +140,7 @@ async fn stamps_the_current_deployment() {
     fixture.create(params()).await.unwrap();
 
     let uploaded = fixture.uploaded().await;
-    assert_eq!(uploaded.job.deployment_id.as_deref(), Some("dpl_1"));
+    assert_eq!(uploaded.metadata.deployment_id.as_deref(), Some("dpl_1"));
 }
 
 #[tokio::test]
@@ -143,7 +150,7 @@ async fn no_deployment_is_fine() {
 
     fixture.create(params()).await.unwrap();
 
-    assert_eq!(fixture.uploaded().await.job.deployment_id, None);
+    assert_eq!(fixture.uploaded().await.metadata.deployment_id, None);
 }
 
 #[tokio::test]
@@ -161,9 +168,9 @@ async fn a_deployments_cache_error_fails_intake() {
 
 #[tokio::test]
 async fn queue_full_is_507() {
-    let options = DirQueueOptions {
+    let options = UploaderOptions {
         capacity: 1,
-        ..calibrations::DEFAULT_OPTIONS
+        ..UploaderOptions::default()
     };
     let fixture = Fixture::with_options(options).await;
     // the first report stays queued while its upload hangs
@@ -181,9 +188,9 @@ async fn queue_full_is_507() {
 
 #[tokio::test]
 async fn an_oversized_report_is_413() {
-    let options = DirQueueOptions {
-        max_item_bytes: 100,
-        ..calibrations::DEFAULT_OPTIONS
+    let options = UploaderOptions {
+        max_report_bytes: 100,
+        ..UploaderOptions::default()
     };
     let fixture = Fixture::with_options(options).await;
     let mut big = params();

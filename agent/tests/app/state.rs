@@ -298,13 +298,13 @@ pub mod init {
         let (state, state_handle) = env.init().await.unwrap();
 
         assert_eq!(state.calibrations.len().await.unwrap(), 0);
-        assert!(env.layout.calibrations().content().exists());
+        assert!(env.layout.calibrations().queue().exists());
         state.shutdown().await.unwrap();
         state_handle.await;
     }
 
     #[tokio::test]
-    async fn calibrations_run_in_memory_when_queue_path_unwritable() {
+    async fn boot_survives_an_unwritable_calibrations_directory() {
         let env = TestEnv::valid().await;
         // a regular file where the calibrations directory should be
         files::write_string(
@@ -317,9 +317,9 @@ pub mod init {
 
         let (state, state_handle) = env.init().await.unwrap();
 
-        // fail-open: calibrations run without persistence
-        state.calibrations.enqueue(report("arm")).await.unwrap();
-        assert!(!env.layout.calibrations().content().exists());
+        // fail-open: the uploader runs, though it can't store a report
+        assert_eq!(state.calibrations.len().await.unwrap(), 0);
+        assert!(state.calibrations.enqueue(report("arm")).await.is_err());
         state.shutdown().await.unwrap();
         state_handle.await;
     }

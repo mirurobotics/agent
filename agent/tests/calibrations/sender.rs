@@ -19,10 +19,10 @@ use serde_json::{json, Value};
 
 fn full_report() -> Report {
     let mut report = report("arm");
-    report.job.role = Some("left".to_string());
-    report.job.aspect = Some("pose".to_string());
-    report.job.serial_number = Some("SN-1".to_string());
-    report.job.deployment_id = Some("dpl_1".to_string());
+    report.metadata.role = Some("left".to_string());
+    report.metadata.aspect = Some("pose".to_string());
+    report.metadata.serial_number = Some("SN-1".to_string());
+    report.metadata.deployment_id = Some("dpl_1".to_string());
     report
 }
 

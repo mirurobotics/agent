@@ -51,7 +51,9 @@ impl MockCalibrationSender {
     /// The `component_slug` of every report `send` was called with, in order.
     pub fn sent(&self) -> Vec<String> {
         let sent = self.sent.lock().unwrap();
-        sent.iter().map(|r| r.job.component_slug.clone()).collect()
+        sent.iter()
+            .map(|r| r.metadata.component_slug.clone())
+            .collect()
     }
 
     /// Every report `send` was called with, in order.

@@ -164,7 +164,7 @@ impl CalibrationsLayout {
         self.root.file("queue.json")
     }
 
-    pub fn content(&self) -> filesys::Dir {
-        self.root.subdir("content")
+    pub fn reports(&self) -> filesys::Dir {
+        self.root.subdir("reports")
     }
 }

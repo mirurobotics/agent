@@ -1,8 +1,9 @@
 // internal crates
 use crate::authn::AuthnErr;
 use crate::errors::{Code, HTTPCode, Trace};
+use crate::filesys::FileSysErr;
 use crate::http::HTTPErr;
-use crate::queue::{DirQueueErr, ItemTooLargeErr, QueueFullErr};
+use crate::queue::{EnqueueErr, QueueFullErr};
 
 pub type SendActorMessageErr = crate::cache::errors::SendActorMessageErr;
 pub type ReceiveActorMessageErr = crate::cache::errors::ReceiveActorMessageErr;
@@ -33,8 +34,12 @@ impl crate::errors::Error for CalibrationBufferFullErr {
 /// The report is over the per-report size cap: 413 `calibration_too_large`.
 /// Nothing was written.
 #[derive(Debug, thiserror::Error)]
-#[error(transparent)]
-pub struct CalibrationTooLargeErr(pub ItemTooLargeErr);
+#[error("calibration report is {report_bytes} bytes, over the {max_bytes}-byte cap")]
+pub struct CalibrationTooLargeErr {
+    pub report_bytes: u64,
+    pub max_bytes: u64,
+    pub trace: Box<Trace>,
+}
 
 impl crate::errors::Error for CalibrationTooLargeErr {
     fn code(&self) -> Code {
@@ -47,7 +52,7 @@ impl crate::errors::Error for CalibrationTooLargeErr {
 
     fn params(&self) -> Option<serde_json::Value> {
         Some(serde_json::json!({
-            "max_bytes": self.0.max_item_bytes,
+            "max_bytes": self.max_bytes,
         }))
     }
 }
@@ -88,7 +93,7 @@ pub enum CalibrationsErr {
     #[error(transparent)]
     TooLargeErr(CalibrationTooLargeErr),
     #[error(transparent)]
-    QueueErr(DirQueueErr),
+    FileSysErr(FileSysErr),
     #[error(transparent)]
     InvalidReportErr(InvalidReportErr),
     #[error(transparent)]
@@ -101,15 +106,25 @@ pub enum CalibrationsErr {
     ReceiveActorMessageErr(ReceiveActorMessageErr),
 }
 
-/// A full queue becomes the calibration-specific 507 and an oversized report
-/// the 413; every other queue error passes through unchanged.
-impl From<DirQueueErr> for CalibrationsErr {
-    fn from(e: DirQueueErr) -> Self {
+/// A full queue becomes the calibration-specific 507.
+impl From<EnqueueErr> for CalibrationsErr {
+    fn from(e: EnqueueErr) -> Self {
         match e {
-            DirQueueErr::QueueFullErr(full) => Self::QueueFullErr(CalibrationBufferFullErr(full)),
-            DirQueueErr::ItemTooLargeErr(large) => Self::TooLargeErr(CalibrationTooLargeErr(large)),
-            other => Self::QueueErr(other),
+            EnqueueErr::QueueFullErr(full) => Self::QueueFullErr(CalibrationBufferFullErr(full)),
+            EnqueueErr::FileSysErr(e) => Self::FileSysErr(e),
         }
+    }
+}
+
+impl From<FileSysErr> for CalibrationsErr {
+    fn from(e: FileSysErr) -> Self {
+        Self::FileSysErr(e)
+    }
+}
+
+impl From<CalibrationTooLargeErr> for CalibrationsErr {
+    fn from(e: CalibrationTooLargeErr) -> Self {
+        Self::TooLargeErr(e)
     }
 }
 
@@ -134,7 +149,7 @@ impl From<AuthnErr> for CalibrationsErr {
 crate::impl_error!(CalibrationsErr {
     QueueFullErr,
     TooLargeErr,
-    QueueErr,
+    FileSysErr,
     InvalidReportErr,
     HTTPErr,
     TokenErr,

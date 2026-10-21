@@ -18,7 +18,7 @@ pub fn received_at() -> DateTime<Utc> {
 /// A sendable report told apart from others by its `component_slug`.
 pub fn report(slug: &str) -> Report {
     Report {
-        job: ReportMetadata {
+        metadata: ReportMetadata {
             component_slug: slug.to_string(),
             role: None,
             aspect: None,

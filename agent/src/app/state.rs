@@ -305,9 +305,8 @@ impl AppState {
     }
 }
 
-/// Open the calibration queue and spawn its uploader. A queue that fails to
-/// open is replaced by an in-memory one, so calibrations run without
-/// persistence (fail-open, like the uploader and deleter) and a bad
+/// Spawn the calibration uploader. A queue file that fails to open degrades
+/// to an in-memory queue (fail-open, like the uploader and deleter), so a bad
 /// calibrations directory can't block config deployment.
 async fn init_calibrations(
     layout: &disk::Layout,
@@ -316,14 +315,18 @@ async fn init_calibrations(
     syncer: &sync::Syncer,
 ) -> (Arc<calibrations::Uploader>, tokio::task::JoinHandle<()>) {
     let layout = layout.calibrations();
-    let options = calibrations::DEFAULT_OPTIONS;
-    let queue = match calibrations::open(&layout, options).await {
-        Ok(queue) => queue,
+    let snapshot_file = match calibrations::QueueSnapshotFile::new_with_default(
+        layout.queue(),
+        Default::default(),
+    )
+    .await
+    {
+        Ok(file) => Some(file),
         Err(e) => {
             tracing::error!(
-                "failed to open the calibration queue; calibrations will run without persistence, so reports still queued at a restart are lost: {e}"
-            );
-            calibrations::DirQueue::new(options)
+                    "failed to open the calibration queue; calibrations will run without persistence, so reports still queued at a restart are lost: {e}"
+                );
+            None
         }
     };
     let events = match syncer.subscribe().await {
@@ -334,7 +337,8 @@ async fn init_calibrations(
         }
     };
     let args = calibrations::UploaderArgs {
-        queue,
+        snapshot_file,
+        reports: layout.reports(),
         sender: Arc::new(calibrations::HttpSender::new(http_client, token_mngr)),
         events,
         options: calibrations::UploaderOptions::default(),

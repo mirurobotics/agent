@@ -6,7 +6,7 @@ use std::sync::Arc;
 use crate::authn::TokenManagerExt;
 use crate::calibrations::{
     errors::{CalibrationsErr, InvalidReportErr},
-    queue::Report,
+    report::Report,
 };
 use crate::http::{self, ClientI, HTTPErr};
 use crate::trace;
@@ -72,7 +72,7 @@ pub fn new_request(report: &Report) -> Result<CreateCalibrationRequest, Calibrat
         reason: format!("content is not a valid instance content: {e}"),
         trace: trace!(),
     })?;
-    let metadata = &report.job;
+    let metadata = &report.metadata;
     Ok(CreateCalibrationRequest {
         deployment_id: metadata.deployment_id.clone(),
         component_slug: metadata.component_slug.clone(),

@@ -250,9 +250,9 @@ pub mod calibrations_layout {
     }
 
     #[test]
-    fn content_dir() {
+    fn reports_dir() {
         let layout = Layout::default();
-        let dir = layout.calibrations().content();
-        assert_eq!(dir.to_string(), under_root(&["calibrations", "content"]));
+        let dir = layout.calibrations().reports();
+        assert_eq!(dir.to_string(), under_root(&["calibrations", "reports"]));
     }
 }

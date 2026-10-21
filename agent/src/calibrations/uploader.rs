@@ -6,10 +6,11 @@ use std::time::Duration;
 // internal crates
 use crate::calibrations::{
     errors::{CalibrationsErr, ReceiveActorMessageErr, SendActorMessageErr},
-    queue::{DirQueue, Report},
+    report::{QueueEntry, QueueSnapshotFile, Report},
     sender::Sender,
     uploader_impl::{UploaderImpl, UploaderOptions},
 };
+use crate::filesys::Dir;
 use crate::sync::syncer::SyncEvent;
 use crate::trace;
 use crate::workers::next_sync_event;
@@ -21,7 +22,10 @@ use tracing::{error, info};
 use uuid::Uuid;
 
 pub struct UploaderArgs<S, F> {
-    pub queue: DirQueue,
+    /// Where the queue persists; `None` keeps it in memory only.
+    pub snapshot_file: Option<QueueSnapshotFile>,
+    /// The directory holding one content file per queued report.
+    pub reports: Dir,
     pub sender: Arc<S>,
     /// Sync events; a successful sync ends a backoff early. `None` disables
     /// the early retry.
@@ -64,9 +68,10 @@ where
     Fut: Future<Output = ()> + Send + 'static,
 {
     async fn run(mut self) {
+        self.uploader.sweep().await;
         loop {
             let flow = match self.uploader.next_ready() {
-                Some(id) => self.attempt(id).await,
+                Some(entry) => self.attempt(entry).await,
                 None => self.idle().await,
             };
             if let Flow::Shutdown = flow {
@@ -76,10 +81,12 @@ where
         info!("calibrations: uploader shutdown complete");
     }
 
-    /// Send report `id`, settle it, then wait out any backoff. A shutdown
-    /// mid-send leaves the report queued, to be re-sent on the next boot.
-    async fn attempt(&mut self, id: Uuid) -> Flow {
-        let result = match self.uploader.read(id).await {
+    /// Send the report queued as `entry`, settle it, then wait out any
+    /// backoff. A shutdown mid-send leaves the report queued, to be re-sent on
+    /// the next boot.
+    async fn attempt(&mut self, entry: QueueEntry) -> Flow {
+        let id = entry.id;
+        let result = match self.uploader.read(entry).await {
             Ok(Some(report)) => {
                 let sender = self.sender.clone();
                 let send = self.serve_until(async move { sender.send(&report).await });
@@ -207,7 +214,7 @@ impl Uploader {
         let (sender, receiver) = mpsc::channel(buffer_size);
         let worker = Worker {
             receiver,
-            uploader: UploaderImpl::new(args.queue, args.options),
+            uploader: UploaderImpl::new(args.snapshot_file, args.reports, args.options),
             sender: args.sender,
             events: args.events,
             sleep_fn: args.sleep_fn,
