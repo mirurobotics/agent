@@ -1,10 +1,13 @@
 name: CI
 
 on:
+  schedule:
+    - cron: '17 6 * * *'
   push:
-    branches: [main, "release/*"]
+    branches: ["release/*"]
   pull_request:
     branches: [main, "release/*"]
+  workflow_dispatch:
   workflow_call:
 
 concurrency:
