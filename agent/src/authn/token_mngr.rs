@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 // internal crates
 use crate::authn::{errors::*, token, token::Token, token_mngr_impl::TokenManagerImpl};
-use crate::filesys::{file::File, state_file::SingleThreadStateFile};
+use crate::filesys::{file::File, state_file::StateFile};
 use crate::http;
 use crate::trace;
 
@@ -22,7 +22,7 @@ macro_rules! dispatch {
     }};
 }
 
-pub type TokenFile = SingleThreadStateFile<Token, token::Updates>;
+pub type TokenFile = StateFile<Token, token::Updates>;
 
 // =================================== TRAIT ======================================= //
 /// Futures are declared `+ Send` (like [`http::ClientI::execute`]) so generic
