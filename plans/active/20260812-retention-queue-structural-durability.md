@@ -142,7 +142,7 @@ Retention is an actor: `Deleter` (handle) + `Worker` (loop) in `agent/src/data_u
 The reference implementation to mirror, method for method:
 
 - `agent/src/data_uploads/upload/queue.rs` — `QueueEntry` with `#[serde(default = "Uuid::new_v4")] id: Uuid`; `next_ready(&self, now)` returning a clone and leaving the entry in the deque; `remove(&mut self, id) -> Option<QueueEntry>` as the only removal-persisting path, with a private `remove_impl`; `requeue(entry)` doing `remove_impl(entry.id)` then `push_back`.
-- `agent/src/data_uploads/upload/uploader.rs` — the worker hands the id back at each resolution point (`uploader.rs:200,217,243,248`).
+- `agent/src/data_uploads/upload/uploader_impl.rs` — `UploaderImpl` hands the id back at each resolution point (`finish_attempt` and the failure handlers it calls).
 - `agent/tests/data_uploads/upload/queue.rs` and `agent/tests/data_uploads/upload/uploader.rs` (`mod durability`) — the test structure to mirror.
 
 Test layout differs between the two modules today and this plan converges it. The upload queue has **no** inline tests; everything lives in `agent/tests/data_uploads/upload/queue.rs` against the public API (`upload/mod.rs` re-exports `Queue, QueueEntry, QueueSnapshot, QueueSnapshotFile`). The retention queue has ~270 lines of inline `#[cfg(test)] mod tests` plus a `#[cfg(test)] pub(crate) fn entries()` accessor, and `agent/tests/data_uploads/retention/` holds only three actor-boundary tests in `deleter.rs`.
