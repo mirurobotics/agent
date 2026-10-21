@@ -1,7 +1,7 @@
 // internal crates
 use crate::errors::Trace;
 
-/// Returned by [`super::Queue::enqueue`] when the queue is at capacity.
+/// Returned by [`super::FileQueue::enqueue`] when the queue is at capacity.
 /// Workers wrap this in their own error enum via `From`.
 #[derive(Debug, thiserror::Error)]
 #[error("{label} queue is full (capacity {capacity}); rejected job for file {name}")]

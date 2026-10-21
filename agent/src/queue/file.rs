@@ -13,18 +13,18 @@ use chrono::{DateTime, Utc};
 use tracing::{info, warn};
 use uuid::Uuid;
 
-/// In-memory job queue with an optional snapshot. Every mutation (`enqueue`,
+/// In-memory job queue with an optional single-file snapshot. Every mutation (`enqueue`,
 /// `remove`, `requeue`, `reset_invalid_deadlines`) persists as its last act,
 /// so there is exactly one persist implementation and no caller can forget
 /// to call it. Selection (`next_ready`, `count_ready`) never mutates and
 /// never persists.
-pub struct Queue<J: QueueJob> {
+pub struct FileQueue<J: QueueJob> {
     entries: VecDeque<QueueEntry<J>>,
     capacity: usize,
     snapshot_file: Option<QueueSnapshotFile<J>>,
 }
 
-impl<J: QueueJob> Queue<J> {
+impl<J: QueueJob> FileQueue<J> {
     /// An in-memory-only queue with no disk persistence.
     pub fn new(capacity: usize) -> Self {
         Self {
@@ -228,7 +228,7 @@ mod tests {
 
     #[tokio::test]
     async fn accessors_expose_the_queued_entries_in_order() {
-        let mut queue = Queue::<Job>::new(4);
+        let mut queue = FileQueue::<Job>::new(4);
         queue.enqueue(job("a.log")).await.unwrap();
         queue.enqueue(job("b.log")).await.unwrap();
 
