@@ -1,0 +1,57 @@
+# TEMPORARY: timing trial for windows-check. Never merged; the branch is
+# deleted once the numbers are in.
+name: Windows check trial
+
+on:
+  push:
+    branches: ["ci/windows-check-trial"]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  windows-trial:
+    name: windows-trial (${{ matrix.vcpu }} vCPU, ${{ matrix.mode }})
+    strategy:
+      fail-fast: false
+      matrix:
+        vcpu: [4, 8]
+        # current: the windows-check steps as on main.
+        # lean: prebuilt aws-lc NASM objects, no unused stable toolchain install.
+        mode: [current, lean]
+    runs-on: blacksmith-${{ matrix.vcpu }}vcpu-windows-2025
+    timeout-minutes: 60
+    env:
+      CARGO_PROFILE_DEV_DEBUG: 0
+      CARGO_INCREMENTAL: 0
+      AWS_LC_SYS_PREBUILT_NASM: ${{ matrix.mode == 'lean' && '1' || '' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Rust Toolchain
+        if: matrix.mode == 'current'
+        uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: trial-${{ matrix.vcpu }}-${{ matrix.mode }}
+          cache-on-failure: true
+          env-vars: AWS_LC_SYS
+
+      - name: Install NASM (aws-lc-sys)
+        if: matrix.mode == 'current'
+        run: |
+          choco install nasm -y
+          echo "C:\Program Files\NASM" >> $env:GITHUB_PATH
+
+      - name: Confirm NASM is absent
+        if: matrix.mode == 'lean'
+        run: |
+          if (Get-Command nasm -ErrorAction SilentlyContinue) { throw "nasm is on PATH; prebuilt objects would not be used" }
+          rustc --version
+
+      - name: Run Windows Tests
+        env:
+          RUST_LOG: "off"
+        run: cargo test --package miru-agent --locked
