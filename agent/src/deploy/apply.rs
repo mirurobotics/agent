@@ -1,5 +1,5 @@
 // internal crates
-use crate::data_uploads::scan::scanner_impl::validate_rules;
+use crate::data_uploads::scan::validate_rules;
 use crate::deploy::{errors::*, filesys as dpl_filesys, fsm};
 use crate::disk;
 use crate::filesys;

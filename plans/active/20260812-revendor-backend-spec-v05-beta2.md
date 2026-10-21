@@ -321,7 +321,7 @@ Non-test call sites to update: `agent/src/services/release/get.rs:7,24` and `age
 
 **Generated field rename `upload_rule_id` → `file_rule_id`.** `agent/src/data_uploads/upload/executor.rs:142` builds a generated `CreateUploadRequest` with `upload_rule_id: job.file_rule_id.clone()`. The struct field must become `file_rule_id:` or it will not compile. (The right-hand side already reads `job.file_rule_id` — that is a domain field and is already correct.)
 
-Optional and explicitly **out of scope** (PR 5 territory): the test-helper functions named `upload_rule()` in `agent/src/data_uploads/scan/scanner_impl.rs` (used from `scanner.rs` too, ~30 call sites) and `agent/tests/data_uploads/upload/sink.rs`. These are cosmetic local names, not wire vocabulary. Leave them.
+Optional and explicitly **out of scope** (PR 5 territory): the test-helper functions named `upload_rule()` in `agent/src/data_uploads/scan/scanner.rs` (~30 call sites) and `agent/tests/data_uploads/upload/sink.rs`. These are cosmetic local names, not wire vocabulary. Leave them.
 
 Commit:
 
@@ -439,7 +439,7 @@ Behavioral acceptance checks:
 
     rg -n 'upload_rules|UploadRule|UploadDeletePolicy|upload_rule_id' agent/src agent/tests
     # expect: no matches, unqualified. (The local helper fns named `upload_rule()`
-    # in data_uploads/scan/scanner_impl.rs and tests/data_uploads/upload/sink.rs are
+    # in data_uploads/scan/scanner.rs and tests/data_uploads/upload/sink.rs are
     # out of scope for this PR, but bare `upload_rule` does not match this
     # pattern, so they do not appear here. Any hit is a real miss.)
 
