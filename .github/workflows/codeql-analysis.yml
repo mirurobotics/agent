@@ -28,26 +28,7 @@ jobs:
       # successful run, so quiet repos don't rescan the same commit.
       - name: Check for commits since the last scan
         id: check
-        env:
-          GH_TOKEN: ${{ github.token }}
-          EVENT: ${{ github.event_name }}
-          REPO: ${{ github.repository }}
-          RUN_ID: ${{ github.run_id }}
-          SHA: ${{ github.sha }}
-        run: |
-          scan=true
-          if [ "$EVENT" = "schedule" ]; then
-            workflow_id=$(gh api "repos/$REPO/actions/runs/$RUN_ID" \
-              --jq .workflow_id) || true
-            runs="repos/$REPO/actions/workflows/$workflow_id/runs"
-            last_sha=$(gh api "$runs?branch=main&status=success&per_page=1" \
-              --jq '.workflow_runs[0].head_sha // ""') || true
-            if [ -n "$last_sha" ] && [ "$last_sha" = "$SHA" ]; then
-              echo "main is still at $SHA, which was already scanned."
-              scan=false
-            fi
-          fi
-          echo "scan=$scan" >> "$GITHUB_OUTPUT"
+        uses: mirurobotics/.github/actions/codeql-gate@d2aec010e6ce5c9dd65fb16e6d06a0f61e437734 # main
 
   codeql:
     needs: changes
