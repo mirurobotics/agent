@@ -4,9 +4,9 @@ use std::fmt::Debug;
 
 // internal crates
 use crate::cache::{
+    cache_impl::{CacheImpl, CacheKey, CacheValue},
     entry::CacheEntry,
     errors::{CacheErr, ReceiveActorMessageErr, SendActorMessageErr},
-    single_thread::{CacheKey, CacheValue, SingleThreadCache},
 };
 use crate::filesys::Overwrite;
 use crate::trace;
@@ -27,13 +27,13 @@ macro_rules! dispatch {
     }};
 }
 
-pub trait ConcurrentCacheKey: CacheKey + Send + Sync + 'static {}
+pub trait SendCacheKey: CacheKey + Send + Sync + 'static {}
 
-impl<K> ConcurrentCacheKey for K where K: CacheKey + Send + Sync + 'static {}
+impl<K> SendCacheKey for K where K: CacheKey + Send + Sync + 'static {}
 
-pub trait ConcurrentCacheValue: CacheValue + Send + Sync + 'static {}
+pub trait SendCacheValue: CacheValue + Send + Sync + 'static {}
 
-impl<V> ConcurrentCacheValue for V where V: CacheValue + Send + Sync + 'static {}
+impl<V> SendCacheValue for V where V: CacheValue + Send + Sync + 'static {}
 
 // ============================== WORKER COMMANDS ================================== //
 type QueryEntryFilter<K, V> = Box<dyn Fn(&CacheEntry<K, V>) -> bool + Send + Sync>;
@@ -134,21 +134,21 @@ where
 }
 
 // =================================== WORKER ====================================== //
-pub struct Worker<SingleThreadCacheT, K, V>
+pub struct Worker<ImplT, K, V>
 where
-    SingleThreadCacheT: SingleThreadCache<K, V>,
-    K: ConcurrentCacheKey,
-    V: ConcurrentCacheValue,
+    ImplT: CacheImpl<K, V>,
+    K: SendCacheKey,
+    V: SendCacheValue,
 {
-    pub cache: SingleThreadCacheT,
+    pub cache: ImplT,
     pub receiver: Receiver<Command<K, V>>,
 }
 
-impl<SingleThreadCacheT, K, V> Worker<SingleThreadCacheT, K, V>
+impl<ImplT, K, V> Worker<ImplT, K, V>
 where
-    SingleThreadCacheT: SingleThreadCache<K, V>,
-    K: ConcurrentCacheKey,
-    V: ConcurrentCacheValue,
+    ImplT: CacheImpl<K, V>,
+    K: SendCacheKey,
+    V: SendCacheValue,
 {
     // lint:allow(funclen) — actor dispatch table; one arm per Command variant
     pub async fn run(mut self) {
@@ -342,23 +342,23 @@ where
     }
 }
 
-// =============================== CONCURRENT CACHE ================================ //
+// ==================================== CACHE ====================================== //
 #[derive(Debug)]
-pub struct ConcurrentCache<SingleThreadCacheT, K, V>
+pub struct Cache<ImplT, K, V>
 where
-    SingleThreadCacheT: SingleThreadCache<K, V>,
-    K: ConcurrentCacheKey,
-    V: ConcurrentCacheValue,
+    ImplT: CacheImpl<K, V>,
+    K: SendCacheKey,
+    V: SendCacheValue,
 {
     sender: Sender<Command<K, V>>,
-    _phantom: std::marker::PhantomData<SingleThreadCacheT>,
+    _phantom: std::marker::PhantomData<ImplT>,
 }
 
-impl<SingleThreadCacheT, K, V> ConcurrentCache<SingleThreadCacheT, K, V>
+impl<ImplT, K, V> Cache<ImplT, K, V>
 where
-    SingleThreadCacheT: SingleThreadCache<K, V>,
-    K: ConcurrentCacheKey,
-    V: ConcurrentCacheValue,
+    ImplT: CacheImpl<K, V>,
+    K: SendCacheKey,
+    V: SendCacheValue,
 {
     pub fn new(sender: Sender<Command<K, V>>) -> Self {
         Self {
@@ -368,11 +368,11 @@ where
     }
 }
 
-impl<SingleThreadCacheT, K, V> ConcurrentCache<SingleThreadCacheT, K, V>
+impl<ImplT, K, V> Cache<ImplT, K, V>
 where
-    SingleThreadCacheT: SingleThreadCache<K, V>,
-    K: ConcurrentCacheKey,
-    V: ConcurrentCacheValue,
+    ImplT: CacheImpl<K, V>,
+    K: SendCacheKey,
+    V: SendCacheValue,
 {
     async fn send_command<R>(
         &self,

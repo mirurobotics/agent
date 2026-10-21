@@ -26,7 +26,7 @@ pub trait CacheValue: Debug + Clone + Serialize + DeserializeOwned {}
 impl<V> CacheValue for V where V: Debug + Clone + Serialize + DeserializeOwned {}
 
 #[allow(async_fn_in_trait)]
-pub trait SingleThreadCache<K, V>
+pub trait CacheImpl<K, V>
 where
     K: CacheKey,
     V: CacheValue,
