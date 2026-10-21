@@ -182,7 +182,7 @@ where
         }
     }
 
-    /// Resolve `entry` with the result of its attempt: remove it on success
+    /// Resolve `entry` with the result of its attempt: dequeue it on success
     /// or when it is dropped, otherwise requeue it at the tail.
     pub(crate) async fn finish_attempt(
         &mut self,
@@ -194,7 +194,7 @@ where
                 entry.attempts += 1;
                 Self::log_success(&entry);
                 self.enqueue_delete_job(&entry).await;
-                self.queue.remove(entry.id).await;
+                self.queue.dequeue(entry.id).await;
             }
             Err(err) if err.is_network_conn_err() => self.handle_network_failure(entry, err).await,
             Err(err) => self.handle_counted_failure(entry, err).await,
@@ -240,7 +240,7 @@ where
         let age = (self.now_fn)() - entry.job.first_observed_at;
         if age >= self.options.max_job_age {
             Self::log_age_drop(&entry, age, &err);
-            self.queue.remove(entry.id).await;
+            self.queue.dequeue(entry.id).await;
             return;
         }
 
@@ -265,12 +265,12 @@ where
 
         if err.is_terminal() {
             Self::log_terminal_drop(&entry, &err);
-            self.queue.remove(entry.id).await;
+            self.queue.dequeue(entry.id).await;
             return;
         }
         if entry.attempts >= self.options.attempts {
             Self::log_dropped(&entry, &err);
-            self.queue.remove(entry.id).await;
+            self.queue.dequeue(entry.id).await;
             return;
         }
 

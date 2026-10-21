@@ -97,7 +97,7 @@ impl DeleterImpl {
             match Self::sweep_entry(&entry.job).await {
                 SweepOutcome::Failed => self.handle_counted_failure(entry, now).await,
                 SweepOutcome::Deleted | SweepOutcome::AlreadyGone | SweepOutcome::Changed => {
-                    self.queue.remove(entry.id).await;
+                    self.queue.dequeue(entry.id).await;
                 }
             }
         }
@@ -110,7 +110,7 @@ impl DeleterImpl {
         entry.attempts += 1;
         if entry.attempts >= self.attempts {
             Self::log_exhausted_drop(&entry);
-            self.queue.remove(entry.id).await;
+            self.queue.dequeue(entry.id).await;
             return;
         }
 
@@ -698,9 +698,9 @@ mod tests {
             deleter.sweep().await.unwrap();
             drop(deleter);
 
-            // the due job was removed-and-persisted (Queue::remove) before the
-            // waiting job was considered, so a rebuild sees only the waiting
-            // job.
+            // the due job was dequeued-and-persisted (FileQueue::dequeue)
+            // before the waiting job was considered, so a rebuild sees only
+            // the waiting job.
             let restored = DeleterImpl::new(DeleterArgs {
                 snapshot_file: Some(snapshot_file(&state_path).await),
                 ..DeleterArgs::default()

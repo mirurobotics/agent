@@ -50,7 +50,7 @@ async fn drain<J: QueueJob>(queue: &mut FileQueue<J>) -> Vec<J> {
     let mut out = Vec::new();
     while let Some(entry) = queue.next_ready(now()) {
         out.push(entry.job);
-        queue.remove(entry.id).await;
+        queue.dequeue(entry.id).await;
     }
     out
 }
@@ -154,7 +154,7 @@ pub mod cases {
             assert_eq!(entry.attempts, 0);
             assert_eq!(entry.next_attempt_at, None);
             // the minted id is a working handle for removal
-            assert!(queue.remove(entry.id).await.is_some());
+            assert!(queue.dequeue(entry.id).await.is_some());
             assert!(queue.is_empty());
         }
     }
@@ -201,7 +201,7 @@ pub mod cases {
             enqueue(&mut queue, job).await;
 
             let first = queue.next_ready(now()).unwrap();
-            queue.remove(first.id).await.unwrap();
+            queue.dequeue(first.id).await.unwrap();
             let second = queue.next_ready(now()).unwrap();
             assert_eq!(first.job, second.job);
             assert_ne!(first.id, second.id);
@@ -304,7 +304,7 @@ pub mod cases {
             assert!(queue.next_ready(now()).is_none());
         }
 
-        pub async fn leaves_the_entry_on_disk_until_removed<J: QueueJob>(
+        pub async fn leaves_the_entry_on_disk_until_dequeued<J: QueueJob>(
             tmp: &str,
             make: fn(&str) -> J,
         ) {
@@ -316,22 +316,22 @@ pub mod cases {
             let entry = queue.next_ready(now()).unwrap();
             assert_eq!(on_disk::<J>(&path).await, jobs(make, &["a.log", "b.log"]));
 
-            let removed = queue.remove(entry.id).await.unwrap();
-            assert_eq!(removed.id, entry.id);
+            let dequeued = queue.dequeue(entry.id).await.unwrap();
+            assert_eq!(dequeued.id, entry.id);
             assert_eq!(on_disk::<J>(&path).await, jobs(make, &["b.log"]));
         }
     }
 
-    // --------------------------------- remove ------------------------------------ //
+    // --------------------------------- dequeue ----------------------------------- //
 
-    pub mod remove {
+    pub mod dequeue {
         use super::*;
 
         pub async fn unknown_id_is_ignored<J: QueueJob>(make: fn(&str) -> J) {
             let mut queue = FileQueue::<J>::new(DEFAULT_CAPACITY);
             enqueue(&mut queue, make("a.log")).await;
 
-            assert!(queue.remove(Uuid::new_v4()).await.is_none());
+            assert!(queue.dequeue(Uuid::new_v4()).await.is_none());
             assert_eq!(queue.len(), 1);
         }
 
@@ -342,7 +342,7 @@ pub mod cases {
             enqueue(&mut queue, job).await;
 
             let entry = queue.next_ready(now()).unwrap();
-            queue.remove(entry.id).await.unwrap();
+            queue.dequeue(entry.id).await.unwrap();
 
             assert_eq!(queue.len(), 1);
             assert_ne!(queue.next_ready(now()).unwrap().id, entry.id);
@@ -384,7 +384,7 @@ pub mod cases {
             // the appended entry lands at the tail carrying its attempt count
             let head = queue.next_ready(now()).unwrap();
             assert_eq!(head.job, make("a.log"));
-            queue.remove(head.id).await.unwrap();
+            queue.dequeue(head.id).await.unwrap();
             let tail = queue.next_ready(now()).unwrap();
             assert_eq!(tail.job, make("b.log"));
             assert_eq!(tail.attempts, 2);
@@ -490,7 +490,7 @@ pub mod cases {
             let mut drained = Vec::new();
             while let Some(entry) = queue.next_ready(beyond) {
                 drained.push((entry.job, entry.next_attempt_at));
-                queue.remove(entry.id).await;
+                queue.dequeue(entry.id).await;
             }
             assert_eq!(
                 drained,
@@ -577,7 +577,7 @@ pub mod cases {
 
         /// A persist landing between an entry's selection and its resolution
         /// must not write the selected entry out of the snapshot. Stronger than
-        /// [`super::next_ready::leaves_the_entry_on_disk_until_removed`], which
+        /// [`super::next_ready::leaves_the_entry_on_disk_until_dequeued`], which
         /// only pins that selection itself does not write: here an unrelated
         /// mutation does the writing while the entry is in flight.
         ///
@@ -610,7 +610,7 @@ pub mod cases {
             );
 
             // `a` leaves disk only when the worker resolves it.
-            queue.remove(in_flight.id).await.unwrap();
+            queue.dequeue(in_flight.id).await.unwrap();
             assert_eq!(on_disk::<J>(&path).await, jobs(make, &["b.log", "c.log"]));
         }
     }
@@ -686,10 +686,10 @@ macro_rules! queue_suite {
                 ],
             },
             next_ready {
-                disk: [leaves_the_entry_on_disk_until_removed],
+                disk: [leaves_the_entry_on_disk_until_dequeued],
                 mem: [skips_waiting_entries, is_none_when_empty],
             },
-            remove {
+            dequeue {
                 disk: [],
                 mem: [unknown_id_is_ignored, one_duplicate_leaves_the_other],
             },

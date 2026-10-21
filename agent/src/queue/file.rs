@@ -14,7 +14,7 @@ use tracing::{info, warn};
 use uuid::Uuid;
 
 /// In-memory job queue with an optional single-file snapshot. Every mutation (`enqueue`,
-/// `remove`, `requeue`, `reset_invalid_deadlines`) persists as its last act,
+/// `dequeue`, `requeue`, `reset_invalid_deadlines`) persists as its last act,
 /// so there is exactly one persist implementation and no caller can forget
 /// to call it. Selection (`next_ready`, `count_ready`) never mutates and
 /// never persists.
@@ -118,14 +118,15 @@ impl<J: QueueJob> FileQueue<J> {
         Ok(())
     }
 
-    /// Drop the entry with `id` and persist the shortened queue. This is the
-    /// only point at which a job leaves durable storage, so call it only once
-    /// the worker has resolved the entry. Unknown ids are ignored.
-    pub async fn remove(&mut self, id: Uuid) -> Option<QueueEntry<J>> {
+    /// Dequeue the entry with `id` and persist the shortened queue. The entry
+    /// need not be at the head, since `requeue` rotates entries to the tail.
+    /// This is the only point at which a job leaves durable storage, so call it
+    /// only once the worker has resolved the entry. Unknown ids are ignored.
+    pub async fn dequeue(&mut self, id: Uuid) -> Option<QueueEntry<J>> {
         if let Some(entry) = self.remove_impl(id) {
             self.persist().await;
             info!(
-                "{}: job removed; queue length {}",
+                "{}: job dequeued; queue length {}",
                 J::LABEL,
                 self.entries.len()
             );
