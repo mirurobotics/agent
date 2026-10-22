@@ -462,8 +462,14 @@ pub mod resolve_and_push {
         // Repair the release and verify the worker handles another sync.
         b.stores.put_rule("r1", "/none/*.mcap").await;
         b.stores.set_release_rules("absent", &["r1"]).await;
-        fire_sync_success(&b.syncer);
-        let payload = await_nth_update_rules(&b.scanner, 1).await;
+        // the worker may not have subscribed yet, and a send before it
+        // subscribes is never seen, so keep firing until it reacts
+        wait_until(|| {
+            fire_sync_success(&b.syncer);
+            b.scanner.update_rules_calls().len() == 1
+        })
+        .await;
+        let payload = b.scanner.update_rules_calls()[0].1.clone();
         assert_eq!(rule_ids(&payload), rule_id_set(["r1"]));
     }
 
