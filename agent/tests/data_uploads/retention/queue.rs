@@ -31,6 +31,9 @@ fn make_job(name: &str, observed_secs: i64, ttl_secs: u64) -> Job {
         ttl_secs,
         file_rule_id: "file_rule_1".to_string(),
         deployment_id: "dpl_1".to_string(),
+        // the queue compares deadlines as given, so the test's "uptime" here
+        // is the observed time plus the TTL
+        uptime_due_secs: Some(observed_secs as u64 + ttl_secs),
     }
 }
 
@@ -57,7 +60,7 @@ fn retention_job(name: &str) -> Job {
 queue_suite!(retention_job, "delete-generic-queue-test");
 
 /// The other state of the `ready_at` hook: a retention job is not ready until
-/// its TTL has elapsed, and `next_ready` / `count_ready` both honour it.
+/// its uptime deadline, and `next_ready` / `count_ready` both honour it.
 #[tokio::test]
 async fn a_job_whose_ttl_has_not_elapsed_is_not_ready() {
     let mut queue = Queue::new(DEFAULT_CAPACITY);
@@ -94,7 +97,8 @@ mod wire {
                 r#""digest":"sha256:a.log","mtime":"1970-01-01T00:15:00Z","#,
                 r#""first_observed_at":"1970-01-01T00:16:40Z","#,
                 r#""last_observed_at":"1970-01-01T00:16:40Z","ttl_secs":500,"#,
-                r#""file_rule_id":"file_rule_1","deployment_id":"dpl_1"}}}}]}}"#,
+                r#""file_rule_id":"file_rule_1","deployment_id":"dpl_1","#,
+                r#""uptime_due_secs":1500}}}}]}}"#,
             ),
             id = id,
             file = file_json,
@@ -109,5 +113,43 @@ mod wire {
         let entry = queue.next_ready(now()).unwrap();
         assert_eq!(entry.id, id);
         assert_eq!(entry.job, expected);
+    }
+
+    /// A job saved before deadlines existed loads with neither, and the queue
+    /// never selects it until the deleter gives it an uptime deadline.
+    #[tokio::test]
+    async fn a_job_saved_without_deadlines_loads_and_waits() {
+        let dir = test_dirs::temp("delete-queue-legacy").unwrap();
+        let path = dir.file("delete_queue.json");
+        let mut job = serde_json::to_value(make_job("a.log", 1000, 500)).unwrap();
+        job.as_object_mut().unwrap().remove("uptime_due_secs");
+        let raw = serde_json::json!({"entries": [{"id": Uuid::new_v4(), "job": job}]});
+        files::write_string(&path, &raw.to_string(), WriteOptions::OVERWRITE_ATOMIC)
+            .await
+            .unwrap();
+
+        let queue = Queue::from_snapshot(8, open(&path).await, Persistence::BestEffort);
+
+        assert_eq!(queue.len(), 1);
+        assert_eq!(
+            queue.count_ready(DateTime::<Utc>::MAX_UTC - TimeDelta::days(1)),
+            0
+        );
+    }
+
+    /// The uptime deadline rides as a plain optional key, omitted when unset.
+    #[test]
+    fn uptime_deadline_round_trips_and_is_omitted_when_unset() {
+        let job = make_job("a.log", 1000, 500);
+        let value = serde_json::to_value(&job).unwrap();
+        assert_eq!(value["uptime_due_secs"], 1500);
+        assert_eq!(serde_json::from_value::<Job>(value).unwrap(), job);
+
+        let unset = Job {
+            uptime_due_secs: None,
+            ..make_job("a.log", 1000, 500)
+        };
+        let value = serde_json::to_value(unset).unwrap();
+        assert!(value.get("uptime_due_secs").is_none());
     }
 }

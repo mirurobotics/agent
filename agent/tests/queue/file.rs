@@ -592,6 +592,62 @@ pub mod cases {
         }
     }
 
+    // ------------------------------- update_jobs --------------------------------- //
+
+    pub mod update_jobs {
+        use super::*;
+
+        pub async fn changes_jobs_and_counts_them<J: QueueJob>(make: fn(&str) -> J) {
+            let mut queue = FileQueue::<J>::new(DEFAULT_CAPACITY);
+            enqueue(&mut queue, make("a.log")).await;
+            enqueue(&mut queue, make("b.log")).await;
+
+            let changed = queue
+                .update_jobs(|job| {
+                    if *job != make("b.log") {
+                        return false;
+                    }
+                    *job = make("b2.log");
+                    true
+                })
+                .await;
+
+            assert_eq!(changed, 1);
+            let mut drained = Vec::new();
+            while let Some(entry) = queue.next_ready(now()) {
+                drained.push(entry.job);
+                queue.ack(entry.id).await;
+            }
+            assert_eq!(drained, vec![make("a.log"), make("b2.log")]);
+        }
+
+        pub async fn persists_a_change<J: QueueJob>(tmp: &str, make: fn(&str) -> J) {
+            let (_dir, path) = temp_path(tmp);
+            {
+                let mut queue = FileQueue::<J>::from_snapshot(
+                    DEFAULT_CAPACITY,
+                    open::<J>(&path).await,
+                    Persistence::BestEffort,
+                );
+                enqueue(&mut queue, make("a.log")).await;
+                let changed = queue
+                    .update_jobs(|job| {
+                        *job = make("a2.log");
+                        true
+                    })
+                    .await;
+                assert_eq!(changed, 1);
+            }
+
+            let reloaded = FileQueue::<J>::from_snapshot(
+                DEFAULT_CAPACITY,
+                open::<J>(&path).await,
+                Persistence::BestEffort,
+            );
+            assert_eq!(reloaded.next_ready(now()).unwrap().job, make("a2.log"));
+        }
+    }
+
     // -------------------------- reset_invalid_deadlines -------------------------- //
 
     pub mod reset_invalid_deadlines {
@@ -891,6 +947,10 @@ macro_rules! queue_suite {
                     waits_for_the_earliest_deadline,
                     pulls_in_a_deadline_past_the_horizon,
                 ],
+            },
+            update_jobs {
+                disk: [persists_a_change],
+                mem: [changes_jobs_and_counts_them],
             },
             reset_invalid_deadlines {
                 disk: [persists],
