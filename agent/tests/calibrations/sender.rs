@@ -7,15 +7,16 @@ use std::sync::Arc;
 use crate::mocks::http_client::{Call, MockClient};
 use crate::mocks::stub_token_manager::StubTokenManager;
 use crate::test_utils::calibrations::{received_at, report};
-use backend_api::models::{Calibration, InstanceContent, InstanceFormat};
+use backend_api::models::{Calibration, InstanceContent, InstanceFormat as BackendFormat};
 use miru_agent::authn::{errors::MockError as AuthnMockErr, AuthnErr};
 use miru_agent::calibrations::{sender::new_request, CalibrationsErr, HttpSender, Report, Sender};
 use miru_agent::errors::Error;
 use miru_agent::http::errors::{HTTPErr, MockErr, RequestFailed, UnmarshalJSONErr};
 use miru_agent::http::request::Params;
+use miru_agent::models::InstanceFormat;
 
 // external crates
-use serde_json::{json, Value};
+use serde_json::Value;
 
 fn full_report() -> Report {
     let mut report = report("arm");
@@ -24,13 +25,6 @@ fn full_report() -> Report {
     report.metadata.serial_number = Some("SN-1".to_string());
     report.metadata.deployment_id = Some("dpl_1".to_string());
     report
-}
-
-fn unparseable_report() -> Report {
-    Report {
-        content: json!({ "offset": 1 }),
-        ..report("arm")
-    }
 }
 
 fn request_failed(status: u16) -> HTTPErr {
@@ -54,7 +48,7 @@ pub mod new_request {
 
     #[test]
     fn maps_the_metadata() {
-        let request = new_request(&full_report()).unwrap();
+        let request = new_request(&full_report());
 
         assert_eq!(request.component_slug, "arm");
         assert_eq!(
@@ -69,7 +63,7 @@ pub mod new_request {
         assert_eq!(
             *request.content,
             InstanceContent {
-                format: InstanceFormat::INSTANCE_FORMAT_JSON,
+                format: BackendFormat::INSTANCE_FORMAT_JSON,
                 data: r#"{"offset":[1,2,3]}"#.to_string(),
             }
         );
@@ -77,7 +71,7 @@ pub mod new_request {
 
     #[test]
     fn omits_absent_fields() {
-        let request = new_request(&report("arm")).unwrap();
+        let request = new_request(&report("arm"));
 
         let value = serde_json::to_value(&request).unwrap();
         let mut keys: Vec<&str> = value
@@ -91,18 +85,19 @@ pub mod new_request {
     }
 
     #[test]
-    fn rejects_unparseable_content() {
-        let err = new_request(&unparseable_report()).unwrap_err();
+    fn sends_the_data_as_given_in_its_format() {
+        let mut report = report("arm");
+        report.metadata.format = InstanceFormat::Yaml;
+        report.data = "offset: [1, 2, 3]\n".to_string();
 
-        assert!(
-            matches!(err, CalibrationsErr::InvalidReportErr(_)),
-            "{err:?}"
-        );
-        assert!(err.is_terminal());
-        assert!(!err.is_network_conn_err());
-        assert!(
-            err.to_string().starts_with("invalid calibration report: "),
-            "{err}"
+        let request = new_request(&report);
+
+        assert_eq!(
+            *request.content,
+            InstanceContent {
+                format: BackendFormat::INSTANCE_FORMAT_YAML,
+                data: "offset: [1, 2, 3]\n".to_string(),
+            }
         );
     }
 }
@@ -220,22 +215,6 @@ pub mod send {
 
         assert!(!err.is_terminal());
         assert!(!err.is_network_conn_err());
-        assert!(client.requests().is_empty());
-    }
-
-    #[tokio::test]
-    async fn rejects_unparseable_content_before_any_request() {
-        let client = Arc::new(MockClient::default());
-
-        let err = sender(&client, StubTokenManager::ok("tok"))
-            .send(&unparseable_report())
-            .await
-            .unwrap_err();
-
-        assert!(
-            matches!(err, CalibrationsErr::InvalidReportErr(_)),
-            "{err:?}"
-        );
         assert!(client.requests().is_empty());
     }
 }

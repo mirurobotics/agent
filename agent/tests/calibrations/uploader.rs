@@ -145,7 +145,7 @@ impl Harness {
     }
 
     fn report_file(&self, id: Uuid) -> File {
-        self.layout.reports().file(&format!("{id}.json"))
+        self.layout.reports().file(&id.to_string())
     }
 
     async fn await_sleep(&self) {
@@ -173,7 +173,7 @@ impl Harness {
 }
 
 /// Queue a report per slug at `h`'s layout, oldest first, as a previous run
-/// would have left them: metadata in `queue.json`, content in `reports/`.
+/// would have left them: metadata in `queue.json`, data in `reports/`.
 async fn preloaded(h: &Harness, slugs: &[&str]) -> Vec<Uuid> {
     let mut queue = Queue::from_snapshot(1000, h.snapshot_file().await, Persistence::Durable);
     let mut ids = Vec::with_capacity(slugs.len());
@@ -181,7 +181,7 @@ async fn preloaded(h: &Harness, slugs: &[&str]) -> Vec<Uuid> {
         let report = report(slug);
         let id = queue.enqueue(report.metadata).await.unwrap();
         let file = h.report_file(id);
-        files::write_json(&file, &report.content, WriteOptions::OVERWRITE_ATOMIC)
+        files::write_string(&file, &report.data, WriteOptions::OVERWRITE_ATOMIC)
             .await
             .unwrap();
         ids.push(id);
@@ -305,10 +305,10 @@ async fn without_a_queue_file_the_queue_lives_in_memory() {
 }
 
 #[test]
-fn default_options_are_1000_reports_of_2_mib() {
+fn default_options_are_1000_reports_of_1_mib() {
     let options = UploaderOptions::default();
     assert_eq!(options.capacity, 1000);
-    assert_eq!(options.max_report_bytes, 2 * 1024 * 1024);
+    assert_eq!(options.max_report_bytes, 1024 * 1024);
 }
 
 #[tokio::test]
@@ -320,7 +320,7 @@ async fn an_oversized_report_is_413_and_writes_nothing() {
     };
     h.spawn_with(options).await;
     let mut big = report("arm");
-    big.content = json!({ "format": "text", "data": "x".repeat(200) });
+    big.data = "x".repeat(200);
 
     let err = h.uploader().enqueue(big).await.unwrap_err();
 
@@ -377,7 +377,7 @@ async fn a_file_with_a_non_utf8_name_is_deleted_at_start() {
 
     let mut h = Harness::new();
     preloaded(&h, &["a"]).await;
-    let name = std::ffi::OsStr::from_bytes(b"\xff.json");
+    let name = std::ffi::OsStr::from_bytes(b"\xff");
     let odd = File::new(h.layout.reports().path().join(name));
     files::write_string(&odd, "{}", WriteOptions::OVERWRITE_ATOMIC)
         .await
@@ -410,7 +410,7 @@ async fn a_report_file_that_cannot_be_deleted_still_dequeues_the_report() {
 }
 
 #[tokio::test]
-async fn stores_metadata_in_the_queue_and_content_in_a_report_file() {
+async fn stores_metadata_in_the_queue_and_data_in_a_report_file() {
     let mut h = Harness::new();
     let (_hold, hang) = oneshot::channel::<()>();
     h.sender.push(Step::Hang(hang));
@@ -421,8 +421,9 @@ async fn stores_metadata_in_the_queue_and_content_in_a_report_file() {
     let snapshot: serde_json::Value = files::read_json(&h.layout.queue()).await.unwrap();
     assert_eq!(snapshot["entries"][0]["id"], json!(id.to_string()));
     assert_eq!(snapshot["entries"][0]["job"]["component_slug"], json!("a"));
-    let content: serde_json::Value = files::read_json(&h.report_file(id)).await.unwrap();
-    assert_eq!(content, report("a").content);
+    assert_eq!(snapshot["entries"][0]["job"]["format"], json!("json"));
+    let data = files::read_string(&h.report_file(id)).await.unwrap();
+    assert_eq!(data, report("a").data);
 }
 
 #[tokio::test]
@@ -641,9 +642,9 @@ async fn terminal_rejection_is_dropped_not_retried() {
 async fn an_unreadable_report_is_dropped_without_sending() {
     let mut h = Harness::new();
     let ids = preloaded(&h, &["a", "b"]).await;
-    files::write_string(
+    files::write_bytes(
         &h.report_file(ids[0]),
-        "not json",
+        &[0xff, 0xfe],
         WriteOptions::OVERWRITE_ATOMIC,
     )
     .await
@@ -671,7 +672,7 @@ async fn a_read_error_is_retried() {
     let ids = preloaded(&h, &["a"]).await;
     // a directory where the report file should be cannot be read
     files::delete(&h.report_file(ids[0])).await.unwrap();
-    let dir = h.layout.reports().subdir(format!("{}.json", ids[0]));
+    let dir = h.layout.reports().subdir(ids[0].to_string());
     dirs::create(&dir).await.unwrap();
     h.spawn().await;
 
@@ -681,9 +682,9 @@ async fn a_read_error_is_retried() {
     assert_eq!(h.len().await, 1);
 
     dirs::delete(&dir).await.unwrap();
-    files::write_json(
+    files::write_string(
         &h.report_file(ids[0]),
-        &report("a").content,
+        &report("a").data,
         WriteOptions::OVERWRITE_ATOMIC,
     )
     .await

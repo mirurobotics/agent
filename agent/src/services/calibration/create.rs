@@ -1,6 +1,7 @@
 // internal crates
 use crate::calibrations::{Report, ReportMetadata, Uploader};
 use crate::disk;
+use crate::models::InstanceFormat;
 use crate::services::errors::ServiceErr;
 
 // external crates
@@ -13,8 +14,10 @@ pub struct CreateParams {
     pub role: Option<String>,
     pub aspect: Option<String>,
     pub serial_number: Option<String>,
-    /// The `{ format, data }` instance content, buffered exactly as given.
-    pub content: serde_json::Value,
+    /// The format `data` is serialized in.
+    pub format: InstanceFormat,
+    /// The calibration's values, buffered exactly as given.
+    pub data: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -39,13 +42,14 @@ pub async fn create(
     let report = Report {
         metadata: ReportMetadata {
             component_slug: params.component_slug,
+            format: params.format,
             role: params.role,
             aspect: params.aspect,
             serial_number: params.serial_number,
             deployment_id,
             calibrated_at: now,
         },
-        content: params.content,
+        data: params.data,
     };
     uploader.enqueue(report).await?;
     Ok(Created { reported_at: now })

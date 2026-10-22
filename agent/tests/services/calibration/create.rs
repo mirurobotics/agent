@@ -13,13 +13,12 @@ use miru_agent::calibrations::{
 };
 use miru_agent::disk::{self, Layout};
 use miru_agent::errors::{Error, HTTPCode};
-use miru_agent::models::{Deployment, DplActivity};
+use miru_agent::models::{Deployment, DplActivity, InstanceFormat};
 use miru_agent::services::calibration::{self, CreateParams, Created};
 use miru_agent::services::ServiceErr;
 
 // external crates
 use chrono::{DateTime, Utc};
-use serde_json::json;
 use tokio::sync::{mpsc, oneshot};
 
 struct Fixture {
@@ -106,8 +105,9 @@ fn params() -> CreateParams {
         role: Some("left".to_string()),
         aspect: Some("pose".to_string()),
         serial_number: Some("SN-1".to_string()),
-        // extra keys are kept: the caller's value is queued unchanged
-        content: json!({ "format": "yaml", "data": "offset: 1", "note": "kept" }),
+        format: InstanceFormat::Yaml,
+        // the caller's data is queued unchanged, comments and all
+        data: "offset: 1 # kept\n".to_string(),
     }
 }
 
@@ -121,6 +121,7 @@ async fn accepted_while_offline() {
     assert_eq!(created, Created { reported_at: now() });
     let expected = ReportMetadata {
         component_slug: "arm".to_string(),
+        format: InstanceFormat::Yaml,
         role: Some("left".to_string()),
         aspect: Some("pose".to_string()),
         serial_number: Some("SN-1".to_string()),
@@ -129,7 +130,7 @@ async fn accepted_while_offline() {
     };
     let uploaded = fixture.uploaded().await;
     assert_eq!(uploaded.metadata, expected);
-    assert_eq!(uploaded.content, params().content);
+    assert_eq!(uploaded.data, params().data);
 }
 
 #[tokio::test]
@@ -195,7 +196,7 @@ async fn an_oversized_report_is_413() {
     };
     let fixture = Fixture::with_options(options).await;
     let mut big = params();
-    big.content = json!({ "format": "text", "data": "x".repeat(200) });
+    big.data = "x".repeat(200);
 
     let err = fixture.create(big).await.unwrap_err();
 

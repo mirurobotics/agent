@@ -6,6 +6,7 @@ use crate::queue::file::queue_suite;
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::calibrations::{Queue, QueueSnapshot, QueueSnapshotFile, ReportMetadata};
 use miru_agent::filesys::{files, File, WriteOptions};
+use miru_agent::models::InstanceFormat;
 use miru_agent::queue::{Persistence, QueueJob};
 
 // external crates
@@ -16,6 +17,7 @@ use uuid::Uuid;
 fn metadata(name: &str) -> ReportMetadata {
     ReportMetadata {
         component_slug: name.to_string(),
+        format: InstanceFormat::Yaml,
         role: Some("aligner-1".to_string()),
         aspect: Some("pose".to_string()),
         serial_number: Some("SN-1".to_string()),
@@ -73,7 +75,7 @@ mod wire {
         let raw = format!(
             concat!(
                 r#"{{"entries":[{{"id":"{id}","job":{{"#,
-                r#""component_slug":"arm","#,
+                r#""component_slug":"arm","format":"yaml","#,
                 r#""role":"aligner-1","aspect":"pose","serial_number":"SN-1","#,
                 r#""deployment_id":"dpl_1","calibrated_at":"1970-01-01T00:16:40Z""#,
                 r#"}},"attempts":0,"next_attempt_at":null}}]}}"#,
@@ -98,7 +100,7 @@ mod wire {
         let dir = test_dirs::temp("calibration_queue_test").unwrap();
         let path = dir.to_dir().file("queue.json");
         let raw = concat!(
-            r#"{"entries":[{"job":{"component_slug":"arm","#,
+            r#"{"entries":[{"job":{"component_slug":"arm","format":"yaml","#,
             r#""calibrated_at":"1970-01-01T00:16:40Z"}}]}"#,
         );
         files::write_string(&path, raw, WriteOptions::OVERWRITE_ATOMIC)
@@ -139,6 +141,7 @@ mod wire {
                 "calibrated_at",
                 "component_slug",
                 "deployment_id",
+                "format",
                 "role",
                 "serial_number",
             ],
