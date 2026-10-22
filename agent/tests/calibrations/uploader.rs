@@ -78,8 +78,13 @@ impl Harness {
     }
 
     async fn spawn_with(&mut self, options: UploaderOptions) {
+        let snapshot_file = Some(self.snapshot_file().await);
+        self.spawn_on(snapshot_file, options);
+    }
+
+    fn spawn_on(&mut self, snapshot_file: Option<QueueSnapshotFile>, options: UploaderOptions) {
         let args = UploaderArgs {
-            snapshot_file: Some(self.snapshot_file().await),
+            snapshot_file,
             reports: self.layout.reports(),
             sender: self.sender.clone(),
             events: self.events.as_ref().map(watch::Sender::subscribe),
@@ -254,6 +259,17 @@ async fn a_full_queue_is_507_and_keeps_what_it_holds() {
     assert_eq!(err.http_status(), HTTPCode::INSUFFICIENT_STORAGE);
     assert_eq!(err.params(), Some(json!({ "max_reports": 1 })));
     assert_eq!(h.len().await, 1);
+}
+
+#[tokio::test]
+async fn without_a_queue_file_the_queue_lives_in_memory() {
+    let mut h = Harness::new();
+    h.spawn_on(None, UploaderOptions::default());
+
+    h.enqueue("a").await;
+
+    h.await_drained(&["a"]).await;
+    assert!(!h.layout.queue().exists());
 }
 
 #[test]
