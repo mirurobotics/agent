@@ -7,10 +7,9 @@ use std::time::Duration;
 use crate::disk;
 use crate::models::device;
 use crate::sync::{
-    syncer::{CooldownEnd, SyncEvent},
+    syncer::{next_sync_event, CooldownEnd, SyncEvent},
     SyncerExt,
 };
-use crate::workers::next_sync_event;
 
 // external crates
 use chrono::Utc;

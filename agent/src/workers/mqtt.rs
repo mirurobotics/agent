@@ -18,8 +18,10 @@ use crate::mqtt::{
     options::{ConnectAddress, Credentials, Options as MqttOptions},
     topics,
 };
-use crate::sync::{syncer::SyncEvent, SyncerExt};
-use crate::workers::next_sync_event;
+use crate::sync::{
+    syncer::{next_sync_event, SyncEvent},
+    SyncerExt,
+};
 
 // external crates
 use rumqttc::{ConnectReturnCode, Event, EventLoop, Incoming, Publish};
