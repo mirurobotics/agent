@@ -57,8 +57,7 @@ enum Flow {
 
 struct Worker<S, F, N> {
     receiver: mpsc::Receiver<Command>,
-    uploader: UploaderImpl<N>,
-    sender: Arc<S>,
+    uploader: UploaderImpl<S, N>,
     events: Option<watch::Receiver<SyncEvent>>,
     sleep_fn: F,
 }
@@ -90,9 +89,8 @@ where
     async fn attempt(&mut self, entry: QueueEntry) -> Flow {
         let result = match self.uploader.read(&entry).await {
             Ok(Some(report)) => {
-                let sender = self.sender.clone();
-                let send = self.serve_until(async move { sender.send(&report).await });
-                let Some(result) = send.await else {
+                let send = self.uploader.send(report);
+                let Some(result) = self.serve_until(send).await else {
                     return Flow::Shutdown;
                 };
                 result
@@ -223,12 +221,12 @@ impl Uploader {
         let worker = Worker {
             receiver,
             uploader: UploaderImpl::new(
+                args.sender,
                 args.snapshot_file,
                 args.reports,
                 args.options,
                 args.now_fn,
             ),
-            sender: args.sender,
             events: args.events,
             sleep_fn: args.sleep_fn,
         };

@@ -1,11 +1,14 @@
 // standard crates
 use std::collections::HashSet;
+use std::future::Future;
 use std::str::FromStr;
+use std::sync::Arc;
 
 // internal crates
 use crate::calibrations::{
     errors::{CalibrationTooLargeErr, CalibrationsErr, InvalidReportErr},
     report::{Queue, QueueEntry, QueueSnapshotFile, Report, ReportMetadata},
+    sender::Sender,
 };
 use crate::errors::Error;
 use crate::filesys::{
@@ -47,8 +50,8 @@ impl Default for UploaderOptions {
 pub(crate) type NextAttempt = queue::NextAttempt<ReportMetadata>;
 
 /// Single-threaded calibration uploader state and logic: the queue of report
-/// metadata and the directory of report files. [`Uploader`] runs it inside an
-/// actor and does the sending and waiting.
+/// metadata, the directory of report files, and the sender that uploads them.
+/// [`Uploader`] runs it inside an actor and does the waiting.
 ///
 /// Each queued report's data is its own file, `<reports>/<entry id>`, so large
 /// data is never rewritten with the queue. A failed report is
@@ -56,20 +59,23 @@ pub(crate) type NextAttempt = queue::NextAttempt<ReportMetadata>;
 /// `data_uploads::upload`, so one failing report never blocks the others.
 ///
 /// [`Uploader`]: crate::calibrations::Uploader
-pub struct UploaderImpl<N> {
+pub struct UploaderImpl<S, N> {
+    sender: Arc<S>,
     queue: Queue,
     reports: Dir,
     options: UploaderOptions,
     now_fn: N,
 }
 
-impl<N> UploaderImpl<N>
+impl<S, N> UploaderImpl<S, N>
 where
+    S: Sender + 'static,
     N: Fn() -> DateTime<Utc> + Send + Sync + 'static,
 {
     /// Without a `snapshot_file` the queue lives in memory, so reports still
     /// queued at a restart are lost.
     pub(crate) fn new(
+        sender: Arc<S>,
         snapshot_file: Option<QueueSnapshotFile>,
         reports: Dir,
         options: UploaderOptions,
@@ -80,6 +86,7 @@ where
             None => Queue::new(options.capacity),
         };
         Self {
+            sender,
             queue,
             reports,
             options,
@@ -161,6 +168,14 @@ where
             Err(FileSysErr::ConvertUTF8Err(e)) => Err(unreadable(e)),
             Err(e) => Err(e.into()),
         }
+    }
+
+    /// Build the upload of `report`. The future owns what it needs and
+    /// borrows nothing from `self`, so the worker can serve commands while it
+    /// runs.
+    pub(crate) fn send(&self, report: Report) -> impl Future<Output = Result<(), CalibrationsErr>> {
+        let sender = self.sender.clone();
+        async move { sender.send(&report).await }
     }
 
     /// Settle `entry` once its send (or read) ended in `result`: remove it
