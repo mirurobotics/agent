@@ -10,7 +10,7 @@ use chrono::{DateTime, Utc};
 /// A calibration as an on-device application reports it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CreateParams {
-    pub component_slug: String,
+    pub component: String,
     pub role: Option<String>,
     pub aspect: Option<String>,
     pub serial_number: Option<String>,
@@ -41,7 +41,7 @@ pub async fn create(
         .map(|deployment| deployment.id);
     let report = Report {
         metadata: ReportMetadata {
-            component_slug: params.component_slug,
+            component: params.component,
             format: params.format,
             role: params.role,
             aspect: params.aspect,

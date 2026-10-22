@@ -101,7 +101,7 @@ fn now() -> DateTime<Utc> {
 
 fn params() -> CreateParams {
     CreateParams {
-        component_slug: "arm".to_string(),
+        component: "arm".to_string(),
         role: Some("left".to_string()),
         aspect: Some("pose".to_string()),
         serial_number: Some("SN-1".to_string()),
@@ -120,7 +120,7 @@ async fn accepted_while_offline() {
 
     assert_eq!(created, Created { reported_at: now() });
     let expected = ReportMetadata {
-        component_slug: "arm".to_string(),
+        component: "arm".to_string(),
         format: InstanceFormat::Yaml,
         role: Some("left".to_string()),
         aspect: Some("pose".to_string()),
