@@ -17,7 +17,7 @@ use miru_agent::calibrations::{
 use miru_agent::disk::layout::CalibrationsLayout;
 use miru_agent::errors::{Code, Error, HTTPCode};
 use miru_agent::filesys::{dirs, files, File, PathExt, WriteOptions};
-use miru_agent::queue::{Persistence, RetryPolicy};
+use miru_agent::queue::Persistence;
 use miru_agent::sync::syncer::{CooldownEnd, SyncEvent};
 
 // external crates
@@ -556,10 +556,7 @@ async fn a_report_out_of_attempts_is_dropped() {
         h.sender.push(Step::Server);
     }
     let options = UploaderOptions {
-        retry: RetryPolicy {
-            attempts: 3,
-            ..RetryPolicy::default()
-        },
+        attempts: 3,
         ..UploaderOptions::default()
     };
     h.spawn_with(options).await;
@@ -582,10 +579,7 @@ async fn network_errors_do_not_use_up_attempts() {
         h.sender.push(Step::Network);
     }
     let options = UploaderOptions {
-        retry: RetryPolicy {
-            attempts: 1,
-            ..RetryPolicy::default()
-        },
+        attempts: 1,
         ..UploaderOptions::default()
     };
     h.spawn_with(options).await;

@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 // internal crates
+use crate::cooldown;
 use crate::data_uploads::{
     retention::{DeleterExt, Job as DeleteJob},
     upload::{
@@ -14,7 +15,7 @@ use crate::data_uploads::{
     },
 };
 use crate::errors::Error;
-use crate::queue::{NextAttempt, Persistence, RetryPolicy, Verdict};
+use crate::queue::Persistence;
 use crate::trace;
 
 // external crates
@@ -26,9 +27,11 @@ pub struct UploaderOptions {
     /// Maximum number of queued jobs. A job being uploaded stays queued until
     /// the backend confirms it, so it still counts against this.
     pub queue_capacity: usize,
-    /// When a failed job is retried and when it is dropped. A job's age is
-    /// measured from when its file was first observed.
-    pub retry: RetryPolicy,
+    /// Total executor attempts per job before it is dropped.
+    pub attempts: u32,
+    /// Backoff between attempts; the exponent is the job's lifetime attempt
+    /// count minus one, so waits grow across requeues and cap at `max_secs`.
+    pub backoff: cooldown::Backoff,
     /// Fixed floor of the per-attempt upload deadline. Covers control-plane
     /// RPCs (create/confirm, each bounded at 3 × 10s attempts) and connection
     /// setup so tiny files are never starved.
@@ -38,15 +41,25 @@ pub struct UploaderOptions {
     /// false timeout discards transfer progress, so this errs generous while
     /// still guaranteeing every attempt terminates.
     pub attempt_timeout_bytes_per_sec: u64,
+    /// Backstop on the network-error attempt exemption: a job first observed
+    /// longer ago than this is dropped even if every failure so far was
+    /// network-classified.
+    pub max_job_age: TimeDelta,
 }
 
 impl Default for UploaderOptions {
     fn default() -> Self {
         Self {
             queue_capacity: 1024,
-            retry: RetryPolicy::default(),
+            attempts: 30,
+            backoff: cooldown::Backoff {
+                base_secs: 10,
+                growth_factor: 2,
+                max_secs: 3600,
+            },
             attempt_timeout_floor: Duration::from_secs(120),
             attempt_timeout_bytes_per_sec: 64 * 1024,
+            max_job_age: TimeDelta::days(7),
         }
     }
 }
@@ -59,6 +72,17 @@ impl UploaderOptions {
         self.attempt_timeout_floor
             .saturating_add(Duration::from_secs(size.div_ceil(bps)))
     }
+}
+
+/// What the queue holds for the worker to do next.
+pub(crate) enum NextAttempt {
+    /// This entry is eligible for an attempt now.
+    Ready(QueueEntry),
+    /// The queue is empty.
+    Empty,
+    /// Every queued entry is waiting out its backoff; the earliest becomes
+    /// eligible after this wait.
+    Backoff(Duration),
 }
 
 /// Single-threaded uploader state and logic. [`Uploader`] runs it inside an
@@ -115,10 +139,26 @@ where
     }
 
     /// The entry to attempt now, or how long until one is eligible.
-    pub(crate) async fn next_attempt(&mut self) -> NextAttempt<Job> {
+    pub(crate) async fn next_attempt(&mut self) -> NextAttempt {
         let now = (self.now_fn)();
-        let horizon = self.options.retry.horizon(now);
-        self.queue.next_attempt(now, horizon).await
+        if let Some(entry) = self.queue.next_ready(now) {
+            return NextAttempt::Ready(entry);
+        }
+        if self.queue.is_empty() {
+            return NextAttempt::Empty;
+        }
+
+        // every queued entry is waiting out its backoff: wait until the
+        // earliest deadline
+        self.queue
+            .reset_invalid_deadlines(now + TimeDelta::seconds(self.options.backoff.max_secs.max(0)))
+            .await;
+        let wait = match self.queue.earliest_next_attempt() {
+            Some(at) => (at - now).to_std().unwrap_or(Duration::ZERO),
+            // unreachable: the queue is non-empty here
+            None => Duration::ZERO,
+        };
+        NextAttempt::Backoff(wait)
     }
 
     /// Build one executor attempt on `entry`, bounded by its size-scaled
@@ -159,7 +199,8 @@ where
                 self.enqueue_delete_job(&entry).await;
                 self.queue.ack(entry.id).await;
             }
-            Err(err) => self.handle_failure(entry, err).await,
+            Err(err) if err.is_network_conn_err() => self.handle_network_failure(entry, err).await,
+            Err(err) => self.handle_counted_failure(entry, err).await,
         }
     }
 
@@ -195,36 +236,50 @@ where
         }
     }
 
-    /// Settle a failed attempt as the retry policy says. Network connection
-    /// errors are expected and don't count toward the attempt budget; any
-    /// other failure does.
-    async fn handle_failure(&mut self, mut entry: QueueEntry, err: UploadErr) {
+    /// Network connection errors are expected and do not count toward the
+    /// attempt budget. Drop the job if it has aged past the backstop;
+    /// otherwise stamp a flat cooldown and requeue at the tail.
+    async fn handle_network_failure(&mut self, entry: QueueEntry, err: UploadErr) {
         let age = (self.now_fn)() - entry.job.first_observed_at;
-        match self.options.retry.on_failure(&err, entry.attempts, age) {
-            Verdict::Retry {
-                attempts,
-                wait_secs,
-            } => {
-                Self::log_failure(&entry, attempts, &err);
-                entry.attempts = attempts;
-                info!("upload: retrying {} in {wait_secs}s", entry.job.file);
-                self.retry_after(&entry, wait_secs).await;
-            }
-            Verdict::Terminal { attempts } => {
-                entry.attempts = attempts;
-                Self::log_terminal_drop(&entry, &err);
-                self.queue.ack(entry.id).await;
-            }
-            Verdict::OutOfAttempts { attempts } => {
-                entry.attempts = attempts;
-                Self::log_dropped(&entry, &err);
-                self.queue.ack(entry.id).await;
-            }
-            Verdict::TooOld { age } => {
-                Self::log_age_drop(&entry, age, &err);
-                self.queue.ack(entry.id).await;
-            }
+        if age >= self.options.max_job_age {
+            Self::log_age_drop(&entry, age, &err);
+            self.queue.ack(entry.id).await;
+            return;
         }
+
+        let wait = self.options.backoff.base_secs.max(0);
+        debug!(
+            "upload: network connection error for file {}; not counting attempt, \
+             retrying in {wait}s: {err:?}",
+            entry.job.file
+        );
+        self.retry_after(&entry, wait).await;
+    }
+
+    /// Counted failures bump the attempt budget. Drop on a terminal error or
+    /// when the budget is exhausted; otherwise stamp the growing backoff and
+    /// requeue at the tail.
+    async fn handle_counted_failure(&mut self, mut entry: QueueEntry, err: UploadErr) {
+        entry.attempts += 1;
+        warn!(
+            "upload: attempt {} for file {} failed: {err:?}",
+            entry.attempts, entry.job.file
+        );
+
+        if err.is_terminal() {
+            Self::log_terminal_drop(&entry, &err);
+            self.queue.ack(entry.id).await;
+            return;
+        }
+        if entry.attempts >= self.options.attempts {
+            Self::log_dropped(&entry, &err);
+            self.queue.ack(entry.id).await;
+            return;
+        }
+
+        let wait = cooldown::calc(&self.options.backoff, entry.attempts - 1).max(0);
+        info!("upload: retrying {} in {wait}s", entry.job.file);
+        self.retry_after(&entry, wait).await;
     }
 
     /// Retry `entry` at the tail once `wait_secs` have passed, recording its
@@ -235,17 +290,6 @@ where
         info!("upload: requeuing {file} at tail after {attempts} attempt(s)");
         let next_attempt_at = (self.now_fn)() + TimeDelta::seconds(wait_secs);
         self.queue.retry(entry.id, attempts, next_attempt_at).await;
-    }
-
-    fn log_failure(entry: &QueueEntry, attempts: u32, err: &UploadErr) {
-        let file = &entry.job.file;
-        if err.is_network_conn_err() {
-            debug!(
-                "upload: network connection error for file {file}; not counting attempt: {err:?}"
-            );
-        } else {
-            warn!("upload: attempt {attempts} for file {file} failed: {err:?}");
-        }
     }
 
     fn log_attempt(entry: &QueueEntry) {
