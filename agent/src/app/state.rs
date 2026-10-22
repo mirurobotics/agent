@@ -231,8 +231,8 @@ impl AppState {
             Ok(file) => Some(file),
             Err(e) => {
                 tracing::error!(
-                        "failed to initialize uptime file; retention will count uptime from zero after each restart: {e}"
-                    );
+                    "failed to initialize uptime file; retention will count uptime from zero after each restart: {e}"
+                );
                 None
             }
         };

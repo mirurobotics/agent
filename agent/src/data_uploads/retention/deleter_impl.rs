@@ -127,17 +127,23 @@ impl DeleterImpl {
         Ok(())
     }
 
-    /// Give an uptime deadline to each job saved before deadlines existed. Its
-    /// only stamp came from the system clock, which cannot be trusted, so its
-    /// TTL starts over from now.
+    /// Make sure every uptime deadline is at most a full TTL from now, which
+    /// no deadline can honestly exceed.
+    /// - A job saved before deadlines existed has none. Its only stamp came
+    ///   from the system clock, which cannot be trusted, so its TTL starts
+    ///   over from now.
+    /// - A deadline further out means the saved uptime was lost (a corrupt
+    ///   or missing `uptime.json`) and the count restarted from zero. Pulling
+    ///   it in to a full TTL from now still never deletes early.
     async fn start_unset_deadlines(&mut self) {
         let uptime_now = self.uptime.now();
         self.queue
             .update_jobs(|job| {
-                if job.uptime_due_secs.is_some() {
+                let latest = job.uptime_due_from(uptime_now);
+                if job.uptime_due_secs.is_some_and(|due| due <= latest) {
                     return false;
                 }
-                job.uptime_due_secs = Some(job.uptime_due_from(uptime_now));
+                job.uptime_due_secs = Some(latest);
                 true
             })
             .await;
@@ -1134,6 +1140,38 @@ mod tests {
             assert_eq!(only_job(&deleter).uptime_due_secs, Some(500));
 
             // its calendar-date retry deadline was pulled back too
+            clock.advance(500);
+            deleter.sweep().await.unwrap();
+            assert!(!tmp.file().exists());
+        }
+
+        #[tokio::test]
+        async fn a_lost_uptime_file_keeps_files_at_most_one_more_ttl() {
+            let dir = test_dirs::temp("delete-deadlines-lost-uptime").unwrap();
+            let tmp = temp_file(b"aaaa").await;
+            let mut snapshot = snapshot_file(&dir.file("delete_queue.json")).await;
+            snapshot
+                .patch(DeleteQueueSnapshot {
+                    entries: vec![QueueEntry {
+                        id: Uuid::new_v4(),
+                        job: Job {
+                            // counted on a saved uptime that is now gone
+                            uptime_due_secs: Some(1_000_000),
+                            ..make_job(tmp.file(), 1000, 500).await
+                        },
+                        attempts: 0,
+                        next_attempt_at: None,
+                    }],
+                })
+                .await
+                .unwrap();
+            let clock = Clock::new(REAL_DATE);
+            let mut deleter = persisted(&clock, &dir).await;
+
+            deleter.sweep().await.unwrap();
+            assert!(tmp.file().exists());
+            assert_eq!(only_job(&deleter).uptime_due_secs, Some(500));
+
             clock.advance(500);
             deleter.sweep().await.unwrap();
             assert!(!tmp.file().exists());
