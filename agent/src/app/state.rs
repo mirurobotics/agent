@@ -10,7 +10,7 @@ use crate::data_uploads::{
     scan::{self, state::ScanSnapshotFile, ScannerArgs, ScannerExt},
     upload::{self, UploaderExt},
 };
-use crate::deploy::{apply, fsm};
+use crate::deploy::{self, apply, fsm};
 use crate::disk;
 use crate::events;
 use crate::filesys::{File, PathExt};
@@ -220,6 +220,7 @@ impl AppState {
             }
         };
 
+        let clock = http_client.clock().clone();
         let executor = Arc::new(upload::LiveExecutor::new(
             http_client,
             token_mngr,
@@ -232,7 +233,7 @@ impl AppState {
             upload::UploaderOptions::default(),
             snapshot_file,
             |wait| tokio::time::sleep(wait),
-            chrono::Utc::now,
+            clock,
         )?;
         Ok((Arc::new(uploader), handle))
     }
@@ -314,6 +315,7 @@ fn build_syncer_args(
     event_hub: events::EventHub,
     system_metadata_cache: File,
 ) -> SyncerArgs<http::Client, authn::TokenManager> {
+    let deployment_cooldowns = deploy::Cooldowns::new(http_client.clock().clone());
     SyncerArgs {
         storage,
         http_client,
@@ -321,6 +323,7 @@ fn build_syncer_args(
         deploy_opts: apply::DeployOpts {
             retry_policy: dpl_retry_policy,
         },
+        deployment_cooldowns,
         backoff: cooldown::Backoff {
             base_secs: 1,
             growth_factor: 2,

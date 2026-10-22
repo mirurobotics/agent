@@ -1,10 +1,13 @@
+// standard crates
+use std::time::Duration;
+
 // internal crates
 use crate::cooldown;
 use crate::errors::Error;
 use crate::models::{self, deployment::Updates, Patch};
 
 // external crates
-use chrono::{TimeDelta, Utc};
+use chrono::Utc;
 
 // ================================ NEXT ACTION ==================================== //
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -13,22 +16,21 @@ pub enum NextAction {
     Deploy,
     Remove,
     Archive,
-    Wait(TimeDelta),
+    Wait(Duration),
 }
 
-pub fn next_action(deployment: &models::Deployment) -> NextAction {
+/// What to do next with `deployment`. `cooldown` is how much of its retry
+/// cooldown is left (see [`crate::deploy::Cooldowns`]), or `None` if it is
+/// not cooling down.
+pub fn next_action(deployment: &models::Deployment, cooldown: Option<Duration>) -> NextAction {
     // do nothing if the status is failed
     if deployment.error_status == models::DplErrStatus::Failed {
         return NextAction::None;
     }
 
     // check for cooldown
-    if deployment.is_in_cooldown() {
-        return NextAction::Wait(
-            deployment
-                .cooldown_ends_at
-                .signed_duration_since(Utc::now()),
-        );
+    if let Some(wait) = cooldown.filter(|wait| !wait.is_zero()) {
+        return NextAction::Wait(wait);
     }
 
     // determine the next action
@@ -119,11 +121,6 @@ fn get_success_updates(
         } else {
             None
         },
-        cooldown: if has_recovered(deployment, new_activity) {
-            Some(TimeDelta::zero())
-        } else {
-            None
-        },
         deployed_at: if new_activity == models::DplActivity::Deployed {
             Some(Utc::now())
         } else {
@@ -197,6 +194,13 @@ fn should_bump_attempts(e: &impl Error) -> bool {
     !e.is_network_conn_err()
 }
 
+/// How long to wait before retrying `deployment` after the failure that
+/// [`error`] just recorded: the backoff for its attempt count.
+pub fn cooldown(deployment: &models::Deployment, retry_policy: &RetryPolicy) -> Duration {
+    let secs = cooldown::calc(&retry_policy.backoff, deployment.attempts);
+    Duration::from_secs(u64::try_from(secs).unwrap_or(0))
+}
+
 fn get_error_updates(
     deployment: &models::Deployment,
     bump_attempts: bool,
@@ -215,13 +219,10 @@ fn get_error_updates(
         new_error_status = Some(models::DplErrStatus::Failed);
     }
 
-    let cooldown = cooldown::calc(&retry_policy.backoff, attempts);
-
     Updates {
         activity_status: None,
         error_status: new_error_status,
         attempts: Some(attempts),
-        cooldown: Some(TimeDelta::seconds(cooldown)),
         deployed_at: None,
         archived_at: None,
     }
@@ -231,6 +232,7 @@ fn get_error_updates(
 mod tests {
     use super::*;
     use crate::cooldown;
+    use chrono::TimeDelta;
     use models::{Deployment, DplActivity, DplErrStatus, DplTarget};
 
     // ================================ MOCK ERROR ================================= //
@@ -261,61 +263,23 @@ mod tests {
         const ACTIONABLE_ERROR_STATUSES: [DplErrStatus; 2] =
             [DplErrStatus::None, DplErrStatus::Retrying];
 
-        fn validate_eq_wait_time(expected: TimeDelta, actual: TimeDelta, tol: TimeDelta) {
-            assert!(
-                expected - actual > -tol,
-                "expected wait time {expected} is not equal to actual wait time {actual}",
-            );
-            assert!(
-                expected - actual < tol,
-                "expected wait time {expected} is not equal to actual wait time {actual}",
-            );
-        }
-
-        fn validate_next_action(expected: NextAction, actual: NextAction) {
-            // if the expected action is not a wait, then the actual action should be
-            // the same
-            let expected_wait_time = match expected {
-                NextAction::Wait(expected_wait_time) => expected_wait_time,
-                _ => {
-                    assert_eq!(expected, actual);
-                    return;
-                }
-            };
-
-            // if the actual action is not a wait, then the expected action should be
-            // the same
-            let actual_wait_time = match actual {
-                NextAction::Wait(actual_wait_time) => actual_wait_time,
-                _ => {
-                    assert_eq!(expected, actual);
-                    return;
-                }
-            };
-
-            // both actions are waits, so validate the wait times. The actual wait
-            // is measured against a second Utc::now() call, so the tolerance must
-            // absorb scheduler delays between the two clock reads under load.
-            validate_eq_wait_time(
-                expected_wait_time,
-                actual_wait_time,
-                TimeDelta::milliseconds(250),
-            );
-        }
-
         struct Expected {
             staged: NextAction,
             deployed: NextAction,
             archived: NextAction,
         }
 
-        fn validate_next_actions(mut deployment: Deployment, expected: &Expected) {
+        fn validate_next_actions(
+            mut deployment: Deployment,
+            cooldown: Option<Duration>,
+            expected: &Expected,
+        ) {
             deployment.target_status = DplTarget::Staged;
-            validate_next_action(expected.staged, next_action(&deployment));
+            assert_eq!(expected.staged, next_action(&deployment, cooldown));
             deployment.target_status = DplTarget::Deployed;
-            validate_next_action(expected.deployed, next_action(&deployment));
+            assert_eq!(expected.deployed, next_action(&deployment, cooldown));
             deployment.target_status = DplTarget::Archived;
-            validate_next_action(expected.archived, next_action(&deployment));
+            assert_eq!(expected.archived, next_action(&deployment, cooldown));
         }
 
         // From the FSM table:
@@ -332,14 +296,16 @@ mod tests {
                 ..Default::default()
             };
 
-            // actionable error statuses (None, Retrying) without cooldown
+            // actionable error statuses (None, Retrying) without cooldown; a
+            // zero cooldown counts as none
             for error_status in ACTIONABLE_ERROR_STATUSES {
                 deployment.error_status = error_status;
-                validate_next_actions(deployment.clone(), &actionable);
+                validate_next_actions(deployment.clone(), None, &actionable);
+                validate_next_actions(deployment.clone(), Some(Duration::ZERO), &actionable);
             }
 
             // actionable error statuses with cooldown → always Wait
-            let cooldown = TimeDelta::minutes(60);
+            let cooldown = Duration::from_secs(60 * 60);
             let wait_all = Expected {
                 staged: NextAction::Wait(cooldown),
                 deployed: NextAction::Wait(cooldown),
@@ -347,18 +313,18 @@ mod tests {
             };
             for error_status in ACTIONABLE_ERROR_STATUSES {
                 deployment.error_status = error_status;
-                deployment.set_cooldown(cooldown);
-                validate_next_actions(deployment.clone(), &wait_all);
+                validate_next_actions(deployment.clone(), Some(cooldown), &wait_all);
             }
 
-            // failed error status → always None
+            // failed error status → always None, cooldown or not
             let none_all = Expected {
                 staged: NextAction::None,
                 deployed: NextAction::None,
                 archived: NextAction::None,
             };
             deployment.error_status = DplErrStatus::Failed;
-            validate_next_actions(deployment.clone(), &none_all);
+            validate_next_actions(deployment.clone(), None, &none_all);
+            validate_next_actions(deployment.clone(), Some(cooldown), &none_all);
         }
 
         #[test]
@@ -483,16 +449,6 @@ mod tests {
                 .collect()
         }
 
-        fn with_cooldown(deployments: Vec<Deployment>, cooldown: TimeDelta) -> Vec<Deployment> {
-            deployments
-                .into_iter()
-                .map(|mut d| {
-                    d.set_cooldown(cooldown);
-                    d
-                })
-                .collect()
-        }
-
         // --- deploy transition ---
 
         fn validate_deploy_transition(deployment: Deployment, expected_error_status: DplErrStatus) {
@@ -502,19 +458,6 @@ mod tests {
 
             let recovered = deployment.error_status == DplErrStatus::Retrying
                 && expected_error_status == DplErrStatus::None;
-
-            // verify cooldown behavior
-            if recovered {
-                assert!(
-                    !actual.is_in_cooldown(),
-                    "cooldown should be cleared on recovery"
-                );
-            } else {
-                assert_eq!(
-                    actual.cooldown_ends_at, deployment.cooldown_ends_at,
-                    "cooldown should be unchanged when not recovering"
-                );
-            }
 
             // verify timestamps: deployed_at is always freshly set; archived_at is
             // an independent watermark preserved from the input (never cleared).
@@ -532,7 +475,6 @@ mod tests {
                 activity_status: DplActivity::Deployed,
                 error_status: expected_error_status,
                 attempts: if recovered { 0 } else { deployment.attempts },
-                cooldown_ends_at: actual.cooldown_ends_at,
                 deployed_at: actual.deployed_at,
                 ..deployment.clone()
             };
@@ -591,22 +533,6 @@ mod tests {
         }
 
         #[test]
-        fn deploy_clears_cooldown_on_recovery() {
-            let deployments = with_cooldown(
-                with_attempts(with_error_status(DplErrStatus::Retrying), 3),
-                TimeDelta::minutes(5),
-            );
-            for deployment in deployments {
-                match deployment.target_status {
-                    DplTarget::Deployed => {
-                        validate_deploy_transition(deployment, DplErrStatus::None)
-                    }
-                    _ => validate_deploy_transition(deployment, DplErrStatus::Retrying),
-                }
-            }
-        }
-
-        #[test]
         fn deploy_preserves_pre_existing_archived_at() {
             let past = Utc::now() - TimeDelta::hours(1);
             for mut deployment in with_error_status(DplErrStatus::None) {
@@ -625,19 +551,6 @@ mod tests {
             let recovered = deployment.error_status == DplErrStatus::Retrying
                 && expected_error_status == DplErrStatus::None;
 
-            // verify cooldown behavior
-            if recovered {
-                assert!(
-                    !actual.is_in_cooldown(),
-                    "cooldown should be cleared on recovery"
-                );
-            } else {
-                assert_eq!(
-                    actual.cooldown_ends_at, deployment.cooldown_ends_at,
-                    "cooldown should be unchanged when not recovering"
-                );
-            }
-
             // verify timestamps: archived_at is always freshly set; deployed_at is
             // an independent watermark preserved from the input (never cleared).
             let archived_at = actual.archived_at.expect("archived_at should be set");
@@ -654,7 +567,6 @@ mod tests {
                 activity_status: DplActivity::Archived,
                 error_status: expected_error_status,
                 attempts: if recovered { 0 } else { deployment.attempts },
-                cooldown_ends_at: actual.cooldown_ends_at,
                 archived_at: actual.archived_at,
                 ..deployment.clone()
             };
@@ -717,24 +629,6 @@ mod tests {
         }
 
         #[test]
-        fn remove_clears_cooldown_on_recovery() {
-            let deployments = with_cooldown(
-                with_attempts(with_error_status(DplErrStatus::Retrying), 3),
-                TimeDelta::minutes(5),
-            );
-            for deployment in deployments {
-                match deployment.target_status {
-                    DplTarget::Staged | DplTarget::Archived => {
-                        validate_remove_transition(deployment, DplErrStatus::None)
-                    }
-                    DplTarget::Deployed => {
-                        validate_remove_transition(deployment, DplErrStatus::Retrying)
-                    }
-                }
-            }
-        }
-
-        #[test]
         fn remove_preserves_pre_existing_deployed_at() {
             let past = Utc::now() - TimeDelta::hours(1);
             for mut deployment in with_error_status(DplErrStatus::None) {
@@ -758,11 +652,7 @@ mod tests {
                 "archived_at should be preserved",
             );
 
-            // removing never counts as recovery, so error_status/attempts/cooldown are preserved
-            assert_eq!(
-                actual.cooldown_ends_at, deployment.cooldown_ends_at,
-                "cooldown should be unchanged",
-            );
+            // removing never counts as recovery, so error_status/attempts are preserved
 
             let expected = Deployment {
                 activity_status: DplActivity::Removing,
@@ -806,17 +696,6 @@ mod tests {
         }
 
         #[test]
-        fn removing_preserves_cooldown() {
-            let deployments = with_cooldown(
-                with_attempts(with_error_status(DplErrStatus::Retrying), 3),
-                TimeDelta::minutes(5),
-            );
-            for deployment in deployments {
-                validate_removing_transition(deployment);
-            }
-        }
-
-        #[test]
         fn removing_preserves_pre_existing_timestamps() {
             let past = Utc::now() - TimeDelta::hours(1);
             for mut deployment in with_error_status(DplErrStatus::None) {
@@ -850,27 +729,16 @@ mod tests {
             };
             let actual = error(deployment.clone(), retry_policy, e, bump_attempts);
 
-            // check the cooldown
-            let now = Utc::now();
+            // the cooldown is the backoff for the new attempt count
             let cd = cooldown::calc(&retry_policy.backoff, attempts);
-            let expected_cooldown_ends_at = now + TimeDelta::seconds(cd);
-            assert!(
-                actual.cooldown_ends_at <= expected_cooldown_ends_at,
-                "actual:\n{:?}\n expected:\n{:?}\n",
-                actual.cooldown_ends_at,
-                expected_cooldown_ends_at
-            );
-            assert!(
-                actual.cooldown_ends_at >= expected_cooldown_ends_at - TimeDelta::seconds(1),
-                "actual:\n{:?}\n expected:\n{:?}\n",
-                actual.cooldown_ends_at,
-                expected_cooldown_ends_at
+            assert_eq!(
+                cooldown(&actual, retry_policy),
+                Duration::from_secs(cd as u64)
             );
 
             let expected = Deployment {
                 error_status: expected_err_status,
                 attempts,
-                cooldown_ends_at: actual.cooldown_ends_at,
                 ..deployment.clone()
             };
             assert!(

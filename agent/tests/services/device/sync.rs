@@ -1,3 +1,6 @@
+// standard crates
+use std::time::{Duration, Instant};
+
 // internal crates
 use crate::mocks::syncer::MockSyncer;
 use device_api::models::{SyncDeviceResponse, SyncDeviceResult};
@@ -8,7 +11,31 @@ use miru_agent::sync::SyncErr;
 use miru_agent::trace;
 
 // external crates
-use chrono::{Duration, Utc};
+use chrono::{DateTime, TimeDelta, Utc};
+
+/// Asserts `resp` matches `expected` in every field but `cooldown_ends_at`,
+/// which is the system clock at response time plus the remaining cooldown, so
+/// it is checked to fall within `[before + remaining - 1s, after + remaining]`.
+fn assert_response(
+    resp: &SyncDeviceResponse,
+    expected: SyncDeviceResponse,
+    before: DateTime<Utc>,
+    remaining: TimeDelta,
+) {
+    let after = Utc::now();
+    let ends_at = DateTime::parse_from_rfc3339(&resp.cooldown_ends_at)
+        .unwrap()
+        .with_timezone(&Utc);
+    assert!(
+        ends_at >= before + remaining - TimeDelta::seconds(1) && ends_at <= after + remaining,
+        "cooldown_ends_at {ends_at} not within [{before}, {after}] + {remaining}"
+    );
+    let expected = SyncDeviceResponse {
+        cooldown_ends_at: resp.cooldown_ends_at.clone(),
+        ..expected
+    };
+    assert_eq!(*resp, expected);
+}
 
 pub mod errors {
     use super::*;
@@ -16,20 +43,24 @@ pub mod errors {
     #[tokio::test]
     async fn device_in_cooldown() {
         let syncer = MockSyncer::default();
+        let day = Duration::from_secs(24 * 60 * 60);
         let sync_state = State {
-            cooldown_ends_at: Utc::now() + Duration::days(1),
+            cooldown_ends: Some(Instant::now() + day),
             ..State::default()
         };
         syncer.set_state(sync_state.clone());
 
+        let err_state = sync_state.clone();
         syncer.set_sync(move || {
             Err(SyncErr::InCooldownErr(SyncerInCooldownErr {
-                cooldown_ends_at: sync_state.cooldown_ends_at,
+                remaining_cooldown: err_state.remaining_cooldown(),
+                cooldown_ends_at: err_state.cooldown_ends_at(),
                 err_streak: 0,
                 trace: trace!(),
             }))
         });
 
+        let before = Utc::now();
         let resp = dvc_svc::sync(&syncer).await.unwrap();
         let expected = SyncDeviceResponse {
             code: SyncDeviceResult::SYNC_DEVICE_RESULT_IN_COOLDOWN,
@@ -37,10 +68,10 @@ pub mod errors {
             last_synced_at: sync_state.last_synced_at.to_rfc3339(),
             last_attempted_sync_at: sync_state.last_attempted_sync_at.to_rfc3339(),
             in_cooldown: true,
-            cooldown_ends_at: sync_state.cooldown_ends_at.to_rfc3339(),
+            cooldown_ends_at: String::new(),
         };
 
-        assert_eq!(resp, expected);
+        assert_response(&resp, expected, before, TimeDelta::days(1));
     }
 
     #[tokio::test]
@@ -55,6 +86,7 @@ pub mod errors {
             }))
         });
 
+        let before = Utc::now();
         let resp = dvc_svc::sync(&syncer).await.unwrap();
         let expected = SyncDeviceResponse {
             code: SyncDeviceResult::SYNC_DEVICE_RESULT_NETWORK_CONNECTION_ERROR,
@@ -62,10 +94,10 @@ pub mod errors {
             last_synced_at: sync_state.last_synced_at.to_rfc3339(),
             last_attempted_sync_at: sync_state.last_attempted_sync_at.to_rfc3339(),
             in_cooldown: sync_state.is_in_cooldown(),
-            cooldown_ends_at: sync_state.cooldown_ends_at.to_rfc3339(),
+            cooldown_ends_at: String::new(),
         };
 
-        assert_eq!(resp, expected);
+        assert_response(&resp, expected, before, TimeDelta::zero());
     }
 
     #[tokio::test]
@@ -94,7 +126,7 @@ pub mod success {
             last_synced_at: sync_state.last_synced_at.to_rfc3339(),
             last_attempted_sync_at: sync_state.last_attempted_sync_at.to_rfc3339(),
             in_cooldown: sync_state.is_in_cooldown(),
-            cooldown_ends_at: sync_state.cooldown_ends_at.to_rfc3339(),
+            cooldown_ends_at: String::new(),
         }
     }
 
@@ -104,9 +136,15 @@ pub mod success {
         let sync_state = State::default();
         syncer.set_state(sync_state.clone());
 
+        let before = Utc::now();
         let resp = dvc_svc::sync(&syncer).await.unwrap();
 
-        assert_eq!(resp, expected_response(&sync_state));
+        assert_response(
+            &resp,
+            expected_response(&sync_state),
+            before,
+            TimeDelta::zero(),
+        );
     }
 
     #[tokio::test]
@@ -114,15 +152,22 @@ pub mod success {
         let syncer = MockSyncer::default();
         let now = Utc::now();
         let sync_state = State {
-            last_synced_at: now - Duration::minutes(5),
-            last_attempted_sync_at: now - Duration::minutes(1),
-            cooldown_ends_at: now - Duration::hours(1),
+            last_synced_at: now - TimeDelta::minutes(5),
+            last_attempted_sync_at: now - TimeDelta::minutes(1),
+            cooldown_ends: Some(Instant::now() + Duration::from_secs(60 * 60)),
             ..State::default()
         };
         syncer.set_state(sync_state.clone());
 
+        let before = Utc::now();
         let resp = dvc_svc::sync(&syncer).await.unwrap();
 
-        assert_eq!(resp, expected_response(&sync_state));
+        assert!(resp.in_cooldown);
+        assert_response(
+            &resp,
+            expected_response(&sync_state),
+            before,
+            TimeDelta::hours(1),
+        );
     }
 }

@@ -1,5 +1,6 @@
 // standard crates
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 // internal crates
 use crate::mocks::{error::SleepController, syncer::MockSyncer};
@@ -51,8 +52,11 @@ pub mod run {
         let secs_since_last_sync = 30;
         let state = State {
             last_attempted_sync_at: Utc::now() - TimeDelta::seconds(secs_since_last_sync),
+            last_attempted_sync: Some(
+                Instant::now() - Duration::from_secs(secs_since_last_sync as u64),
+            ),
             last_synced_at: Utc::now(),
-            cooldown_ends_at: Utc::now(),
+            cooldown_ends: None,
             err_streak: 0,
         };
         syncer.set_state(state);
@@ -136,8 +140,11 @@ pub mod run {
         let secs_until_cooldown_ends = 120;
         let state = State {
             last_attempted_sync_at: Utc::now(),
+            last_attempted_sync: Some(Instant::now()),
             last_synced_at: Utc::now(),
-            cooldown_ends_at: Utc::now() + TimeDelta::seconds(secs_until_cooldown_ends),
+            cooldown_ends: Some(
+                Instant::now() + Duration::from_secs(secs_until_cooldown_ends as u64),
+            ),
             err_streak: 0,
         };
         syncer.set_state(state);
@@ -220,8 +227,11 @@ pub mod run {
         let secs_since_last_sync = 30;
         let state = State {
             last_attempted_sync_at: Utc::now() - TimeDelta::seconds(secs_since_last_sync),
+            last_attempted_sync: Some(
+                Instant::now() - Duration::from_secs(secs_since_last_sync as u64),
+            ),
             last_synced_at: Utc::now(),
-            cooldown_ends_at: Utc::now(),
+            cooldown_ends: None,
             err_streak: 0,
         };
         syncer.set_state(state);
@@ -288,8 +298,9 @@ pub mod run {
 
         let state = State {
             last_attempted_sync_at: Utc::now(),
+            last_attempted_sync: Some(Instant::now()),
             last_synced_at: Utc::now(),
-            cooldown_ends_at: Utc::now() - TimeDelta::seconds(10),
+            cooldown_ends: None,
             err_streak: 0,
         };
         syncer.set_state(state);
@@ -350,8 +361,11 @@ pub mod run {
         let secs_since_last_sync = 30;
         let state = State {
             last_attempted_sync_at: Utc::now() - TimeDelta::seconds(secs_since_last_sync),
+            last_attempted_sync: Some(
+                Instant::now() - Duration::from_secs(secs_since_last_sync as u64),
+            ),
             last_synced_at: Utc::now(),
-            cooldown_ends_at: Utc::now(),
+            cooldown_ends: None,
             err_streak: 0,
         };
         syncer.set_state(state);
@@ -412,8 +426,11 @@ pub mod run {
         let secs_since_last_sync = 45;
         let state = State {
             last_attempted_sync_at: Utc::now() - TimeDelta::seconds(secs_since_last_sync),
+            last_attempted_sync: Some(
+                Instant::now() - Duration::from_secs(secs_since_last_sync as u64),
+            ),
             last_synced_at: Utc::now(),
-            cooldown_ends_at: Utc::now() - TimeDelta::seconds(10),
+            cooldown_ends: None,
             err_streak: 0,
         };
         syncer.set_state(state);

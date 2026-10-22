@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 // internal crates
+use crate::clock::Clock;
 use crate::cooldown;
 use crate::data_uploads::{
     retention::{DeleterExt, Job as DeleteJob},
@@ -19,7 +20,7 @@ use crate::queue::Persistence;
 use crate::trace;
 
 // external crates
-use chrono::{DateTime, TimeDelta, Utc};
+use chrono::TimeDelta;
 use tracing::{debug, error, info, warn};
 
 #[derive(Clone, Debug)]
@@ -89,31 +90,29 @@ pub(crate) enum NextAttempt {
 /// actor so callers can share it across tasks.
 ///
 /// [`Uploader`]: crate::data_uploads::upload::Uploader
-pub struct UploaderImpl<ExecutorT, D, N>
+pub struct UploaderImpl<ExecutorT, D>
 where
     ExecutorT: UploadExecutor,
     D: DeleterExt + 'static,
-    N: Fn() -> DateTime<Utc> + Send + Sync + 'static,
 {
     queue: Queue,
     executor: Arc<ExecutorT>,
     deleter: Arc<D>,
     options: UploaderOptions,
-    now_fn: N,
+    clock: Clock,
 }
 
-impl<ExecutorT, D, N> UploaderImpl<ExecutorT, D, N>
+impl<ExecutorT, D> UploaderImpl<ExecutorT, D>
 where
     ExecutorT: UploadExecutor,
     D: DeleterExt + 'static,
-    N: Fn() -> DateTime<Utc> + Send + Sync + 'static,
 {
     pub(crate) fn new(
         executor: Arc<ExecutorT>,
         deleter: Arc<D>,
         options: UploaderOptions,
         snapshot_file: Option<QueueSnapshotFile>,
-        now_fn: N,
+        clock: Clock,
     ) -> Self {
         let queue = match snapshot_file {
             Some(file) => {
@@ -126,7 +125,7 @@ where
             executor,
             deleter,
             options,
-            now_fn,
+            clock,
         }
     }
 
@@ -140,25 +139,16 @@ where
 
     /// The entry to attempt now, or how long until one is eligible.
     pub(crate) async fn next_attempt(&mut self) -> NextAttempt {
-        let now = (self.now_fn)();
-        if let Some(entry) = self.queue.next_ready(now) {
+        let instant = self.clock.monotonic_now();
+        if let Some(entry) = self.queue.next_ready(self.clock.system_now(), instant) {
             return NextAttempt::Ready(entry);
         }
-        if self.queue.is_empty() {
-            return NextAttempt::Empty;
-        }
-
         // every queued entry is waiting out its backoff: wait until the
         // earliest deadline
-        self.queue
-            .reset_invalid_deadlines(now + TimeDelta::seconds(self.options.backoff.max_secs.max(0)))
-            .await;
-        let wait = match self.queue.earliest_next_attempt() {
-            Some(at) => (at - now).to_std().unwrap_or(Duration::ZERO),
-            // unreachable: the queue is non-empty here
-            None => Duration::ZERO,
-        };
-        NextAttempt::Backoff(wait)
+        match self.queue.wait_for_next_attempt(instant) {
+            Some(wait) => NextAttempt::Backoff(wait),
+            None => NextAttempt::Empty,
+        }
     }
 
     /// Build one executor attempt on `entry`, bounded by its size-scaled
@@ -223,7 +213,7 @@ where
             digest: job.digest.clone(),
             mtime: job.mtime,
             first_observed_at: job.first_observed_at,
-            last_observed_at: (self.now_fn)(),
+            last_observed_at: self.clock.system_now(),
             ttl_secs: retention.ttl_secs,
             file_rule_id: job.file_rule_id.clone(),
             deployment_id: job.deployment_id.clone(),
@@ -240,7 +230,7 @@ where
     /// attempt budget. Drop the job if it has aged past the backstop;
     /// otherwise stamp a flat cooldown and requeue at the tail.
     async fn handle_network_failure(&mut self, entry: QueueEntry, err: UploadErr) {
-        let age = (self.now_fn)() - entry.job.first_observed_at;
+        let age = self.clock.system_now() - entry.job.first_observed_at;
         if age >= self.options.max_job_age {
             Self::log_age_drop(&entry, age, &err);
             self.queue.ack(entry.id).await;
@@ -282,13 +272,14 @@ where
         self.retry_after(&entry, wait).await;
     }
 
-    /// Retry `entry` at the tail once `wait_secs` have passed, recording its
-    /// attempt count.
+    /// Retry `entry` at the tail once `wait_secs` have passed on the
+    /// monotonic clock, recording its attempt count.
     async fn retry_after(&mut self, entry: &QueueEntry, wait_secs: i64) {
         let file = &entry.job.file;
         let attempts = entry.attempts;
         info!("upload: requeuing {file} at tail after {attempts} attempt(s)");
-        let next_attempt_at = (self.now_fn)() + TimeDelta::seconds(wait_secs);
+        let wait = Duration::from_secs(u64::try_from(wait_secs).unwrap_or(0));
+        let next_attempt_at = self.clock.monotonic_now() + wait;
         self.queue.retry(entry.id, attempts, next_attempt_at).await;
     }
 

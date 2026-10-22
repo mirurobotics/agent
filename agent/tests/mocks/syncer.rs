@@ -1,6 +1,7 @@
 // standard crates
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 // internal crates
 use miru_agent::sync::{
@@ -40,12 +41,7 @@ impl MockSyncer {
         Self {
             last_attempted_sync_at: Arc::new(Mutex::new(DateTime::<Utc>::UNIX_EPOCH)),
             num_sync_calls: AtomicUsize::new(0),
-            get_sync_state_fn: Arc::new(Mutex::new(Box::new(|| State {
-                last_attempted_sync_at: DateTime::<Utc>::UNIX_EPOCH,
-                last_synced_at: DateTime::<Utc>::UNIX_EPOCH,
-                cooldown_ends_at: DateTime::<Utc>::UNIX_EPOCH,
-                err_streak: 0,
-            }))),
+            get_sync_state_fn: Arc::new(Mutex::new(Box::new(State::default))),
             sync_fn: Arc::new(Mutex::new(Box::new(|| Ok(())))),
 
             // subscriptions
@@ -105,14 +101,14 @@ impl SyncerExt for MockSyncer {
         Ok(state.is_in_cooldown())
     }
 
-    async fn get_cooldown_ends_at(&self) -> Result<DateTime<Utc>, SyncErr> {
+    async fn get_remaining_cooldown(&self) -> Result<Duration, SyncErr> {
         let state = self.get_sync_state().await.unwrap();
-        Ok(state.cooldown_ends_at)
+        Ok(state.remaining_cooldown())
     }
 
-    async fn get_last_attempted_sync_at(&self) -> Result<DateTime<Utc>, SyncErr> {
+    async fn get_since_last_attempt(&self) -> Result<Option<Duration>, SyncErr> {
         let state = self.get_sync_state().await.unwrap();
-        Ok(state.last_attempted_sync_at)
+        Ok(state.since_last_attempt())
     }
 
     async fn sync(&self) -> Result<(), SyncErr> {

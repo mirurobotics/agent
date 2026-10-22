@@ -1,5 +1,5 @@
 // internal crates
-use crate::queue::file::{enqueue, queue_suite, DEFAULT_CAPACITY};
+use crate::queue::file::{enqueue, instant, queue_suite, DEFAULT_CAPACITY};
 use crate::test_utils::filesys::{abs_path, dirs as test_dirs};
 use miru_agent::data_uploads::retention::{
     DeleteQueueSnapshot, DeleteQueueSnapshotFile, Job, Queue,
@@ -65,14 +65,14 @@ async fn a_job_whose_ttl_has_not_elapsed_is_not_ready() {
     enqueue(&mut queue, retention_job_with_ttl("due", 500)).await;
 
     // ready_at is inclusive: "due" is ready at exactly `now`
-    assert_eq!(queue.count_ready(now()), 1);
+    assert_eq!(queue.count_ready(now(), instant()), 1);
     assert_eq!(
-        queue.next_ready(now()).unwrap().job,
+        queue.next_ready(now(), instant()).unwrap().job,
         retention_job_with_ttl("due", 500)
     );
 
     // the waiting job becomes ready once its TTL elapses
-    assert_eq!(queue.count_ready(now() + TimeDelta::hours(2)), 2);
+    assert_eq!(queue.count_ready(now() + TimeDelta::hours(2), instant()), 2);
 }
 
 mod wire {
@@ -106,7 +106,7 @@ mod wire {
         let queue = Queue::from_snapshot(8, open(&path).await, Persistence::BestEffort);
 
         assert_eq!(queue.len(), 1);
-        let entry = queue.next_ready(now()).unwrap();
+        let entry = queue.next_ready(now(), instant()).unwrap();
         assert_eq!(entry.id, id);
         assert_eq!(entry.job, expected);
     }

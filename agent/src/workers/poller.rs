@@ -1,5 +1,4 @@
 // standard crates
-use std::cmp::max;
 use std::future::Future;
 use std::pin::Pin;
 use std::time::Duration;
@@ -14,7 +13,7 @@ use crate::sync::{
 use crate::workers::next_sync_event;
 
 // external crates
-use chrono::{TimeDelta, Utc};
+use chrono::Utc;
 use tracing::{debug, error, info};
 
 #[derive(Debug, Clone)]
@@ -78,18 +77,12 @@ async fn run_impl<F, Fut, SyncerT: SyncerExt>(
     let _ = syncer.sync_if_not_in_cooldown().await;
 
     loop {
-        let wait_secs = next_wait_secs(options, syncer).await;
-
-        // log the next scheduled sync time
-        let next_sync_at = Utc::now() + TimeDelta::seconds(wait_secs);
-        debug!(
-            "Waiting until {:?} ({:?} seconds) for next *scheduled* device sync",
-            next_sync_at, wait_secs
-        );
+        let wait = next_wait(options, syncer).await;
+        debug!("Waiting {wait:?} for next *scheduled* device sync");
 
         tokio::select! {
             // next scheduled sync
-            _ = sleep_fn(Duration::from_secs(wait_secs as u64)) => {
+            _ = sleep_fn(wait) => {
                 let _ = syncer.sync_if_not_in_cooldown().await;
             }
 
@@ -119,23 +112,17 @@ async fn run_impl<F, Fut, SyncerT: SyncerExt>(
     }
 }
 
-// seconds to wait before the next scheduled sync: the later of the poll interval
-// (measured from the last sync attempt, not the current time) and the cooldown end
-async fn next_wait_secs<SyncerT: SyncerExt>(options: &Options, syncer: &SyncerT) -> i64 {
-    let last_attempted_sync_at = syncer
-        .get_last_attempted_sync_at()
-        .await
-        .unwrap_or_default()
-        .timestamp();
-    let secs_since_last_sync = Utc::now().timestamp() - last_attempted_sync_at;
-    let secs_until_next_sync = options.poll_interval_secs - secs_since_last_sync;
-
-    let secs_until_cooldown_ends = syncer
-        .get_cooldown_ends_at()
-        .await
-        .unwrap_or_default()
-        .signed_duration_since(Utc::now())
-        .num_seconds();
-
-    max(secs_until_next_sync, secs_until_cooldown_ends)
+// time to wait before the next scheduled sync: the later of the poll interval
+// (measured from the last sync attempt, not the current time) and the cooldown
+// end. Both use the monotonic clock, so a system clock step cannot stretch or
+// skip the wait.
+async fn next_wait<SyncerT: SyncerExt>(options: &Options, syncer: &SyncerT) -> Duration {
+    let poll_interval = Duration::from_secs(u64::try_from(options.poll_interval_secs).unwrap_or(0));
+    let until_next_poll = match syncer.get_since_last_attempt().await {
+        Ok(Some(since)) => poll_interval.saturating_sub(since),
+        // no attempt yet in this process: poll now
+        Ok(None) | Err(_) => Duration::ZERO,
+    };
+    let until_cooldown_ends = syncer.get_remaining_cooldown().await.unwrap_or_default();
+    until_next_poll.max(until_cooldown_ends)
 }

@@ -1,5 +1,6 @@
 // standard crates
 use std::collections::VecDeque;
+use std::time::{Duration, Instant};
 
 // internal crates
 use crate::filesys::FileSysErr;
@@ -72,22 +73,25 @@ impl<J: QueueJob> FileQueue<J> {
         self.entries.is_empty()
     }
 
-    fn is_ready(entry: &QueueEntry<J>, now: DateTime<Utc>) -> bool {
-        entry.job.ready_at() <= now && entry.next_attempt_at.is_none_or(|at| at <= now)
+    /// Whether `entry` may be attempted: its job is ready by the system
+    /// clock reading `now`, and its retry deadline has passed by the
+    /// monotonic reading `instant`.
+    fn is_ready(entry: &QueueEntry<J>, now: DateTime<Utc>, instant: Instant) -> bool {
+        entry.job.ready_at() <= now && entry.next_attempt_at.is_none_or(|at| at <= instant)
     }
 
-    pub fn count_ready(&self, now: DateTime<Utc>) -> usize {
+    pub fn count_ready(&self, now: DateTime<Utc>, instant: Instant) -> usize {
         self.entries
             .iter()
-            .filter(|entry| Self::is_ready(entry, now))
+            .filter(|entry| Self::is_ready(entry, now, instant))
             .count()
     }
 
-    pub fn next_ready(&self, now: DateTime<Utc>) -> Option<QueueEntry<J>> {
+    pub fn next_ready(&self, now: DateTime<Utc>, instant: Instant) -> Option<QueueEntry<J>> {
         let entry = self
             .entries
             .iter()
-            .find(|entry| Self::is_ready(entry, now))?;
+            .find(|entry| Self::is_ready(entry, now, instant))?;
         info!(
             "{}: job selected; queue length {}",
             J::LABEL,
@@ -96,10 +100,17 @@ impl<J: QueueJob> FileQueue<J> {
         Some(entry.clone())
     }
 
-    pub fn earliest_next_attempt(&self) -> Option<DateTime<Utc>> {
+    /// How long after the monotonic reading `instant` the earliest retry
+    /// deadline passes: zero when some entry has no deadline or one already
+    /// past, `None` when the queue is empty.
+    pub fn wait_for_next_attempt(&self, instant: Instant) -> Option<Duration> {
         self.entries
             .iter()
-            .map(|entry| entry.next_attempt_at.unwrap_or(DateTime::<Utc>::MIN_UTC))
+            .map(|entry| {
+                entry
+                    .next_attempt_at
+                    .map_or(Duration::ZERO, |at| at.saturating_duration_since(instant))
+            })
             .min()
     }
 
@@ -166,9 +177,10 @@ impl<J: QueueJob> FileQueue<J> {
         Some(entry)
     }
 
-    /// Move the entry with `id` to the tail with updated `attempts` and
-    /// `next_attempt_at`. Returns `false` for an unknown id.
-    pub async fn retry(&mut self, id: Uuid, attempts: u32, next_attempt_at: DateTime<Utc>) -> bool {
+    /// Move the entry with `id` to the tail with updated `attempts` and the
+    /// monotonic deadline `next_attempt_at`. Only `attempts` is persisted.
+    /// Returns `false` for an unknown id.
+    pub async fn retry(&mut self, id: Uuid, attempts: u32, next_attempt_at: Instant) -> bool {
         let Some(mut entry) = self.take(id) else {
             return false;
         };
@@ -187,25 +199,6 @@ impl<J: QueueJob> FileQueue<J> {
     fn take(&mut self, id: Uuid) -> Option<QueueEntry<J>> {
         let idx = self.entries.iter().position(|entry| entry.id == id)?;
         self.entries.remove(idx)
-    }
-
-    /// Pull every `next_attempt_at` strictly beyond `horizon` back to it, so no
-    /// entry can be deferred past a deadline the caller considers reachable.
-    /// A no-op when every deadline is already inside the horizon, so nothing
-    /// is persisted in that case.
-    pub async fn reset_invalid_deadlines(&mut self, horizon: DateTime<Utc>) {
-        let mut reset = 0;
-        for entry in self.entries.iter_mut() {
-            if entry.next_attempt_at.is_some_and(|at| at > horizon) {
-                entry.next_attempt_at = Some(horizon);
-                reset += 1;
-            }
-        }
-        if reset == 0 {
-            return;
-        }
-        let _ = self.persist().await;
-        warn!("{}: pulled {reset} deadline(s) back to {horizon}", J::LABEL);
     }
 
     /// The sole writer to disk, called by every mutator as its last act. A
