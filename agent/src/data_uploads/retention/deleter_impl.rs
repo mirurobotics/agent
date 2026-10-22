@@ -124,13 +124,10 @@ impl DeleterImpl {
             entry.attempts, self.attempts, entry.job.file
         );
         let next_attempt_at = now + TimeDelta::seconds(wait);
+        // The wait tally is only read by the uploader; leave it at zero so the
+        // delete queue's saved format doesn't change.
         self.queue
-            .retry(
-                entry.id,
-                entry.attempts,
-                next_attempt_at,
-                u64::try_from(wait).unwrap_or(0),
-            )
+            .retry(entry.id, entry.attempts, next_attempt_at, 0)
             .await;
     }
 
