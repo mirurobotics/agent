@@ -205,18 +205,19 @@ where
                 attempts,
                 wait_secs,
             } => {
-                Self::log_failure(&entry, attempts, &err);
                 entry.attempts = attempts;
-                info!("upload: retrying {} in {wait_secs}s", entry.job.file);
+                Self::log_retry(&entry, wait_secs, &err);
                 self.retry_after(&entry, wait_secs).await;
             }
             Verdict::Terminal { attempts } => {
                 entry.attempts = attempts;
+                Self::log_counted_failure(&entry, &err);
                 Self::log_terminal_drop(&entry, &err);
                 self.queue.ack(entry.id).await;
             }
             Verdict::OutOfAttempts { attempts } => {
                 entry.attempts = attempts;
+                Self::log_counted_failure(&entry, &err);
                 Self::log_dropped(&entry, &err);
                 self.queue.ack(entry.id).await;
             }
@@ -237,15 +238,26 @@ where
         self.queue.retry(entry.id, attempts, next_attempt_at).await;
     }
 
-    fn log_failure(entry: &QueueEntry, attempts: u32, err: &UploadErr) {
+    /// A network retry logs at debug, since it repeats every `base_secs` while
+    /// the device is offline; a counted one logs the failure and the wait.
+    fn log_retry(entry: &QueueEntry, wait_secs: i64, err: &UploadErr) {
         let file = &entry.job.file;
         if err.is_network_conn_err() {
             debug!(
-                "upload: network connection error for file {file}; not counting attempt: {err:?}"
+                "upload: network connection error for file {file}; not counting attempt, \
+                 retrying in {wait_secs}s: {err:?}"
             );
-        } else {
-            warn!("upload: attempt {attempts} for file {file} failed: {err:?}");
+            return;
         }
+        Self::log_counted_failure(entry, err);
+        info!("upload: retrying {file} in {wait_secs}s");
+    }
+
+    fn log_counted_failure(entry: &QueueEntry, err: &UploadErr) {
+        warn!(
+            "upload: attempt {} for file {} failed: {err:?}",
+            entry.attempts, entry.job.file
+        );
     }
 
     fn log_attempt(entry: &QueueEntry) {
