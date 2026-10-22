@@ -37,12 +37,12 @@ fn upload_job(name: &str) -> Job {
 
 queue_suite!(upload_job, "upload-generic-queue-test");
 
-/// An upload job is due the moment it arrives: `due_at` is `MIN_UTC`, so
+/// An upload job is ready the moment it arrives: `ready_at` is `MIN_UTC`, so
 /// readiness is decided by `next_attempt_at` alone.
 #[test]
-fn due_at_is_min_utc() {
+fn ready_at_is_min_utc() {
     assert_eq!(
-        QueueJob::due_at(&upload_job("a.log")),
+        QueueJob::ready_at(&upload_job("a.log")),
         DateTime::<Utc>::MIN_UTC
     );
 }

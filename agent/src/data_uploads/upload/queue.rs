@@ -9,7 +9,7 @@ impl queue::QueueJob for Job {
     const LABEL: &'static str = "upload";
 
     /// An upload job is actionable the moment it is enqueued.
-    fn due_at(&self) -> DateTime<Utc> {
+    fn ready_at(&self) -> DateTime<Utc> {
         DateTime::<Utc>::MIN_UTC
     }
 
