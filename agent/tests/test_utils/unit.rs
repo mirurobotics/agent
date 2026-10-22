@@ -6,6 +6,8 @@
 //! through `super::` within `test_utils/` — never `crate::mocks::…` or
 //! `crate::sync::…`, which resolve differently in the two trees.
 
+#[path = "clock.rs"]
+pub mod clock;
 #[path = "../errors/harnesses.rs"]
 pub mod error_harnesses;
 #[path = "filesys/mod.rs"]

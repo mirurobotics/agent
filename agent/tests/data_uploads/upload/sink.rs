@@ -13,7 +13,7 @@ use miru_agent::filesys::File;
 use miru_agent::models::{FileRule, FileRuleRetention, FileRuleUpload};
 
 // external crates
-use chrono::{DateTime, Utc};
+use chrono::DateTime;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
@@ -80,7 +80,7 @@ impl Harness {
             UploaderOptions::default(),
             None,
             |_: Duration| async {},
-            Utc::now,
+            miru_agent::clock::Clock::default(),
         )
         .unwrap();
         let uploader = Arc::new(uploader);

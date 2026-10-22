@@ -8,7 +8,8 @@ use crate::mocks::{
     deleter::{MockDeleter, MockStep as DeleterStep},
     upload_executor::{MockStep, MockUploadExecutor},
 };
-use crate::test_utils::{filesys::dirs as test_dirs, upload::make_job};
+use crate::test_utils::{clock::FakeClock, filesys::dirs as test_dirs, upload::make_job};
+use miru_agent::clock::Clock;
 use miru_agent::data_uploads::retention::Job as DeleteJob;
 use miru_agent::data_uploads::upload::errors::{EnqueueErr, ExecutorErr};
 use miru_agent::data_uploads::upload::{
@@ -66,7 +67,7 @@ fn spawn_uploader(mock: Arc<MockUploadExecutor>) -> (Uploader, JoinHandle<()>) {
         UploaderOptions::default(),
         None,
         |_: Duration| async {},
-        Utc::now,
+        Clock::default(),
     )
     .unwrap()
 }
@@ -97,21 +98,19 @@ fn spawn_with_test_clock_and_deleter(
     Uploader,
     JoinHandle<()>,
     Arc<Mutex<Vec<Duration>>>,
-    Arc<Mutex<DateTime<Utc>>>,
+    FakeClock,
 ) {
-    let clock = Arc::new(Mutex::new(Utc::now()));
+    let clock = FakeClock::new(Utc::now());
     let sleeps: Arc<Mutex<Vec<Duration>>> = Arc::new(Mutex::new(Vec::new()));
-    let now_clock = clock.clone();
-    let now_fn = move || *now_clock.lock().unwrap();
     let recorded = sleeps.clone();
     let sleep_clock = clock.clone();
     let sleep_fn = move |duration: Duration| {
         recorded.lock().unwrap().push(duration);
-        *sleep_clock.lock().unwrap() += TimeDelta::from_std(duration).unwrap();
+        sleep_clock.advance(duration);
         async {}
     };
     let (uploader, handle) =
-        Uploader::spawn(16, mock, deleter, options, None, sleep_fn, now_fn).unwrap();
+        Uploader::spawn(16, mock, deleter, options, None, sleep_fn, clock.clock()).unwrap();
     (uploader, handle, sleeps, clock)
 }
 
@@ -122,7 +121,7 @@ fn spawn_frozen(
     mock: Arc<MockUploadExecutor>,
     options: UploaderOptions,
 ) -> (Uploader, JoinHandle<()>) {
-    let epoch = Utc::now();
+    let frozen = FakeClock::new(Utc::now());
     Uploader::spawn(
         16,
         mock,
@@ -130,7 +129,7 @@ fn spawn_frozen(
         options,
         None,
         |_: Duration| std::future::pending::<()>(),
-        move || epoch,
+        frozen.clock(),
     )
     .unwrap()
 }
@@ -612,7 +611,7 @@ async fn shutdown_during_backoff_sleep_returns_promptly() {
         UploaderOptions::default(),
         None,
         |_: Duration| std::future::pending::<()>(),
-        Utc::now,
+        Clock::default(),
     )
     .unwrap();
 
@@ -862,7 +861,7 @@ mod retention_producer {
         timed(uploader.shutdown()).await.unwrap();
         timed(handle).await.unwrap();
         // no sleeps ran, so the clock still holds the confirm-time value
-        let confirmed_at = *clock.lock().unwrap();
+        let confirmed_at = clock.system_now();
         assert_eq!(
             deleter.recorded_calls(),
             [expected_delete_job(&job, confirmed_at)]
@@ -905,7 +904,7 @@ mod retention_producer {
         timed(uploader.shutdown()).await.unwrap();
         timed(handle).await.unwrap();
         assert_eq!(*sleeps.lock().unwrap(), vec![Duration::from_secs(1)]);
-        let confirmed_at = *clock.lock().unwrap();
+        let confirmed_at = clock.system_now();
         assert_eq!(
             deleter.recorded_calls(),
             [expected_delete_job(&job, confirmed_at)]
@@ -1014,7 +1013,7 @@ mod retention_producer {
         timed(uploader.shutdown()).await.unwrap();
         timed(handle).await.unwrap();
         assert_eq!(mock.recorded_calls(), vec![job_a.clone(), job_b.clone()]);
-        let confirmed_at = *clock.lock().unwrap();
+        let confirmed_at = clock.system_now();
         assert_eq!(
             deleter.recorded_calls(),
             [
@@ -1047,7 +1046,7 @@ mod durability {
             UploaderOptions::default(),
             Some(snapshot),
             |_: Duration| async {},
-            Utc::now,
+            Clock::default(),
         )
         .unwrap()
     }
@@ -1058,14 +1057,13 @@ mod durability {
         mock: Arc<MockUploadExecutor>,
         snapshot: QueueSnapshotFile,
     ) -> (Uploader, JoinHandle<()>, Arc<Mutex<Vec<Duration>>>) {
-        let clock = Arc::new(Mutex::new(Utc::now()));
+        let clock = FakeClock::new(Utc::now());
         let sleeps: Arc<Mutex<Vec<Duration>>> = Arc::new(Mutex::new(Vec::new()));
-        let now_clock = clock.clone();
-        let now_fn = move || *now_clock.lock().unwrap();
         let recorded = sleeps.clone();
+        let sleep_clock = clock.clone();
         let sleep_fn = move |duration: Duration| {
             recorded.lock().unwrap().push(duration);
-            *clock.lock().unwrap() += TimeDelta::from_std(duration).unwrap();
+            sleep_clock.advance(duration);
             async {}
         };
         let (uploader, handle) = Uploader::spawn(
@@ -1075,7 +1073,7 @@ mod durability {
             UploaderOptions::default(),
             Some(snapshot),
             sleep_fn,
-            now_fn,
+            clock.clock(),
         )
         .unwrap();
         (uploader, handle, sleeps)

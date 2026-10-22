@@ -1,9 +1,9 @@
 // standard crates
 use std::fs::Metadata;
-use std::sync::Arc;
 use std::time::SystemTime;
 
 // internal crates
+use crate::clock::Clock;
 use crate::cooldown;
 use crate::data_uploads::retention::{
     errors::*,
@@ -21,7 +21,9 @@ const DEFAULT_QUEUE_CAPACITY: usize = 4096;
 const DEFAULT_ATTEMPTS: u32 = 10;
 
 pub struct DeleterArgs {
-    pub now_fn: Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>,
+    /// The clock that decides when a job's TTL has elapsed and when a failed
+    /// delete may be retried.
+    pub clock: Clock,
     pub queue_capacity: usize,
     pub snapshot_file: Option<DeleteQueueSnapshotFile>,
     pub attempts: u32,
@@ -31,7 +33,7 @@ pub struct DeleterArgs {
 impl Default for DeleterArgs {
     fn default() -> Self {
         Self {
-            now_fn: Arc::new(Utc::now),
+            clock: Clock::default(),
             queue_capacity: DEFAULT_QUEUE_CAPACITY,
             snapshot_file: None,
             attempts: DEFAULT_ATTEMPTS,
@@ -46,7 +48,7 @@ impl Default for DeleterArgs {
 
 pub struct DeleterImpl {
     queue: Queue,
-    now_fn: Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>,
+    clock: Clock,
     attempts: u32,
     backoff: cooldown::Backoff,
 }
@@ -73,7 +75,7 @@ impl DeleterImpl {
         };
         Self {
             queue,
-            now_fn: args.now_fn,
+            clock: args.clock,
             attempts: args.attempts,
             backoff: args.backoff,
         }
@@ -89,7 +91,7 @@ impl DeleterImpl {
     }
 
     pub(crate) async fn sweep(&mut self) -> Result<(), DeleteErr> {
-        let now = (self.now_fn)();
+        let now = self.clock.system_now();
         // Budget: one visit per entry that is due at `now`. A retried entry is
         // requeued at the tail, behind every entry not yet visited, so this
         // budget is exactly enough to visit each due entry once and never
@@ -225,9 +227,6 @@ impl DeleterImpl {
 #[cfg(test)]
 mod tests {
     // standard crates
-    use std::sync::atomic::{AtomicI64, Ordering};
-    use std::sync::Arc;
-
     // internal crates
     use super::{DeleterArgs, DeleterImpl, SweepOutcome};
     use crate::cooldown;
@@ -235,38 +234,12 @@ mod tests {
     use crate::data_uploads::retention::queue::{DeleteQueueSnapshot, DeleteQueueSnapshotFile};
     use crate::filesys::{dirs, files, Dir, File, PathExt, WriteOptions};
     use crate::test_utils::{
-        filesys::dirs as test_dirs, filesys::files as test_files, retention::undeletable_dir_job,
+        clock::FakeClock, filesys::dirs as test_dirs, filesys::files as test_files,
+        retention::undeletable_dir_job,
     };
 
     // external crates
     use chrono::{DateTime, Utc};
-
-    /// A controllable monotonic-ish clock for deterministic sweep tests. Holds
-    /// the current time as epoch seconds in a shared atomic so a test can step
-    /// it forward independently of wall-clock time. `now_fn()` produces the
-    /// `Fn() -> DateTime<Utc>` closure that the deleter's injected `now_fn`
-    /// expects.
-    #[derive(Clone)]
-    pub struct Clock {
-        secs: Arc<AtomicI64>,
-    }
-
-    impl Clock {
-        pub fn new(start_secs: i64) -> Self {
-            Self {
-                secs: Arc::new(AtomicI64::new(start_secs)),
-            }
-        }
-
-        pub fn now_fn(&self) -> impl Fn() -> DateTime<Utc> {
-            let secs = self.secs.clone();
-            move || DateTime::from_timestamp(secs.load(Ordering::SeqCst), 0).unwrap()
-        }
-
-        pub fn advance(&self, secs: i64) {
-            self.secs.fetch_add(secs, Ordering::SeqCst);
-        }
-    }
 
     // =============================== TEST HELPERS ================================= //
 
@@ -308,9 +281,9 @@ mod tests {
 
     /// A deleter with the injected clock, default capacity, no persistence,
     /// and no backoff.
-    fn deleter(clock: &Clock) -> DeleterImpl {
+    fn deleter(clock: &FakeClock) -> DeleterImpl {
         DeleterImpl::new(DeleterArgs {
-            now_fn: Arc::new(clock.now_fn()),
+            clock: clock.clock(),
             backoff: NO_BACKOFF,
             ..DeleterArgs::default()
         })
@@ -354,7 +327,7 @@ mod tests {
         #[tokio::test]
         async fn appends_the_job() {
             let tmp = temp_file(b"aaaa").await;
-            let clock = Clock::new(1000);
+            let clock = FakeClock::at_secs(1000);
             let mut deleter = deleter(&clock);
             let job = make_job(tmp.file(), 1000, 0).await;
 
@@ -368,9 +341,9 @@ mod tests {
             let dir = test_dirs::temp("delete-enqueue-persist").unwrap();
             let state_path = dir.file("delete_queue.json");
             let tmp = temp_file(b"aaaa").await;
-            let clock = Clock::new(1000);
+            let clock = FakeClock::at_secs(1000);
             let mut deleter = DeleterImpl::new(DeleterArgs {
-                now_fn: Arc::new(clock.now_fn()),
+                clock: clock.clock(),
                 snapshot_file: Some(snapshot_file(&state_path).await),
                 ..DeleterArgs::default()
             });
@@ -389,9 +362,9 @@ mod tests {
         async fn full_queue_returns_queue_full_err() {
             let tmp_a = temp_file(b"aaaa").await;
             let tmp_b = temp_file(b"bbbb").await;
-            let clock = Clock::new(1000);
+            let clock = FakeClock::at_secs(1000);
             let mut deleter = DeleterImpl::new(DeleterArgs {
-                now_fn: Arc::new(clock.now_fn()),
+                clock: clock.clock(),
                 queue_capacity: 1,
                 ..DeleterArgs::default()
             });
@@ -414,9 +387,9 @@ mod tests {
             let dir = test_dirs::temp("delete-enqueue-persist-fail").unwrap();
             let state_path = dir.file("delete_queue.json");
             let tmp = temp_file(b"aaaa").await;
-            let clock = Clock::new(1000);
+            let clock = FakeClock::at_secs(1000);
             let mut deleter = DeleterImpl::new(DeleterArgs {
-                now_fn: Arc::new(clock.now_fn()),
+                clock: clock.clock(),
                 snapshot_file: Some(snapshot_file(&state_path).await),
                 ..DeleterArgs::default()
             });
@@ -443,7 +416,7 @@ mod tests {
         async fn due_entry_behind_a_not_due_entry_is_still_swept() {
             let waiting = temp_file(b"aaaa").await;
             let due = temp_file(b"bbbb").await;
-            let clock = Clock::new(1000);
+            let clock = FakeClock::at_secs(1000);
             let mut deleter = deleter(&clock);
             let waiting_job = make_job(waiting.file(), 1000, 500).await;
             deleter.enqueue(waiting_job.clone()).await.unwrap();
@@ -466,7 +439,7 @@ mod tests {
         #[tokio::test]
         async fn same_path_duplicate_resolves_in_one_sweep() {
             let tmp = temp_file(b"aaaa").await;
-            let clock = Clock::new(1000);
+            let clock = FakeClock::at_secs(1000);
             let mut deleter = deleter(&clock);
             deleter
                 .enqueue(make_job(tmp.file(), 900, 0).await)
@@ -486,20 +459,20 @@ mod tests {
         #[tokio::test]
         async fn positive_delay_entry_waits_for_ready_at() {
             let tmp = temp_file(b"aaaa").await;
-            let clock = Clock::new(1000);
+            let clock = FakeClock::at_secs(1000);
             let mut deleter = deleter(&clock);
             let record = make_job(tmp.file(), 1000, 500).await;
             deleter.enqueue(record.clone()).await.unwrap();
 
             // not yet ready: both 1000 and 1499 are before ready_at (1500).
             deleter.sweep().await.unwrap();
-            clock.advance(499);
+            clock.advance_secs(499);
             deleter.sweep().await.unwrap();
             assert_eq!(deleter.queue.entries(), [record]);
             assert!(tmp.file().exists());
 
             // ready exactly at ready_at.
-            clock.advance(1);
+            clock.advance_secs(1);
             deleter.sweep().await.unwrap();
             assert!(deleter.queue.is_empty());
             assert!(!tmp.file().exists());
@@ -508,7 +481,7 @@ mod tests {
         #[tokio::test]
         async fn missing_file_is_dropped_as_success() {
             let tmp = temp_file(b"aaaa").await;
-            let clock = Clock::new(1000);
+            let clock = FakeClock::at_secs(1000);
             let mut deleter = deleter(&clock);
             deleter
                 .enqueue(make_job(tmp.file(), 1000, 0).await)
@@ -527,7 +500,7 @@ mod tests {
         #[tokio::test]
         async fn stat_failure_counts_an_attempt() {
             let invalid = File::new("invalid\0path");
-            let clock = Clock::new(1000);
+            let clock = FakeClock::at_secs(1000);
             let mut deleter = deleter(&clock);
             deleter.enqueue(wedged_job(invalid)).await.unwrap();
 
@@ -543,7 +516,7 @@ mod tests {
         async fn parent_is_a_file_counts_an_attempt() {
             let parent = temp_file(b"not a dir").await;
             let child = File::new(parent.file().path().join("child"));
-            let clock = Clock::new(1000);
+            let clock = FakeClock::at_secs(1000);
             let mut deleter = deleter(&clock);
             deleter.enqueue(wedged_job(child)).await.unwrap();
 
@@ -559,7 +532,7 @@ mod tests {
         async fn parent_is_a_file_is_treated_as_already_gone() {
             let parent = temp_file(b"not a dir").await;
             let child = File::new(parent.file().path().join("child"));
-            let clock = Clock::new(1000);
+            let clock = FakeClock::at_secs(1000);
             let mut deleter = deleter(&clock);
             deleter.enqueue(wedged_job(child)).await.unwrap();
 
@@ -571,7 +544,7 @@ mod tests {
         #[tokio::test]
         async fn size_changed_file_is_dropped_without_deleting() {
             let tmp = temp_file(b"aaaa").await;
-            let clock = Clock::new(1000);
+            let clock = FakeClock::at_secs(1000);
             let mut deleter = deleter(&clock);
             deleter
                 .enqueue(make_job(tmp.file(), 1000, 0).await)
@@ -592,7 +565,7 @@ mod tests {
         #[tokio::test]
         async fn mtime_changed_content_unchanged_is_deleted() {
             let tmp = temp_file(b"aaaa").await;
-            let clock = Clock::new(1000);
+            let clock = FakeClock::at_secs(1000);
             let mut deleter = deleter(&clock);
             let mut record = make_job(tmp.file(), 1000, 0).await;
             // same size, different recorded mtime: the re-stat mismatches, but
@@ -609,7 +582,7 @@ mod tests {
         #[tokio::test]
         async fn mtime_and_content_changed_is_dropped_without_deleting() {
             let tmp = temp_file(b"aaaa").await;
-            let clock = Clock::new(1000);
+            let clock = FakeClock::at_secs(1000);
             let mut deleter = deleter(&clock);
             let mut record = make_job(tmp.file(), 1000, 0).await;
             // deterministic mtime mismatch: the record carries a sentinel.
@@ -633,7 +606,7 @@ mod tests {
         #[tokio::test]
         async fn hash_failure_counts_an_attempt() {
             let dir = test_dirs::temp("delete-hash-eisdir").unwrap();
-            let clock = Clock::new(1000);
+            let clock = FakeClock::at_secs(1000);
             let mut deleter = deleter(&clock);
             // sentinel mtime: the re-stat mismatches, forcing the re-hash.
             let job = Job {
@@ -652,7 +625,7 @@ mod tests {
         #[tokio::test]
         async fn zero_delay_entry_is_deleted_on_first_sweep() {
             let tmp = temp_file(b"aaaa").await;
-            let clock = Clock::new(1000);
+            let clock = FakeClock::at_secs(1000);
             let mut deleter = deleter(&clock);
             deleter
                 .enqueue(make_job(tmp.file(), 1000, 0).await)
@@ -670,7 +643,7 @@ mod tests {
         #[tokio::test]
         async fn unlink_failure_counts_an_attempt() {
             let dir = test_dirs::temp("delete-eisdir").unwrap();
-            let clock = Clock::new(1000);
+            let clock = FakeClock::at_secs(1000);
             let mut deleter = deleter(&clock);
             let job = undeletable_dir_job(&dir, at(1000)).await;
             let target = job.file.clone();
@@ -688,9 +661,9 @@ mod tests {
             let state_path = dir.file("delete_queue.json");
             let due = temp_file(b"aaaa").await;
             let waiting = temp_file(b"bbbb").await;
-            let clock = Clock::new(1000);
+            let clock = FakeClock::at_secs(1000);
             let mut deleter = DeleterImpl::new(DeleterArgs {
-                now_fn: Arc::new(clock.now_fn()),
+                clock: clock.clock(),
                 snapshot_file: Some(snapshot_file(&state_path).await),
                 ..DeleterArgs::default()
             });
@@ -726,9 +699,9 @@ mod tests {
             let waiting_a = temp_file(b"aaaa").await;
             let waiting_b = temp_file(b"bbbb").await;
             let due = temp_file(b"cccc").await;
-            let clock = Clock::new(1000);
+            let clock = FakeClock::at_secs(1000);
             let mut deleter = DeleterImpl::new(DeleterArgs {
-                now_fn: Arc::new(clock.now_fn()),
+                clock: clock.clock(),
                 snapshot_file: Some(snapshot_file(&state_path).await),
                 ..DeleterArgs::default()
             });
@@ -762,7 +735,7 @@ mod tests {
         #[tokio::test]
         async fn counted_failure_increments_attempts() {
             let dir = test_dirs::temp("delete-attempts-counted").unwrap();
-            let clock = Clock::new(1000);
+            let clock = FakeClock::at_secs(1000);
             let mut deleter = deleter(&clock);
             deleter
                 .enqueue(undeletable_dir_job(&dir, at(1000)).await)
@@ -780,9 +753,9 @@ mod tests {
         #[tokio::test]
         async fn attempt_cap_drops_job() {
             let dir = test_dirs::temp("delete-attempts-cap").unwrap();
-            let clock = Clock::new(1000);
+            let clock = FakeClock::at_secs(1000);
             let mut deleter = DeleterImpl::new(DeleterArgs {
-                now_fn: Arc::new(clock.now_fn()),
+                clock: clock.clock(),
                 attempts: 3,
                 backoff: NO_BACKOFF,
                 ..DeleterArgs::default()
@@ -806,7 +779,7 @@ mod tests {
             assert_eq!(DeleterArgs::default().attempts, 10);
 
             let dir = test_dirs::temp("delete-attempts-default").unwrap();
-            let clock = Clock::new(1000);
+            let clock = FakeClock::at_secs(1000);
             let mut deleter = deleter(&clock);
             deleter
                 .enqueue(undeletable_dir_job(&dir, at(1000)).await)
@@ -824,9 +797,9 @@ mod tests {
             let dir = test_dirs::temp("delete-success-clears").unwrap();
             let state_path = dir.file("delete_queue.json");
             let tmp = temp_file(b"aaaa").await;
-            let clock = Clock::new(1000);
+            let clock = FakeClock::at_secs(1000);
             let mut deleter = DeleterImpl::new(DeleterArgs {
-                now_fn: Arc::new(clock.now_fn()),
+                clock: clock.clock(),
                 snapshot_file: Some(snapshot_file(&state_path).await),
                 ..DeleterArgs::default()
             });
@@ -862,13 +835,13 @@ mod tests {
 
         /// A deleter on `clock` that backs off under [`BACKOFF`], persisting to
         /// `state_path` when one is given.
-        async fn backoff_deleter(clock: &Clock, state_path: Option<&File>) -> DeleterImpl {
+        async fn backoff_deleter(clock: &FakeClock, state_path: Option<&File>) -> DeleterImpl {
             let snapshot_file = match state_path {
                 Some(path) => Some(snapshot_file(path).await),
                 None => None,
             };
             DeleterImpl::new(DeleterArgs {
-                now_fn: Arc::new(clock.now_fn()),
+                clock: clock.clock(),
                 backoff: BACKOFF,
                 snapshot_file,
                 ..DeleterArgs::default()
@@ -878,7 +851,7 @@ mod tests {
         #[tokio::test]
         async fn failure_defers_the_next_attempt() {
             let dir = test_dirs::temp("delete-backoff-defer").unwrap();
-            let clock = Clock::new(1000);
+            let clock = FakeClock::at_secs(1000);
             let mut deleter = backoff_deleter(&clock, None).await;
             deleter
                 .enqueue(undeletable_dir_job(&dir, at(1000)).await)
@@ -894,12 +867,12 @@ mod tests {
             );
 
             // still deferred: the next sweep must not touch it.
-            clock.advance(9);
+            clock.advance_secs(9);
             deleter.sweep().await.unwrap();
             assert_eq!(deleter.queue.queue_entries()[0].attempts, 1);
 
             // due exactly at next_attempt_at.
-            clock.advance(1);
+            clock.advance_secs(1);
             deleter.sweep().await.unwrap();
             assert_eq!(deleter.queue.queue_entries()[0].attempts, 2);
         }
@@ -907,7 +880,7 @@ mod tests {
         #[tokio::test]
         async fn the_delay_grows_and_caps() {
             let dir = test_dirs::temp("delete-backoff-growth").unwrap();
-            let clock = Clock::new(1000);
+            let clock = FakeClock::at_secs(1000);
             let mut deleter = backoff_deleter(&clock, None).await;
             deleter
                 .enqueue(undeletable_dir_job(&dir, at(1000)).await)
@@ -924,7 +897,7 @@ mod tests {
                     Some(DateTime::from_timestamp(at, 0).unwrap()),
                     "after a {wait}s wait"
                 );
-                clock.advance(wait);
+                clock.advance_secs(wait as u64);
             }
         }
 
@@ -932,7 +905,7 @@ mod tests {
         async fn next_attempt_at_survives_a_reload() {
             let dir = test_dirs::temp("delete-backoff-reload").unwrap();
             let state_path = dir.file("delete_queue.json");
-            let clock = Clock::new(1000);
+            let clock = FakeClock::at_secs(1000);
             let mut deleter = backoff_deleter(&clock, Some(&state_path)).await;
             deleter
                 .enqueue(undeletable_dir_job(&dir, at(1000)).await)
@@ -955,7 +928,7 @@ mod tests {
         #[tokio::test]
         async fn count_ready_and_next_ready_agree_about_a_deferred_entry() {
             let dir = test_dirs::temp("delete-backoff-agree").unwrap();
-            let clock = Clock::new(1000);
+            let clock = FakeClock::at_secs(1000);
             let mut deleter = backoff_deleter(&clock, None).await;
             deleter
                 .enqueue(undeletable_dir_job(&dir, at(1000)).await)
@@ -980,9 +953,9 @@ mod tests {
         async fn attempts_survive_a_restart() {
             let dir = test_dirs::temp("delete-attempts-restart").unwrap();
             let state_path = dir.file("delete_queue.json");
-            let clock = Clock::new(1000);
+            let clock = FakeClock::at_secs(1000);
             let mut deleter = DeleterImpl::new(DeleterArgs {
-                now_fn: Arc::new(clock.now_fn()),
+                clock: clock.clock(),
                 backoff: NO_BACKOFF,
                 snapshot_file: Some(snapshot_file(&state_path).await),
                 ..DeleterArgs::default()
@@ -1013,9 +986,9 @@ mod tests {
         async fn dropped_entry_is_absent_from_the_persisted_snapshot() {
             let dir = test_dirs::temp("delete-attempts-drop-persist").unwrap();
             let state_path = dir.file("delete_queue.json");
-            let clock = Clock::new(1000);
+            let clock = FakeClock::at_secs(1000);
             let mut deleter = DeleterImpl::new(DeleterArgs {
-                now_fn: Arc::new(clock.now_fn()),
+                clock: clock.clock(),
                 attempts: 1,
                 snapshot_file: Some(snapshot_file(&state_path).await),
                 ..DeleterArgs::default()
