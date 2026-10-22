@@ -60,6 +60,10 @@ impl Layout {
         CalibrationsLayout::new(self.root().subdir("calibrations"))
     }
 
+    pub fn uptime(&self) -> filesys::File {
+        self.root().file("uptime.json")
+    }
+
     fn config_instances(&self) -> filesys::Dir {
         self.resources().subdir("config_instances")
     }

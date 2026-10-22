@@ -107,6 +107,13 @@ pub mod storage_layout {
     }
 
     #[test]
+    fn uptime() {
+        let layout = Layout::default();
+        let file = layout.uptime();
+        assert_eq!(file.to_string(), under_root(&["uptime.json"]));
+    }
+
+    #[test]
     fn resources() {
         let layout = Layout::default();
         let dir = layout.resources();
