@@ -28,6 +28,18 @@ pub enum Persistence {
     Durable,
 }
 
+/// What a queue holds for its worker to do next.
+#[derive(Clone, Debug, PartialEq)]
+pub enum NextAttempt<J: QueueJob> {
+    /// This entry is due for an attempt now.
+    Ready(QueueEntry<J>),
+    /// The queue is empty.
+    Empty,
+    /// Every queued entry is waiting out its backoff; the earliest is due
+    /// after this wait.
+    Backoff(Duration),
+}
+
 /// In-memory job queue with an optional single-file snapshot. Workers select
 /// with `next_ready`, which leaves the entry queued, then settle it with `ack`
 /// or `retry`. Every mutation persists as its last act; selection never does.
@@ -199,6 +211,20 @@ impl<J: QueueJob> FileQueue<J> {
     fn take(&mut self, id: Uuid) -> Option<QueueEntry<J>> {
         let idx = self.entries.iter().position(|entry| entry.id == id)?;
         self.entries.remove(idx)
+    }
+
+    /// The entry to attempt at `now` (wall clock, for job readiness) and
+    /// `instant` (monotonic, for retry deadlines), or how long until one is
+    /// due. Retry deadlines are monotonic, so a system clock step can neither
+    /// stall the queue nor rush it.
+    pub fn next_attempt(&self, now: DateTime<Utc>, instant: Instant) -> NextAttempt<J> {
+        if let Some(entry) = self.next_ready(now, instant) {
+            return NextAttempt::Ready(entry);
+        }
+        match self.wait_for_next_attempt(instant) {
+            None => NextAttempt::Empty,
+            Some(wait) => NextAttempt::Backoff(wait),
+        }
     }
 
     /// The sole writer to disk, called by every mutator as its last act. A

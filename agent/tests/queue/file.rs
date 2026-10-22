@@ -22,11 +22,12 @@ use std::time::{Duration, Instant};
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::filesys::{dirs, files, Dir, File, PathExt, WriteOptions};
 use miru_agent::queue::{
-    EnqueueErr, FileQueue, Persistence, QueueEntry, QueueJob, QueueSnapshot, QueueSnapshotFile,
+    EnqueueErr, FileQueue, NextAttempt, Persistence, QueueEntry, QueueJob, QueueSnapshot,
+    QueueSnapshotFile,
 };
 
 // external crates
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeDelta, Utc};
 use uuid::Uuid;
 
 pub const DEFAULT_CAPACITY: usize = 4096;
@@ -642,6 +643,59 @@ pub mod cases {
         }
     }
 
+    // ------------------------------- next_attempt -------------------------------- //
+
+    pub mod next_attempt {
+        use super::*;
+
+        fn minutes(n: u64) -> Duration {
+            Duration::from_secs(n * 60)
+        }
+
+        pub async fn is_empty_when_empty<J: QueueJob>(_make: fn(&str) -> J) {
+            let queue = FileQueue::<J>::new(DEFAULT_CAPACITY);
+
+            let next = queue.next_attempt(now(), instant());
+
+            assert_eq!(next, NextAttempt::Empty);
+        }
+
+        pub async fn returns_the_ready_entry<J: QueueJob>(make: fn(&str) -> J) {
+            let mut queue = FileQueue::<J>::new(DEFAULT_CAPACITY);
+            enqueue_waiting(&mut queue, make("a.log"), 1, instant() + minutes(5)).await;
+            enqueue(&mut queue, make("b.log")).await;
+
+            let NextAttempt::Ready(entry) = queue.next_attempt(now(), instant()) else {
+                panic!("expected a ready entry");
+            };
+
+            assert_eq!(entry.job, make("b.log"));
+        }
+
+        pub async fn waits_for_the_earliest_deadline<J: QueueJob>(make: fn(&str) -> J) {
+            let mut queue = FileQueue::<J>::new(DEFAULT_CAPACITY);
+            for (name, wait) in [("a.log", 20), ("b.log", 5)] {
+                enqueue_waiting(&mut queue, make(name), 1, instant() + minutes(wait)).await;
+            }
+
+            let next = queue.next_attempt(now(), instant());
+
+            assert_eq!(next, NextAttempt::Backoff(minutes(5)));
+        }
+
+        /// Retry deadlines are monotonic, so a system clock step either way
+        /// leaves the wait as it was.
+        pub async fn ignores_a_system_clock_step<J: QueueJob>(make: fn(&str) -> J) {
+            let mut queue = FileQueue::<J>::new(DEFAULT_CAPACITY);
+            enqueue_waiting(&mut queue, make("a.log"), 1, instant() + minutes(5)).await;
+
+            for step in [TimeDelta::days(365), -TimeDelta::days(365)] {
+                let next = queue.next_attempt(now() + step, instant());
+                assert_eq!(next, NextAttempt::Backoff(minutes(5)));
+            }
+        }
+    }
+
     // -------------------------------- durability --------------------------------- //
 
     /// What the snapshot must still hold while a worker is mid-job.
@@ -789,6 +843,15 @@ macro_rules! queue_suite {
             count_ready {
                 disk: [],
                 mem: [counts_only_ready_entries],
+            },
+            next_attempt {
+                disk: [],
+                mem: [
+                    is_empty_when_empty,
+                    returns_the_ready_entry,
+                    waits_for_the_earliest_deadline,
+                    ignores_a_system_clock_step,
+                ],
             },
             wait_for_next_attempt {
                 disk: [],
