@@ -42,7 +42,7 @@ impl queue::QueueJob for ReportMetadata {
     const LABEL: &'static str = "calibration";
 
     /// A calibration is uploadable the moment it is queued.
-    fn due_at(&self) -> DateTime<Utc> {
+    fn ready_at(&self) -> DateTime<Utc> {
         DateTime::<Utc>::MIN_UTC
     }
 
