@@ -6,7 +6,7 @@ use crate::clock::uptime;
 use crate::filesys::File;
 
 // external crates
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeDelta, Utc};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -17,8 +17,8 @@ pub struct Job {
     pub mtime: DateTime<Utc>,
     pub first_observed_at: DateTime<Utc>,
     /// The robot's system clock when the file was last observed, for logs.
-    /// The TTL is counted by `uptime_due_secs`, which never reads the system
-    /// clock.
+    /// The TTL is counted by the two deadlines below, which never read the
+    /// system clock.
     pub last_observed_at: DateTime<Utc>,
     pub ttl_secs: u64,
     pub file_rule_id: String,
@@ -28,6 +28,10 @@ pub struct Job {
     /// enqueue. `None` only for a job saved before this field existed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub uptime_due_secs: Option<u64>,
+    /// When the TTL runs out in server time, if the agent knew server time
+    /// when the job was enqueued. The deleter sets it on enqueue.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server_due_at: Option<DateTime<Utc>>,
 }
 
 impl Job {
@@ -35,6 +39,15 @@ impl Job {
     /// `uptime_now`. Resolution is one second, like the TTL itself.
     pub fn uptime_due_from(&self, uptime_now: Duration) -> u64 {
         uptime_now.as_secs().saturating_add(self.ttl_secs)
+    }
+
+    /// The server time at which the TTL runs out, counting from `server_now`.
+    pub fn server_due_from(&self, server_now: DateTime<Utc>) -> DateTime<Utc> {
+        i64::try_from(self.ttl_secs)
+            .ok()
+            .and_then(TimeDelta::try_seconds)
+            .and_then(|ttl| server_now.checked_add_signed(ttl))
+            .unwrap_or(DateTime::<Utc>::MAX_UTC)
     }
 
     /// The uptime deadline as the queue compares it (see
@@ -71,6 +84,7 @@ mod tests {
             file_rule_id: "file_rule_1".to_string(),
             deployment_id: "dpl_1".to_string(),
             uptime_due_secs: None,
+            server_due_at: None,
         }
     }
 
@@ -85,6 +99,16 @@ mod tests {
             job(u64::MAX).uptime_due_from(Duration::from_secs(1)),
             u64::MAX
         );
+    }
+
+    #[test]
+    fn server_due_adds_ttl_and_saturates() {
+        let now = DateTime::from_timestamp(1000, 0).unwrap();
+        assert_eq!(
+            job(300).server_due_from(now),
+            DateTime::from_timestamp(1300, 0).unwrap()
+        );
+        assert_eq!(job(u64::MAX).server_due_from(now), DateTime::<Utc>::MAX_UTC);
     }
 
     #[test]

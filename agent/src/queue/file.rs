@@ -319,6 +319,7 @@ mod tests {
             file_rule_id: "file_rule_1".to_string(),
             deployment_id: "dpl_1".to_string(),
             uptime_due_secs: Some(0),
+            server_due_at: None,
         }
     }
 

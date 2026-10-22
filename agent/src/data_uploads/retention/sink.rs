@@ -60,6 +60,7 @@ impl<D: DeleterExt> StableFileSink for RetentionStableFileSink<D> {
                 file_rule_id: file.file_rule_id,
                 deployment_id: file.deployment_id,
                 uptime_due_secs: None,
+                server_due_at: None,
             };
 
             if let Err(e) = self.deleter.enqueue(job).await {

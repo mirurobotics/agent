@@ -829,6 +829,7 @@ mod retention_producer {
             file_rule_id: job.file_rule_id.clone(),
             deployment_id: job.deployment_id.clone(),
             uptime_due_secs: None,
+            server_due_at: None,
         }
     }
 
