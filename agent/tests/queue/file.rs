@@ -7,9 +7,9 @@
 //! emits one `mod` per group holding one `#[tokio::test]` per case, each named
 //! exactly after the case function — so a failing test path
 //! (`upload::queue::enqueue::persists`) greps straight to its body here. The
-//! suite therefore runs against `upload::Job` (always ready on arrival) and
-//! `retention::Job` (ready only once its TTL elapses), proving the `ready_at` hook
-//! in both states.
+//! suite therefore runs against both `upload::Job` and `retention::Job`. Both
+//! are ready on arrival as far as the queue can tell: the deleter decides when
+//! a retention TTL has run out, since that takes server and monotonic time.
 //!
 //! This file itself contains no tests: only the fixtures, the generic cases,
 //! and the macro.
@@ -566,6 +566,89 @@ pub mod cases {
         }
     }
 
+    // ------------------------------- ready_where --------------------------------- //
+
+    pub mod ready_where {
+        use super::*;
+
+        pub async fn selects_only_ready_entries_matching_the_predicate<J: QueueJob>(
+            make: fn(&str) -> J,
+        ) {
+            let mut queue = FileQueue::<J>::new(DEFAULT_CAPACITY);
+            let a = enqueue(&mut queue, make("a.log")).await;
+            let b = enqueue(&mut queue, make("b.log")).await;
+            enqueue_waiting(&mut queue, make("waiting"), 1, now() + TimeDelta::hours(1)).await;
+
+            let not_a = |entry: &QueueEntry<J>| entry.id != a;
+            assert_eq!(queue.count_ready_where(now(), not_a), 1);
+            assert_eq!(queue.next_ready_where(now(), not_a).unwrap().id, b);
+
+            let none = |_: &QueueEntry<J>| false;
+            assert_eq!(queue.count_ready_where(now(), none), 0);
+            assert!(queue.next_ready_where(now(), none).is_none());
+
+            // a waiting entry stays unselectable even when the predicate accepts it
+            let any = |_: &QueueEntry<J>| true;
+            assert_eq!(queue.count_ready_where(now(), any), 2);
+        }
+    }
+
+    // ------------------------------- update_jobs --------------------------------- //
+
+    pub mod update_jobs {
+        use super::*;
+
+        pub async fn changes_jobs_by_id_and_counts_them<J: QueueJob>(make: fn(&str) -> J) {
+            let mut queue = FileQueue::<J>::new(DEFAULT_CAPACITY);
+            enqueue(&mut queue, make("a.log")).await;
+            let b = enqueue(&mut queue, make("b.log")).await;
+
+            let changed = queue
+                .update_jobs(|id, job| {
+                    if id != b {
+                        return false;
+                    }
+                    *job = make("b2.log");
+                    true
+                })
+                .await;
+
+            assert_eq!(changed, 1);
+            let mut drained = Vec::new();
+            while let Some(entry) = queue.next_ready(now()) {
+                drained.push(entry.job);
+                queue.ack(entry.id).await;
+            }
+            assert_eq!(drained, vec![make("a.log"), make("b2.log")]);
+        }
+
+        pub async fn persists_a_change<J: QueueJob>(tmp: &str, make: fn(&str) -> J) {
+            let (_dir, path) = temp_path(tmp);
+            {
+                let mut queue = FileQueue::<J>::from_snapshot(
+                    DEFAULT_CAPACITY,
+                    open::<J>(&path).await,
+                    Persistence::BestEffort,
+                );
+                enqueue(&mut queue, make("a.log")).await;
+                let changed = queue
+                    .update_jobs(|_, job| {
+                        *job = make("a2.log");
+                        true
+                    })
+                    .await;
+                assert_eq!(changed, 1);
+            }
+
+            let reloaded = FileQueue::<J>::from_snapshot(
+                DEFAULT_CAPACITY,
+                open::<J>(&path).await,
+                Persistence::BestEffort,
+            );
+            assert_eq!(reloaded.next_ready(now()).unwrap().job, make("a2.log"));
+        }
+    }
+
     // -------------------------- reset_invalid_deadlines -------------------------- //
 
     pub mod reset_invalid_deadlines {
@@ -800,6 +883,14 @@ macro_rules! queue_suite {
             count_ready {
                 disk: [],
                 mem: [counts_only_ready_entries],
+            },
+            ready_where {
+                disk: [],
+                mem: [selects_only_ready_entries_matching_the_predicate],
+            },
+            update_jobs {
+                disk: [persists_a_change],
+                mem: [changes_jobs_by_id_and_counts_them],
             },
             reset_invalid_deadlines {
                 disk: [persists],

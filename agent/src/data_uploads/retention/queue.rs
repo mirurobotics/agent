@@ -8,8 +8,11 @@ use chrono::{DateTime, Utc};
 impl queue::QueueJob for Job {
     const LABEL: &'static str = "delete";
 
+    /// Always ready as far as the queue can tell. Whether the TTL has run
+    /// out depends on server and monotonic time, which the deleter tracks, so
+    /// the deleter decides that itself (see `DeleterImpl::sweep`).
     fn ready_at(&self) -> DateTime<Utc> {
-        Job::ready_at(self)
+        DateTime::<Utc>::MIN_UTC
     }
 
     fn name(&self) -> String {

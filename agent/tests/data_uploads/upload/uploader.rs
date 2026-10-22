@@ -784,6 +784,7 @@ mod retention_producer {
             ttl_secs: job.retention.as_ref().unwrap().ttl_secs,
             file_rule_id: job.file_rule_id.clone(),
             deployment_id: job.deployment_id.clone(),
+            expiry: Default::default(),
         }
     }
 

@@ -77,17 +77,37 @@ impl<J: QueueJob> FileQueue<J> {
     }
 
     pub fn count_ready(&self, now: DateTime<Utc>) -> usize {
+        self.count_ready_where(now, |_| true)
+    }
+
+    /// [`count_ready`](Self::count_ready), counting only entries that also
+    /// satisfy `pred`.
+    pub fn count_ready_where(
+        &self,
+        now: DateTime<Utc>,
+        pred: impl Fn(&QueueEntry<J>) -> bool,
+    ) -> usize {
         self.entries
             .iter()
-            .filter(|entry| Self::is_ready(entry, now))
+            .filter(|entry| Self::is_ready(entry, now) && pred(entry))
             .count()
     }
 
     pub fn next_ready(&self, now: DateTime<Utc>) -> Option<QueueEntry<J>> {
+        self.next_ready_where(now, |_| true)
+    }
+
+    /// [`next_ready`](Self::next_ready), selecting only an entry that also
+    /// satisfies `pred`.
+    pub fn next_ready_where(
+        &self,
+        now: DateTime<Utc>,
+        pred: impl Fn(&QueueEntry<J>) -> bool,
+    ) -> Option<QueueEntry<J>> {
         let entry = self
             .entries
             .iter()
-            .find(|entry| Self::is_ready(entry, now))?;
+            .find(|entry| Self::is_ready(entry, now) && pred(entry))?;
         info!(
             "{}: job selected; queue length {}",
             J::LABEL,
@@ -208,6 +228,21 @@ impl<J: QueueJob> FileQueue<J> {
         warn!("{}: pulled {reset} deadline(s) back to {horizon}", J::LABEL);
     }
 
+    /// Apply `f` to every queued job with its entry id, persisting once if `f`
+    /// reported a change for any of them. Returns how many jobs changed.
+    pub async fn update_jobs(&mut self, mut f: impl FnMut(Uuid, &mut J) -> bool) -> usize {
+        let mut changed = 0;
+        for entry in self.entries.iter_mut() {
+            if f(entry.id, &mut entry.job) {
+                changed += 1;
+            }
+        }
+        if changed > 0 {
+            let _ = self.persist().await;
+        }
+        changed
+    }
+
     /// The sole writer to disk, called by every mutator as its last act. A
     /// failed write is logged and returned. Only a durable `enqueue` acts on
     /// the error; every other caller keeps the in-memory queue authoritative.
@@ -263,6 +298,7 @@ mod tests {
             ttl_secs: 0,
             file_rule_id: "file_rule_1".to_string(),
             deployment_id: "dpl_1".to_string(),
+            expiry: Default::default(),
         }
     }
 

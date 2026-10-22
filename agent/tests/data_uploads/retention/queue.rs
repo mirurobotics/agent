@@ -2,13 +2,13 @@
 use crate::queue::file::{enqueue, queue_suite, DEFAULT_CAPACITY};
 use crate::test_utils::filesys::{abs_path, dirs as test_dirs};
 use miru_agent::data_uploads::retention::{
-    DeleteQueueSnapshot, DeleteQueueSnapshotFile, Job, Queue,
+    DeleteQueueSnapshot, DeleteQueueSnapshotFile, Expiry, Job, Queue,
 };
 use miru_agent::filesys::{files, File, WriteOptions};
 use miru_agent::queue::Persistence;
 
 // external crates
-use chrono::{DateTime, TimeDelta, Utc};
+use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 /// The instant the pin selects at. The pinned job's TTL has elapsed by then.
@@ -31,6 +31,7 @@ fn make_job(name: &str, observed_secs: i64, ttl_secs: u64) -> Job {
         ttl_secs,
         file_rule_id: "file_rule_1".to_string(),
         deployment_id: "dpl_1".to_string(),
+        expiry: Default::default(),
     }
 }
 
@@ -42,37 +43,27 @@ async fn open(path: &File) -> DeleteQueueSnapshotFile {
         .unwrap()
 }
 
-/// A deterministic retention job whose TTL has yet to elapse at [`now`] unless
-/// `ttl_secs` is small enough. Observed at 1000s, so a TTL of 1000s is due at
-/// exactly [`now`].
+/// A deterministic retention job observed at 1000s with `ttl_secs`.
 fn retention_job_with_ttl(name: &str, ttl_secs: u64) -> Job {
     make_job(name, 1000, ttl_secs)
 }
 
-/// A retention job with a zero TTL, so it is due at [`now`].
+/// A retention job with a zero TTL.
 fn retention_job(name: &str) -> Job {
     retention_job_with_ttl(name, 0)
 }
 
 queue_suite!(retention_job, "delete-generic-queue-test");
 
-/// The other state of the `ready_at` hook: a retention job is not ready until
-/// its TTL has elapsed, and `next_ready` / `count_ready` both honour it.
+/// The queue never holds a retention job back on its TTL: the deleter decides
+/// when the TTL has run out (see `DeleterImpl::sweep`), because that takes
+/// server and monotonic time, not the system clock the queue is given.
 #[tokio::test]
-async fn a_job_whose_ttl_has_not_elapsed_is_not_ready() {
+async fn a_job_is_ready_whatever_its_ttl() {
     let mut queue = Queue::new(DEFAULT_CAPACITY);
     enqueue(&mut queue, retention_job_with_ttl("waiting", 5000)).await;
-    enqueue(&mut queue, retention_job_with_ttl("due", 500)).await;
 
-    // ready_at is inclusive: "due" is ready at exactly `now`
-    assert_eq!(queue.count_ready(now()), 1);
-    assert_eq!(
-        queue.next_ready(now()).unwrap().job,
-        retention_job_with_ttl("due", 500)
-    );
-
-    // the waiting job becomes ready once its TTL elapses
-    assert_eq!(queue.count_ready(now() + TimeDelta::hours(2)), 2);
+    assert_eq!(queue.count_ready(DateTime::<Utc>::MIN_UTC), 1);
 }
 
 mod wire {
@@ -109,5 +100,32 @@ mod wire {
         let entry = queue.next_ready(now()).unwrap();
         assert_eq!(entry.id, id);
         assert_eq!(entry.job, expected);
+    }
+
+    /// Pins the expiry's wire format: the deleter's server deadline and saved
+    /// remaining TTL ride under `expiry`, and a job without one (saved before
+    /// expiries existed) omits the key, as the test above loads.
+    #[test]
+    fn expiry_round_trips_under_its_own_key() {
+        let job = Job {
+            expiry: Expiry {
+                server_expires_at: Some(DateTime::from_timestamp(1500, 0).unwrap()),
+                remaining_ttl_secs: Some(300),
+            },
+            ..make_job("a.log", 1000, 500)
+        };
+
+        let value = serde_json::to_value(&job).unwrap();
+        assert_eq!(
+            value["expiry"],
+            serde_json::json!({
+                "server_expires_at": "1970-01-01T00:25:00Z",
+                "remaining_ttl_secs": 300,
+            })
+        );
+        assert_eq!(serde_json::from_value::<Job>(value).unwrap(), job);
+
+        let unset = serde_json::to_value(make_job("a.log", 1000, 500)).unwrap();
+        assert!(unset.get("expiry").is_none());
     }
 }

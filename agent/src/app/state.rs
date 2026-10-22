@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 // internal crates
 use crate::authn::{self, token_mngr::TokenFile, TokenManagerExt};
+use crate::clock;
 use crate::cooldown;
 use crate::data_uploads::{
     retention::{self, DeleterExt},
@@ -113,7 +114,8 @@ impl AppState {
         http_client: Arc<http::Client>,
         token_mngr: Arc<authn::TokenManager>,
     ) -> Result<DataUploadActors, server::ServerErr> {
-        let (deleter, deleter_handle) = Self::init_deleter(layout).await?;
+        let (deleter, deleter_handle) =
+            Self::init_deleter(layout, http_client.clock().clone()).await?;
         let (uploader, uploader_handle) =
             Self::init_uploader(layout, http_client, token_mngr, deleter.clone()).await?;
 
@@ -169,6 +171,7 @@ impl AppState {
     /// (`Deleter::spawn` cannot fail today).
     async fn init_deleter(
         layout: &disk::Layout,
+        clock: clock::Clock,
     ) -> Result<(Arc<retention::Deleter>, tokio::task::JoinHandle<()>), server::ServerErr> {
         let snapshot_file = match retention::DeleteQueueSnapshotFile::new_with_default(
             layout.delete_queue(),
@@ -186,6 +189,7 @@ impl AppState {
         };
 
         let args = retention::DeleterArgs {
+            clock,
             snapshot_file,
             ..retention::DeleterArgs::default()
         };

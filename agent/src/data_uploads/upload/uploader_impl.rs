@@ -227,6 +227,7 @@ where
             ttl_secs: retention.ttl_secs,
             file_rule_id: job.file_rule_id.clone(),
             deployment_id: job.deployment_id.clone(),
+            expiry: Default::default(),
         };
         if let Err(e) = self.deleter.enqueue(delete_job).await {
             warn!(
