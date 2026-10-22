@@ -94,6 +94,21 @@ pub fn http_client() -> SharedHttpClient {
     })
 }
 
+/// Settings every store shares: the SDK behaviour version, the client-wide
+/// time limit and upload stall protection, and the HTTPS client.
+fn base_config(http_client: SharedHttpClient) -> aws_sdk_s3::config::Builder {
+    aws_sdk_s3::config::Config::builder()
+        .behavior_version(BehaviorVersion::latest())
+        .timeout_config(timeout_config(ATTEMPT_TIMEOUT))
+        .stalled_stream_protection(
+            StalledStreamProtectionConfig::enabled()
+                .upload_enabled(true)
+                .grace_period(STALL_GRACE)
+                .build(),
+        )
+        .http_client(http_client)
+}
+
 pub struct Config {
     pub creds: Credentials,
     pub region: String,
@@ -223,17 +238,9 @@ pub struct Store {
 }
 
 impl Store {
-    /// Builds a client from caller-supplied temporary credentials. No network
-    /// I/O happens here; the first request is made lazily on the first call.
-    pub fn new(cfg: Config) -> Self {
-        Self::build(cfg, None, false)
-    }
-
-    pub(crate) fn build(
-        cfg: Config,
-        http_client: Option<SharedHttpClient>,
-        force_path_style: bool,
-    ) -> Self {
+    /// Builds a store that uploads to AWS S3 with caller-supplied temporary
+    /// credentials. No network I/O happens here.
+    pub fn new_s3(cfg: Config, http_client: SharedHttpClient, force_path_style: bool) -> Self {
         let s3creds = AwsCredentials::new(
             cfg.creds.access_key_id,
             cfg.creds.secret_access_key,
@@ -241,21 +248,10 @@ impl Store {
             None,
             "miru-agent",
         );
-        let mut builder = aws_sdk_s3::config::Config::builder()
-            .behavior_version(BehaviorVersion::latest())
+        let builder = base_config(http_client)
             .region(Region::new(cfg.region))
             .credentials_provider(s3creds)
-            .force_path_style(force_path_style)
-            .timeout_config(timeout_config(ATTEMPT_TIMEOUT))
-            .stalled_stream_protection(
-                StalledStreamProtectionConfig::enabled()
-                    .upload_enabled(true)
-                    .grace_period(STALL_GRACE)
-                    .build(),
-            );
-        if let Some(http_client) = http_client {
-            builder = builder.http_client(http_client);
-        }
+            .force_path_style(force_path_style);
         Self {
             client: Client::from_conf(builder.build()),
         }
@@ -270,11 +266,7 @@ impl Store {
         http_client: impl aws_sdk_s3::config::HttpClient + 'static,
         cfg: Config,
     ) -> Self {
-        Self::build(
-            cfg,
-            Some(aws_sdk_s3::config::IntoShared::into_shared(http_client)),
-            true,
-        )
+        Self::new_s3(cfg, SharedHttpClient::new(http_client), true)
     }
 
     /// Creates or overwrites an object from a local file, opened once as a
@@ -703,12 +695,12 @@ mod tests {
                 region: "us-west-2".to_string(),
             };
             // Constructing must not panic or touch the network.
-            let _store = Store::new(cfg);
+            let _store = Store::new_s3(cfg, http_client(), false);
         }
 
         #[tokio::test]
-        async fn build_sets_timeouts_and_stall_protection() {
-            let store = Store::new(test_config());
+        async fn new_s3_sets_timeouts_and_stall_protection() {
+            let store = Store::new_s3(test_config(), http_client(), false);
             let config = store.client.config();
 
             let timeouts = TimeoutConfig::builder()
@@ -726,7 +718,7 @@ mod tests {
 
         #[tokio::test]
         async fn http_client_builds_connector() {
-            let store = Store::build(test_config(), Some(http_client()), false);
+            let store = Store::new_s3(test_config(), http_client(), false);
             assert!(store.client.config().http_client().is_some());
 
             // The SDK calls the connector closure with settings and components

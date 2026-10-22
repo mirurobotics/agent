@@ -13,6 +13,7 @@ use backend_api::models::upload_credentials::Scheme;
 use backend_api::models::{S3UploadCredentials, UploadCredentials, UploadDestination};
 
 // external crates
+use aws_sdk_s3::config::SharedHttpClient;
 use tracing::info;
 
 /// The seam between the upload executor and the concrete cloud-storage SDKs.
@@ -41,7 +42,7 @@ pub trait ObjectTransfer: Send + Sync {
 /// transport settings feed the same store builders as the default HTTPS
 /// transport and cloud endpoints.
 pub struct SdkTransfer {
-    s3_http_client: Option<aws_sdk_s3::config::SharedHttpClient>,
+    s3_http_client: SharedHttpClient,
     s3_force_path_style: bool,
     gcs_endpoint: Option<String>,
 }
@@ -51,7 +52,7 @@ pub struct SdkTransfer {
 impl Default for SdkTransfer {
     fn default() -> Self {
         Self {
-            s3_http_client: Some(s3::http_client()),
+            s3_http_client: s3::http_client(),
             s3_force_path_style: false,
             gcs_endpoint: None,
         }
@@ -67,7 +68,7 @@ impl SdkTransfer {
         http_client: impl aws_sdk_s3::config::HttpClient + 'static,
     ) -> Self {
         Self {
-            s3_http_client: Some(aws_sdk_s3::config::IntoShared::into_shared(http_client)),
+            s3_http_client: SharedHttpClient::new(http_client),
             s3_force_path_style: true,
             gcs_endpoint: None,
         }
@@ -79,7 +80,7 @@ impl SdkTransfer {
     #[cfg(test)]
     pub(crate) fn with_gcs_endpoint(endpoint: String) -> Self {
         Self {
-            s3_http_client: None,
+            s3_http_client: s3::http_client(),
             s3_force_path_style: false,
             gcs_endpoint: Some(endpoint),
         }
@@ -143,7 +144,7 @@ impl SdkTransfer {
 
     /// Builds the S3 store with this transfer's transport settings.
     fn s3_store(&self, cfg: s3::Config) -> s3::Store {
-        s3::Store::build(cfg, self.s3_http_client.clone(), self.s3_force_path_style)
+        s3::Store::new_s3(cfg, self.s3_http_client.clone(), self.s3_force_path_style)
     }
 
     /// Builds the GCS store with this transfer's endpoint settings.
@@ -362,10 +363,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn default_carries_shared_s3_http_client() {
+    async fn default_uses_virtual_hosted_s3_urls() {
         let transfer = SdkTransfer::default();
 
-        assert!(transfer.s3_http_client.is_some());
         assert!(!transfer.s3_force_path_style);
         assert!(transfer.gcs_endpoint.is_none());
     }
