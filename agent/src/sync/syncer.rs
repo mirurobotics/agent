@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 // internal crates
 use crate::authn::{self, TokenManagerExt};
 use crate::cooldown;
-use crate::deploy::apply;
+use crate::deploy::{self, apply};
 use crate::disk;
 use crate::events;
 use crate::filesys::File;
@@ -72,6 +72,8 @@ pub struct SyncerArgs<HTTPClientT, TokenManagerT: TokenManagerExt> {
     pub http_client: Arc<HTTPClientT>,
     pub token_mngr: Arc<TokenManagerT>,
     pub deploy_opts: apply::DeployOpts,
+    /// Retry cooldowns of failed deployments, in memory only.
+    pub deployment_cooldowns: deploy::Cooldowns,
     pub backoff: cooldown::Backoff,
     pub event_hub: events::EventHub,
     pub system_metadata_cache: File,
@@ -341,7 +343,7 @@ mod tests {
     };
     use miru_agent::authn::{TokenManager, TokenManagerExt};
     use miru_agent::cooldown;
-    use miru_agent::deploy::{apply, fsm};
+    use miru_agent::deploy::{apply, fsm, Cooldowns};
     use miru_agent::disk::Storage;
     use miru_agent::errors::*;
     use miru_agent::events::hub::{EventHub, SpawnOptions};
@@ -380,6 +382,7 @@ mod tests {
         backoff: cooldown::Backoff,
         token_mngr: Arc<TokenManager>,
         system_metadata_cache: File,
+        deployment_cooldowns: Cooldowns,
     }
 
     impl Fixture {
@@ -403,6 +406,7 @@ mod tests {
             let http_client = Arc::new(MockClient::default());
             let storage = Arc::new(create_storage(dir.dir()).await);
             let system_metadata_cache = dir.file("system_metadata.json");
+            let deployment_cooldowns = Cooldowns::default();
 
             let log_file = dir.file("events.jsonl");
             let (event_hub, _hub_handle) = EventHub::spawn(log_file, SpawnOptions::default())
@@ -418,6 +422,7 @@ mod tests {
                     deploy_opts: apply::DeployOpts {
                         retry_policy: fsm::RetryPolicy::default(),
                     },
+                    deployment_cooldowns: deployment_cooldowns.clone(),
                     backoff,
                     event_hub,
                     system_metadata_cache: system_metadata_cache.clone(),
@@ -433,6 +438,7 @@ mod tests {
                 backoff,
                 system_metadata_cache,
                 token_mngr,
+                deployment_cooldowns,
             }
         }
 
@@ -544,6 +550,7 @@ mod tests {
                     deploy_opts: apply::DeployOpts {
                         retry_policy: fsm::RetryPolicy::default(),
                     },
+                    deployment_cooldowns: Cooldowns::default(),
                     backoff: cooldown::Backoff {
                         base_secs: 15,
                         growth_factor: 2,
@@ -1270,9 +1277,10 @@ mod tests {
                 target_status: DplTarget::Deployed,
                 config_instance_ids: vec!["cfg_inst_1".to_string()],
                 attempts: 1,
-                cooldown_ends_at: Utc::now() + TimeDelta::seconds(5),
                 ..Default::default()
             };
+            f.deployment_cooldowns
+                .start("dpl_1", Duration::from_secs(5));
             f.storage
                 .deployments
                 .write("dpl_1".to_string(), seeded, |_, _| false, Overwrite::Allow)
@@ -1359,9 +1367,10 @@ mod tests {
                 target_status: DplTarget::Deployed,
                 config_instance_ids: vec!["cfg_inst_1".to_string()],
                 attempts: 1,
-                cooldown_ends_at: Utc::now() + TimeDelta::seconds(5),
                 ..Default::default()
             };
+            f.deployment_cooldowns
+                .start("dpl_1", Duration::from_secs(5));
             f.storage
                 .deployments
                 .write("dpl_1".to_string(), seeded, |_, _| false, Overwrite::Allow)

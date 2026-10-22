@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 // internal crates
 use crate::authn::{self, TokenManagerExt};
 use crate::cooldown;
-use crate::deploy::apply;
+use crate::deploy::{apply, Cooldowns};
 use crate::disk;
 use crate::errors::*;
 use crate::events;
@@ -29,6 +29,7 @@ pub struct SyncerImpl<HTTPClientT> {
     storage: Arc<disk::Storage>,
     token_mngr: Arc<authn::TokenManager>,
     deploy_opts: apply::DeployOpts,
+    deployment_cooldowns: Cooldowns,
     event_hub: events::EventHub,
     system_metadata_cache: File,
 
@@ -49,6 +50,7 @@ impl<HTTPClientT: http::ClientI> SyncerImpl<HTTPClientT> {
             http_client: args.http_client,
             token_mngr: args.token_mngr,
             deploy_opts: args.deploy_opts,
+            deployment_cooldowns: args.deployment_cooldowns,
             backoff: args.backoff,
             event_hub: args.event_hub,
             system_metadata_cache: args.system_metadata_cache,
@@ -186,6 +188,7 @@ impl<HTTPClientT: http::ClientI> SyncerImpl<HTTPClientT> {
             http_client: self.http_client.as_ref(),
             storage: &sync_storage,
             opts: &self.deploy_opts,
+            cooldowns: &self.deployment_cooldowns,
             token: &token.token,
             event_hub: &self.event_hub,
         })
@@ -195,7 +198,7 @@ impl<HTTPClientT: http::ClientI> SyncerImpl<HTTPClientT> {
         if !matches!(&result, Err(e) if e.is_network_conn_err()) {
             self.sync_system_metadata(&token.token).await;
         }
-        result.map(|wait| wait.map(|w| w.to_std().unwrap_or(Duration::ZERO)))
+        result
     }
 
     /// Best-effort: failures are logged and never affect the sync result or its

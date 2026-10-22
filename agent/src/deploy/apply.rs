@@ -1,13 +1,15 @@
+// standard crates
+use std::time::Duration;
+
 // internal crates
 use crate::data_uploads::scan::validate_rules;
-use crate::deploy::{errors::*, filesys as dpl_filesys, fsm};
+use crate::deploy::{cooldowns::Cooldowns, errors::*, filesys as dpl_filesys, fsm};
 use crate::disk;
 use crate::filesys;
 use crate::models;
 use crate::trace;
 
 // external crates
-use chrono::Utc;
 use tracing::{error, info};
 
 pub struct DeployOpts {
@@ -17,6 +19,7 @@ pub struct DeployOpts {
 pub struct Args<'a> {
     pub storage: &'a Storage<'a>,
     pub opts: &'a DeployOpts,
+    pub cooldowns: &'a Cooldowns,
 }
 
 pub struct Storage<'a> {
@@ -28,7 +31,7 @@ pub struct Storage<'a> {
 
 pub struct Outcome {
     pub deployment: models::Deployment,
-    pub wait: Option<chrono::TimeDelta>,
+    pub wait: Option<Duration>,
     pub error: Option<DeployErr>,
     /// Whether the FSM actually transitioned the deployment state (deploy, remove,
     /// archive). False for no-op and wait outcomes.
@@ -36,9 +39,9 @@ pub struct Outcome {
 }
 
 pub async fn apply(args: &Args<'_>) -> Result<Vec<Outcome>, DeployErr> {
-    let mut categorized = read_deployments(args.storage.deployments).await?;
+    let mut categorized = read_deployments(args.storage.deployments, args.cooldowns).await?;
 
-    categorized.remove = mark_removing(args.storage.deployments, categorized.remove).await?;
+    categorized.remove = mark_removing(args, categorized.remove).await?;
 
     match &categorized.target_deployed {
         Some(target_deployed) => {
@@ -72,7 +75,10 @@ pub async fn apply(args: &Args<'_>) -> Result<Vec<Outcome>, DeployErr> {
     }
 }
 
-async fn read_deployments(storage: &disk::Deployments) -> Result<Categorized, DeployErr> {
+async fn read_deployments(
+    storage: &disk::Deployments,
+    cooldowns: &Cooldowns,
+) -> Result<Categorized, DeployErr> {
     let target_deployed = find_target_deployed(storage).await?;
     let tgt_dpl_id = target_deployed.as_ref().map(|d| d.id.clone());
 
@@ -84,17 +90,14 @@ async fn read_deployments(storage: &disk::Deployments) -> Result<Categorized, De
         archive: Vec::new(),
     };
 
-    let deployments = storage
-        .find_where(move |d| fsm::next_action(d) != fsm::NextAction::None)
-        .await?;
-
+    let deployments = find_actionable(storage, cooldowns).await?;
     for dpl in deployments.into_iter() {
         if let Some(id) = &tgt_dpl_id {
             if &dpl.id == id {
                 continue;
             }
         }
-        match fsm::next_action(&dpl) {
+        match fsm::next_action(&dpl, cooldowns.remaining(&dpl.id)) {
             fsm::NextAction::None => {
                 categorized.none.push(dpl.clone());
             }
@@ -124,6 +127,20 @@ async fn read_deployments(storage: &disk::Deployments) -> Result<Categorized, De
         }
     }
     Ok(categorized)
+}
+
+/// The deployments with a next action, counting waiting out a cooldown.
+async fn find_actionable(
+    storage: &disk::Deployments,
+    cooldowns: &Cooldowns,
+) -> Result<Vec<models::Deployment>, DeployErr> {
+    let cooldowns = cooldowns.clone();
+    let deployments = storage
+        .find_where(move |d| {
+            fsm::next_action(d, cooldowns.remaining(&d.id)) != fsm::NextAction::None
+        })
+        .await?;
+    Ok(deployments)
 }
 
 async fn find_target_deployed(
@@ -204,7 +221,7 @@ async fn apply_one(
     deployment: models::Deployment,
     dont_remove: &[filesys::File],
 ) -> Outcome {
-    match fsm::next_action(&deployment) {
+    match fsm::next_action(&deployment, args.cooldowns.remaining(&deployment.id)) {
         fsm::NextAction::None => {
             info!("'{}' has no next action", deployment.id);
             Outcome {
@@ -218,7 +235,7 @@ async fn apply_one(
             info!(
                 "'{}' is waiting for cooldown to end ({} seconds)",
                 deployment.id,
-                wait.num_seconds()
+                wait.as_secs()
             );
             Outcome {
                 deployment,
@@ -229,59 +246,35 @@ async fn apply_one(
         }
         fsm::NextAction::Deploy => {
             info!("deploying '{}'", deployment.id);
-            deploy(args.storage, args.opts, deployment).await
+            deploy(args, deployment).await
         }
         fsm::NextAction::Remove => {
             info!("removing '{}'", deployment.id);
-            remove(args.storage, args.opts, deployment, dont_remove).await
+            remove(args, deployment, dont_remove).await
         }
         fsm::NextAction::Archive => {
             info!("archiving '{}'", deployment.id);
-            archive(args.storage.deployments, deployment).await
+            archive(args, deployment).await
         }
     }
 }
 
 // ================================= DEPLOY ======================================== //
 
-async fn deploy(
-    storage: &Storage<'_>,
-    opts: &DeployOpts,
-    deployment: models::Deployment,
-) -> Outcome {
-    debug_assert_eq!(fsm::next_action(&deployment), fsm::NextAction::Deploy);
+async fn deploy(args: &Args<'_>, deployment: models::Deployment) -> Outcome {
+    debug_assert_eq!(
+        fsm::next_action(&deployment, args.cooldowns.remaining(&deployment.id)),
+        fsm::NextAction::Deploy
+    );
 
+    let storage = args.storage;
     let result = match validate_file_rules(storage, &deployment).await {
         Ok(()) => dpl_filesys::deploy(&storage.cfg_insts, &deployment).await,
         Err(e) => Err(e),
     };
     match result {
-        Ok(()) => {
-            let deployment = fsm::deploy(deployment);
-            let error = store_dpl(storage.deployments, &deployment).await.err();
-            Outcome {
-                deployment,
-                wait: None,
-                error,
-                transitioned: true,
-            }
-        }
-        Err(e) => {
-            let deployment = fsm::error(deployment, &opts.retry_policy, &e, true);
-            if let Err(write_e) = store_dpl(storage.deployments, &deployment).await {
-                error!(
-                    "failed to update deployment {} after error: {write_e}",
-                    deployment.id
-                );
-            }
-            let wait = remaining_cooldown(&deployment);
-            Outcome {
-                deployment,
-                wait,
-                error: Some(e),
-                transitioned: true,
-            }
-        }
+        Ok(()) => succeeded(args, fsm::deploy(deployment)).await,
+        Err(e) => failed(args, deployment, e).await,
     }
 }
 
@@ -302,36 +295,62 @@ async fn validate_file_rules(
     Ok(())
 }
 
-fn remaining_cooldown(deployment: &models::Deployment) -> Option<chrono::TimeDelta> {
-    if deployment.is_in_cooldown() {
-        let remaining = deployment
-            .cooldown_ends_at
-            .signed_duration_since(Utc::now())
-            .max(chrono::TimeDelta::zero());
-        Some(remaining)
-    } else {
-        None
+/// Settles a deployment whose transition succeeded: saves it and ends any
+/// cooldown.
+async fn succeeded(args: &Args<'_>, deployment: models::Deployment) -> Outcome {
+    args.cooldowns.clear(&deployment.id);
+    let error = store_dpl(args.storage.deployments, &deployment).await.err();
+    Outcome {
+        deployment,
+        wait: None,
+        error,
+        transitioned: true,
+    }
+}
+
+/// Settles a deployment whose transition failed with `e`: records the
+/// attempt, saves it, and starts its retry cooldown.
+async fn failed(args: &Args<'_>, deployment: models::Deployment, e: DeployErr) -> Outcome {
+    let policy = &args.opts.retry_policy;
+    let deployment = fsm::error(deployment, policy, &e, true);
+    if let Err(write_e) = store_dpl(args.storage.deployments, &deployment).await {
+        error!(
+            "failed to update deployment {} after error: {write_e}",
+            deployment.id
+        );
+    }
+    let wait = fsm::cooldown(&deployment, policy);
+    args.cooldowns.start(&deployment.id, wait);
+    Outcome {
+        deployment,
+        wait: (!wait.is_zero()).then_some(wait),
+        error: Some(e),
+        transitioned: true,
     }
 }
 
 // ================================= REMOVING ====================================== //
 async fn mark_removing(
-    storage: &disk::Deployments,
+    args: &Args<'_>,
     deployments: Vec<models::Deployment>,
 ) -> Result<Vec<models::Deployment>, DeployErr> {
     let mut marked = Vec::new();
     for old in deployments {
-        let new = mark_one_removing(storage, old).await?;
+        let new = mark_one_removing(args, old).await?;
         marked.push(new);
     }
     Ok(marked)
 }
 
 async fn mark_one_removing(
-    storage: &disk::Deployments,
+    args: &Args<'_>,
     deployment: models::Deployment,
 ) -> Result<models::Deployment, DeployErr> {
-    debug_assert_eq!(fsm::next_action(&deployment), fsm::NextAction::Remove);
+    debug_assert_eq!(
+        fsm::next_action(&deployment, args.cooldowns.remaining(&deployment.id)),
+        fsm::NextAction::Remove
+    );
+    let storage = args.storage.deployments;
 
     if deployment.activity_status == models::DplActivity::Removing {
         return Ok(deployment);
@@ -343,56 +362,30 @@ async fn mark_one_removing(
 
 // ================================== REMOVE ======================================= //
 async fn remove(
-    storage: &Storage<'_>,
-    opts: &DeployOpts,
+    args: &Args<'_>,
     deployment: models::Deployment,
     ignored: &[filesys::File],
 ) -> Outcome {
-    debug_assert_eq!(fsm::next_action(&deployment), fsm::NextAction::Remove);
+    debug_assert_eq!(
+        fsm::next_action(&deployment, args.cooldowns.remaining(&deployment.id)),
+        fsm::NextAction::Remove
+    );
 
-    match dpl_filesys::remove(&storage.cfg_insts, &deployment, ignored).await {
-        Ok(()) => {
-            let deployment = fsm::archive(deployment);
-            let error = store_dpl(storage.deployments, &deployment).await.err();
-            Outcome {
-                deployment,
-                wait: None,
-                error,
-                transitioned: true,
-            }
-        }
-        Err(e) => {
-            let deployment = fsm::error(deployment, &opts.retry_policy, &e, true);
-            if let Err(write_e) = store_dpl(storage.deployments, &deployment).await {
-                error!(
-                    "failed to update deployment {} after error: {write_e}",
-                    deployment.id
-                );
-            }
-            let wait = remaining_cooldown(&deployment);
-            Outcome {
-                deployment,
-                wait,
-                error: Some(e),
-                transitioned: true,
-            }
-        }
+    match dpl_filesys::remove(&args.storage.cfg_insts, &deployment, ignored).await {
+        Ok(()) => succeeded(args, fsm::archive(deployment)).await,
+        Err(e) => failed(args, deployment, e).await,
     }
 }
 
 // ================================= ARCHIVE ======================================= //
 
-async fn archive(deployments: &disk::Deployments, deployment: models::Deployment) -> Outcome {
-    debug_assert_eq!(fsm::next_action(&deployment), fsm::NextAction::Archive);
+async fn archive(args: &Args<'_>, deployment: models::Deployment) -> Outcome {
+    debug_assert_eq!(
+        fsm::next_action(&deployment, args.cooldowns.remaining(&deployment.id)),
+        fsm::NextAction::Archive
+    );
 
-    let deployment = fsm::archive(deployment);
-    let error = store_dpl(deployments, &deployment).await.err();
-    Outcome {
-        deployment,
-        wait: None,
-        error,
-        transitioned: true,
-    }
+    succeeded(args, fsm::archive(deployment)).await
 }
 
 // ================================= HELPERS ======================================= //

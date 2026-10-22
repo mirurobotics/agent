@@ -6,7 +6,7 @@ use miru_agent::models::Patch;
 use miru_agent::models::{Deployment, DplActivity, DplErrStatus, DplStatus, DplTarget};
 
 // external crates
-use chrono::{DateTime, TimeDelta, Utc};
+use chrono::{DateTime, Utc};
 use serde_json::json;
 
 // harness
@@ -72,11 +72,6 @@ impl ModelFixture for Deployment {
                 value: json!(3),
                 default_value: json!(0),
             },
-            OptionalField {
-                key: "cooldown_ends_at",
-                value: json!("2099-01-01T00:00:00Z"),
-                default_value: json!("1970-01-01T00:00:00Z"),
-            },
         ]
     }
 }
@@ -100,34 +95,27 @@ fn status_method() {
     assert_eq!(deployment.status(), DplStatus::Retrying);
 }
 
+/// Older agents saved a wall-clock `cooldown_ends_at`. It still loads and is
+/// ignored, and it is no longer written: cooldowns live in memory only.
 #[test]
-fn is_in_cooldown_method() {
-    let deployment = Deployment::default();
-    assert!(!deployment.is_in_cooldown());
+fn saved_cooldown_is_ignored_and_not_written() {
+    let raw = json!({
+        "id": "dpl_123",
+        "description": "Test",
+        "activity_status": "queued",
+        "error_status": "retrying",
+        "target_status": "deployed",
+        "device_id": "device_123",
+        "release_id": "rel_123",
+        "config_instance_ids": ["cfg_1"],
+        "attempts": 3,
+        "cooldown_ends_at": "2099-01-01T00:00:00Z",
+    });
+    let deployment: Deployment = serde_json::from_value(raw).unwrap();
+    assert_eq!(deployment.attempts, 3);
 
-    let mut deployment = Deployment::default();
-    deployment.set_cooldown(TimeDelta::hours(1));
-    assert!(deployment.is_in_cooldown());
-
-    let deployment = Deployment {
-        cooldown_ends_at: Utc::now() - TimeDelta::hours(1),
-        ..Default::default()
-    };
-    assert!(!deployment.is_in_cooldown());
-}
-
-#[test]
-fn set_cooldown_method() {
-    let mut deployment = Deployment::default();
-    assert_eq!(deployment.cooldown_ends_at, DateTime::<Utc>::UNIX_EPOCH);
-
-    deployment.set_cooldown(TimeDelta::seconds(60));
-
-    let expected_approx = Utc::now() + TimeDelta::seconds(60);
-    let diff = (deployment.cooldown_ends_at - expected_approx)
-        .num_seconds()
-        .abs();
-    assert!(diff < 2, "cooldown_ends_at should be ~60s from now");
+    let written = serde_json::to_value(&deployment).unwrap();
+    assert!(written.get("cooldown_ends_at").is_none(), "{written}");
 }
 
 #[test]
@@ -163,7 +151,6 @@ fn defaults() {
         created_at: DateTime::<Utc>::UNIX_EPOCH,
         updated_at: DateTime::<Utc>::UNIX_EPOCH,
         attempts: 0,
-        cooldown_ends_at: DateTime::<Utc>::UNIX_EPOCH,
         deployed_at: None,
         archived_at: None,
         config_instance_ids: Vec::new(),
@@ -431,21 +418,16 @@ fn update_all() {
         activity_status: Some(DplActivity::Deployed),
         error_status: Some(DplErrStatus::Retrying),
         attempts: Some(5),
-        cooldown: Some(TimeDelta::seconds(120)),
         deployed_at: Some(now),
         archived_at: Some(now),
     };
     let mut actual = initial.clone();
     actual.patch(updates);
 
-    let diff = (actual.cooldown_ends_at - Utc::now()).num_seconds();
-    assert!((diff - 120).abs() < 2, "cooldown should be ~120s from now");
-
     let expected = Deployment {
         activity_status: DplActivity::Deployed,
         error_status: DplErrStatus::Retrying,
         attempts: 5,
-        cooldown_ends_at: actual.cooldown_ends_at,
         deployed_at: Some(now),
         archived_at: Some(now),
         ..initial
@@ -482,7 +464,6 @@ fn updates_empty() {
         activity_status: None,
         error_status: None,
         attempts: None,
-        cooldown: None,
         deployed_at: None,
         archived_at: None,
     };
@@ -542,7 +523,6 @@ fn from_backend() {
         created_at: now,
         updated_at: now,
         attempts: 0,
-        cooldown_ends_at: DateTime::<Utc>::UNIX_EPOCH,
         deployed_at: None,
         archived_at: None,
         config_instance_ids: vec!["cfg_1".to_string(), "cfg_2".to_string()],
@@ -577,19 +557,15 @@ fn from_backend_invalid_dates() {
 // ─── retry state tests ──────────────────────────────────────────────────────
 
 #[test]
-fn reset_retry_state_clears_attempts_and_cooldown() {
+fn reset_retry_state_clears_attempts() {
     let mut deployment = Deployment {
         attempts: 5,
         ..Default::default()
     };
-    deployment.set_cooldown(TimeDelta::hours(1));
-    assert!(deployment.is_in_cooldown());
 
     deployment.reset_retry_state();
 
     assert_eq!(deployment.attempts, 0);
-    assert_eq!(deployment.cooldown_ends_at, DateTime::<Utc>::UNIX_EPOCH);
-    assert!(!deployment.is_in_cooldown());
 }
 
 #[test]
@@ -608,19 +584,11 @@ fn has_clean_retry_state_false_with_attempts() {
 }
 
 #[test]
-fn has_clean_retry_state_false_when_in_cooldown() {
-    let mut deployment = Deployment::default();
-    deployment.set_cooldown(TimeDelta::hours(1));
-    assert!(!deployment.has_clean_retry_state());
-}
-
-#[test]
 fn has_clean_retry_state_true_after_reset() {
     let mut deployment = Deployment {
         attempts: 3,
         ..Default::default()
     };
-    deployment.set_cooldown(TimeDelta::hours(1));
     assert!(!deployment.has_clean_retry_state());
 
     deployment.reset_retry_state();

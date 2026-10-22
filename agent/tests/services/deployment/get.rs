@@ -110,7 +110,6 @@ pub mod get_deployment_fallback {
             created_at: DateTime::<Utc>::UNIX_EPOCH,
             updated_at: DateTime::<Utc>::UNIX_EPOCH,
             attempts: 0,
-            cooldown_ends_at: DateTime::<Utc>::UNIX_EPOCH,
             deployed_at: None,
             archived_at: None,
             config_instance_ids: vec!["cfg_1".to_string()],

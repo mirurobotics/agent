@@ -11,7 +11,7 @@ use crate::data_uploads::{
     scan::{self, state::ScanSnapshotFile, ScannerArgs, ScannerExt},
     upload::{self, UploaderExt},
 };
-use crate::deploy::{apply, fsm};
+use crate::deploy::{self, apply, fsm};
 use crate::disk;
 use crate::events;
 use crate::filesys::{File, PathExt};
@@ -389,6 +389,7 @@ fn build_syncer_args(
     event_hub: events::EventHub,
     system_metadata_cache: File,
 ) -> SyncerArgs<http::Client, authn::TokenManager> {
+    let deployment_cooldowns = deploy::Cooldowns::new(http_client.clock().clone());
     SyncerArgs {
         storage,
         http_client,
@@ -396,6 +397,7 @@ fn build_syncer_args(
         deploy_opts: apply::DeployOpts {
             retry_policy: dpl_retry_policy,
         },
+        deployment_cooldowns,
         backoff: cooldown::Backoff {
             base_secs: 1,
             growth_factor: 2,
