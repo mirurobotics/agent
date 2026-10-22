@@ -282,3 +282,22 @@ fn invalid(reason: &str) -> CalibrationsErr {
         trace: trace!(),
     })
 }
+
+#[cfg(test)]
+mod tests {
+    // internal crates
+    use super::*;
+    use crate::test_utils::calibration_sender::MockCalibrationSender;
+
+    #[tokio::test]
+    async fn finish_skips_a_report_no_longer_queued() {
+        let (sender, _started) = MockCalibrationSender::new();
+        let reports = Dir::new("/nonexistent/reports");
+        let options = UploaderOptions::default();
+        let mut uploader = UploaderImpl::new(sender, None, reports, options, Utc::now);
+
+        uploader.finish(Uuid::new_v4(), Err(invalid("gone"))).await;
+
+        assert_eq!(uploader.len(), 0);
+    }
+}
