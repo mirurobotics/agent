@@ -174,20 +174,93 @@ pub mod server_now {
     }
 }
 
-pub mod server_or_system_now {
+pub mod now {
     use super::*;
+    use miru_agent::clock::{Reading, Trust};
 
     #[test]
-    fn is_the_system_clock_before_any_server_reading() {
+    fn is_the_unverified_system_clock_before_any_server_reading() {
         let fake = Fake::new(epoch());
-        assert_eq!(fake.clock.server_or_system_now(), epoch());
+        let reading = fake.clock.now();
+        assert_eq!(
+            reading,
+            Reading {
+                time: epoch(),
+                trust: Trust::Unverified
+            }
+        );
+        assert!(!reading.is_trusted());
     }
 
     #[test]
-    fn is_the_server_time_once_known() {
+    fn is_the_synced_system_clock_when_it_agrees_with_the_server() {
+        let fake = Fake::new(real());
+        fake.clock
+            .observe_server_time(real() + clock::SYNC_TOLERANCE);
+        let reading = fake.clock.now();
+        assert_eq!(
+            reading,
+            Reading {
+                time: real(),
+                trust: Trust::Synced
+            }
+        );
+        assert!(reading.is_trusted());
+    }
+
+    #[test]
+    fn is_the_corrected_server_time_when_the_system_clock_disagrees() {
         let fake = Fake::new(epoch());
         fake.clock.observe_server_time(real());
-        assert_eq!(fake.clock.server_or_system_now(), real());
+        let reading = fake.clock.now();
+        assert_eq!(
+            reading,
+            Reading {
+                time: real(),
+                trust: Trust::Corrected
+            }
+        );
+        assert!(reading.is_trusted());
+    }
+
+    #[test]
+    fn becomes_synced_once_ntp_corrects_the_system_clock() {
+        let fake = Fake::new(epoch());
+        fake.clock.observe_server_time(real());
+        fake.advance(Duration::from_secs(30));
+        fake.jump_system_clock(real() + TimeDelta::seconds(31));
+        assert_eq!(
+            fake.clock.now(),
+            Reading {
+                time: real() + TimeDelta::seconds(31),
+                trust: Trust::Synced
+            }
+        );
+    }
+}
+
+pub mod trusted_now {
+    use super::*;
+
+    #[test]
+    fn is_none_before_any_server_reading() {
+        let fake = Fake::new(real());
+        assert_eq!(fake.clock.trusted_now(), None);
+    }
+
+    #[test]
+    fn is_the_system_clock_when_synced() {
+        let fake = Fake::new(real());
+        fake.clock
+            .observe_server_time(real() + TimeDelta::seconds(5));
+        assert_eq!(fake.clock.trusted_now(), Some(real()));
+    }
+
+    #[test]
+    fn is_the_server_time_when_the_system_clock_disagrees() {
+        let fake = Fake::new(epoch());
+        fake.clock.observe_server_time(real());
+        assert_eq!(fake.clock.trusted_now(), Some(real()));
     }
 }
 

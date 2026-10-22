@@ -136,14 +136,11 @@ pub async fn calc_refresh_wait<TokenManagerT: TokenManagerExt>(
     // calculate the cooldown period
     let cooldown_secs = cooldown::calc(&backoff, err_streak);
 
-    let (now, from_server) = match clock.server_now() {
-        Some(now) => (now, true),
-        None => (clock.system_now(), false),
-    };
+    let now = clock.now();
     let wait = match token_mngr.get_token().await {
         Ok(token) => {
             let expiration = token.expires_at;
-            let secs_until_exp = (expiration - now).num_seconds();
+            let secs_until_exp = (expiration - now.time).num_seconds();
 
             // if the token will expire within our refresh advance period, only wait
             // for the cooldown period before refreshing the token
@@ -161,7 +158,7 @@ pub async fn calc_refresh_wait<TokenManagerT: TokenManagerExt>(
             Duration::from_secs(cooldown_secs as u64)
         }
     };
-    if from_server {
+    if now.is_trusted() {
         wait
     } else {
         wait.min(Duration::from_secs(backoff.max_secs.max(0) as u64))

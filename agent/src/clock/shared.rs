@@ -18,6 +18,34 @@ pub const SYNC_TOLERANCE: TimeDelta = TimeDelta::seconds(60);
 type DateTimeFn = Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>;
 type InstantFn = Arc<dyn Fn() -> Instant + Send + Sync>;
 
+/// How far a [`Reading`] can be trusted, best first.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Trust {
+    /// The system clock, which agrees with the server's time to within
+    /// [`SYNC_TOLERANCE`].
+    Synced,
+    /// The server's time, because the system clock disagrees with it.
+    Corrected,
+    /// The system clock, because the server's time is not known yet. It may be
+    /// decades off.
+    Unverified,
+}
+
+/// The agent's best answer to "what time is it?", and how far to trust it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Reading {
+    pub time: DateTime<Utc>,
+    pub trust: Trust,
+}
+
+impl Reading {
+    /// Whether `time` is known to be right: the server's time, or a system
+    /// clock that agrees with it.
+    pub fn is_trusted(&self) -> bool {
+        self.trust != Trust::Unverified
+    }
+}
+
 /// One reading of the server's time, with what the agent's own clocks said
 /// at the same moment.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -118,10 +146,33 @@ impl Clock {
         )
     }
 
-    /// The server's time when known, else the system clock. For callers that
-    /// must produce a time now and cannot wait to hear from the server.
-    pub fn server_or_system_now(&self) -> DateTime<Utc> {
-        self.server_now().unwrap_or_else(|| self.system_now())
+    /// The best available time now, and how far to trust it: the system clock
+    /// when it agrees with the server, the server's time when it does not, and
+    /// the system clock, unverified, before the agent has heard from the
+    /// server. For callers that must produce a time now and cannot wait.
+    pub fn now(&self) -> Reading {
+        let system_time = self.system_now();
+        match self.server_now() {
+            Some(server_time) if (server_time - system_time).abs() <= SYNC_TOLERANCE => Reading {
+                time: system_time,
+                trust: Trust::Synced,
+            },
+            Some(server_time) => Reading {
+                time: server_time,
+                trust: Trust::Corrected,
+            },
+            None => Reading {
+                time: system_time,
+                trust: Trust::Unverified,
+            },
+        }
+    }
+
+    /// The time now if it is known to be right, else `None`. For callers that
+    /// must not act on a wrong time, such as deleting files when a TTL ends.
+    pub fn trusted_now(&self) -> Option<DateTime<Utc>> {
+        let reading = self.now();
+        reading.is_trusted().then_some(reading.time)
     }
 
     /// How far ahead of the system clock the server was at the latest reading,
