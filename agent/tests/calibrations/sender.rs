@@ -48,7 +48,7 @@ pub mod new_request {
 
     #[test]
     fn maps_the_metadata() {
-        let request = new_request(&full_report());
+        let request = new_request(full_report());
 
         assert_eq!(request.component, "arm");
         assert_eq!(
@@ -71,7 +71,7 @@ pub mod new_request {
 
     #[test]
     fn omits_absent_fields() {
-        let request = new_request(&report("arm"));
+        let request = new_request(report("arm"));
 
         let value = serde_json::to_value(&request).unwrap();
         let mut keys: Vec<&str> = value
@@ -90,7 +90,7 @@ pub mod new_request {
         report.metadata.format = InstanceFormat::Yaml;
         report.data = "offset: [1, 2, 3]\n".to_string();
 
-        let request = new_request(&report);
+        let request = new_request(report);
 
         assert_eq!(
             *request.content,
@@ -110,7 +110,7 @@ pub mod send {
         let client = Arc::new(MockClient::default());
 
         sender(&client, StubTokenManager::ok("tok"))
-            .send(&report("arm"))
+            .send(report("arm"))
             .await
             .unwrap();
 
@@ -129,7 +129,7 @@ pub mod send {
         client.set_create_calibration(|| Err(request_failed(422)));
 
         let err = sender(&client, StubTokenManager::ok("tok"))
-            .send(&report("arm"))
+            .send(report("arm"))
             .await
             .unwrap_err();
 
@@ -152,7 +152,7 @@ pub mod send {
         });
 
         sender(&client, StubTokenManager::ok("tok"))
-            .send(&report("arm"))
+            .send(report("arm"))
             .await
             .unwrap();
 
@@ -169,7 +169,7 @@ pub mod send {
         });
 
         let err = sender(&client, StubTokenManager::ok("tok"))
-            .send(&report("arm"))
+            .send(report("arm"))
             .await
             .unwrap_err();
 
@@ -187,7 +187,7 @@ pub mod send {
         }));
 
         let err = sender(&client, tokens)
-            .send(&report("arm"))
+            .send(report("arm"))
             .await
             .unwrap_err();
 
@@ -209,7 +209,7 @@ pub mod send {
         let tokens = StubTokenManager::err(AuthnErr::HTTPErr(request_failed(403)));
 
         let err = sender(&client, tokens)
-            .send(&report("arm"))
+            .send(report("arm"))
             .await
             .unwrap_err();
 

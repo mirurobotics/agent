@@ -70,8 +70,8 @@ fn request_failed(status: u16) -> CalibrationsErr {
 }
 
 impl Sender for MockCalibrationSender {
-    async fn send(&self, report: &Report) -> Result<(), CalibrationsErr> {
-        self.sent.lock().unwrap().push(report.clone());
+    async fn send(&self, report: Report) -> Result<(), CalibrationsErr> {
+        self.sent.lock().unwrap().push(report);
         let step = self.script.lock().unwrap().pop_front();
         // both guards are dropped: never hold a std Mutex across an await
         let _ = self.started_tx.send(());

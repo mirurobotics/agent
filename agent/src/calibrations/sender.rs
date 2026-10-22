@@ -19,7 +19,7 @@ use tracing::warn;
 /// from the queue only after `send` returns `Ok`, so an interrupted send is
 /// retried on the next boot, and Miru may then store the calibration twice.
 pub trait Sender: Send + Sync {
-    fn send(&self, report: &Report) -> impl Future<Output = Result<(), CalibrationsErr>> + Send;
+    fn send(&self, report: Report) -> impl Future<Output = Result<(), CalibrationsErr>> + Send;
 }
 
 /// Sends each report as one `POST /calibrations`, with no retry of its own:
@@ -39,7 +39,7 @@ impl<C: ClientI, T: TokenManagerExt> HttpSender<C, T> {
 }
 
 impl<C: ClientI, T: TokenManagerExt> Sender for HttpSender<C, T> {
-    async fn send(&self, report: &Report) -> Result<(), CalibrationsErr> {
+    async fn send(&self, report: Report) -> Result<(), CalibrationsErr> {
         let payload = new_request(report);
         let token = self.token_mngr.get_token().await?;
         let params = http::calibrations::CreateParams {
@@ -60,19 +60,21 @@ impl<C: ClientI, T: TokenManagerExt> Sender for HttpSender<C, T> {
 }
 
 /// The backend request for `report`. `reported_at` is the agent's receive
-/// time, [`crate::calibrations::ReportMetadata::calibrated_at`].
-pub fn new_request(report: &Report) -> CreateCalibrationRequest {
-    let metadata = &report.metadata;
+/// time, [`crate::calibrations::ReportMetadata::calibrated_at`]. It takes
+/// `report` by value so the data moves into the request instead of being
+/// copied.
+pub fn new_request(report: Report) -> CreateCalibrationRequest {
+    let metadata = report.metadata;
     let content = InstanceContent {
         format: (&metadata.format).into(),
-        data: report.data.clone(),
+        data: report.data,
     };
     CreateCalibrationRequest {
-        deployment_id: metadata.deployment_id.clone(),
-        component: metadata.component.clone(),
-        role: metadata.role.clone(),
-        serial_number: metadata.serial_number.clone(),
-        aspect: metadata.aspect.clone(),
+        deployment_id: metadata.deployment_id,
+        component: metadata.component,
+        role: metadata.role,
+        serial_number: metadata.serial_number,
+        aspect: metadata.aspect,
         content: Box::new(content),
         reported_at: metadata.calibrated_at.to_rfc3339(),
     }

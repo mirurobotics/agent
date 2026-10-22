@@ -160,7 +160,7 @@ where
         let file = self.report_file(entry.id);
         async move {
             let data = read(&file).await?;
-            sender.send(&Report { metadata, data }).await
+            sender.send(Report { metadata, data }).await
         }
     }
 
