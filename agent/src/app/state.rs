@@ -241,6 +241,7 @@ impl AppState {
             }
         };
 
+        let clock = http_client.clock().clone();
         let executor = Arc::new(upload::LiveExecutor::new(
             http_client,
             token_mngr,
@@ -253,7 +254,7 @@ impl AppState {
             upload::UploaderOptions::default(),
             snapshot_file,
             |wait| tokio::time::sleep(wait),
-            chrono::Utc::now,
+            clock,
         )?;
         Ok((Arc::new(uploader), handle))
     }

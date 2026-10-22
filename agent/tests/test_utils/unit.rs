@@ -10,6 +10,8 @@
 pub mod calibration_sender;
 #[path = "calibrations.rs"]
 pub mod calibrations;
+#[path = "clock.rs"]
+pub mod clock;
 #[path = "../errors/harnesses.rs"]
 pub mod error_harnesses;
 #[path = "filesys/mod.rs"]
