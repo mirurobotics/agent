@@ -16,22 +16,28 @@ pub struct SyncDeviceResponse {
     /// The message of the result.
     #[serde(rename = "message")]
     pub message: String,
-    /// Timestamp of when the device was last synced.
+    /// Timestamp of when the device was last synced. For display only; it comes from the device's clock, which may be wrong. Use `secs_since_last_sync` to decide how long ago the device synced.
     #[serde(rename = "last_synced_at")]
     pub last_synced_at: String,
-    /// Timestamp of when the last *attempted* sync occurred.
+    /// Timestamp of when the last *attempted* sync occurred. For display only; it comes from the device's clock, which may be wrong.
     #[serde(rename = "last_attempted_sync_at")]
     pub last_attempted_sync_at: String,
     /// Whether the device is currently in cooldown.
     #[serde(rename = "in_cooldown")]
     pub in_cooldown: bool,
-    /// Timestamp of when the cooldown will end.
+    /// Timestamp of when the cooldown will end. For display only; it comes from the device's clock, which may be wrong. Use `remaining_cooldown_secs` to decide when to sync again.
     #[serde(rename = "cooldown_ends_at")]
     pub cooldown_ends_at: String,
+    /// Seconds until the cooldown ends, rounded up. `0` when the device is not in cooldown.
+    #[serde(rename = "remaining_cooldown_secs")]
+    pub remaining_cooldown_secs: i64,
+    /// Seconds since the agent last synced with the backend, measured with a clock that does not jump when the device's time changes. `null` if the agent has not synced since it started.
+    #[serde(rename = "secs_since_last_sync", deserialize_with = "Option::deserialize")]
+    pub secs_since_last_sync: Option<i64>,
 }
 
 impl SyncDeviceResponse {
-    pub fn new(code: models::SyncDeviceResult, message: String, last_synced_at: String, last_attempted_sync_at: String, in_cooldown: bool, cooldown_ends_at: String) -> SyncDeviceResponse {
+    pub fn new(code: models::SyncDeviceResult, message: String, last_synced_at: String, last_attempted_sync_at: String, in_cooldown: bool, cooldown_ends_at: String, remaining_cooldown_secs: i64, secs_since_last_sync: Option<i64>) -> SyncDeviceResponse {
         SyncDeviceResponse {
             code,
             message,
@@ -39,6 +45,8 @@ impl SyncDeviceResponse {
             last_attempted_sync_at,
             in_cooldown,
             cooldown_ends_at,
+            remaining_cooldown_secs,
+            secs_since_last_sync,
         }
     }
 }

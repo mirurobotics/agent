@@ -45,6 +45,7 @@ impl MockSyncer {
                 last_synced_at: DateTime::<Utc>::UNIX_EPOCH,
                 cooldown_ends_at: DateTime::<Utc>::UNIX_EPOCH,
                 err_streak: 0,
+                last_synced: None,
             }))),
             sync_fn: Arc::new(Mutex::new(Box::new(|| Ok(())))),
 

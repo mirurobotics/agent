@@ -4,6 +4,7 @@ use miru_agent::models::{
     Deployment, Device, DeviceStatus, DplActivity, DplErrStatus, DplTarget, FileRule,
     FileRuleRetention, FileRuleSource, FileRuleUpload, GitCommit, Release,
 };
+use miru_agent::server::response::to_device;
 
 // external crates
 use chrono::{DateTime, TimeZone, Utc};
@@ -37,9 +38,10 @@ pub mod device_response {
             last_synced_at: t.to_rfc3339(),
             last_connected_at: t.to_rfc3339(),
             last_disconnected_at: t.to_rfc3339(),
+            secs_since_last_sync: None,
         };
 
-        let sdk: openapi::Device = (&device).into();
+        let sdk = to_device(&device, None);
         assert_eq!(sdk, expected);
     }
 
@@ -65,9 +67,10 @@ pub mod device_response {
             last_synced_at: t.to_rfc3339(),
             last_connected_at: t.to_rfc3339(),
             last_disconnected_at: t.to_rfc3339(),
+            secs_since_last_sync: Some(42),
         };
 
-        let sdk: openapi::Device = (&device).into();
+        let sdk = to_device(&device, Some(42));
         assert_eq!(sdk, expected);
     }
 }

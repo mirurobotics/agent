@@ -3,17 +3,21 @@ use crate::events;
 use crate::models;
 use device_api::models as device_server;
 
-impl From<&models::Device> for device_server::Device {
-    fn from(device: &models::Device) -> Self {
-        device_server::Device {
-            object: device_server::device::Object::Device,
-            id: device.id.clone(),
-            name: device.name.clone(),
-            status: (&device.status).into(),
-            last_synced_at: device.last_synced_at.to_rfc3339(),
-            last_connected_at: device.last_connected_at.to_rfc3339(),
-            last_disconnected_at: device.last_disconnected_at.to_rfc3339(),
-        }
+/// The device response. `secs_since_last_sync` comes from the syncer's
+/// in-memory state, not from the stored device.
+pub fn to_device(
+    device: &models::Device,
+    secs_since_last_sync: Option<i64>,
+) -> device_server::Device {
+    device_server::Device {
+        object: device_server::device::Object::Device,
+        id: device.id.clone(),
+        name: device.name.clone(),
+        status: (&device.status).into(),
+        last_synced_at: device.last_synced_at.to_rfc3339(),
+        last_connected_at: device.last_connected_at.to_rfc3339(),
+        last_disconnected_at: device.last_disconnected_at.to_rfc3339(),
+        secs_since_last_sync,
     }
 }
 

@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 // internal crates
 use crate::errors::Error;
-use crate::server::{errors::*, state::State};
+use crate::server::{errors::*, response, state::State};
 use crate::services::{
     deployment as dpl_svc, device as dvc_svc, file_rule as file_rule_svc,
     git_commit as git_cmt_svc, release as rls_svc, HttpBackend,
@@ -55,7 +55,9 @@ pub async fn get_device(AxumState(state): AxumState<Arc<State>>) -> impl IntoRes
     handle(
         async move {
             let device = dvc_svc::get(&state.storage.device).await?;
-            Ok::<_, ServerErr>(device_server::Device::from(&device))
+            let secs_since_last_sync =
+                dvc_svc::get_secs_since_last_sync(state.syncer.as_ref()).await;
+            Ok::<_, ServerErr>(response::to_device(&device, secs_since_last_sync))
         },
         "Error getting device",
     )

@@ -1,6 +1,6 @@
 // standard crates
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 // internal crates
 use crate::authn::{self, TokenManagerExt};
@@ -144,6 +144,7 @@ impl<HTTPClientT: http::ClientI> SyncerImpl<HTTPClientT> {
             info!("successfully synced with backend");
         }
         self.state.last_synced_at = Utc::now();
+        self.state.last_synced = Some(Instant::now());
         self.state.err_streak = 0;
         TimeDelta::seconds(self.backoff.base_secs)
     }

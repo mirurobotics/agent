@@ -1,5 +1,6 @@
 // standard crates
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 // internal crates
 use crate::authn::{self, TokenManagerExt};
@@ -64,6 +65,10 @@ pub struct State {
     pub last_synced_at: DateTime<Utc>,
     pub cooldown_ends_at: DateTime<Utc>,
     pub err_streak: u32,
+    /// Monotonic instant of the latest successful sync in this process, or
+    /// `None` before the first one. Unlike `last_synced_at`, it does not move
+    /// when the system clock changes.
+    pub last_synced: Option<Instant>,
 }
 
 impl Default for State {
@@ -73,6 +78,7 @@ impl Default for State {
             last_synced_at: DateTime::<Utc>::UNIX_EPOCH,
             cooldown_ends_at: DateTime::<Utc>::UNIX_EPOCH,
             err_streak: 0,
+            last_synced: None,
         }
     }
 }
@@ -80,6 +86,19 @@ impl Default for State {
 impl State {
     pub fn is_in_cooldown(&self) -> bool {
         Utc::now() < self.cooldown_ends_at
+    }
+
+    /// Time left before the next sync may run, or zero when not in cooldown.
+    pub fn remaining_cooldown(&self) -> Duration {
+        (self.cooldown_ends_at - Utc::now())
+            .to_std()
+            .unwrap_or(Duration::ZERO)
+    }
+
+    /// Monotonic time since the latest successful sync in this process, or
+    /// `None` before the first one.
+    pub fn since_last_sync(&self) -> Option<Duration> {
+        self.last_synced.map(|synced| synced.elapsed())
     }
 }
 
@@ -280,7 +299,7 @@ impl SyncerExt for Syncer {
 mod tests {
     // standard crates
     use std::sync::{Arc, Mutex};
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     // internal crates
     use crate::test_utils::{
@@ -410,6 +429,7 @@ mod tests {
                 last_synced_at: DateTime::<Utc>::UNIX_EPOCH,
                 cooldown_ends_at: DateTime::<Utc>::UNIX_EPOCH,
                 err_streak: 0,
+                last_synced: None,
             };
             assert_eq!(state, expected);
         }
@@ -422,6 +442,7 @@ mod tests {
                 last_synced_at: Utc::now(),
                 cooldown_ends_at: Utc::now() + TimeDelta::seconds(10),
                 err_streak: 0,
+                last_synced: None,
             };
             assert!(state.is_in_cooldown());
 
@@ -431,8 +452,43 @@ mod tests {
                 last_synced_at: Utc::now(),
                 cooldown_ends_at: Utc::now() - TimeDelta::seconds(10),
                 err_streak: 0,
+                last_synced: None,
             };
             assert!(!state.is_in_cooldown());
+        }
+
+        #[test]
+        fn remaining_cooldown() {
+            // in cooldown: roughly the time left, never more
+            let state = State {
+                cooldown_ends_at: Utc::now() + TimeDelta::seconds(10),
+                ..State::default()
+            };
+            let remaining = state.remaining_cooldown();
+            assert!(remaining > Duration::from_secs(9), "got {remaining:?}");
+            assert!(remaining <= Duration::from_secs(10), "got {remaining:?}");
+
+            // cooldown ended: zero
+            let state = State {
+                cooldown_ends_at: Utc::now() - TimeDelta::seconds(10),
+                ..State::default()
+            };
+            assert_eq!(state.remaining_cooldown(), Duration::ZERO);
+        }
+
+        #[test]
+        fn since_last_sync() {
+            // never synced in this process
+            assert_eq!(State::default().since_last_sync(), None);
+
+            // synced: monotonic time since then
+            let state = State {
+                last_synced: Instant::now().checked_sub(Duration::from_secs(5)),
+                ..State::default()
+            };
+            let elapsed = state.since_last_sync().unwrap();
+            assert!(elapsed >= Duration::from_secs(5), "got {elapsed:?}");
+            assert!(elapsed < Duration::from_secs(60), "got {elapsed:?}");
         }
     }
 
@@ -633,6 +689,7 @@ mod tests {
                     last_synced_at: DateTime::<Utc>::UNIX_EPOCH,
                     cooldown_ends_at: Utc::now() + TimeDelta::seconds(10),
                     err_streak: 0,
+                    last_synced: None,
                 })
                 .await
                 .unwrap();
