@@ -83,6 +83,11 @@ async fn on_disk<J: QueueJob>(path: &File) -> Vec<J> {
         .collect()
 }
 
+/// The queued jobs in queue order, read through [`FileQueue::iter`].
+fn queued<J: QueueJob>(queue: &FileQueue<J>) -> Vec<J> {
+    queue.iter().map(|entry| entry.job.clone()).collect()
+}
+
 fn jobs<J: QueueJob>(make: fn(&str) -> J, stems: &[&str]) -> Vec<J> {
     stems.iter().copied().map(make).collect()
 }
@@ -343,8 +348,7 @@ pub mod cases {
 
             let err = queue.enqueue(make("b.log")).await.unwrap_err();
             assert!(matches!(err, EnqueueErr::FileSysErr(_)), "{err:?}");
-            assert_eq!(queue.len(), 1);
-            assert_eq!(queue.next_ready(now()).unwrap().job, make("a.log"));
+            assert_eq!(queued(&queue), jobs(make, &["a.log"]));
         }
 
         async fn durable_queue<J: QueueJob>(path: &File) -> FileQueue<J> {
@@ -353,6 +357,24 @@ pub mod cases {
                 open::<J>(path).await,
                 Persistence::Durable,
             )
+        }
+    }
+
+    // --------------------------------- iter -------------------------------------- //
+
+    pub mod iter {
+        use super::*;
+
+        pub async fn yields_entries_in_queue_order_without_mutating<J: QueueJob>(
+            make: fn(&str) -> J,
+        ) {
+            let mut queue = FileQueue::<J>::new(DEFAULT_CAPACITY);
+            for name in ["a.log", "b.log"] {
+                enqueue(&mut queue, make(name)).await;
+            }
+
+            assert_eq!(queued(&queue), jobs(make, &["a.log", "b.log"]));
+            assert_eq!(queue.len(), 2);
         }
     }
 
@@ -780,6 +802,10 @@ macro_rules! queue_suite {
             durable {
                 disk: [persists_under_the_returned_id, persist_failure_rolls_back],
                 mem: [],
+            },
+            iter {
+                disk: [],
+                mem: [yields_entries_in_queue_order_without_mutating],
             },
             next_ready {
                 disk: [leaves_the_entry_on_disk_until_acked],
