@@ -47,6 +47,8 @@ pub enum TransferErr {
     MissingS3Credentials,
     #[error("gcs scheme is missing gcs_credentials")]
     MissingGcsCredentials,
+    #[error("gcs access token is not a valid header value")]
+    InvalidGcsToken,
 }
 
 impl crate::errors::Error for TransferErr {}
@@ -110,7 +112,6 @@ mod tests {
     use super::*;
     use crate::authn::errors::{AuthnErr, MockError};
     use crate::errors::{Error as _, HTTPCode};
-    use crate::gcs;
     use crate::http::errors::{HTTPErr, MockErr, RequestFailed};
     use crate::http::request::Params;
     use crate::s3;
@@ -136,19 +137,6 @@ mod tests {
     fn classified_s3_connection_err_is_network() {
         let err = classified_executor_err(s3::S3Err::ConnectionErr(s3::errors::ConnectionErr {
             object: s3::Object {
-                bucket: "bucket".to_string(),
-                key: "key".to_string(),
-            },
-            msg: "connection refused".to_string(),
-            trace: crate::trace!(),
-        }));
-        assert!(err.is_network_conn_err());
-    }
-
-    #[test]
-    fn classified_gcs_connection_err_is_network() {
-        let err = classified_executor_err(gcs::GcsErr::ConnectionErr(gcs::errors::ConnectionErr {
-            object: gcs::Object {
                 bucket: "bucket".to_string(),
                 key: "key".to_string(),
             },

@@ -23,9 +23,6 @@ bytes = { workspace = true }
 chrono = { workspace = true }
 futures = { workspace = true }
 glob = { workspace = true }
-google-cloud-storage = { workspace = true }
-google-cloud-auth = { workspace = true }
-google-cloud-gax = { workspace = true }
 http = { workspace = true }
 http-body = { workspace = true }
 md5 = { workspace = true }
@@ -69,10 +66,6 @@ ignored = ["openssl"]
 aws-sdk-s3 = { workspace = true }
 aws-smithy-http-client = { workspace = true, features = ["test-util"] }
 aws-smithy-runtime-api = { version = "1.14", features = ["client", "http-1x", "test-util"] }
-google-cloud-gax = { workspace = true }
-google-cloud-iam-v1 = "1.10"
-google-cloud-longrunning = "1.11"
-google-cloud-storage = { workspace = true }
 http = { workspace = true }
 http-body-util = "0.1"
 mockall = "0.14"

@@ -10,7 +10,6 @@ pub mod disk;
 pub mod errors;
 pub mod events;
 pub mod filesys;
-pub mod gcs;
 pub mod http;
 pub mod logs;
 pub mod models;

@@ -68,13 +68,8 @@ impl UploaderOptions {
     /// Backstop deadline for one upload attempt of `size` bytes: floor plus a
     /// per-byte allowance at the minimum-throughput assumption. Guarantees
     /// every attempt terminates; expiry counts against the attempt budget.
-    ///
-    /// Stalls are caught first by the stores' own bounds (GCS's no-progress
-    /// watchdog; S3 stalled-stream protection and per-call limits) and surface
-    /// as uncounted network errors. Those bounds end before this deadline when
-    /// the backend create call takes ≤ 30 s (≤ 20 s for S3 multipart, whose
-    /// best-effort abort may add 10 s) and bytes move at ≥
-    /// `attempt_timeout_bytes_per_sec`.
+    /// Stalls normally end sooner, as uncounted network errors, through the
+    /// store's stalled-stream protection and per-call timeouts.
     pub fn attempt_deadline(&self, size: u64) -> Duration {
         let bps = self.attempt_timeout_bytes_per_sec.max(1);
         self.attempt_timeout_floor
