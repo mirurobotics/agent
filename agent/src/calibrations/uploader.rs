@@ -11,9 +11,8 @@ use crate::calibrations::{
     uploader_impl::{NextAttempt, UploaderImpl, UploaderOptions},
 };
 use crate::filesys::Dir;
-use crate::sync::syncer::SyncEvent;
+use crate::sync::syncer::{next_sync_event, SyncEvent};
 use crate::trace;
-use crate::workers::next_sync_event;
 
 // external crates
 use chrono::{DateTime, Utc};
