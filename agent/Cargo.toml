@@ -8,6 +8,7 @@ build = "build.rs"
 
 [lints.clippy]
 new_without_default = "allow"
+many_single_char_names = "warn"
 
 [dependencies]
 atomicwrites = { workspace = true }
