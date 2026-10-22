@@ -21,6 +21,7 @@ use tokio::io::AsyncWriteExt;
 
 mod body;
 pub mod errors;
+pub mod gcs;
 pub mod multipart;
 
 use errors::ObjectNotFoundErr;
@@ -41,6 +42,10 @@ const ATTEMPT_TIMEOUT: Duration = Duration::from_secs(60);
 /// frame (which stalled-stream protection no longer watches) ends at this limit.
 const BODY_ATTEMPT_FLOOR: Duration = Duration::from_secs(90);
 const MIN_UPLOAD_BYTES_PER_SEC: u64 = 64 * 1024;
+
+/// Read size for hashing a streamed part, so hashing holds no more of the
+/// part in memory than streaming it does.
+const MD5_READ_SIZE: u64 = 64 * 1024;
 
 /// Longest a request body may go without progress.
 const STALL_GRACE: Duration = Duration::from_secs(60);
@@ -107,6 +112,14 @@ fn base_config(http_client: SharedHttpClient) -> aws_sdk_s3::config::Builder {
                 .build(),
         )
         .http_client(http_client)
+}
+
+/// How a successful object write ended.
+#[derive(Debug, PartialEq, Eq)]
+enum Write {
+    Created,
+    /// An earlier attempt already stored the object (GCS create-only).
+    AlreadyExists,
 }
 
 pub struct Config {
@@ -235,6 +248,10 @@ impl Source {
 
 pub struct Store {
     client: Client,
+    /// Set for GCS (see [`gcs`]). PutObject and UploadPart then carry a
+    /// `Content-MD5` the store computes, since the GCS client turns the SDK's
+    /// own request checksums off, and object writes are create-only.
+    gcs: bool,
 }
 
 impl Store {
@@ -254,7 +271,76 @@ impl Store {
             .force_path_style(force_path_style);
         Self {
             client: Client::from_conf(builder.build()),
+            gcs: false,
         }
+    }
+
+    /// Builds a store that uploads to GCS through its XML API with a bearer
+    /// token (see [`gcs`]). No network I/O happens here.
+    pub fn new_gcs(token: Arc<dyn gcs::BearerToken>, http_client: SharedHttpClient) -> Self {
+        Self {
+            client: gcs::client(token, http_client),
+            gcs: true,
+        }
+    }
+
+    /// Finishes an object write (PutObject or CompleteMultipartUpload). On GCS
+    /// the client sends writes create-only (see [`gcs`]), so a 412 means an
+    /// earlier attempt already stored the object at this key, which counts as
+    /// done.
+    fn finish_write<E>(
+        &self,
+        operation: &str,
+        dst: &Object,
+        result: Result<(), aws_sdk_s3::error::SdkError<E>>,
+    ) -> Result<Write, S3Err>
+    where
+        E: std::error::Error + 'static,
+    {
+        match result {
+            Ok(()) => Ok(Write::Created),
+            Err(e) if self.gcs && errors::status(&e) == Some(412) => {
+                tracing::info!("upload: {dst} already exists, so an earlier {operation} landed");
+                Ok(Write::AlreadyExists)
+            }
+            Err(e) => Err(errors::map_sdk_err(operation, dst, e)),
+        }
+    }
+
+    /// `Content-MD5` for a body, when this store sends one.
+    fn content_md5(&self, bytes: &[u8]) -> Option<String> {
+        self.gcs.then(|| gcs::content_md5(bytes))
+    }
+
+    /// `Content-MD5` for a streamed part, when this store sends one. The header
+    /// goes before the body, so the range is hashed in a pass of its own. If
+    /// the file changes between that pass and the upload, the store rejects
+    /// the part with `BadDigest` instead of storing other bytes.
+    async fn part_md5(
+        &self,
+        src: &Source,
+        dst: &Object,
+        offset: u64,
+        length: u64,
+    ) -> Result<Option<String>, S3Err> {
+        if !self.gcs {
+            return Ok(None);
+        }
+        let digest = src
+            .blocking("upload_part", dst, move |handle| {
+                let mut ctx = md5::Context::new();
+                let mut buf = vec![0u8; MD5_READ_SIZE.min(length) as usize];
+                let mut done = 0;
+                while done < length {
+                    let n = MD5_READ_SIZE.min(length - done) as usize;
+                    body::read_exact_at(handle, &mut buf[..n], offset + done)?;
+                    ctx.consume(&buf[..n]);
+                    done += n as u64;
+                }
+                Ok(ctx.finalize())
+            })
+            .await?;
+        Ok(Some(gcs::encode_md5(digest)))
     }
 
     /// Test-only constructor that injects a caller-provided HTTP client (e.g. a
@@ -300,19 +386,23 @@ impl Store {
         metadata: &HashMap<String, String>,
     ) -> Result<(), S3Err> {
         let size = src.size;
-        let body = body::chunked(Bytes::from(src.read("put_object", dst, 0, size).await?));
-        self.client
+        let bytes = src.read("put_object", dst, 0, size).await?;
+        let content_md5 = self.content_md5(&bytes);
+        let body = body::chunked(Bytes::from(bytes));
+        let result = self
+            .client
             .put_object()
             .bucket(&dst.bucket)
             .key(&dst.key)
             .body(body)
+            .set_content_md5(content_md5)
             .set_metadata((!metadata.is_empty()).then(|| metadata.clone()))
             .customize()
             .config_override(attempt_override(body_attempt_timeout(size)))
             .send()
             .await
-            .map_err(|e| errors::map_sdk_err("put_object", dst, e))?;
-        Ok(())
+            .map(|_| ());
+        self.finish_write("put_object", dst, result).map(|_| ())
     }
 
     /// Streams an object's body to a destination file. A missing object maps to

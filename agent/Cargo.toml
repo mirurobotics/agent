@@ -13,6 +13,8 @@ new_without_default = "allow"
 atomicwrites = { workspace = true }
 aws-sdk-s3 = { workspace = true }
 aws-smithy-http-client = { workspace = true, features = ["rustls-aws-lc"] }
+# Operation names (`Metadata`) for GCS create-only writes (agent/src/s3/gcs.rs).
+aws-smithy-runtime-api = { workspace = true, features = ["client"] }
 aws-smithy-types = { workspace = true, features = ["http-body-1-x"] }
 aws-lc-rs = { workspace = true }
 axum = { workspace = true }
@@ -26,6 +28,7 @@ google-cloud-auth = { workspace = true }
 google-cloud-gax = { workspace = true }
 http = { workspace = true }
 http-body = { workspace = true }
+md5 = { workspace = true }
 backend-api = { workspace = true }
 device-api = { workspace = true }
 pem-rfc7468 = { workspace = true }

@@ -1,12 +1,11 @@
 // internal crates
 use crate::s3::{
-    attempt_override, body, body_attempt_timeout, complete_attempt_timeout, errors,
-    errors::NoSuchUploadErr, Object, S3Err, Source, Store, ABORT_ATTEMPT_TIMEOUT, PART_SIZE,
+    attempt_override, body_attempt_timeout, complete_attempt_timeout, errors,
+    errors::NoSuchUploadErr, Object, S3Err, Source, Store, Write, ABORT_ATTEMPT_TIMEOUT, PART_SIZE,
 };
 
 // external crates
 use aws_sdk_s3::operation::list_parts::ListPartsOutput;
-use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart};
 use tokio::time::Instant;
 
@@ -21,7 +20,8 @@ impl Store {
     ///
     /// A fresh upload is created every call: on any in-process failure the
     /// in-progress upload is aborted (best-effort) so S3 does not retain orphaned
-    /// parts, then the error propagates.
+    /// parts, then the error propagates. So is one whose object already exists
+    /// (GCS create-only), since completing it left its parts in place.
     pub async fn put_multipart(
         &self,
         src: Source,
@@ -31,18 +31,15 @@ impl Store {
         let started = Instant::now();
         let upload_id = self.create_multipart_upload(dst, metadata).await?;
 
-        match self
+        let written = self
             .exec_multipart_upload(&src, dst, &upload_id, started)
-            .await
-        {
-            Ok(()) => Ok(()),
-            Err(err) => {
-                // Best-effort cleanup: don't mask the original error if the abort
-                // itself fails.
-                let _ = self.abort_multipart_upload(dst, &upload_id).await;
-                Err(err)
-            }
+            .await;
+        if !matches!(written, Ok(Write::Created)) {
+            // Best-effort cleanup: don't mask the original error if the abort
+            // itself fails.
+            let _ = self.abort_multipart_upload(dst, &upload_id).await;
         }
+        written.map(|_| ())
     }
 
     /// Resumes an existing multipart upload: lists the parts that already landed
@@ -62,6 +59,7 @@ impl Store {
         let parts = self.upload_parts(&src, dst, upload_id, &landed).await?;
         self.complete_multipart_upload(dst, upload_id, &parts, src.size, started)
             .await
+            .map(|_| ())
     }
 
     /// Walks [`Self::part_plan`] in order. For each part number present in
@@ -79,8 +77,7 @@ impl Store {
             let part = match landed.get(&part_number) {
                 Some(existing) => existing.clone(),
                 None => {
-                    let (body, failure) = src.stream("upload_part", dst, offset, len).await?;
-                    self.upload_part(src, dst, upload_id, part_number, (body, len), failure)
+                    self.upload_part(src, dst, upload_id, part_number, (offset, len))
                         .await?
                 }
             };
@@ -225,7 +222,7 @@ impl Store {
         dst: &Object,
         upload_id: &str,
         started: Instant,
-    ) -> Result<(), S3Err> {
+    ) -> Result<Write, S3Err> {
         let parts = self
             .upload_parts(src, dst, upload_id, &std::collections::HashMap::new())
             .await?;
@@ -233,19 +230,20 @@ impl Store {
             .await
     }
 
-    /// Uploads one part, streamed from `src` as a `(body, length)` pair, and
-    /// returns the [`CompletedPart`] describing it. A local read failure while
-    /// the body streams (recorded in `failure`) is [`S3Err::LocalIoErr`], not a
-    /// network error. `InvalidResponseErr` if the response omits the ETag.
+    /// Uploads the `(offset, length)` range of `src` as one part, streamed from
+    /// the file, and returns the [`CompletedPart`] describing it. A local read
+    /// failure while the body streams is [`S3Err::LocalIoErr`], not a network
+    /// error. `InvalidResponseErr` if the response omits the ETag.
     async fn upload_part(
         &self,
         src: &Source,
         dst: &Object,
         upload_id: &str,
         part_number: i32,
-        (body, len): (ByteStream, u64),
-        failure: body::ReadFailure,
+        (offset, len): (u64, u64),
     ) -> Result<CompletedPart, S3Err> {
+        let content_md5 = self.part_md5(src, dst, offset, len).await?;
+        let (body, failure) = src.stream("upload_part", dst, offset, len).await?;
         let output = self
             .client
             .upload_part()
@@ -254,6 +252,7 @@ impl Store {
             .upload_id(upload_id)
             .part_number(part_number)
             .body(body)
+            .set_content_md5(content_md5)
             .customize()
             .config_override(attempt_override(body_attempt_timeout(len)))
             .send()
@@ -283,12 +282,13 @@ impl Store {
         parts: &[CompletedPart],
         size: u64,
         started: Instant,
-    ) -> Result<(), S3Err> {
+    ) -> Result<Write, S3Err> {
         let completed = CompletedMultipartUpload::builder()
             .set_parts(Some(parts.to_vec()))
             .build();
         let limit = complete_attempt_timeout(size, started.elapsed());
-        self.client
+        let result = self
+            .client
             .complete_multipart_upload()
             .bucket(&obj.bucket)
             .key(&obj.key)
@@ -298,8 +298,8 @@ impl Store {
             .config_override(attempt_override(limit))
             .send()
             .await
-            .map_err(|e| errors::map_sdk_err("complete_multipart_upload", obj, e))?;
-        Ok(())
+            .map(|_| ());
+        self.finish_write("complete_multipart_upload", obj, result)
     }
 
     /// Aborts an in-progress multipart upload so S3 releases its parts. Returns a
@@ -804,14 +804,24 @@ mod tests {
             tokio::fs::remove_file(&moved).await.unwrap();
         }
 
-        /// Reads each request body to its end, like a real connection does, and
-        /// fails the request if the body errors.
+        /// Shrinks the file at `path` to 40 KiB once the request is sent, then
+        /// reads the body to its end like a real connection does, failing the
+        /// request if the body errors.
         #[derive(Clone, Debug)]
-        struct DrainingClient;
+        struct ShrinkingClient {
+            path: std::path::PathBuf,
+        }
 
-        impl HttpConnector for DrainingClient {
+        impl HttpConnector for ShrinkingClient {
             fn call(&self, request: HttpRequest) -> HttpConnectorFuture {
+                let path = self.path.clone();
                 HttpConnectorFuture::new(async move {
+                    std::fs::OpenOptions::new()
+                        .write(true)
+                        .open(&path)
+                        .unwrap()
+                        .set_len(40 * 1024)
+                        .unwrap();
                     match request.into_body().collect().await {
                         Ok(_) => Ok(HttpResponse::try_from(upload_part_resp("\"e1\"")).unwrap()),
                         Err(e) => Err(ConnectorError::other(e, None)),
@@ -820,7 +830,7 @@ mod tests {
             }
         }
 
-        impl HttpClient for DrainingClient {
+        impl HttpClient for ShrinkingClient {
             fn http_connector(
                 &self,
                 _: &HttpConnectorSettings,
@@ -836,25 +846,11 @@ mod tests {
             // out mid-stream. That is a local read failure, not a network error.
             let tf = temp_file_with(&[7u8; 100 * 1024]).await;
             let src = source_of(&tf).await;
-            let failure = body::ReadFailure::default();
-            let stream = body::file_range(src.handle.clone(), 0, 100 * 1024, failure.clone());
-            std::fs::OpenOptions::new()
-                .write(true)
-                .open(tf.file().path())
-                .unwrap()
-                .set_len(40 * 1024)
-                .unwrap();
-            let store = store_on(DrainingClient);
+            let path = tf.file().path().to_path_buf();
+            let store = store_on(ShrinkingClient { path });
 
             let err = store
-                .upload_part(
-                    &src,
-                    &obj("big.bin"),
-                    UPLOAD_ID,
-                    1,
-                    (stream, 100 * 1024),
-                    failure,
-                )
+                .upload_part(&src, &obj("big.bin"), UPLOAD_ID, 1, (0, 100 * 1024))
                 .await
                 .unwrap_err();
 
@@ -951,22 +947,11 @@ mod tests {
         async fn stalled_upload_part_maps_to_connection_err() {
             let tf = temp_file_with(&[0u8; 64 * 1024]).await;
             let src = source_of(&tf).await;
-            let (stream, failure) = src
-                .stream("upload_part", &obj("big.bin"), 0, 64 * 1024)
-                .await
-                .unwrap();
             let store = store_on(NeverClient::new());
             let start = Instant::now();
 
             let err = store
-                .upload_part(
-                    &src,
-                    &obj("big.bin"),
-                    UPLOAD_ID,
-                    1,
-                    (stream, 64 * 1024),
-                    failure,
-                )
+                .upload_part(&src, &obj("big.bin"), UPLOAD_ID, 1, (0, 64 * 1024))
                 .await
                 .unwrap_err();
 
