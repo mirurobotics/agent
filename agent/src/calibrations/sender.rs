@@ -4,16 +4,11 @@ use std::sync::Arc;
 
 // internal crates
 use crate::authn::TokenManagerExt;
-use crate::calibrations::{
-    errors::{CalibrationsErr, InvalidReportErr},
-    report::Report,
-};
+use crate::calibrations::{errors::CalibrationsErr, report::Report};
 use crate::http::{self, ClientI, HTTPErr};
-use crate::trace;
 use backend_api::models::{CreateCalibrationRequest, InstanceContent};
 
 // external crates
-use serde::Deserialize;
 use tracing::warn;
 
 /// The seam between the upload worker and Miru.
@@ -45,7 +40,7 @@ impl<C: ClientI, T: TokenManagerExt> HttpSender<C, T> {
 
 impl<C: ClientI, T: TokenManagerExt> Sender for HttpSender<C, T> {
     async fn send(&self, report: &Report) -> Result<(), CalibrationsErr> {
-        let payload = new_request(report)?;
+        let payload = new_request(report);
         let token = self.token_mngr.get_token().await?;
         let params = http::calibrations::CreateParams {
             payload: &payload,
@@ -65,15 +60,14 @@ impl<C: ClientI, T: TokenManagerExt> Sender for HttpSender<C, T> {
 }
 
 /// The backend request for `report`. `reported_at` is the agent's receive
-/// time, [`crate::calibrations::ReportMetadata::calibrated_at`]. Content that
-/// is not a `{ format, data }` instance content is an [`InvalidReportErr`].
-pub fn new_request(report: &Report) -> Result<CreateCalibrationRequest, CalibrationsErr> {
-    let content = InstanceContent::deserialize(&report.content).map_err(|e| InvalidReportErr {
-        reason: format!("content is not a valid instance content: {e}"),
-        trace: trace!(),
-    })?;
+/// time, [`crate::calibrations::ReportMetadata::calibrated_at`].
+pub fn new_request(report: &Report) -> CreateCalibrationRequest {
     let metadata = &report.metadata;
-    Ok(CreateCalibrationRequest {
+    let content = InstanceContent {
+        format: (&metadata.format).into(),
+        data: report.data.clone(),
+    };
+    CreateCalibrationRequest {
         deployment_id: metadata.deployment_id.clone(),
         component_slug: metadata.component_slug.clone(),
         role: metadata.role.clone(),
@@ -81,5 +75,5 @@ pub fn new_request(report: &Report) -> Result<CreateCalibrationRequest, Calibrat
         aspect: metadata.aspect.clone(),
         content: Box::new(content),
         reported_at: metadata.calibrated_at.to_rfc3339(),
-    })
+    }
 }

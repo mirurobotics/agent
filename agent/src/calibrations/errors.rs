@@ -57,9 +57,8 @@ impl crate::errors::Error for CalibrationTooLargeErr {
     }
 }
 
-/// A buffered report that can never be sent: its content is not a valid
-/// `{ format, data }` instance content, or its file cannot be parsed. Terminal,
-/// so the worker drops it instead of retrying.
+/// A buffered report that can never be sent, because its file is not UTF-8.
+/// Terminal, so the worker drops it instead of retrying.
 #[derive(Debug, thiserror::Error)]
 #[error("invalid calibration report: {reason}")]
 pub struct InvalidReportErr {
@@ -125,12 +124,6 @@ impl From<FileSysErr> for CalibrationsErr {
 impl From<CalibrationTooLargeErr> for CalibrationsErr {
     fn from(e: CalibrationTooLargeErr) -> Self {
         Self::TooLargeErr(e)
-    }
-}
-
-impl From<InvalidReportErr> for CalibrationsErr {
-    fn from(e: InvalidReportErr) -> Self {
-        Self::InvalidReportErr(e)
     }
 }
 

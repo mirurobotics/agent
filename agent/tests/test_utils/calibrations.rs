@@ -5,10 +5,10 @@
 use crate::test_utils::filesys::dirs::TempDir;
 use miru_agent::calibrations::{Report, ReportMetadata};
 use miru_agent::disk::layout::CalibrationsLayout;
+use miru_agent::models::InstanceFormat;
 
 // external crates
 use chrono::{DateTime, Utc};
-use serde_json::json;
 
 /// When every fixture report was received.
 pub fn received_at() -> DateTime<Utc> {
@@ -20,13 +20,14 @@ pub fn report(slug: &str) -> Report {
     Report {
         metadata: ReportMetadata {
             component_slug: slug.to_string(),
+            format: InstanceFormat::Json,
             role: None,
             aspect: None,
             serial_number: None,
             deployment_id: None,
             calibrated_at: received_at(),
         },
-        content: json!({ "format": "json", "data": r#"{"offset":[1,2,3]}"# }),
+        data: r#"{"offset":[1,2,3]}"#.to_string(),
     }
 }
 

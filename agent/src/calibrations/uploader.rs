@@ -24,7 +24,7 @@ use uuid::Uuid;
 pub struct UploaderArgs<S, F, N> {
     /// Where the queue persists; `None` keeps it in memory only.
     pub snapshot_file: Option<QueueSnapshotFile>,
-    /// The directory holding one content file per queued report.
+    /// The directory holding one data file per queued report.
     pub reports: Dir,
     pub sender: Arc<S>,
     /// Sync events; a successful sync makes every waiting report due at once. `None` disables

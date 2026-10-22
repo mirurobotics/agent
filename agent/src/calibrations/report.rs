@@ -1,4 +1,5 @@
 // internal crates
+use crate::models::InstanceFormat;
 use crate::queue;
 
 // external crates
@@ -6,13 +7,14 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 /// A calibration report: what intake hands the uploader and what the uploader
-/// sends to Miru. The metadata is queued in `queue.json`; the content is kept
-/// in its own file, `reports/<entry id>.json`.
+/// sends to Miru. The metadata is queued in `queue.json`; the data is kept in
+/// its own file, `reports/<entry id>`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Report {
     pub metadata: ReportMetadata,
-    /// The `{ format, data }` instance content, kept exactly as given.
-    pub content: serde_json::Value,
+    /// The calibration's values, serialized in [`ReportMetadata::format`] and
+    /// kept exactly as given.
+    pub data: String,
 }
 
 /// A queued report's metadata. Everything here is captured at intake, so an
@@ -21,6 +23,8 @@ pub struct Report {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ReportMetadata {
     pub component_slug: String,
+    /// The format [`Report::data`] is serialized in.
+    pub format: InstanceFormat,
     #[serde(default)]
     pub role: Option<String>,
     #[serde(default)]

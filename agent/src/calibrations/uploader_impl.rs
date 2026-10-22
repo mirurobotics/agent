@@ -11,7 +11,7 @@ use crate::calibrations::{
 use crate::cooldown;
 use crate::errors::Error;
 use crate::filesys::{
-    dirs, errors::ParseJSONErr, files, Dir, File, FileSysErr, PathExt, WriteOptions,
+    dirs, errors::ConvertUTF8Err, files, Dir, File, FileSysErr, PathExt, WriteOptions,
 };
 use crate::queue::Persistence;
 use crate::trace;
@@ -25,7 +25,7 @@ use uuid::Uuid;
 pub struct UploaderOptions {
     /// The most reports queued at once; intake is rejected beyond it.
     pub capacity: usize,
-    /// The largest report content accepted, in bytes.
+    /// The largest report data accepted, in bytes.
     pub max_report_bytes: u64,
     /// Total send attempts per report before it is dropped. Network errors
     /// don't count toward it.
@@ -39,14 +39,13 @@ pub struct UploaderOptions {
 }
 
 impl Default for UploaderOptions {
-    /// At most 1,000 reports of up to 2 MiB each (2 GiB at worst). Miru
-    /// accepts up to 1 MiB of calibration data, and 2 MiB leaves room for its
-    /// JSON escaping. Retries match the data uploads: 30 attempts, 10 s
-    /// doubling to 1 h, and a 7-day backstop.
+    /// At most 1,000 reports of up to 1 MiB of data each (1 GiB at worst),
+    /// the most calibration data Miru accepts. Retries match the data uploads:
+    /// 30 attempts, 10 s doubling to 1 h, and a 7-day backstop.
     fn default() -> Self {
         Self {
             capacity: 1000,
-            max_report_bytes: 2 * 1024 * 1024,
+            max_report_bytes: 1024 * 1024,
             attempts: 30,
             backoff: cooldown::Backoff {
                 base_secs: 10,
@@ -73,8 +72,8 @@ pub(crate) enum NextAttempt {
 /// metadata and the directory of report files. [`Uploader`] runs it inside an
 /// actor and does the sending and waiting.
 ///
-/// Each queued report's content is its own file, `<reports>/<entry id>.json`,
-/// so large content is never rewritten with the queue. A failed report is
+/// Each queued report's data is its own file, `<reports>/<entry id>`, so large
+/// data is never rewritten with the queue. A failed report is
 /// retried at the tail of the queue after its own backoff, as in
 /// `data_uploads::upload`, so one failing report never blocks the others.
 ///
@@ -138,7 +137,7 @@ where
     /// the report file, so a crash between the two leaves an entry without a
     /// file, which [`Self::read`] drops. On error nothing is queued.
     pub(crate) async fn enqueue(&mut self, report: Report) -> Result<Uuid, CalibrationsErr> {
-        let bytes = report.content.to_string().into_bytes();
+        let bytes = report.data.into_bytes();
         self.verify_size(bytes.len() as u64)?;
         let id = self.queue.enqueue(report.metadata).await?;
         let file = self.report_file(id);
@@ -188,14 +187,14 @@ where
     ) -> Result<Option<Report>, CalibrationsErr> {
         let id = entry.id;
         let metadata = entry.job.clone();
-        match files::read_json(&self.report_file(id)).await {
-            Ok(content) => Ok(Some(Report { metadata, content })),
+        match files::read_string(&self.report_file(id)).await {
+            Ok(data) => Ok(Some(Report { metadata, data })),
             Err(FileSysErr::PathDoesNotExistErr(_)) => {
                 error!("calibrations: dropping report {id}, whose file is missing");
                 self.queue.ack(id).await;
                 Ok(None)
             }
-            Err(FileSysErr::ParseJSONErr(e)) => Err(unreadable(e)),
+            Err(FileSysErr::ConvertUTF8Err(e)) => Err(unreadable(e)),
             Err(e) => Err(e.into()),
         }
     }
@@ -280,14 +279,13 @@ where
     }
 
     fn report_file(&self, id: Uuid) -> File {
-        self.reports.file(&format!("{}.json", id.hyphenated()))
+        self.reports.file(&id.hyphenated().to_string())
     }
 }
 
 /// The report id a report file is named after, or `None` for any other file.
 fn report_id(file: &File) -> Option<Uuid> {
-    let name = file.name().ok()?;
-    Uuid::from_str(name.strip_suffix(".json")?).ok()
+    Uuid::from_str(file.name().ok()?).ok()
 }
 
 /// Delete `file`, logging a failure. A file that is already gone is fine.
@@ -297,10 +295,10 @@ async fn delete(file: &File) {
     }
 }
 
-/// A report file that cannot be parsed can never be sent.
-fn unreadable(e: ParseJSONErr) -> CalibrationsErr {
+/// A report file that is not UTF-8 can never be sent.
+fn unreadable(e: ConvertUTF8Err) -> CalibrationsErr {
     CalibrationsErr::InvalidReportErr(InvalidReportErr {
-        reason: format!("the report file cannot be parsed: {e}"),
+        reason: format!("the report file is not UTF-8: {e}"),
         trace: trace!(),
     })
 }
