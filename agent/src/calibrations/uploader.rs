@@ -97,6 +97,10 @@ where
 
     /// Drive `fut` to completion while serving commands, so intake never
     /// waits on Miru. `None` when a shutdown arrived; `fut` is then dropped.
+    ///
+    /// Sync events are consumed here too. The watch keeps only the latest
+    /// event, so a successful sync left unread until `fut` finished could be
+    /// overwritten by a later one and its early retry lost.
     async fn serve_until<T>(&mut self, fut: impl Future<Output = T>) -> Option<T> {
         tokio::pin!(fut);
         loop {
@@ -106,6 +110,11 @@ where
                 cmd = self.receiver.recv() => {
                     if let Flow::Shutdown = self.handle(cmd).await {
                         return None;
+                    }
+                }
+                event = next_sync_event(&mut self.events) => {
+                    if self.reconnected(event) {
+                        self.uploader.clear_retry_cooldowns().await;
                     }
                 }
             }

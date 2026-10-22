@@ -464,6 +464,31 @@ async fn a_successful_sync_retries_waiting_reports_at_once() {
 }
 
 #[tokio::test]
+async fn a_successful_sync_during_an_upload_retries_waiting_reports() {
+    let mut h = Harness::new();
+    let (release, hang) = oneshot::channel();
+    h.sender.push(Step::Network);
+    h.sender.push(Step::Hang(hang));
+    preloaded(&h, &["a", "b"]).await;
+    h.spawn().await;
+
+    // `a` fails and backs off at the tail while `b` is still in flight
+    h.await_started().await;
+    h.await_started().await;
+
+    // a later event replaces the success in the watch before `b` finishes
+    h.sync(SyncEvent::SyncSuccess);
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    h.sync(SyncEvent::CooldownEnd(CooldownEnd::SyncSuccess));
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    release.send(()).unwrap();
+
+    // `a` is retried at once, without waiting out its backoff
+    h.await_drained(&["a", "b", "a"]).await;
+    assert!(h.sleeps_secs().is_empty());
+}
+
+#[tokio::test]
 async fn other_sync_events_do_not_end_a_wait() {
     let mut h = Harness::new();
     h.sender.push(Step::Network);
