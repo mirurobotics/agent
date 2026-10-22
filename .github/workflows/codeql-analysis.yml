@@ -2,9 +2,10 @@ name: CodeQL
 
 on:
   push:
-    branches: [main, "release/*"]
+    branches: ["release/*"]
   schedule:
-    - cron: '31 7 * * 3'
+    - cron: '31 7 * * *'
+  workflow_dispatch:
   workflow_call:
 
 permissions:
@@ -14,7 +15,24 @@ permissions:
   security-events: write
 
 jobs:
+  changes:
+    name: Check for new commits
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 5
+    permissions:
+      actions: read
+    outputs:
+      scan: ${{ steps.check.outputs.scan }}
+    steps:
+      # The nightly run skips the scan when main hasn't moved since the last
+      # successful run, so quiet repos don't rescan the same commit.
+      - name: Check for commits since the last scan
+        id: check
+        uses: mirurobotics/.github/actions/codeql-gate@d2aec010e6ce5c9dd65fb16e6d06a0f61e437734 # main
+
   codeql:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.scan != 'false' }}
     runs-on: blacksmith-4vcpu-ubuntu-2404
 
     steps:

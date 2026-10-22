@@ -1,5 +1,6 @@
 // internal crates
-use crate::data_uploads::{queue, upload::job::Job};
+use crate::data_uploads::upload::job::Job;
+use crate::queue;
 
 // external crates
 use chrono::{DateTime, Utc};
@@ -17,8 +18,8 @@ impl queue::QueueJob for Job {
     }
 }
 
-/// The uploader's job queue: the shared [`queue::Queue`] carrying upload jobs.
-pub type Queue = queue::Queue<Job>;
+/// The uploader's job queue: the shared [`queue::FileQueue`] carrying upload jobs.
+pub type Queue = queue::FileQueue<Job>;
 
 pub type QueueEntry = queue::QueueEntry<Job>;
 

@@ -1,5 +1,6 @@
 // internal crates
-use crate::data_uploads::{queue, retention::job::Job};
+use crate::data_uploads::retention::job::Job;
+use crate::queue;
 
 // external crates
 use chrono::{DateTime, Utc};
@@ -16,9 +17,9 @@ impl queue::QueueJob for Job {
     }
 }
 
-/// The retention deleter's job queue: the shared [`queue::Queue`] carrying
+/// The retention deleter's job queue: the shared [`queue::FileQueue`] carrying
 /// delete jobs.
-pub type Queue = queue::Queue<Job>;
+pub type Queue = queue::FileQueue<Job>;
 
 pub type QueueEntry = queue::QueueEntry<Job>;
 

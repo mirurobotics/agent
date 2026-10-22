@@ -1,0 +1,3 @@
+# A code owner must approve every PR to main. Branch protection is set in
+# mirurobotics/infra: github/terraform/repos.tf.
+* @ben-miru

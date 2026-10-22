@@ -1,32 +1,29 @@
 // standard crates
 use std::sync::Arc;
+use std::time::Duration;
 
 // internal crates
+use crate::cooldown;
 use crate::filesys::{errors::*, file::File, files, Atomic, Overwrite, WriteOptions};
 use crate::models::Patch;
-use crate::trace;
 
 // external crates
 use serde::{de::DeserializeOwned, Serialize};
-use tokio::sync::{
-    mpsc::{self, Receiver, Sender},
-    oneshot,
-};
-use tokio::task::JoinHandle;
-use tracing::{error, info};
+use tracing::error;
 
-macro_rules! dispatch {
-    ($op:expr, $respond_to:expr, $msg:expr) => {{
-        let result = $op;
-        if $respond_to.send(result).is_err() {
-            error!($msg);
-        }
-    }};
-}
+/// Waits between retries of a state file read that failed for a reason other
+/// than "missing" or "unparseable" (e.g. a transient EIO).
+const READ_RETRY_DELAYS: [Duration; 3] = [
+    Duration::from_millis(50),
+    Duration::from_millis(250),
+    Duration::from_millis(1000),
+];
 
-// ============================== SINGLE THREADED ================================== //
+/// Single-threaded state file: a JSON file plus its cached contents.
+/// [`crate::filesys::shared_state_file::SharedStateFile`] wraps it in an actor
+/// so several tasks can share one file.
 #[derive(Debug)]
-pub struct SingleThreadStateFile<ContentT, PatchT>
+pub struct StateFile<ContentT, PatchT>
 where
     ContentT: Clone + Serialize + DeserializeOwned + Patch<PatchT> + PartialEq,
 {
@@ -35,7 +32,7 @@ where
     _phantom: std::marker::PhantomData<PatchT>,
 }
 
-impl<ContentT, PatchT> SingleThreadStateFile<ContentT, PatchT>
+impl<ContentT, PatchT> StateFile<ContentT, PatchT>
 where
     ContentT: Clone + Serialize + DeserializeOwned + Patch<PatchT> + PartialEq,
 {
@@ -51,15 +48,67 @@ where
         Ok(state_file)
     }
 
+    /// Opens `file`:
+    ///
+    /// - **Missing:** created with `default`.
+    /// - **Unparseable:** copied aside to `<name>.corrupt-<uuid>` (best
+    ///   effort), then atomically replaced with `default`.
+    /// - **Other read error:** retried per [`READ_RETRY_DELAYS`], then returned
+    ///   with the file left untouched.
     pub async fn new_with_default(file: File, default: ContentT) -> Result<Self, FileSysErr>
     where
         Self: Sized,
     {
-        let result = Self::new(file.clone()).await;
-        match result {
+        match Self::new_with_retry(&file).await {
             Ok(state_file) => Ok(state_file),
-            Err(_) => Self::create(file, &default, Overwrite::Allow).await,
+            Err(FileSysErr::PathDoesNotExistErr(_)) => {
+                Self::create(file, &default, Overwrite::Allow).await
+            }
+            Err(FileSysErr::ParseJSONErr(err)) => {
+                match Self::copy_aside(&file).await {
+                    Ok(aside) => error!(
+                        "state file {file} could not be parsed ({err}); copied it to {aside} \
+                         and started from the default"
+                    ),
+                    Err(copy_err) => error!(
+                        "state file {file} could not be parsed ({err}) or copied aside \
+                         ({copy_err}); started from the default"
+                    ),
+                }
+                Self::create(file, &default, Overwrite::Allow).await
+            }
+            Err(err) => Err(err),
         }
+    }
+
+    /// [`Self::new`], retrying errors other than "missing" and "unparseable"
+    /// after each of [`READ_RETRY_DELAYS`].
+    async fn new_with_retry(file: &File) -> Result<Self, FileSysErr> {
+        let retryable = |err: &FileSysErr| {
+            !matches!(
+                err,
+                FileSysErr::PathDoesNotExistErr(_) | FileSysErr::ParseJSONErr(_)
+            )
+        };
+        cooldown::retry(
+            |n| READ_RETRY_DELAYS.get(n as usize).copied(),
+            retryable,
+            tokio::time::sleep,
+            || Self::new(file.clone()),
+        )
+        .await
+    }
+
+    /// Copies `file` to a uniquely named `.corrupt-<uuid>` sibling, keeping
+    /// its permissions.
+    async fn copy_aside(file: &File) -> Result<File, FileSysErr> {
+        let aside = file.parent()?.file(&format!(
+            "{}.corrupt-{}",
+            file.name()?,
+            uuid::Uuid::new_v4()
+        ));
+        files::copy_to(file, &aside, Overwrite::Deny).await?;
+        Ok(aside)
     }
 
     pub async fn create(
@@ -102,177 +151,5 @@ where
             return Ok(());
         }
         self.write(content).await
-    }
-}
-
-// ================================ CONCURRENT ===================================== //
-
-pub trait ConcurrentPatchT: Send + Sync + 'static {}
-impl<T> ConcurrentPatchT for T where T: Send + Sync + 'static {}
-
-pub trait ConcurrentContentT<PatchT>:
-    Clone + Serialize + DeserializeOwned + Patch<PatchT> + Send + Sync + 'static + PartialEq
-{
-}
-impl<T, U> ConcurrentContentT<U> for T where
-    T: Clone + Serialize + DeserializeOwned + Patch<U> + Send + Sync + 'static + PartialEq
-{
-}
-
-pub enum Command<ContentT, PatchT>
-where
-    ContentT: Clone + Serialize + DeserializeOwned + Patch<PatchT>,
-{
-    Shutdown {
-        respond_to: oneshot::Sender<Result<(), FileSysErr>>,
-    },
-    Read {
-        respond_to: oneshot::Sender<Arc<ContentT>>,
-    },
-    Write {
-        data: ContentT,
-        respond_to: oneshot::Sender<Result<(), FileSysErr>>,
-    },
-    Patch {
-        patch: PatchT,
-        respond_to: oneshot::Sender<Result<(), FileSysErr>>,
-    },
-}
-
-pub struct Worker<ContentT, PatchT>
-where
-    ContentT: Clone + Serialize + DeserializeOwned + Patch<PatchT> + PartialEq,
-{
-    pub file: SingleThreadStateFile<ContentT, PatchT>,
-    pub receiver: Receiver<Command<ContentT, PatchT>>,
-}
-
-impl<ContentT, PatchT> Worker<ContentT, PatchT>
-where
-    ContentT: Clone + Serialize + DeserializeOwned + Patch<PatchT> + PartialEq,
-{
-    pub async fn run(mut self) {
-        while let Some(cmd) = self.receiver.recv().await {
-            match cmd {
-                Command::Shutdown { respond_to } => {
-                    if let Err(e) = respond_to.send(Ok(())) {
-                        error!("Actor failed to send shutdown response: {:?}", e);
-                    }
-                    break;
-                }
-                Command::Read { respond_to } => {
-                    dispatch!(self.file.read(), respond_to, "Actor failed to read file");
-                }
-                Command::Write { data, respond_to } => {
-                    dispatch!(
-                        self.file.write(data).await,
-                        respond_to,
-                        "Actor failed to write file"
-                    );
-                }
-                Command::Patch { patch, respond_to } => {
-                    dispatch!(
-                        self.file.patch(patch).await,
-                        respond_to,
-                        "Actor failed to patch file"
-                    );
-                }
-            }
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct ConcurrentStateFile<ContentT, PatchT>
-where
-    PatchT: ConcurrentPatchT,
-    ContentT: ConcurrentContentT<PatchT>,
-{
-    sender: Sender<Command<ContentT, PatchT>>,
-}
-
-impl<ContentT, PatchT> ConcurrentStateFile<ContentT, PatchT>
-where
-    PatchT: ConcurrentPatchT,
-    ContentT: ConcurrentContentT<PatchT>,
-{
-    pub async fn spawn(
-        buffer_size: usize,
-        file: File,
-    ) -> Result<(Self, JoinHandle<()>), FileSysErr> {
-        let (sender, receiver) = mpsc::channel(buffer_size);
-        let worker = Worker {
-            file: SingleThreadStateFile::new(file).await?,
-            receiver,
-        };
-        let worker_handle = tokio::spawn(worker.run());
-        Ok((Self { sender }, worker_handle))
-    }
-
-    pub async fn spawn_with_default(
-        buffer_size: usize,
-        file: File,
-        default: ContentT,
-    ) -> Result<(Self, JoinHandle<()>), FileSysErr> {
-        let (sender, receiver) = mpsc::channel(buffer_size);
-        let worker = Worker {
-            file: SingleThreadStateFile::new_with_default(file, default).await?,
-            receiver,
-        };
-        let worker_handle = tokio::spawn(worker.run());
-        Ok((Self { sender }, worker_handle))
-    }
-
-    async fn send_command<R>(
-        &self,
-        op: &str,
-        make_cmd: impl FnOnce(oneshot::Sender<R>) -> Command<ContentT, PatchT>,
-    ) -> Result<R, FileSysErr> {
-        let (send, recv) = oneshot::channel();
-        self.sender.send(make_cmd(send)).await.map_err(|e| {
-            error!("Failed to send {op} command to actor: {e:?}");
-            FileSysErr::SendActorMessageErr(SendActorMessageErr {
-                source: Box::new(e),
-                trace: trace!(),
-            })
-        })?;
-        recv.await.map_err(|e| {
-            error!("Failed to receive {op} response from actor: {e:?}");
-            FileSysErr::ReceiveActorMessageErr(ReceiveActorMessageErr {
-                source: Box::new(e),
-                trace: trace!(),
-            })
-        })
-    }
-
-    pub async fn shutdown(&self) -> Result<(), FileSysErr> {
-        self.send_command("shutdown", |tx| Command::Shutdown { respond_to: tx })
-            .await??;
-        info!(
-            "{} state file shutdown complete",
-            std::any::type_name::<ContentT>()
-        );
-        Ok(())
-    }
-
-    pub async fn read(&self) -> Result<Arc<ContentT>, FileSysErr> {
-        self.send_command("read", |tx| Command::Read { respond_to: tx })
-            .await
-    }
-
-    pub async fn write(&self, data: ContentT) -> Result<(), FileSysErr> {
-        self.send_command("write", |tx| Command::Write {
-            data,
-            respond_to: tx,
-        })
-        .await?
-    }
-
-    pub async fn patch(&self, patch: PatchT) -> Result<(), FileSysErr> {
-        self.send_command("patch", |tx| Command::Patch {
-            patch,
-            respond_to: tx,
-        })
-        .await?
     }
 }

@@ -10,7 +10,7 @@ use crate::mocks::{
 };
 use crate::test_utils::{filesys::dirs as test_dirs, upload::make_job};
 use miru_agent::data_uploads::retention::Job as DeleteJob;
-use miru_agent::data_uploads::upload::errors::ExecutorErr;
+use miru_agent::data_uploads::upload::errors::{EnqueueErr, ExecutorErr};
 use miru_agent::data_uploads::upload::{
     Job, QueueEntry, QueueSnapshot, QueueSnapshotFile, UploadErr, Uploader, UploaderExt,
     UploaderOptions,
@@ -542,7 +542,7 @@ async fn in_flight_job_holds_its_capacity_slot() {
         .await
         .unwrap_err();
     assert!(
-        matches!(err, UploadErr::QueueFullErr(_)),
+        matches!(err, UploadErr::EnqueueErr(EnqueueErr::QueueFullErr(_))),
         "expected QueueFullErr, got: {err:?}"
     );
 
@@ -787,7 +787,7 @@ mod retention_producer {
         }
     }
 
-    /// Wait until the queue is empty: the job's `queue.remove` — which runs
+    /// Wait until the queue is empty: the job's `queue.ack` — which runs
     /// after the producer's enqueue — has happened.
     async fn await_drained(uploader: &Uploader) {
         timed(async {
@@ -866,15 +866,13 @@ mod retention_producer {
     }
 
     // require_upload: false files were already enqueued at stability by the
-    // retention sink; the confirm-time enqueue is a same-path duplicate, which
-    // the queue permits and the sweep resolves harmlessly. Any retention on a
-    // confirmed upload produces a delete job.
+    // retention sink, so the confirm path must not book a second delete job.
     #[tokio::test]
-    async fn unrequired_retention_also_enqueues_a_delete_job() {
+    async fn unrequired_retention_enqueues_nothing() {
         let (mock, mut started_rx) = MockUploadExecutor::new();
         mock.push_step(MockStep::Ok);
         let deleter = MockDeleter::new();
-        let (uploader, handle, _sleeps, clock) = spawn_with_test_clock_and_deleter(
+        let (uploader, handle, _sleeps, _clock) = spawn_with_test_clock_and_deleter(
             mock.clone(),
             deleter.clone(),
             UploaderOptions::default(),
@@ -891,11 +889,7 @@ mod retention_producer {
 
         timed(uploader.shutdown()).await.unwrap();
         timed(handle).await.unwrap();
-        let confirmed_at = *clock.lock().unwrap();
-        assert_eq!(
-            deleter.recorded_calls(),
-            [expected_delete_job(&job, confirmed_at)]
-        );
+        assert_eq!(deleter.recorded_calls(), []);
     }
 
     #[tokio::test]
