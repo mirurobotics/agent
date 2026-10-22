@@ -56,7 +56,7 @@ fn retention_job(name: &str) -> Job {
 
 queue_suite!(retention_job, "delete-generic-queue-test");
 
-/// The other state of the `due_at` hook: a retention job is not ready until
+/// The other state of the `ready_at` hook: a retention job is not ready until
 /// its TTL has elapsed, and `next_ready` / `count_ready` both honour it.
 #[tokio::test]
 async fn a_job_whose_ttl_has_not_elapsed_is_not_ready() {
@@ -64,7 +64,7 @@ async fn a_job_whose_ttl_has_not_elapsed_is_not_ready() {
     enqueue(&mut queue, retention_job_with_ttl("waiting", 5000)).await;
     enqueue(&mut queue, retention_job_with_ttl("due", 500)).await;
 
-    // due_at is inclusive: "due" is due at exactly `now`
+    // ready_at is inclusive: "due" is ready at exactly `now`
     assert_eq!(queue.count_ready(now()), 1);
     assert_eq!(
         queue.next_ready(now()).unwrap().job,

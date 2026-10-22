@@ -484,21 +484,21 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn positive_delay_entry_waits_for_due_at() {
+        async fn positive_delay_entry_waits_for_ready_at() {
             let tmp = temp_file(b"aaaa").await;
             let clock = Clock::new(1000);
             let mut deleter = deleter(&clock);
             let record = make_job(tmp.file(), 1000, 500).await;
             deleter.enqueue(record.clone()).await.unwrap();
 
-            // not yet due: both 1000 and 1499 are before due_at (1500).
+            // not yet ready: both 1000 and 1499 are before ready_at (1500).
             deleter.sweep().await.unwrap();
             clock.advance(499);
             deleter.sweep().await.unwrap();
             assert_eq!(deleter.queue.entries(), [record]);
             assert!(tmp.file().exists());
 
-            // due exactly at due_at.
+            // ready exactly at ready_at.
             clock.advance(1);
             deleter.sweep().await.unwrap();
             assert!(deleter.queue.is_empty());
@@ -995,8 +995,8 @@ mod tests {
             deleter.sweep().await.unwrap();
             drop(deleter);
 
-            // no injected clock: the wedged job's due_at is in 1970, so the
-            // wall clock finds it due. The cap is tightened on the rebuild so
+            // no injected clock: the wedged job's ready_at is in 1970, so the
+            // wall clock finds it ready. The cap is tightened on the rebuild so
             // the restored entry's third attempt is its last.
             let mut restored = DeleterImpl::new(DeleterArgs {
                 attempts: 3,

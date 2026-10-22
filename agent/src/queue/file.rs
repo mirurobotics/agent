@@ -73,7 +73,7 @@ impl<J: QueueJob> FileQueue<J> {
     }
 
     fn is_ready(entry: &QueueEntry<J>, now: DateTime<Utc>) -> bool {
-        entry.job.due_at() <= now && entry.next_attempt_at.is_none_or(|at| at <= now)
+        entry.job.ready_at() <= now && entry.next_attempt_at.is_none_or(|at| at <= now)
     }
 
     pub fn count_ready(&self, now: DateTime<Utc>) -> usize {
