@@ -368,7 +368,7 @@ async fn a_queue_write_failure_queues_nothing() {
     assert!(!h.layout.reports().exists());
 }
 
-/// A file whose name isn't UTF-8 can't be a report file, so the sweep
+/// A file whose name isn't UTF-8 can't be a report file, so `prune_orphans`
 /// deletes it too.
 #[cfg(unix)]
 #[tokio::test]
@@ -389,8 +389,8 @@ async fn a_file_with_a_non_utf8_name_is_deleted_at_start() {
     assert!(!odd.exists());
 }
 
-/// A report file that can't be deleted is left for the next boot's sweep;
-/// the report itself is still dequeued.
+/// A report file that can't be deleted is left for `prune_orphans` on the
+/// next boot; the report itself is still dequeued.
 #[cfg(unix)]
 #[tokio::test]
 async fn a_report_file_that_cannot_be_deleted_still_dequeues_the_report() {

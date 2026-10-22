@@ -70,7 +70,7 @@ where
     N: Fn() -> DateTime<Utc> + Send + Sync + 'static,
 {
     async fn run(mut self) {
-        self.uploader.sweep().await;
+        self.uploader.prune_orphans().await;
         loop {
             let flow = match self.uploader.next_attempt().await {
                 NextAttempt::Ready(entry) => self.attempt(entry).await,

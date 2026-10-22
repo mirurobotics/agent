@@ -95,7 +95,7 @@ where
     /// Delete report files with no queue entry, left behind by a crash
     /// between dequeuing a report and deleting its file. Failures are logged
     /// and retried on the next boot.
-    pub(crate) async fn sweep(&self) {
+    pub(crate) async fn prune_orphans(&self) {
         if !self.reports.exists() {
             return;
         }
@@ -217,7 +217,7 @@ where
     }
 
     /// Dequeue report `id`, then delete its file. The entry goes first, so a
-    /// crash between the two leaves a file that [`Self::sweep`] deletes.
+    /// crash between the two leaves a file that [`Self::prune_orphans`] deletes.
     async fn remove(&mut self, id: Uuid) {
         self.queue.ack(id).await;
         delete(&self.report_file(id)).await;
