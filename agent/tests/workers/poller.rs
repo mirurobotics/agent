@@ -393,6 +393,47 @@ pub mod run {
     }
 
     #[tokio::test]
+    async fn unreachable_syncer_waits_a_full_poll_interval() {
+        let dir = test_dirs::temp("testing").unwrap();
+        let layout = Layout::new(dir.to_dir());
+
+        let (device_file, _) =
+            disk::Device::spawn_with_default(64, layout.device(), Device::default())
+                .await
+                .unwrap();
+
+        let options = poller::Options::default();
+        let syncer = Arc::new(MockSyncer::default());
+        syncer.set_get_state_fail(true);
+        let sleep_ctrl = Arc::new(SleepController::new());
+
+        let options_for_spawn = options.clone();
+        let syncer_for_spawn = syncer.clone();
+        let sleep_ctrl_for_spawn = sleep_ctrl.clone();
+        let shutdown_signal = Box::pin(async move {
+            std::future::pending::<()>().await;
+        });
+        let _handle = tokio::spawn(async move {
+            poller::run(
+                &options_for_spawn,
+                syncer_for_spawn.as_ref(),
+                &device_file,
+                sleep_ctrl_for_spawn.sleep_fn(),
+                shutdown_signal,
+            )
+            .await;
+        });
+
+        // a syncer whose state can't be read must not make the poller spin
+        let poll_interval = Duration::from_secs(options.poll_interval_secs as u64);
+        for _ in 0..3 {
+            sleep_ctrl.await_sleep().await;
+            assert_eq!(sleep_ctrl.get_last_attempted_sleep(), Some(poll_interval));
+            sleep_ctrl.release().await;
+        }
+    }
+
+    #[tokio::test]
     async fn syncer_cooldown_end_from_sync_failure_event() {
         let dir = test_dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());

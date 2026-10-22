@@ -26,6 +26,7 @@ pub struct MockSyncer {
     pub subscribe_rx: watch::Receiver<SyncEvent>,
     pub subscribe_tx: Mutex<Option<watch::Sender<SyncEvent>>>,
     pub fail_subscribe: AtomicBool,
+    pub fail_get_state: AtomicBool,
 }
 
 impl Default for MockSyncer {
@@ -48,6 +49,7 @@ impl MockSyncer {
             subscribe_rx: rx,
             subscribe_tx: Mutex::new(Some(tx)),
             fail_subscribe: AtomicBool::new(false),
+            fail_get_state: AtomicBool::new(false),
         }
     }
 
@@ -75,6 +77,11 @@ impl MockSyncer {
         self.fail_subscribe.store(fail, Ordering::Relaxed);
     }
 
+    /// Make subsequent state reads fail, as when the syncer actor is gone.
+    pub fn set_get_state_fail(&self, fail: bool) {
+        self.fail_get_state.store(fail, Ordering::Relaxed);
+    }
+
     pub fn set_sync<F>(&self, sync_fn: F)
     where
         F: Fn() -> Result<(), SyncErr> + Send + Sync + 'static,
@@ -93,21 +100,26 @@ impl SyncerExt for MockSyncer {
     }
 
     async fn get_sync_state(&self) -> Result<State, SyncErr> {
+        if self.fail_get_state.load(Ordering::Relaxed) {
+            return Err(SyncErr::MockErr(MockErr {
+                is_network_conn_err: false,
+            }));
+        }
         Ok((*self.get_sync_state_fn.lock().unwrap())())
     }
 
     async fn is_in_cooldown(&self) -> Result<bool, SyncErr> {
-        let state = self.get_sync_state().await.unwrap();
+        let state = self.get_sync_state().await?;
         Ok(state.is_in_cooldown())
     }
 
     async fn get_remaining_cooldown(&self) -> Result<Duration, SyncErr> {
-        let state = self.get_sync_state().await.unwrap();
+        let state = self.get_sync_state().await?;
         Ok(state.remaining_cooldown())
     }
 
     async fn get_since_last_attempt(&self) -> Result<Option<Duration>, SyncErr> {
-        let state = self.get_sync_state().await.unwrap();
+        let state = self.get_sync_state().await?;
         Ok(state.since_last_attempt())
     }
 
@@ -118,7 +130,7 @@ impl SyncerExt for MockSyncer {
     }
 
     async fn sync_if_not_in_cooldown(&self) -> Result<(), SyncErr> {
-        let state = self.get_sync_state().await.unwrap();
+        let state = self.get_sync_state().await?;
         if !state.is_in_cooldown() {
             self.sync().await?;
         }

@@ -121,7 +121,9 @@ async fn next_wait<SyncerT: SyncerExt>(options: &Options, syncer: &SyncerT) -> D
     let until_next_poll = match syncer.get_since_last_attempt().await {
         Ok(Some(since)) => poll_interval.saturating_sub(since),
         // no attempt yet in this process: poll now
-        Ok(None) | Err(_) => Duration::ZERO,
+        Ok(None) => Duration::ZERO,
+        // the syncer is unreachable: wait a full interval instead of spinning
+        Err(_) => poll_interval,
     };
     let until_cooldown_ends = syncer.get_remaining_cooldown().await.unwrap_or_default();
     until_next_poll.max(until_cooldown_ends)
