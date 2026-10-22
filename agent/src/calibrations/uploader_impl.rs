@@ -1,19 +1,17 @@
 // standard crates
 use std::collections::HashSet;
 use std::str::FromStr;
-use std::time::Duration;
 
 // internal crates
 use crate::calibrations::{
     errors::{CalibrationTooLargeErr, CalibrationsErr, InvalidReportErr},
-    report::{Queue, QueueEntry, QueueSnapshotFile, Report},
+    report::{Queue, QueueEntry, QueueSnapshotFile, Report, ReportMetadata},
 };
-use crate::cooldown;
 use crate::errors::Error;
 use crate::filesys::{
     dirs, errors::ConvertUTF8Err, files, Dir, File, FileSysErr, PathExt, WriteOptions,
 };
-use crate::queue::Persistence;
+use crate::queue::{self, Persistence, RetryPolicy, Verdict};
 use crate::trace;
 
 // external crates
@@ -27,46 +25,26 @@ pub struct UploaderOptions {
     pub capacity: usize,
     /// The largest report data accepted, in bytes.
     pub max_report_bytes: u64,
-    /// Total send attempts per report before it is dropped. Network errors
-    /// don't count toward it.
-    pub attempts: u32,
-    /// Backoff between attempts; the exponent is the report's attempt count
-    /// minus one.
-    pub backoff: cooldown::Backoff,
-    /// Backstop on the network-error exemption: a report received longer ago
-    /// than this is dropped even if every failure so far was a network error.
-    pub max_report_age: TimeDelta,
+    /// When a failed report is retried and when it is dropped. Its age is
+    /// measured from `calibrated_at`.
+    pub retry: RetryPolicy,
 }
 
 impl Default for UploaderOptions {
     /// At most 1,000 reports of up to 1 MiB of data each (1 GiB at worst),
-    /// the most calibration data Miru accepts. Retries match the data uploads:
-    /// 30 attempts, 10 s doubling to 1 h, and a 7-day backstop.
+    /// the most calibration data Miru accepts, retried as the data uploads
+    /// are.
     fn default() -> Self {
         Self {
             capacity: 1000,
             max_report_bytes: 1024 * 1024,
-            attempts: 30,
-            backoff: cooldown::Backoff {
-                base_secs: 10,
-                growth_factor: 2,
-                max_secs: 3600,
-            },
-            max_report_age: TimeDelta::days(7),
+            retry: RetryPolicy::default(),
         }
     }
 }
 
 /// What the queue holds for the worker to do next.
-pub(crate) enum NextAttempt {
-    /// This report is due for an attempt now.
-    Ready(QueueEntry),
-    /// The queue is empty.
-    Empty,
-    /// Every queued report is waiting out its backoff; the earliest is due
-    /// after this wait.
-    Backoff(Duration),
-}
+pub(crate) type NextAttempt = queue::NextAttempt<ReportMetadata>;
 
 /// Single-threaded calibration uploader state and logic: the queue of report
 /// metadata and the directory of report files. [`Uploader`] runs it inside an
@@ -155,22 +133,8 @@ where
     /// The report to attempt now, or how long until one is due.
     pub(crate) async fn next_attempt(&mut self) -> NextAttempt {
         let now = (self.now_fn)();
-        if let Some(entry) = self.queue.next_ready(now) {
-            return NextAttempt::Ready(entry);
-        }
-        if self.queue.is_empty() {
-            return NextAttempt::Empty;
-        }
-        // a deadline beyond the longest backoff came from a clock jump
-        let horizon = now + TimeDelta::seconds(self.options.backoff.max_secs.max(0));
-        self.queue.reset_invalid_deadlines(horizon).await;
-        let wait = self
-            .queue
-            .earliest_next_attempt()
-            .map_or(Duration::ZERO, |at| {
-                (at - now).to_std().unwrap_or(Duration::ZERO)
-            });
-        NextAttempt::Backoff(wait)
+        let horizon = self.options.retry.horizon(now);
+        self.queue.next_attempt(now, horizon).await
     }
 
     /// Make every waiting report due now, once Miru is reachable again.
@@ -200,56 +164,40 @@ where
     }
 
     /// Settle `entry` once its send (or read) ended in `result`: remove it
-    /// when sent, drop it when it can never be sent or is out of attempts,
-    /// otherwise retry it at the tail after its backoff.
+    /// when sent, otherwise retry or drop it as the retry policy says.
     pub(crate) async fn finish(&mut self, entry: QueueEntry, result: Result<(), CalibrationsErr>) {
-        match result {
+        let err = match result {
             Ok(()) => {
                 self.remove(entry.id).await;
                 info!("calibrations: uploaded report {}", entry.id);
+                return;
             }
-            Err(err) if err.is_network_conn_err() => self.network_failure(entry, err).await,
-            Err(err) => self.counted_failure(entry, err).await,
-        }
-    }
-
-    /// A network error doesn't count as an attempt. The report waits a flat
-    /// `base_secs`, unless it has aged past the backstop.
-    async fn network_failure(&mut self, entry: QueueEntry, err: CalibrationsErr) {
-        let age = (self.now_fn)() - entry.job.calibrated_at;
-        if age >= self.options.max_report_age {
-            let days = age.num_days();
-            error!(
-                "calibrations: dropping report {}, unsent after {days} days of network errors: {err}",
-                entry.id
-            );
-            return self.remove(entry.id).await;
-        }
-        warn!(
-            "calibrations: failed to reach Miru with report {}; will retry: {err}",
-            entry.id
-        );
-        self.retry_after(&entry, entry.attempts, self.options.backoff.base_secs)
-            .await;
-    }
-
-    /// Any other failure counts as an attempt. The report is dropped when the
-    /// error is terminal or it is out of attempts, and otherwise waits out
-    /// its growing backoff.
-    async fn counted_failure(&mut self, entry: QueueEntry, err: CalibrationsErr) {
+            Err(err) => err,
+        };
         let id = entry.id;
-        let attempts = entry.attempts.saturating_add(1);
-        if err.is_terminal() {
-            error!("calibrations: dropping report {id}, which can never be uploaded: {err}");
-            return self.remove(id).await;
+        let age = (self.now_fn)() - entry.job.calibrated_at;
+        match self.options.retry.on_failure(&err, entry.attempts, age) {
+            Verdict::Retry {
+                attempts,
+                wait_secs,
+            } => {
+                log_retry(id, attempts, &err);
+                self.retry_after(&entry, attempts, wait_secs).await;
+            }
+            Verdict::Terminal { .. } => {
+                error!("calibrations: dropping report {id}, which can never be uploaded: {err}");
+                self.remove(id).await;
+            }
+            Verdict::OutOfAttempts { attempts } => {
+                error!("calibrations: dropping report {id} after {attempts} attempts: {err}");
+                self.remove(id).await;
+            }
+            Verdict::TooOld { age, .. } => {
+                let days = age.num_days();
+                error!("calibrations: dropping report {id}, still unsent after {days} days: {err}");
+                self.remove(id).await;
+            }
         }
-        if attempts >= self.options.attempts {
-            error!("calibrations: dropping report {id} after {attempts} attempts: {err}");
-            return self.remove(id).await;
-        }
-        warn!("calibrations: attempt {attempts} to upload report {id} failed; will retry: {err}");
-        let wait = cooldown::calc(&self.options.backoff, attempts - 1);
-        self.retry_after(&entry, attempts, wait).await;
     }
 
     /// Move `entry` to the tail, due again in `wait_secs`.
@@ -281,6 +229,15 @@ where
     fn report_file(&self, id: Uuid) -> File {
         self.reports.file(&id.hyphenated().to_string())
     }
+}
+
+/// A network error doesn't count as an attempt, so its retry log says so.
+fn log_retry(id: Uuid, attempts: u32, err: &CalibrationsErr) {
+    if err.is_network_conn_err() {
+        warn!("calibrations: failed to reach Miru with report {id}; will retry: {err}");
+        return;
+    }
+    warn!("calibrations: attempt {attempts} to upload report {id} failed; will retry: {err}");
 }
 
 /// The report id a report file is named after, or `None` for any other file.

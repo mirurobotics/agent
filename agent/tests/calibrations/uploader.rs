@@ -17,7 +17,7 @@ use miru_agent::calibrations::{
 use miru_agent::disk::layout::CalibrationsLayout;
 use miru_agent::errors::{Code, Error, HTTPCode};
 use miru_agent::filesys::{dirs, files, File, PathExt, WriteOptions};
-use miru_agent::queue::Persistence;
+use miru_agent::queue::{Persistence, RetryPolicy};
 use miru_agent::sync::syncer::{CooldownEnd, SyncEvent};
 
 // external crates
@@ -556,7 +556,10 @@ async fn a_report_out_of_attempts_is_dropped() {
         h.sender.push(Step::Server);
     }
     let options = UploaderOptions {
-        attempts: 3,
+        retry: RetryPolicy {
+            attempts: 3,
+            ..RetryPolicy::default()
+        },
         ..UploaderOptions::default()
     };
     h.spawn_with(options).await;
@@ -579,7 +582,10 @@ async fn network_errors_do_not_use_up_attempts() {
         h.sender.push(Step::Network);
     }
     let options = UploaderOptions {
-        attempts: 1,
+        retry: RetryPolicy {
+            attempts: 1,
+            ..RetryPolicy::default()
+        },
         ..UploaderOptions::default()
     };
     h.spawn_with(options).await;
@@ -597,6 +603,19 @@ async fn network_errors_do_not_use_up_attempts() {
 async fn a_report_unsent_past_the_age_backstop_is_dropped() {
     let mut h = Harness::new();
     h.sender.push(Step::Network);
+    h.advance(TimeDelta::days(7));
+    h.spawn().await;
+    let id = h.enqueue("a").await;
+
+    h.await_drained(&["a"]).await;
+    assert!(h.sleeps_secs().is_empty());
+    assert!(!h.report_file(id).exists());
+}
+
+#[tokio::test]
+async fn a_failing_report_past_the_age_cap_is_dropped() {
+    let mut h = Harness::new();
+    h.sender.push(Step::Server);
     h.advance(TimeDelta::days(7));
     h.spawn().await;
     let id = h.enqueue("a").await;
