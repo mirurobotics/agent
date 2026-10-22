@@ -3,7 +3,7 @@ use crate::cooldown;
 use crate::errors::Error;
 
 // external crates
-use chrono::{DateTime, TimeDelta, Utc};
+use chrono::TimeDelta;
 
 /// When a queued job that failed is retried, and when it is given up on. A
 /// network error doesn't count as an attempt: the job waits a flat
@@ -51,12 +51,6 @@ pub enum Verdict {
 }
 
 impl RetryPolicy {
-    /// The latest deadline a retry can be given from `now`. A later one came
-    /// from a clock jump and should be pulled back to it.
-    pub fn horizon(&self, now: DateTime<Utc>) -> DateTime<Utc> {
-        now + TimeDelta::seconds(self.backoff.max_secs.max(0))
-    }
-
     /// The verdict on a job that failed with `err` after `attempts` counted
     /// attempts, `age` after it was first seen.
     pub fn on_failure(&self, err: &impl Error, attempts: u32, age: TimeDelta) -> Verdict {

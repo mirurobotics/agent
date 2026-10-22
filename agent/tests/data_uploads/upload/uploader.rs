@@ -8,7 +8,8 @@ use crate::mocks::{
     deleter::{MockDeleter, MockStep as DeleterStep},
     upload_executor::{MockStep, MockUploadExecutor},
 };
-use crate::test_utils::{filesys::dirs as test_dirs, upload::make_job};
+use crate::test_utils::{clock::FakeClock, filesys::dirs as test_dirs, upload::make_job};
+use miru_agent::clock::Clock;
 use miru_agent::data_uploads::retention::Job as DeleteJob;
 use miru_agent::data_uploads::upload::errors::{EnqueueErr, ExecutorErr};
 use miru_agent::data_uploads::upload::{
@@ -66,7 +67,7 @@ fn spawn_uploader(mock: Arc<MockUploadExecutor>) -> (Uploader, JoinHandle<()>) {
         UploaderOptions::default(),
         None,
         |_: Duration| async {},
-        Utc::now,
+        Clock::default(),
     )
     .unwrap()
 }
@@ -97,21 +98,19 @@ fn spawn_with_test_clock_and_deleter(
     Uploader,
     JoinHandle<()>,
     Arc<Mutex<Vec<Duration>>>,
-    Arc<Mutex<DateTime<Utc>>>,
+    FakeClock,
 ) {
-    let clock = Arc::new(Mutex::new(Utc::now()));
+    let clock = FakeClock::new(Utc::now());
     let sleeps: Arc<Mutex<Vec<Duration>>> = Arc::new(Mutex::new(Vec::new()));
-    let now_clock = clock.clone();
-    let now_fn = move || *now_clock.lock().unwrap();
     let recorded = sleeps.clone();
     let sleep_clock = clock.clone();
     let sleep_fn = move |duration: Duration| {
         recorded.lock().unwrap().push(duration);
-        *sleep_clock.lock().unwrap() += TimeDelta::from_std(duration).unwrap();
+        sleep_clock.advance(duration);
         async {}
     };
     let (uploader, handle) =
-        Uploader::spawn(16, mock, deleter, options, None, sleep_fn, now_fn).unwrap();
+        Uploader::spawn(16, mock, deleter, options, None, sleep_fn, clock.clock()).unwrap();
     (uploader, handle, sleeps, clock)
 }
 
@@ -122,7 +121,7 @@ fn spawn_frozen(
     mock: Arc<MockUploadExecutor>,
     options: UploaderOptions,
 ) -> (Uploader, JoinHandle<()>) {
-    let epoch = Utc::now();
+    let frozen = FakeClock::new(Utc::now());
     Uploader::spawn(
         16,
         mock,
@@ -130,7 +129,7 @@ fn spawn_frozen(
         options,
         None,
         |_: Duration| std::future::pending::<()>(),
-        move || epoch,
+        frozen.clock(),
     )
     .unwrap()
 }
@@ -612,7 +611,7 @@ async fn shutdown_during_backoff_sleep_returns_promptly() {
         UploaderOptions::default(),
         None,
         |_: Duration| std::future::pending::<()>(),
-        Utc::now,
+        Clock::default(),
     )
     .unwrap();
 
@@ -862,7 +861,7 @@ mod retention_producer {
         timed(uploader.shutdown()).await.unwrap();
         timed(handle).await.unwrap();
         // no sleeps ran, so the clock still holds the confirm-time value
-        let confirmed_at = *clock.lock().unwrap();
+        let confirmed_at = clock.system_now();
         assert_eq!(
             deleter.recorded_calls(),
             [expected_delete_job(&job, confirmed_at)]
@@ -905,7 +904,7 @@ mod retention_producer {
         timed(uploader.shutdown()).await.unwrap();
         timed(handle).await.unwrap();
         assert_eq!(*sleeps.lock().unwrap(), vec![Duration::from_secs(1)]);
-        let confirmed_at = *clock.lock().unwrap();
+        let confirmed_at = clock.system_now();
         assert_eq!(
             deleter.recorded_calls(),
             [expected_delete_job(&job, confirmed_at)]
@@ -1014,7 +1013,7 @@ mod retention_producer {
         timed(uploader.shutdown()).await.unwrap();
         timed(handle).await.unwrap();
         assert_eq!(mock.recorded_calls(), vec![job_a.clone(), job_b.clone()]);
-        let confirmed_at = *clock.lock().unwrap();
+        let confirmed_at = clock.system_now();
         assert_eq!(
             deleter.recorded_calls(),
             [
@@ -1047,7 +1046,7 @@ mod durability {
             UploaderOptions::default(),
             Some(snapshot),
             |_: Duration| async {},
-            Utc::now,
+            Clock::default(),
         )
         .unwrap()
     }
@@ -1058,14 +1057,13 @@ mod durability {
         mock: Arc<MockUploadExecutor>,
         snapshot: QueueSnapshotFile,
     ) -> (Uploader, JoinHandle<()>, Arc<Mutex<Vec<Duration>>>) {
-        let clock = Arc::new(Mutex::new(Utc::now()));
+        let clock = FakeClock::new(Utc::now());
         let sleeps: Arc<Mutex<Vec<Duration>>> = Arc::new(Mutex::new(Vec::new()));
-        let now_clock = clock.clone();
-        let now_fn = move || *now_clock.lock().unwrap();
         let recorded = sleeps.clone();
+        let sleep_clock = clock.clone();
         let sleep_fn = move |duration: Duration| {
             recorded.lock().unwrap().push(duration);
-            *clock.lock().unwrap() += TimeDelta::from_std(duration).unwrap();
+            sleep_clock.advance(duration);
             async {}
         };
         let (uploader, handle) = Uploader::spawn(
@@ -1075,28 +1073,33 @@ mod durability {
             UploaderOptions::default(),
             Some(snapshot),
             sleep_fn,
-            now_fn,
+            clock.clock(),
         )
         .unwrap();
         (uploader, handle, sleeps)
     }
 
-    /// Seed `path` with one entry stamped `deadline`, as a snapshot written
-    /// before a clock step would look.
+    /// Seed `path` with one retried entry carrying the wall-clock
+    /// `next_attempt_at` an older agent saved.
     async fn seed(path: &File, deadline: DateTime<Utc>) -> Job {
         let job = make_job("stranded.log");
-        let mut snapshot = open(path).await;
-        snapshot
-            .patch(QueueSnapshot {
-                entries: vec![QueueEntry {
-                    id: uuid::Uuid::new_v4(),
-                    job: job.clone(),
-                    attempts: 1,
-                    next_attempt_at: Some(deadline),
-                }],
-            })
-            .await
-            .unwrap();
+        let snapshot = QueueSnapshot {
+            entries: vec![QueueEntry {
+                id: uuid::Uuid::new_v4(),
+                job: job.clone(),
+                attempts: 1,
+                next_attempt_at: None,
+            }],
+        };
+        let mut value = serde_json::to_value(&snapshot).unwrap();
+        value["entries"][0]["next_attempt_at"] = serde_json::json!(deadline);
+        miru_agent::filesys::files::write_string(
+            path,
+            &value.to_string(),
+            miru_agent::filesys::WriteOptions::OVERWRITE_ATOMIC,
+        )
+        .await
+        .unwrap();
         job
     }
 
@@ -1230,38 +1233,13 @@ mod durability {
         timed(handle).await.unwrap();
     }
 
+    /// Older agents saved a wall-clock deadline; it is ignored, so however
+    /// far out a clock step pushed it, the entry uploads without waiting.
     #[tokio::test]
-    async fn a_deadline_past_the_max_backoff_is_pulled_back_before_sleeping() {
+    async fn a_saved_deadline_is_ignored_after_a_restart() {
         let dir = test_dirs::temp("uploader_stranded").unwrap();
         let path = dir.to_dir().file("upload_queue.json");
-        // 48h out: unreachable under the default 1h maximum backoff, so only a
-        // clock step could have produced it
-        seed(&path, Utc::now() + TimeDelta::hours(48)).await;
-        let (mock, mut started_rx) = MockUploadExecutor::new();
-        mock.push_step(MockStep::Ok);
-
-        let (uploader, handle, sleeps) =
-            spawn_persisted_with_test_clock(mock.clone(), open(&path).await);
-
-        // the worker waits one maximum backoff, not 48 hours, and then uploads
-        timed(started_rx.recv()).await.unwrap();
-        assert_eq!(
-            *sleeps.lock().unwrap(),
-            vec![Duration::from_secs(3600)],
-            "the stranded deadline should have been pulled back to the horizon"
-        );
-
-        timed(uploader.shutdown()).await.unwrap();
-        timed(handle).await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn a_deadline_inside_the_max_backoff_is_left_alone() {
-        let dir = test_dirs::temp("uploader_backoff_kept").unwrap();
-        let path = dir.to_dir().file("upload_queue.json");
-        // an ordinary backoff stamp: the worker must honor it rather than
-        // treating every future deadline as a clock anomaly
-        seed(&path, Utc::now() + TimeDelta::seconds(60)).await;
+        let job = seed(&path, Utc::now() + TimeDelta::hours(48)).await;
         let (mock, mut started_rx) = MockUploadExecutor::new();
         mock.push_step(MockStep::Ok);
 
@@ -1269,11 +1247,9 @@ mod durability {
             spawn_persisted_with_test_clock(mock.clone(), open(&path).await);
 
         timed(started_rx.recv()).await.unwrap();
-        let waited = sleeps.lock().unwrap().first().copied().unwrap();
-        assert!(
-            waited <= Duration::from_secs(60),
-            "an in-range backoff must be honored, waited {waited:?}"
-        );
+        await_drained(&uploader).await;
+        assert!(sleeps.lock().unwrap().is_empty());
+        assert_eq!(mock.recorded_calls(), vec![job]);
 
         timed(uploader.shutdown()).await.unwrap();
         timed(handle).await.unwrap();

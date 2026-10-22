@@ -1,5 +1,8 @@
+// standard crates
+use std::time::Duration;
+
 // internal crates
-use crate::deploy::apply;
+use crate::deploy::{apply, Cooldowns};
 use crate::disk;
 use crate::events;
 use crate::filesys::Overwrite;
@@ -20,6 +23,7 @@ pub struct SyncArgs<'a, HTTPClientT> {
     pub http_client: &'a HTTPClientT,
     pub storage: &'a Storage<'a>,
     pub opts: &'a apply::DeployOpts,
+    pub cooldowns: &'a Cooldowns,
     pub token: &'a str,
     pub event_hub: &'a events::EventHub,
 }
@@ -48,7 +52,7 @@ impl<'a> Storage<'a> {
 
 pub async fn sync<HTTPClientT: http::ClientI>(
     args: &SyncArgs<'_, HTTPClientT>,
-) -> Result<Option<chrono::TimeDelta>, SyncErr> {
+) -> Result<Option<Duration>, SyncErr> {
     let mut errors = Vec::new();
 
     debug!("pulling deployments from server");
@@ -63,7 +67,7 @@ pub async fn sync<HTTPClientT: http::ClientI>(
         errors.push(e);
     }
 
-    let wait = apply_deployments(args.storage, args.opts, args.event_hub, &mut errors).await;
+    let wait = apply_deployments(args, &mut errors).await;
 
     debug!("pushing deployment status updates to server");
     if let Err(e) = push_deployments(args.http_client, args.storage.deployments, args.token).await {
@@ -326,27 +330,27 @@ fn resolve_dpl(new: models::Deployment, cached: Option<models::Deployment>) -> m
 }
 
 // =================================== APPLY ======================================= //
-async fn apply_deployments<'a>(
-    storage: &'a Storage<'a>,
-    opts: &'a apply::DeployOpts,
-    event_hub: &'a events::EventHub,
+async fn apply_deployments<HTTPClientT>(
+    args: &SyncArgs<'_, HTTPClientT>,
     errors: &mut Vec<SyncErr>,
-) -> chrono::TimeDelta {
+) -> Duration {
     debug!("applying deployments");
-    let apply_stor = storage.apply_storage();
+    let event_hub = args.event_hub;
+    let apply_stor = args.storage.apply_storage();
     let apply_args = apply::Args {
         storage: &apply_stor,
-        opts,
+        opts: args.opts,
+        cooldowns: args.cooldowns,
     };
     let outcomes = match apply::apply(&apply_args).await {
         Ok(v) => v,
         Err(e) => {
             error!("Failed to apply deployments: {e}");
             errors.push(SyncErr::from(e));
-            return chrono::TimeDelta::zero();
+            return Duration::ZERO;
         }
     };
-    let mut wait: Option<chrono::TimeDelta> = None;
+    let mut wait: Option<Duration> = None;
     for outcome in outcomes {
         if let Some(e) = outcome.error {
             error!("error applying deployment {}: {}", outcome.deployment.id, e);
@@ -366,7 +370,7 @@ async fn apply_deployments<'a>(
             }
         }
         if let Some(w) = outcome.wait {
-            if w <= chrono::TimeDelta::zero() {
+            if w.is_zero() {
                 continue;
             }
             wait = Some(match wait {
@@ -375,7 +379,7 @@ async fn apply_deployments<'a>(
             });
         }
     }
-    wait.unwrap_or(chrono::TimeDelta::zero())
+    wait.unwrap_or(Duration::ZERO)
 }
 
 // =================================== PUSH ======================================== //

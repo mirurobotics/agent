@@ -9,7 +9,7 @@ use miru_agent::filesys::{files, WriteOptions};
 use miru_agent::models::Deployment;
 
 // external crates
-use chrono::{DateTime, TimeDelta, Utc};
+use chrono::Utc;
 
 // ─── retry state reset on init ──────────────────────────────────────────────
 
@@ -68,32 +68,6 @@ pub mod reset_retry_state_on_init {
     }
 
     #[tokio::test]
-    async fn resets_deployment_with_active_cooldown() {
-        let dir = test_dirs::temp("reset_cooldown").unwrap();
-        let layout = Layout::new(dir.to_dir());
-
-        let mut dpl = Deployment {
-            id: "dpl-cooldown".to_string(),
-            ..Default::default()
-        };
-        dpl.set_cooldown(TimeDelta::hours(1));
-        seed_deployments(&layout, vec![make_entry(dpl, false)]).await;
-
-        let (storage, _) = Storage::init(&layout, Capacities::default(), "dev".to_string())
-            .await
-            .unwrap();
-
-        let loaded = storage
-            .deployments
-            .read_optional("dpl-cooldown".to_string())
-            .await
-            .unwrap();
-        let dpl = loaded.expect("deployment should exist");
-        assert!(!dpl.is_in_cooldown(), "cooldown should be cleared");
-        assert!(dpl.has_clean_retry_state());
-    }
-
-    #[tokio::test]
     async fn skips_clean_deployments() {
         let dir = test_dirs::temp("reset_skip_clean").unwrap();
         let layout = Layout::new(dir.to_dir());
@@ -101,15 +75,13 @@ pub mod reset_retry_state_on_init {
         let clean = Deployment {
             id: "dpl-clean".to_string(),
             attempts: 0,
-            cooldown_ends_at: DateTime::<Utc>::UNIX_EPOCH,
             ..Default::default()
         };
-        let mut dirty = Deployment {
+        let dirty = Deployment {
             id: "dpl-dirty".to_string(),
             attempts: 3,
             ..Default::default()
         };
-        dirty.set_cooldown(TimeDelta::hours(1));
         seed_deployments(
             &layout,
             vec![make_entry(clean, false), make_entry(dirty, false)],
@@ -146,16 +118,14 @@ pub mod reset_retry_state_on_init {
         let dir = test_dirs::temp("reset_preserves_dirty").unwrap();
         let layout = Layout::new(dir.to_dir());
 
-        let mut pending = Deployment {
+        let pending = Deployment {
             id: "dpl-dirty-pending".to_string(),
             attempts: 3,
             ..Default::default()
         };
-        pending.set_cooldown(TimeDelta::hours(1));
         let clean = Deployment {
             id: "dpl-clean".to_string(),
             attempts: 0,
-            cooldown_ends_at: DateTime::<Utc>::UNIX_EPOCH,
             ..Default::default()
         };
         seed_deployments(

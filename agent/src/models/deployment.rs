@@ -5,7 +5,7 @@ use backend_api::models as backend_client;
 use device_api::models as agent_server;
 
 // external crates
-use chrono::{DateTime, TimeDelta, Utc};
+use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use serde::Serialize;
 use tracing::warn;
@@ -202,9 +202,9 @@ pub struct Deployment {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub config_instance_ids: Vec<CfgInstID>,
-    // Agent-side fields for retry logic (not from backend)
+    // Agent-side retry count (not from backend). The retry cooldown itself is
+    // kept in memory by `deploy::Cooldowns`, never saved with the deployment.
     pub attempts: u32,
-    pub cooldown_ends_at: DateTime<Utc>,
     // Agent-side timestamps pushed to backend.
     // These are independent historical watermarks: each records the last time the
     // deployment entered that state. Both may be set simultaneously after a
@@ -227,7 +227,6 @@ impl Default for Deployment {
             created_at: DateTime::<Utc>::UNIX_EPOCH,
             updated_at: DateTime::<Utc>::UNIX_EPOCH,
             attempts: 0,
-            cooldown_ends_at: DateTime::<Utc>::UNIX_EPOCH,
             deployed_at: None,
             archived_at: None,
             config_instance_ids: Vec::new(),
@@ -257,7 +256,6 @@ impl Deployment {
                 .parse::<DateTime<Utc>>()
                 .unwrap_or(DateTime::<Utc>::UNIX_EPOCH),
             attempts: 0,
-            cooldown_ends_at: DateTime::<Utc>::UNIX_EPOCH,
             deployed_at: None,
             archived_at: None,
             config_instance_ids,
@@ -268,26 +266,17 @@ impl Deployment {
         DplStatus::from_activity_and_error(&self.activity_status, &self.error_status)
     }
 
-    pub fn is_in_cooldown(&self) -> bool {
-        Utc::now() < self.cooldown_ends_at
-    }
-
-    pub fn set_cooldown(&mut self, cooldown: TimeDelta) {
-        self.cooldown_ends_at = Utc::now() + cooldown;
-    }
-
     pub fn attempts(&self) -> u32 {
         self.attempts
     }
 
-    /// Resets retry state so the deployment can be retried immediately.
+    /// Resets the attempt count so the next failure starts the backoff over.
     pub fn reset_retry_state(&mut self) {
         self.attempts = 0;
-        self.cooldown_ends_at = DateTime::<Utc>::UNIX_EPOCH;
     }
 
     pub fn has_clean_retry_state(&self) -> bool {
-        self.attempts() == 0 && !self.is_in_cooldown()
+        self.attempts() == 0
     }
 }
 
@@ -308,7 +297,7 @@ impl<'de> Deserialize<'de> for Deployment {
             created_at: Option<DateTime<Utc>>,
             updated_at: Option<DateTime<Utc>>,
             attempts: Option<u32>,
-            cooldown_ends_at: Option<DateTime<Utc>>,
+            // a `cooldown_ends_at` saved by older agents is ignored
             deployed_at: Option<DateTime<Utc>>,
             archived_at: Option<DateTime<Utc>>,
             config_instance_ids: Vec<CfgInstID>,
@@ -334,9 +323,6 @@ impl<'de> Deserialize<'de> for Deployment {
             attempts: result
                 .attempts
                 .unwrap_or_else(|| deserialize_error!("deployment", "attempts", default.attempts)),
-            cooldown_ends_at: result
-                .cooldown_ends_at
-                .unwrap_or(DateTime::<Utc>::UNIX_EPOCH),
             deployed_at: result.deployed_at,
             archived_at: result.archived_at,
             config_instance_ids: result.config_instance_ids,
@@ -349,7 +335,6 @@ pub struct Updates {
     pub activity_status: Option<DplActivity>,
     pub error_status: Option<DplErrStatus>,
     pub attempts: Option<u32>,
-    pub cooldown: Option<TimeDelta>,
     pub deployed_at: Option<DateTime<Utc>>,
     pub archived_at: Option<DateTime<Utc>>,
 }
@@ -360,7 +345,6 @@ impl Updates {
             activity_status: None,
             error_status: None,
             attempts: None,
-            cooldown: None,
             deployed_at: None,
             archived_at: None,
         }
@@ -377,9 +361,6 @@ impl Patch<Updates> for Deployment {
         }
         if let Some(attempts) = patch.attempts {
             self.attempts = attempts;
-        }
-        if let Some(cooldown) = patch.cooldown {
-            self.set_cooldown(cooldown);
         }
         if let Some(deployed_at) = patch.deployed_at {
             self.deployed_at = Some(deployed_at);
