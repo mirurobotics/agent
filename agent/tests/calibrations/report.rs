@@ -13,7 +13,7 @@ use miru_agent::queue::{Persistence, QueueJob};
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-/// Deterministic report metadata, due the moment it arrives.
+/// Deterministic report metadata, ready the moment it arrives.
 fn metadata(name: &str) -> ReportMetadata {
     ReportMetadata {
         component_slug: name.to_string(),
@@ -29,8 +29,11 @@ fn metadata(name: &str) -> ReportMetadata {
 queue_suite!(metadata, "calibration-generic-queue-test");
 
 #[test]
-fn due_at_is_min_utc() {
-    assert_eq!(QueueJob::due_at(&metadata("arm")), DateTime::<Utc>::MIN_UTC);
+fn ready_at_is_min_utc() {
+    assert_eq!(
+        QueueJob::ready_at(&metadata("arm")),
+        DateTime::<Utc>::MIN_UTC
+    );
 }
 
 #[test]

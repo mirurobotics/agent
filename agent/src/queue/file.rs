@@ -1,5 +1,6 @@
 // standard crates
 use std::collections::VecDeque;
+use std::time::Duration;
 
 // internal crates
 use crate::filesys::FileSysErr;
@@ -25,6 +26,18 @@ pub enum Persistence {
     /// write rolls it back and is returned. For producers told their job is
     /// safe, such as an HTTP caller answered 201.
     Durable,
+}
+
+/// What a queue holds for its worker to do next.
+#[derive(Clone, Debug, PartialEq)]
+pub enum NextAttempt<J: QueueJob> {
+    /// This entry is due for an attempt now.
+    Ready(QueueEntry<J>),
+    /// The queue is empty.
+    Empty,
+    /// Every queued entry is waiting out its backoff; the earliest is due
+    /// after this wait.
+    Backoff(Duration),
 }
 
 /// In-memory job queue with an optional single-file snapshot. Workers select
@@ -73,7 +86,7 @@ impl<J: QueueJob> FileQueue<J> {
     }
 
     fn is_ready(entry: &QueueEntry<J>, now: DateTime<Utc>) -> bool {
-        entry.job.due_at() <= now && entry.next_attempt_at.is_none_or(|at| at <= now)
+        entry.job.ready_at() <= now && entry.next_attempt_at.is_none_or(|at| at <= now)
     }
 
     /// The queued entries, oldest enqueue first. Never mutates or persists.
@@ -192,6 +205,28 @@ impl<J: QueueJob> FileQueue<J> {
     fn take(&mut self, id: Uuid) -> Option<QueueEntry<J>> {
         let idx = self.entries.iter().position(|entry| entry.id == id)?;
         self.entries.remove(idx)
+    }
+
+    /// The entry to attempt at `now`, or how long until one is due. When none
+    /// is due, any deadline beyond `horizon` (see
+    /// [`RetryPolicy::horizon`](super::RetryPolicy::horizon)) is first pulled
+    /// back to it, so a clock jump can't stall the queue.
+    pub async fn next_attempt(
+        &mut self,
+        now: DateTime<Utc>,
+        horizon: DateTime<Utc>,
+    ) -> NextAttempt<J> {
+        if let Some(entry) = self.next_ready(now) {
+            return NextAttempt::Ready(entry);
+        }
+        if self.is_empty() {
+            return NextAttempt::Empty;
+        }
+        self.reset_invalid_deadlines(horizon).await;
+        let wait = self.earliest_next_attempt().map_or(Duration::ZERO, |at| {
+            (at - now).to_std().unwrap_or(Duration::ZERO)
+        });
+        NextAttempt::Backoff(wait)
     }
 
     /// Pull every `next_attempt_at` strictly beyond `horizon` back to it, so no

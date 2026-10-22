@@ -11,7 +11,7 @@ pub trait QueueJob:
 
     /// Earliest instant this job may be actioned. Jobs actionable on arrival
     /// return `DateTime::<Utc>::MIN_UTC`.
-    fn due_at(&self) -> DateTime<Utc>;
+    fn ready_at(&self) -> DateTime<Utc>;
 
     /// How this job identifies itself in logs and the capacity error.
     fn name(&self) -> String;
