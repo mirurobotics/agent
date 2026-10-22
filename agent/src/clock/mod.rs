@@ -15,7 +15,13 @@
 //!   time from the `Date` header of backend responses and records it here.
 //! - **Roughly what time is it?** [`Clock::system_now`] is the system clock as-is.
 //!   Use it only for logs.
+//!
+//! [`Uptime`] adds a fourth: **how long has the agent run, across restarts?**
+//! It is monotonic time summed over every run and saved to disk, for deadlines
+//! that must survive a restart without trusting any calendar date.
 
 pub mod shared;
+pub mod uptime;
 
 pub use self::shared::{Clock, SYNC_TOLERANCE};
+pub use self::uptime::{Uptime, UptimeFile, UptimeState};

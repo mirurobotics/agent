@@ -36,7 +36,8 @@ async fn make_job(file: &File) -> Job {
         ttl_secs: 0,
         file_rule_id: "rule_1".to_string(),
         deployment_id: "dpl_1".to_string(),
-        expiry: Default::default(),
+        uptime_due_secs: None,
+        server_due_at: None,
     }
 }
 

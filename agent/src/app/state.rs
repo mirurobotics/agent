@@ -188,8 +188,24 @@ impl AppState {
             }
         };
 
+        let uptime_file = match clock::UptimeFile::new_with_default(
+            layout.uptime(),
+            Default::default(),
+        )
+        .await
+        {
+            Ok(file) => Some(file),
+            Err(e) => {
+                tracing::error!(
+                        "failed to initialize uptime file; retention will count uptime from zero after each restart: {e}"
+                    );
+                None
+            }
+        };
+
         let args = retention::DeleterArgs {
             clock,
+            uptime_file,
             snapshot_file,
             ..retention::DeleterArgs::default()
         };

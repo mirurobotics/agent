@@ -43,7 +43,8 @@ fn expected_job(name: &str, ttl_secs: u64) -> Job {
         ttl_secs,
         file_rule_id: "rule_1".to_string(),
         deployment_id: "dpl_1".to_string(),
-        expiry: Default::default(),
+        uptime_due_secs: None,
+        server_due_at: None,
     }
 }
 

@@ -7,9 +7,9 @@
 //! emits one `mod` per group holding one `#[tokio::test]` per case, each named
 //! exactly after the case function — so a failing test path
 //! (`upload::queue::enqueue::persists`) greps straight to its body here. The
-//! suite therefore runs against both `upload::Job` and `retention::Job`. Both
-//! are ready on arrival as far as the queue can tell: the deleter decides when
-//! a retention TTL has run out, since that takes server and monotonic time.
+//! suite therefore runs against `upload::Job` (always ready on arrival) and
+//! `retention::Job` (ready only once its TTL elapses), proving the `ready_at` hook
+//! in both states.
 //!
 //! This file itself contains no tests: only the fixtures, the generic cases,
 //! and the macro.
@@ -566,46 +566,19 @@ pub mod cases {
         }
     }
 
-    // ------------------------------- ready_where --------------------------------- //
-
-    pub mod ready_where {
-        use super::*;
-
-        pub async fn selects_only_ready_entries_matching_the_predicate<J: QueueJob>(
-            make: fn(&str) -> J,
-        ) {
-            let mut queue = FileQueue::<J>::new(DEFAULT_CAPACITY);
-            let a = enqueue(&mut queue, make("a.log")).await;
-            let b = enqueue(&mut queue, make("b.log")).await;
-            enqueue_waiting(&mut queue, make("waiting"), 1, now() + TimeDelta::hours(1)).await;
-
-            let not_a = |entry: &QueueEntry<J>| entry.id != a;
-            assert_eq!(queue.count_ready_where(now(), not_a), 1);
-            assert_eq!(queue.next_ready_where(now(), not_a).unwrap().id, b);
-
-            let none = |_: &QueueEntry<J>| false;
-            assert_eq!(queue.count_ready_where(now(), none), 0);
-            assert!(queue.next_ready_where(now(), none).is_none());
-
-            // a waiting entry stays unselectable even when the predicate accepts it
-            let any = |_: &QueueEntry<J>| true;
-            assert_eq!(queue.count_ready_where(now(), any), 2);
-        }
-    }
-
     // ------------------------------- update_jobs --------------------------------- //
 
     pub mod update_jobs {
         use super::*;
 
-        pub async fn changes_jobs_by_id_and_counts_them<J: QueueJob>(make: fn(&str) -> J) {
+        pub async fn changes_jobs_and_counts_them<J: QueueJob>(make: fn(&str) -> J) {
             let mut queue = FileQueue::<J>::new(DEFAULT_CAPACITY);
             enqueue(&mut queue, make("a.log")).await;
-            let b = enqueue(&mut queue, make("b.log")).await;
+            enqueue(&mut queue, make("b.log")).await;
 
             let changed = queue
-                .update_jobs(|id, job| {
-                    if id != b {
+                .update_jobs(|job| {
+                    if *job != make("b.log") {
                         return false;
                     }
                     *job = make("b2.log");
@@ -632,7 +605,7 @@ pub mod cases {
                 );
                 enqueue(&mut queue, make("a.log")).await;
                 let changed = queue
-                    .update_jobs(|_, job| {
+                    .update_jobs(|job| {
                         *job = make("a2.log");
                         true
                     })
@@ -884,13 +857,9 @@ macro_rules! queue_suite {
                 disk: [],
                 mem: [counts_only_ready_entries],
             },
-            ready_where {
-                disk: [],
-                mem: [selects_only_ready_entries_matching_the_predicate],
-            },
             update_jobs {
                 disk: [persists_a_change],
-                mem: [changes_jobs_by_id_and_counts_them],
+                mem: [changes_jobs_and_counts_them],
             },
             reset_invalid_deadlines {
                 disk: [persists],

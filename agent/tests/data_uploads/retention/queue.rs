@@ -2,13 +2,13 @@
 use crate::queue::file::{enqueue, queue_suite, DEFAULT_CAPACITY};
 use crate::test_utils::filesys::{abs_path, dirs as test_dirs};
 use miru_agent::data_uploads::retention::{
-    DeleteQueueSnapshot, DeleteQueueSnapshotFile, Expiry, Job, Queue,
+    DeleteQueueSnapshot, DeleteQueueSnapshotFile, Job, Queue,
 };
 use miru_agent::filesys::{files, File, WriteOptions};
 use miru_agent::queue::Persistence;
 
 // external crates
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeDelta, Utc};
 use uuid::Uuid;
 
 /// The instant the pin selects at. The pinned job's TTL has elapsed by then.
@@ -31,7 +31,10 @@ fn make_job(name: &str, observed_secs: i64, ttl_secs: u64) -> Job {
         ttl_secs,
         file_rule_id: "file_rule_1".to_string(),
         deployment_id: "dpl_1".to_string(),
-        expiry: Default::default(),
+        // the queue compares deadlines as given, so the test's "uptime" here
+        // is the observed time plus the TTL
+        uptime_due_secs: Some(observed_secs as u64 + ttl_secs),
+        server_due_at: None,
     }
 }
 
@@ -43,27 +46,37 @@ async fn open(path: &File) -> DeleteQueueSnapshotFile {
         .unwrap()
 }
 
-/// A deterministic retention job observed at 1000s with `ttl_secs`.
+/// A deterministic retention job whose TTL has yet to elapse at [`now`] unless
+/// `ttl_secs` is small enough. Observed at 1000s, so a TTL of 1000s is due at
+/// exactly [`now`].
 fn retention_job_with_ttl(name: &str, ttl_secs: u64) -> Job {
     make_job(name, 1000, ttl_secs)
 }
 
-/// A retention job with a zero TTL.
+/// A retention job with a zero TTL, so it is due at [`now`].
 fn retention_job(name: &str) -> Job {
     retention_job_with_ttl(name, 0)
 }
 
 queue_suite!(retention_job, "delete-generic-queue-test");
 
-/// The queue never holds a retention job back on its TTL: the deleter decides
-/// when the TTL has run out (see `DeleterImpl::sweep`), because that takes
-/// server and monotonic time, not the system clock the queue is given.
+/// The other state of the `ready_at` hook: a retention job is not ready until
+/// its uptime deadline, and `next_ready` / `count_ready` both honour it.
 #[tokio::test]
-async fn a_job_is_ready_whatever_its_ttl() {
+async fn a_job_whose_ttl_has_not_elapsed_is_not_ready() {
     let mut queue = Queue::new(DEFAULT_CAPACITY);
     enqueue(&mut queue, retention_job_with_ttl("waiting", 5000)).await;
+    enqueue(&mut queue, retention_job_with_ttl("due", 500)).await;
 
-    assert_eq!(queue.count_ready(DateTime::<Utc>::MIN_UTC), 1);
+    // ready_at is inclusive: "due" is ready at exactly `now`
+    assert_eq!(queue.count_ready(now()), 1);
+    assert_eq!(
+        queue.next_ready(now()).unwrap().job,
+        retention_job_with_ttl("due", 500)
+    );
+
+    // the waiting job becomes ready once its TTL elapses
+    assert_eq!(queue.count_ready(now() + TimeDelta::hours(2)), 2);
 }
 
 mod wire {
@@ -85,7 +98,8 @@ mod wire {
                 r#""digest":"sha256:a.log","mtime":"1970-01-01T00:15:00Z","#,
                 r#""first_observed_at":"1970-01-01T00:16:40Z","#,
                 r#""last_observed_at":"1970-01-01T00:16:40Z","ttl_secs":500,"#,
-                r#""file_rule_id":"file_rule_1","deployment_id":"dpl_1"}}}}]}}"#,
+                r#""file_rule_id":"file_rule_1","deployment_id":"dpl_1","#,
+                r#""uptime_due_secs":1500}}}}]}}"#,
             ),
             id = id,
             file = file_json,
@@ -102,30 +116,46 @@ mod wire {
         assert_eq!(entry.job, expected);
     }
 
-    /// Pins the expiry's wire format: the deleter's server deadline and saved
-    /// remaining TTL ride under `expiry`, and a job without one (saved before
-    /// expiries existed) omits the key, as the test above loads.
+    /// A job saved before deadlines existed loads with neither, and the queue
+    /// never selects it until the deleter gives it an uptime deadline.
+    #[tokio::test]
+    async fn a_job_saved_without_deadlines_loads_and_waits() {
+        let dir = test_dirs::temp("delete-queue-legacy").unwrap();
+        let path = dir.file("delete_queue.json");
+        let mut job = serde_json::to_value(make_job("a.log", 1000, 500)).unwrap();
+        job.as_object_mut().unwrap().remove("uptime_due_secs");
+        let raw = serde_json::json!({"entries": [{"id": Uuid::new_v4(), "job": job}]});
+        files::write_string(&path, &raw.to_string(), WriteOptions::OVERWRITE_ATOMIC)
+            .await
+            .unwrap();
+
+        let queue = Queue::from_snapshot(8, open(&path).await, Persistence::BestEffort);
+
+        assert_eq!(queue.len(), 1);
+        assert_eq!(
+            queue.count_ready(DateTime::<Utc>::MAX_UTC - TimeDelta::days(1)),
+            0
+        );
+    }
+
+    /// Both deadlines ride as plain optional keys, omitted when unset.
     #[test]
-    fn expiry_round_trips_under_its_own_key() {
+    fn deadlines_round_trip_and_are_omitted_when_unset() {
         let job = Job {
-            expiry: Expiry {
-                server_expires_at: Some(DateTime::from_timestamp(1500, 0).unwrap()),
-                remaining_ttl_secs: Some(300),
-            },
+            server_due_at: Some(DateTime::from_timestamp(1500, 0).unwrap()),
             ..make_job("a.log", 1000, 500)
         };
-
         let value = serde_json::to_value(&job).unwrap();
-        assert_eq!(
-            value["expiry"],
-            serde_json::json!({
-                "server_expires_at": "1970-01-01T00:25:00Z",
-                "remaining_ttl_secs": 300,
-            })
-        );
+        assert_eq!(value["uptime_due_secs"], 1500);
+        assert_eq!(value["server_due_at"], "1970-01-01T00:25:00Z");
         assert_eq!(serde_json::from_value::<Job>(value).unwrap(), job);
 
-        let unset = serde_json::to_value(make_job("a.log", 1000, 500)).unwrap();
-        assert!(unset.get("expiry").is_none());
+        let unset = Job {
+            uptime_due_secs: None,
+            ..make_job("a.log", 1000, 500)
+        };
+        let value = serde_json::to_value(unset).unwrap();
+        assert!(value.get("uptime_due_secs").is_none());
+        assert!(value.get("server_due_at").is_none());
     }
 }

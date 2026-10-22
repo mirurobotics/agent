@@ -56,6 +56,10 @@ impl Layout {
         self.root().file("delete_queue.json")
     }
 
+    pub fn uptime(&self) -> filesys::File {
+        self.root().file("uptime.json")
+    }
+
     fn config_instances(&self) -> filesys::Dir {
         self.resources().subdir("config_instances")
     }
