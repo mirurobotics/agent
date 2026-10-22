@@ -17,7 +17,7 @@ use crate::trace;
 
 // external crates
 use chrono::{DateTime, TimeDelta, Utc};
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
@@ -152,10 +152,12 @@ where
     }
 
     /// Clear every report's retry cooldown so it is due now, once Miru is
-    /// reachable again.
+    /// reachable again. This is expected, so unlike a clock jump it does not
+    /// warn.
     pub(crate) async fn clear_retry_cooldowns(&mut self) {
         let now = (self.now_fn)();
-        self.queue.reset_invalid_deadlines(now).await;
+        let cleared = self.queue.pull_deadlines_to(now).await;
+        info!("calibrations: cleared the retry cooldown of {cleared} report(s)");
     }
 
     /// Upload the report queued as `entry`: read its file, then send it. The
@@ -253,10 +255,12 @@ where
     }
 }
 
-/// A network error doesn't count as an attempt, so its retry log says so.
+/// A network error doesn't count as an attempt and repeats every base
+/// backoff while the device is offline, so it logs at debug, as in
+/// `data_uploads::upload`. Any other retry logs at warn.
 fn log_retry(id: Uuid, attempts: u32, err: &CalibrationsErr) {
     if err.is_network_conn_err() {
-        warn!("calibrations: failed to reach Miru with report {id}; will retry: {err}");
+        debug!("calibrations: failed to reach Miru with report {id}; will retry: {err}");
         return;
     }
     warn!("calibrations: attempt {attempts} to upload report {id} failed; will retry: {err}");

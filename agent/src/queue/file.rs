@@ -231,9 +231,11 @@ impl<J: QueueJob> FileQueue<J> {
 
     /// Pull every `next_attempt_at` strictly beyond `horizon` back to it, so no
     /// entry can be deferred past a deadline the caller considers reachable.
-    /// A no-op when every deadline is already inside the horizon, so nothing
-    /// is persisted in that case.
-    pub async fn reset_invalid_deadlines(&mut self, horizon: DateTime<Utc>) {
+    /// Returns how many entries changed. A no-op when every deadline is
+    /// already inside the horizon, so nothing is persisted in that case.
+    /// Does not log: a clock jump warns from [`Self::reset_invalid_deadlines`],
+    /// while an uploader clearing retry cooldowns on purpose does not.
+    pub async fn pull_deadlines_to(&mut self, horizon: DateTime<Utc>) -> usize {
         let mut reset = 0;
         for entry in self.entries.iter_mut() {
             if entry.next_attempt_at.is_some_and(|at| at > horizon) {
@@ -241,10 +243,19 @@ impl<J: QueueJob> FileQueue<J> {
                 reset += 1;
             }
         }
+        if reset > 0 {
+            let _ = self.persist().await;
+        }
+        reset
+    }
+
+    /// [`Self::pull_deadlines_to`], then warn. For a deadline a clock jump
+    /// left past the longest backoff, which should not happen in normal use.
+    pub async fn reset_invalid_deadlines(&mut self, horizon: DateTime<Utc>) {
+        let reset = self.pull_deadlines_to(horizon).await;
         if reset == 0 {
             return;
         }
-        let _ = self.persist().await;
         warn!("{}: pulled {reset} deadline(s) back to {horizon}", J::LABEL);
     }
 
