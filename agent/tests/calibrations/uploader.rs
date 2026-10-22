@@ -3,13 +3,13 @@
 
 // standard crates
 use std::future::Future;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 // internal crates
 use crate::mocks::calibration_sender::{MockCalibrationSender, Step};
 use crate::mocks::error::SleepController;
-use crate::test_utils::calibrations::{layout, report};
+use crate::test_utils::calibrations::{layout, received_at, report};
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::calibrations::{
     CalibrationsErr, Queue, QueueSnapshotFile, Uploader, UploaderArgs, UploaderOptions,
@@ -21,6 +21,8 @@ use miru_agent::queue::Persistence;
 use miru_agent::sync::syncer::{CooldownEnd, SyncEvent};
 
 // external crates
+use chrono::{DateTime, TimeDelta, Utc};
+use futures::future::BoxFuture;
 use futures::FutureExt;
 use serde_json::json;
 use tokio::sync::{mpsc, oneshot, watch};
@@ -39,6 +41,9 @@ struct Harness {
     /// spawns without one.
     events: Option<watch::Sender<SyncEvent>>,
     sleep: Arc<SleepController>,
+    /// The uploader's clock. It starts when the fixture reports were received
+    /// and moves only when a backoff sleep completes.
+    clock: Arc<Mutex<DateTime<Utc>>>,
     uploader: Option<Uploader>,
     handle: Option<JoinHandle<()>>,
 }
@@ -56,6 +61,7 @@ impl Harness {
             started,
             events: Some(events),
             sleep: Arc::new(SleepController::new()),
+            clock: Arc::new(Mutex::new(received_at())),
             uploader: None,
             handle: None,
         }
@@ -89,11 +95,37 @@ impl Harness {
             sender: self.sender.clone(),
             events: self.events.as_ref().map(watch::Sender::subscribe),
             options,
-            sleep_fn: self.sleep.sleep_fn(),
+            sleep_fn: self.sleep_fn(),
+            now_fn: self.now_fn(),
         };
         let (uploader, handle) = Uploader::spawn(64, args);
         self.uploader = Some(uploader);
         self.handle = Some(handle);
+    }
+
+    /// The controlled sleep, advancing the clock by each sleep that completes.
+    fn sleep_fn(&self) -> impl Fn(Duration) -> BoxFuture<'static, ()> + Send + 'static {
+        let sleep = self.sleep.sleep_fn();
+        let clock = self.clock.clone();
+        move |wait| {
+            let slept = sleep(wait);
+            let clock = clock.clone();
+            async move {
+                slept.await;
+                *clock.lock().unwrap() += TimeDelta::from_std(wait).unwrap();
+            }
+            .boxed()
+        }
+    }
+
+    fn now_fn(&self) -> impl Fn() -> DateTime<Utc> + Send + Sync + 'static {
+        let clock = self.clock.clone();
+        move || *clock.lock().unwrap()
+    }
+
+    /// Move the uploader's clock forward by `by`.
+    fn advance(&self, by: TimeDelta) {
+        *self.clock.lock().unwrap() += by;
     }
 
     fn uploader(&self) -> &Uploader {
@@ -223,7 +255,7 @@ async fn intake_is_served_during_an_upload() {
 }
 
 #[tokio::test]
-async fn intake_during_a_backoff_does_not_extend_it() {
+async fn a_new_report_is_sent_while_another_backs_off() {
     let mut h = Harness::new();
     h.sender.push(Step::Server);
     h.spawn().await;
@@ -232,11 +264,11 @@ async fn intake_during_a_backoff_does_not_extend_it() {
 
     h.enqueue("b").await;
 
-    assert_eq!(h.len().await, 2);
-    assert_eq!(h.sender.sent(), strings(&["a"]));
+    eventually(|| async { h.sender.sent() == strings(&["a", "b"]) }).await;
+    h.await_sleep().await;
     h.sleep.release().await;
-    h.await_drained(&["a", "a", "b"]).await;
-    assert_eq!(h.sleeps_secs(), [10]);
+    h.await_drained(&["a", "b", "a"]).await;
+    assert_eq!(h.sleeps_secs(), [10, 10]);
 }
 
 #[tokio::test]
@@ -412,20 +444,21 @@ async fn report_files_with_no_queue_entry_are_deleted_at_start() {
 }
 
 #[tokio::test]
-async fn offline_then_online_uploads_in_order() {
+async fn a_successful_sync_retries_waiting_reports_at_once() {
     let mut h = Harness::new();
     h.sender.push(Step::Network);
     preloaded(&h, &["a", "b"]).await;
     h.spawn().await;
 
+    // `a` waits out its backoff at the tail while `b` is sent
     h.await_sleep().await;
-    assert_eq!(h.sleeps_secs(), [10]);
-    assert_eq!(h.len().await, 2);
+    assert_eq!(h.sender.sent(), strings(&["a", "b"]));
+    assert_eq!(h.len().await, 1);
 
     // a successful sync ends the wait without the sleep being released
     h.sync(SyncEvent::SyncSuccess);
 
-    h.await_drained(&["a", "a", "b"]).await;
+    h.await_drained(&["a", "b", "a"]).await;
     assert_eq!(h.sleeps_secs(), [10]);
 }
 
@@ -498,7 +531,7 @@ async fn network_errors_wait_a_flat_base() {
 }
 
 #[tokio::test]
-async fn a_success_resets_the_backoff() {
+async fn each_report_backs_off_on_its_own() {
     let mut h = Harness::new();
     h.sender.push(Step::Server);
     h.sender.push(Step::Ok);
@@ -511,8 +544,81 @@ async fn a_success_resets_the_backoff() {
         h.sleep.release().await;
     }
 
-    h.await_drained(&["a", "a", "b", "b"]).await;
-    assert_eq!(h.sleeps_secs(), [10, 10]);
+    h.await_drained(&["a", "b", "a", "a"]).await;
+    assert_eq!(h.sleeps_secs(), [10, 20]);
+}
+
+#[tokio::test]
+async fn a_report_out_of_attempts_is_dropped() {
+    let mut h = Harness::new();
+    for _ in 0..3 {
+        h.sender.push(Step::Server);
+    }
+    let options = UploaderOptions {
+        attempts: 3,
+        ..UploaderOptions::default()
+    };
+    h.spawn_with(options).await;
+    let id = h.enqueue("a").await;
+
+    for _ in 0..2 {
+        h.await_sleep().await;
+        h.sleep.release().await;
+    }
+
+    h.await_drained(&["a"; 3]).await;
+    assert_eq!(h.sleeps_secs(), [10, 20]);
+    assert!(!h.report_file(id).exists());
+}
+
+#[tokio::test]
+async fn network_errors_do_not_use_up_attempts() {
+    let mut h = Harness::new();
+    for _ in 0..3 {
+        h.sender.push(Step::Network);
+    }
+    let options = UploaderOptions {
+        attempts: 1,
+        ..UploaderOptions::default()
+    };
+    h.spawn_with(options).await;
+    h.enqueue("a").await;
+
+    for _ in 0..3 {
+        h.await_sleep().await;
+        h.sleep.release().await;
+    }
+
+    h.await_drained(&["a"; 4]).await;
+}
+
+#[tokio::test]
+async fn a_report_unsent_past_the_age_backstop_is_dropped() {
+    let mut h = Harness::new();
+    h.sender.push(Step::Network);
+    h.advance(TimeDelta::days(7));
+    h.spawn().await;
+    let id = h.enqueue("a").await;
+
+    h.await_drained(&["a"]).await;
+    assert!(h.sleeps_secs().is_empty());
+    assert!(!h.report_file(id).exists());
+}
+
+#[tokio::test]
+async fn a_deadline_past_the_longest_backoff_is_pulled_in() {
+    let mut h = Harness::new();
+    let ids = preloaded(&h, &["a"]).await;
+    // a deadline a clock jump left far beyond the 1 h cap
+    let mut queue = Queue::from_snapshot(1000, h.snapshot_file().await, Persistence::Durable);
+    let far = received_at() + TimeDelta::days(30);
+    assert!(queue.retry(ids[0], 1, far).await);
+    h.spawn().await;
+
+    h.await_sleep().await;
+    assert_eq!(h.sleeps_secs(), [3600]);
+    h.sleep.release().await;
+    h.await_drained(&["a"]).await;
 }
 
 #[tokio::test]
