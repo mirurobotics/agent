@@ -13,7 +13,7 @@ use crate::clock::Clock;
 use crate::data_uploads::scan;
 use crate::disk::{self, Layout};
 use crate::filesys;
-use crate::http;
+use crate::http::{self, ClientI};
 #[cfg(unix)]
 use crate::server::unix::serve;
 use crate::server::{self, auth::BearerToken, errors::*, tcp};

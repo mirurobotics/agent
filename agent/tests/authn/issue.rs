@@ -305,7 +305,7 @@ mod wrong_system_clock {
     use axum::{Json, Router};
     use chrono::DateTime;
     use miru_agent::clock::Clock;
-    use miru_agent::http;
+    use miru_agent::http::{self, ClientI};
 
     /// A backend that, like the real one, rejects a JWT whose `exp` has passed
     /// by its own clock.

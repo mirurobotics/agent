@@ -11,7 +11,6 @@ use crate::http::{
 use crate::trace;
 
 // external crates
-use chrono::{DateTime, Utc};
 use serde::de::DeserializeOwned;
 use tokio::time::timeout;
 use tracing::debug;
@@ -38,15 +37,8 @@ pub struct Client {
 pub trait ClientI: Send + Sync {
     fn base_url(&self) -> &str;
 
-    /// The server's time now, if this client has heard from the backend.
-    fn server_now(&self) -> Option<DateTime<Utc>> {
-        None
-    }
-
-    /// The server's time when known, else the system clock.
-    fn server_or_system_now(&self) -> DateTime<Utc> {
-        self.server_now().unwrap_or_else(Utc::now)
-    }
+    /// The clock this client feeds with the server's time.
+    fn clock(&self) -> &Clock;
 
     /// Build, send, handle response — returns body text and request metadata.
     fn execute(
@@ -60,12 +52,8 @@ impl ClientI for Client {
         &self.base_url
     }
 
-    fn server_now(&self) -> Option<DateTime<Utc>> {
-        self.clock.server_now()
-    }
-
-    fn server_or_system_now(&self) -> DateTime<Utc> {
-        self.clock.server_or_system_now()
+    fn clock(&self) -> &Clock {
+        &self.clock
     }
 
     async fn execute(
@@ -85,12 +73,8 @@ impl<T: ClientI> ClientI for Arc<T> {
         self.as_ref().base_url()
     }
 
-    fn server_now(&self) -> Option<DateTime<Utc>> {
-        self.as_ref().server_now()
-    }
-
-    fn server_or_system_now(&self) -> DateTime<Utc> {
-        self.as_ref().server_or_system_now()
+    fn clock(&self) -> &Clock {
+        self.as_ref().clock()
     }
 
     async fn execute(
@@ -122,11 +106,6 @@ impl Client {
             headers: request::Headers::default(),
             clock,
         })
-    }
-
-    /// The clock this client feeds with the server's time.
-    pub fn clock(&self) -> &Clock {
-        &self.clock
     }
 
     pub fn build_request(&self, params: request::Params) -> Result<request::Request, HTTPErr> {

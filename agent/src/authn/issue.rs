@@ -34,7 +34,8 @@ pub async fn issue_token(
     private_key_file: &File,
     public_key_file: &File,
 ) -> Result<Token, AuthnErr> {
-    let server_time_before = http_client.server_now();
+    let clock = http_client.clock();
+    let server_time_before = clock.server_now();
     let resp = match request_token(http_client, private_key_file, public_key_file).await {
         Ok(resp) => resp,
         // A robot that booted with its clock at 1970 signs a JWT the backend
@@ -44,7 +45,7 @@ pub async fn issue_token(
         Err(AuthnErr::HTTPErr(e))
             if is_unauthorized(&e)
                 && server_time_before.is_none()
-                && http_client.server_now().is_some() =>
+                && clock.server_now().is_some() =>
         {
             debug!("token request rejected before server time was known; retrying");
             request_token(http_client, private_key_file, public_key_file).await?
@@ -75,7 +76,7 @@ async fn request_token(
     private_key_file: &File,
     public_key_file: &File,
 ) -> Result<TokenResponse, AuthnErr> {
-    let now = http_client.server_or_system_now();
+    let now = http_client.clock().server_or_system_now();
     let jwt = mint_jwt(private_key_file, public_key_file, now).await?;
     let params = devices::IssueTokenParams { token: &jwt };
     Ok(devices::issue_token(http_client, params).await?)
