@@ -1,5 +1,6 @@
 // internal crates
 use crate::test_utils::filesys::dirs as test_dirs;
+use miru_agent::clock::Clock;
 use miru_agent::disk::{Capacities, Layout, Storage};
 use miru_agent::models::{FileRule, FileRuleRetention, FileRuleSource, FileRuleUpload};
 
@@ -33,9 +34,14 @@ fn rule(id: &str, digest: &str, retention: Option<FileRuleRetention>) -> FileRul
 async fn init_storage() -> (test_dirs::TempDir, Storage) {
     let dir = test_dirs::temp("file_rules_test").unwrap();
     let layout = Layout::new(dir.to_dir());
-    let (storage, _) = Storage::init(&layout, Capacities::default(), "dev".to_string())
-        .await
-        .unwrap();
+    let (storage, _) = Storage::init(
+        &layout,
+        Capacities::default(),
+        "dev".to_string(),
+        Clock::new(),
+    )
+    .await
+    .unwrap();
     (dir, storage)
 }
 

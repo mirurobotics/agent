@@ -7,7 +7,7 @@ use crate::models;
 use crate::trace;
 
 // external crates
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use tracing::{error, info};
 
 pub struct DeployOpts {
@@ -17,7 +17,14 @@ pub struct DeployOpts {
 pub struct Args<'a> {
     pub storage: &'a Storage<'a>,
     pub opts: &'a DeployOpts,
+    /// The time to record as a deployment's `deployed_at` or `archived_at`.
+    /// Should return the time from `Clock::now`: the backend and dashboard
+    /// show these times, and the robot's clock may be wrong.
+    pub now_fn: &'a NowFn<'a>,
 }
+
+/// A source of the current time.
+pub type NowFn<'a> = dyn Fn() -> DateTime<Utc> + Send + Sync + 'a;
 
 pub struct Storage<'a> {
     pub deployments: &'a disk::Deployments,
@@ -229,15 +236,22 @@ async fn apply_one(
         }
         fsm::NextAction::Deploy => {
             info!("deploying '{}'", deployment.id);
-            deploy(args.storage, args.opts, deployment).await
+            deploy(args.storage, args.opts, args.now_fn, deployment).await
         }
         fsm::NextAction::Remove => {
             info!("removing '{}'", deployment.id);
-            remove(args.storage, args.opts, deployment, dont_remove).await
+            remove(
+                args.storage,
+                args.opts,
+                args.now_fn,
+                deployment,
+                dont_remove,
+            )
+            .await
         }
         fsm::NextAction::Archive => {
             info!("archiving '{}'", deployment.id);
-            archive(args.storage.deployments, deployment).await
+            archive(args.storage.deployments, args.now_fn, deployment).await
         }
     }
 }
@@ -247,6 +261,7 @@ async fn apply_one(
 async fn deploy(
     storage: &Storage<'_>,
     opts: &DeployOpts,
+    now_fn: &NowFn<'_>,
     deployment: models::Deployment,
 ) -> Outcome {
     debug_assert_eq!(fsm::next_action(&deployment), fsm::NextAction::Deploy);
@@ -257,7 +272,7 @@ async fn deploy(
     };
     match result {
         Ok(()) => {
-            let deployment = fsm::deploy(deployment);
+            let deployment = fsm::deploy(deployment, now_fn());
             let error = store_dpl(storage.deployments, &deployment).await.err();
             Outcome {
                 deployment,
@@ -345,6 +360,7 @@ async fn mark_one_removing(
 async fn remove(
     storage: &Storage<'_>,
     opts: &DeployOpts,
+    now_fn: &NowFn<'_>,
     deployment: models::Deployment,
     ignored: &[filesys::File],
 ) -> Outcome {
@@ -352,7 +368,7 @@ async fn remove(
 
     match dpl_filesys::remove(&storage.cfg_insts, &deployment, ignored).await {
         Ok(()) => {
-            let deployment = fsm::archive(deployment);
+            let deployment = fsm::archive(deployment, now_fn());
             let error = store_dpl(storage.deployments, &deployment).await.err();
             Outcome {
                 deployment,
@@ -382,10 +398,14 @@ async fn remove(
 
 // ================================= ARCHIVE ======================================= //
 
-async fn archive(deployments: &disk::Deployments, deployment: models::Deployment) -> Outcome {
+async fn archive(
+    deployments: &disk::Deployments,
+    now_fn: &NowFn<'_>,
+    deployment: models::Deployment,
+) -> Outcome {
     debug_assert_eq!(fsm::next_action(&deployment), fsm::NextAction::Archive);
 
-    let deployment = fsm::archive(deployment);
+    let deployment = fsm::archive(deployment, now_fn());
     let error = store_dpl(deployments, &deployment).await.err();
     Outcome {
         deployment,

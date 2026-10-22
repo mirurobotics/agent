@@ -4,7 +4,7 @@ use crate::errors::Error;
 use crate::models::{self, deployment::Updates, Patch};
 
 // external crates
-use chrono::{TimeDelta, Utc};
+use chrono::{DateTime, TimeDelta, Utc};
 
 // ================================ NEXT ACTION ==================================== //
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,9 +82,13 @@ impl Default for RetryPolicy {
 // ================================== TRANSITIONS ================================== //
 
 // ---------------------------- successful transitions ----------------------------= //
-pub fn deploy(mut deployment: models::Deployment) -> models::Deployment {
-    let new_activity = models::DplActivity::Deployed;
-    let patch = get_success_updates(&deployment, new_activity);
+/// Marks the deployment deployed. `now` becomes its `deployed_at`; pass the
+/// time from `Clock::now`, since the backend and dashboard show it.
+pub fn deploy(mut deployment: models::Deployment, now: DateTime<Utc>) -> models::Deployment {
+    let patch = Updates {
+        deployed_at: Some(now),
+        ..get_success_updates(&deployment, models::DplActivity::Deployed)
+    };
     deployment.patch(patch);
     deployment
 }
@@ -96,9 +100,13 @@ pub fn removing(mut deployment: models::Deployment) -> models::Deployment {
     deployment
 }
 
-pub fn archive(mut deployment: models::Deployment) -> models::Deployment {
-    let new_activity = models::DplActivity::Archived;
-    let patch = get_success_updates(&deployment, new_activity);
+/// Marks the deployment archived. `now` becomes its `archived_at`; pass the
+/// time from `Clock::now`, since the backend and dashboard show it.
+pub fn archive(mut deployment: models::Deployment, now: DateTime<Utc>) -> models::Deployment {
+    let patch = Updates {
+        archived_at: Some(now),
+        ..get_success_updates(&deployment, models::DplActivity::Archived)
+    };
     deployment.patch(patch);
     deployment
 }
@@ -124,16 +132,8 @@ fn get_success_updates(
         } else {
             None
         },
-        deployed_at: if new_activity == models::DplActivity::Deployed {
-            Some(Utc::now())
-        } else {
-            None
-        },
-        archived_at: if new_activity == models::DplActivity::Archived {
-            Some(Utc::now())
-        } else {
-            None
-        },
+        deployed_at: None,
+        archived_at: None,
     }
 }
 
@@ -496,9 +496,8 @@ mod tests {
         // --- deploy transition ---
 
         fn validate_deploy_transition(deployment: Deployment, expected_error_status: DplErrStatus) {
-            let before = Utc::now();
-            let actual = deploy(deployment.clone());
-            let after = Utc::now();
+            let now = "2026-10-21T12:00:00Z".parse::<DateTime<Utc>>().unwrap();
+            let actual = deploy(deployment.clone(), now);
 
             let recovered = deployment.error_status == DplErrStatus::Retrying
                 && expected_error_status == DplErrStatus::None;
@@ -516,13 +515,10 @@ mod tests {
                 );
             }
 
-            // verify timestamps: deployed_at is always freshly set; archived_at is
-            // an independent watermark preserved from the input (never cleared).
-            let deployed_at = actual.deployed_at.expect("deployed_at should be set");
-            assert!(
-                deployed_at >= before && deployed_at <= after,
-                "deployed_at should be approximately now",
-            );
+            // verify timestamps: deployed_at is always set to the given time;
+            // archived_at is an independent watermark preserved from the input
+            // (never cleared).
+            assert_eq!(actual.deployed_at, Some(now), "deployed_at should be now");
             assert_eq!(
                 actual.archived_at, deployment.archived_at,
                 "archived_at should be preserved from input",
@@ -618,9 +614,8 @@ mod tests {
         // --- remove transition ---
 
         fn validate_remove_transition(deployment: Deployment, expected_error_status: DplErrStatus) {
-            let before = Utc::now();
-            let actual = archive(deployment.clone());
-            let after = Utc::now();
+            let now = "2026-10-21T12:00:00Z".parse::<DateTime<Utc>>().unwrap();
+            let actual = archive(deployment.clone(), now);
 
             let recovered = deployment.error_status == DplErrStatus::Retrying
                 && expected_error_status == DplErrStatus::None;
@@ -638,13 +633,10 @@ mod tests {
                 );
             }
 
-            // verify timestamps: archived_at is always freshly set; deployed_at is
-            // an independent watermark preserved from the input (never cleared).
-            let archived_at = actual.archived_at.expect("archived_at should be set");
-            assert!(
-                archived_at >= before && archived_at <= after,
-                "archived_at should be approximately now",
-            );
+            // verify timestamps: archived_at is always set to the given time;
+            // deployed_at is an independent watermark preserved from the input
+            // (never cleared).
+            assert_eq!(actual.archived_at, Some(now), "archived_at should be now");
             assert_eq!(
                 actual.deployed_at, deployment.deployed_at,
                 "deployed_at should be preserved from input",

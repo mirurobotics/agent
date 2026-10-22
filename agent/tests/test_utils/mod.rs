@@ -1,4 +1,5 @@
 pub mod calibrations;
+pub mod clock;
 pub mod filesys;
 pub mod retention;
 pub mod sync;

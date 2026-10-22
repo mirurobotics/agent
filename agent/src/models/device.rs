@@ -182,18 +182,22 @@ impl Updates {
         }
     }
 
-    pub fn disconnected() -> Self {
+    /// Marks the device offline as of `at`. Pass the time from `Clock::now`,
+    /// since the device API shows it to people.
+    pub fn disconnected(at: DateTime<Utc>) -> Self {
         Self {
             status: Some(DeviceStatus::Offline),
-            last_disconnected_at: Some(Utc::now()),
+            last_disconnected_at: Some(at),
             ..Self::empty()
         }
     }
 
-    pub fn connected() -> Self {
+    /// Marks the device online as of `at`. Pass the time from `Clock::now`,
+    /// since the device API shows it to people.
+    pub fn connected(at: DateTime<Utc>) -> Self {
         Self {
             status: Some(DeviceStatus::Online),
-            last_connected_at: Some(Utc::now()),
+            last_connected_at: Some(at),
             ..Self::empty()
         }
     }

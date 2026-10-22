@@ -1,5 +1,6 @@
 // internal crates
-use crate::test_utils::filesys::dirs as test_dirs;
+use crate::test_utils::{clock as test_clock, filesys::dirs as test_dirs};
+use miru_agent::clock::Clock;
 use miru_agent::disk::{Capacities, DiskErr, Layout, Storage};
 use miru_agent::filesys::{dirs, files, WriteOptions};
 use miru_agent::models::{self, device};
@@ -39,9 +40,10 @@ pub mod init {
         let dir = test_dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
         let capacities = Capacities::default();
-        let (storage, _) = Storage::init(&layout, capacities, "test_device".to_string())
-            .await
-            .unwrap();
+        let (storage, _) =
+            Storage::init(&layout, capacities, "test_device".to_string(), Clock::new())
+                .await
+                .unwrap();
 
         // shutdown storage
         storage.shutdown().await.unwrap();
@@ -52,9 +54,14 @@ pub mod init {
         let dir = test_dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
         let capacities = Capacities::default();
-        let (storage, _) = Storage::init(&layout, capacities, "test_device".to_string())
-            .await
-            .unwrap();
+        let (storage, handle) = Storage::init(
+            &layout,
+            capacities,
+            "test_device".to_string(),
+            test_clock::server_clock(),
+        )
+        .await
+        .unwrap();
 
         // set device to online before shutdown
         storage
@@ -66,8 +73,14 @@ pub mod init {
             .await
             .unwrap();
 
-        // shutdown should transition device back to offline
+        // shutdown should transition device back to offline, stamped with the
+        // server's time rather than the robot's 1970 clock
         storage.shutdown().await.unwrap();
+        tokio::time::timeout(HANG_GUARD, handle).await.unwrap();
+        let device: models::Device =
+            serde_json::from_str(&files::read_string(&layout.device()).await.unwrap()).unwrap();
+        assert_eq!(device.status, models::DeviceStatus::Offline);
+        assert_eq!(device.last_disconnected_at, test_clock::server_time());
     }
 
     #[tokio::test]
@@ -80,7 +93,13 @@ pub mod init {
             .await
             .unwrap();
 
-        let result = Storage::init(&layout, Capacities::default(), "test_device".to_string()).await;
+        let result = Storage::init(
+            &layout,
+            Capacities::default(),
+            "test_device".to_string(),
+            Clock::new(),
+        )
+        .await;
         assert!(result.is_err());
     }
 
@@ -99,7 +118,13 @@ pub mod init {
             .await
             .unwrap();
 
-        let result = Storage::init(&layout, Capacities::default(), "test_device".to_string()).await;
+        let result = Storage::init(
+            &layout,
+            Capacities::default(),
+            "test_device".to_string(),
+            Clock::new(),
+        )
+        .await;
         assert!(result.is_err());
     }
 
@@ -114,7 +139,13 @@ pub mod init {
             .await
             .unwrap();
 
-        let result = Storage::init(&layout, Capacities::default(), "test_device".to_string()).await;
+        let result = Storage::init(
+            &layout,
+            Capacities::default(),
+            "test_device".to_string(),
+            Clock::new(),
+        )
+        .await;
         assert!(result.is_err());
     }
 
@@ -123,9 +154,10 @@ pub mod init {
         let dir = test_dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
         let capacities = Capacities::default();
-        let (storage, _) = Storage::init(&layout, capacities, "test_device".to_string())
-            .await
-            .unwrap();
+        let (storage, _) =
+            Storage::init(&layout, capacities, "test_device".to_string(), Clock::new())
+                .await
+                .unwrap();
 
         // first shutdown succeeds
         storage.shutdown().await.unwrap();
@@ -139,9 +171,10 @@ pub mod init {
         let dir = test_dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
         let capacities = Capacities::default();
-        let (storage, _) = Storage::init(&layout, capacities, "test_device".to_string())
-            .await
-            .unwrap();
+        let (storage, _) =
+            Storage::init(&layout, capacities, "test_device".to_string(), Clock::new())
+                .await
+                .unwrap();
 
         // pre-close the cfg_insts meta store
         storage.cfg_insts.meta.shutdown().await.unwrap();
@@ -155,9 +188,10 @@ pub mod init {
         let dir = test_dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
         let capacities = Capacities::default();
-        let (storage, _) = Storage::init(&layout, capacities, "test_device".to_string())
-            .await
-            .unwrap();
+        let (storage, _) =
+            Storage::init(&layout, capacities, "test_device".to_string(), Clock::new())
+                .await
+                .unwrap();
 
         // pre-close the releases store
         storage.releases.shutdown().await.unwrap();
@@ -171,9 +205,10 @@ pub mod init {
         let dir = test_dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
         let capacities = Capacities::default();
-        let (storage, _) = Storage::init(&layout, capacities, "test_device".to_string())
-            .await
-            .unwrap();
+        let (storage, _) =
+            Storage::init(&layout, capacities, "test_device".to_string(), Clock::new())
+                .await
+                .unwrap();
 
         // pre-close the file_rules store
         storage.file_rules.shutdown().await.unwrap();
@@ -190,10 +225,14 @@ pub mod shutdown {
     async fn all_workers_exit_after_success() {
         let dir = test_dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
-        let (storage, storage_handle) =
-            Storage::init(&layout, Capacities::default(), "test_device".to_string())
-                .await
-                .unwrap();
+        let (storage, storage_handle) = Storage::init(
+            &layout,
+            Capacities::default(),
+            "test_device".to_string(),
+            Clock::new(),
+        )
+        .await
+        .unwrap();
 
         storage.shutdown().await.unwrap();
 
@@ -207,10 +246,14 @@ pub mod shutdown {
     async fn attempts_all_stores_after_early_failure() {
         let dir = test_dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
-        let (storage, storage_handle) =
-            Storage::init(&layout, Capacities::default(), "test_device".to_string())
-                .await
-                .unwrap();
+        let (storage, storage_handle) = Storage::init(
+            &layout,
+            Capacities::default(),
+            "test_device".to_string(),
+            Clock::new(),
+        )
+        .await
+        .unwrap();
 
         // pre-close an early store so the shutdown sequence hits a dead worker
         storage.cfg_insts.meta.shutdown().await.unwrap();
@@ -230,10 +273,14 @@ pub mod shutdown {
     async fn returns_first_error_with_multiple_failures() {
         let dir = test_dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
-        let (storage, storage_handle) =
-            Storage::init(&layout, Capacities::default(), "test_device".to_string())
-                .await
-                .unwrap();
+        let (storage, storage_handle) = Storage::init(
+            &layout,
+            Capacities::default(),
+            "test_device".to_string(),
+            Clock::new(),
+        )
+        .await
+        .unwrap();
 
         // pre-close the device store (fails first, at the device read
         // preamble) and the deployments store (fails later)

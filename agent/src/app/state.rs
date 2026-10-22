@@ -15,7 +15,7 @@ use crate::deploy::{apply, fsm};
 use crate::disk;
 use crate::events;
 use crate::filesys::{File, PathExt};
-use crate::http;
+use crate::http::{self, ClientI};
 use crate::server;
 use crate::sync::{self, syncer::SyncerArgs, SyncerExt};
 
@@ -53,7 +53,8 @@ impl AppState {
         let device_id = disk::resolve_device_id(layout).await?;
 
         // initialize storage
-        let (stor, storage_handle) = disk::Storage::init(layout, capacities, device_id).await?;
+        let (stor, storage_handle) =
+            disk::Storage::init(layout, capacities, device_id, http_client.clock().clone()).await?;
         let storage = Arc::new(stor);
 
         // initialize the token manager

@@ -2,7 +2,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 // internal crates
-use crate::test_utils::filesys::dirs as test_dirs;
+use crate::test_utils::{clock as test_clock, filesys::dirs as test_dirs};
 use miru_agent::deploy::{apply, fsm};
 use miru_agent::disk::{
     self, CfgInstContent, CfgInsts, Deployments, FileRules, GitCommits, Releases,
@@ -1719,5 +1719,68 @@ mod event_emission {
             "steady-state deployment should emit no events, got {} events",
             events.len()
         );
+    }
+}
+
+mod reported_times {
+    use super::*;
+
+    #[tokio::test]
+    async fn deploy_records_server_time() {
+        let mut f = Fixture::new("reported_times_deploy").await;
+        f.http_client.clock = test_clock::server_clock();
+        let dpl = make_deployment("dpl_1", cfg_inst_args(&f, &["cfg_inst_1"]));
+        f.http_client
+            .set_list_all_deployments(move || Ok(vec![dpl.clone()]));
+
+        f.sync().await.unwrap();
+
+        let cached = read_deployment(&f.deployment_stor, "dpl_1").await;
+        assert_eq!(cached.deployed_at, Some(test_clock::server_time()));
+
+        let events = f.event_hub.replay_after(0).await.unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].occurred_at, test_clock::server_time());
+
+        let pushed = push_bodies(&f.http_client.requests());
+        assert_eq!(pushed.len(), 1);
+        assert_eq!(
+            pushed[0].deployed_at,
+            Some(test_clock::server_time().to_rfc3339())
+        );
+    }
+
+    #[tokio::test]
+    async fn archive_records_server_time() {
+        let mut f = Fixture::new("reported_times_archive").await;
+        f.http_client.clock = test_clock::server_clock();
+        let dpl = make_archived_dpl("dpl_1", cfg_inst_args(&f, &["cfg_inst_1"]));
+        f.http_client
+            .set_list_all_deployments(move || Ok(vec![dpl.clone()]));
+
+        f.sync().await.unwrap();
+
+        let cached = read_deployment(&f.deployment_stor, "dpl_1").await;
+        assert_eq!(cached.archived_at, Some(test_clock::server_time()));
+
+        let events = f.event_hub.replay_after(0).await.unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].occurred_at, test_clock::server_time());
+    }
+
+    #[tokio::test]
+    async fn falls_back_to_system_clock_before_server_time_is_known() {
+        let f = Fixture::new("reported_times_fallback").await;
+        let dpl = make_deployment("dpl_1", cfg_inst_args(&f, &["cfg_inst_1"]));
+        f.http_client
+            .set_list_all_deployments(move || Ok(vec![dpl.clone()]));
+
+        let before = Utc::now();
+        f.sync().await.unwrap();
+        let after = Utc::now();
+
+        let cached = read_deployment(&f.deployment_stor, "dpl_1").await;
+        let deployed_at = cached.deployed_at.expect("deployed_at should be set");
+        assert!(deployed_at >= before && deployed_at <= after);
     }
 }

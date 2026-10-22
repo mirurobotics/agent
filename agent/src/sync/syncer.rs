@@ -637,6 +637,26 @@ mod tests {
         }
     }
 
+    pub mod last_synced_at {
+        use super::*;
+
+        #[tokio::test]
+        async fn uses_server_time_when_known() {
+            let f = Fixture::new("sync_last_synced_at_server_time").await;
+            let server_time = "2026-10-21T12:00:00Z".parse::<DateTime<Utc>>().unwrap();
+            // a day off the system clock, so the clock reports the server's time
+            f.http_client.clock.observe_server_time(server_time);
+            f.http_client.set_list_all_deployments(|| Ok(vec![]));
+
+            f.syncer.sync().await.unwrap();
+
+            // the server's time advances with monotonic time after the reading
+            let state = f.syncer.get_sync_state().await.unwrap();
+            assert!(state.last_synced_at >= server_time);
+            assert!(state.last_synced_at < server_time + TimeDelta::minutes(1));
+        }
+    }
+
     pub mod sync_failure {
         use super::*;
 

@@ -4,6 +4,7 @@ use std::collections::HashMap;
 // internal crates
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::cache::CacheEntry;
+use miru_agent::clock::Clock;
 use miru_agent::disk::{Capacities, Layout, Storage};
 use miru_agent::filesys::{files, WriteOptions};
 use miru_agent::models::Deployment;
@@ -53,9 +54,14 @@ pub mod reset_retry_state_on_init {
         };
         seed_deployments(&layout, vec![make_entry(dpl, false)]).await;
 
-        let (storage, _) = Storage::init(&layout, Capacities::default(), "dev".to_string())
-            .await
-            .unwrap();
+        let (storage, _) = Storage::init(
+            &layout,
+            Capacities::default(),
+            "dev".to_string(),
+            Clock::new(),
+        )
+        .await
+        .unwrap();
 
         let loaded = storage
             .deployments
@@ -79,9 +85,14 @@ pub mod reset_retry_state_on_init {
         dpl.set_cooldown(TimeDelta::hours(1));
         seed_deployments(&layout, vec![make_entry(dpl, false)]).await;
 
-        let (storage, _) = Storage::init(&layout, Capacities::default(), "dev".to_string())
-            .await
-            .unwrap();
+        let (storage, _) = Storage::init(
+            &layout,
+            Capacities::default(),
+            "dev".to_string(),
+            Clock::new(),
+        )
+        .await
+        .unwrap();
 
         let loaded = storage
             .deployments
@@ -116,9 +127,14 @@ pub mod reset_retry_state_on_init {
         )
         .await;
 
-        let (storage, _) = Storage::init(&layout, Capacities::default(), "dev".to_string())
-            .await
-            .unwrap();
+        let (storage, _) = Storage::init(
+            &layout,
+            Capacities::default(),
+            "dev".to_string(),
+            Clock::new(),
+        )
+        .await
+        .unwrap();
 
         // dirty deployment should be reset
         let loaded_dirty = storage
@@ -164,9 +180,14 @@ pub mod reset_retry_state_on_init {
         )
         .await;
 
-        let (storage, _) = Storage::init(&layout, Capacities::default(), "dev".to_string())
-            .await
-            .unwrap();
+        let (storage, _) = Storage::init(
+            &layout,
+            Capacities::default(),
+            "dev".to_string(),
+            Clock::new(),
+        )
+        .await
+        .unwrap();
 
         // retry state is reset but the pending push (dirty flag) survives
         let entry = storage

@@ -47,17 +47,27 @@ pub struct EventArgs {
 }
 
 impl EventArgs {
-    fn new(event_type: &str, data: impl Serialize) -> Result<Self, EventsErr> {
+    fn new(
+        event_type: &str,
+        occurred_at: DateTime<Utc>,
+        data: impl Serialize,
+    ) -> Result<Self, EventsErr> {
         Ok(Self {
             event_type: event_type.to_string(),
-            occurred_at: Utc::now(),
+            occurred_at,
             data: serde_json::to_value(data)?,
         })
     }
 
-    pub fn deployed(deployment: &models::Deployment) -> Result<Self, EventsErr> {
+    /// A `deployment.deployed` event that occurred at `occurred_at`. Pass the
+    /// time from `Clock::now`, since the event stream shows it to people.
+    pub fn deployed(
+        deployment: &models::Deployment,
+        occurred_at: DateTime<Utc>,
+    ) -> Result<Self, EventsErr> {
         Self::new(
             DEPLOYMENT_DEPLOYED,
+            occurred_at,
             DeploymentDeployedEvent {
                 deployment_id: deployment.id.clone(),
                 release_id: deployment.release_id.clone(),
@@ -70,9 +80,15 @@ impl EventArgs {
         )
     }
 
-    pub fn removed(deployment: &models::Deployment) -> Result<Self, EventsErr> {
+    /// A `deployment.removed` event that occurred at `occurred_at`. Pass the
+    /// time from `Clock::now`, since the event stream shows it to people.
+    pub fn removed(
+        deployment: &models::Deployment,
+        occurred_at: DateTime<Utc>,
+    ) -> Result<Self, EventsErr> {
         Self::new(
             DEPLOYMENT_REMOVED,
+            occurred_at,
             DeploymentRemovedEvent {
                 deployment_id: deployment.id.clone(),
                 release_id: deployment.release_id.clone(),
