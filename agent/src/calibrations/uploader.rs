@@ -8,9 +8,10 @@ use crate::calibrations::{
     errors::{CalibrationsErr, ReceiveActorMessageErr, SendActorMessageErr},
     report::{QueueEntry, QueueSnapshotFile, Report},
     sender::Sender,
-    uploader_impl::{NextAttempt, UploaderImpl, UploaderOptions},
+    uploader_impl::{UploaderImpl, UploaderOptions},
 };
 use crate::filesys::Dir;
+use crate::queue::NextAttempt;
 use crate::sync::syncer::{next_sync_event, SyncEvent};
 use crate::trace;
 
