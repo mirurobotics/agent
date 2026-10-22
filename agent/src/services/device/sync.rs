@@ -14,7 +14,7 @@ pub async fn sync<SyncerT: SyncerExt>(syncer: &SyncerT) -> Result<SyncDeviceResp
                 last_synced_at: sync_state.last_synced_at.to_rfc3339(),
                 last_attempted_sync_at: sync_state.last_attempted_sync_at.to_rfc3339(),
                 in_cooldown: sync_state.is_in_cooldown(),
-                cooldown_ends_at: sync_state.cooldown_ends_at.to_rfc3339(),
+                cooldown_ends_at: sync_state.cooldown_ends_at().to_rfc3339(),
             })
         }
         Err(e) => {
@@ -34,7 +34,7 @@ pub async fn sync<SyncerT: SyncerExt>(syncer: &SyncerT) -> Result<SyncDeviceResp
                 last_synced_at: sync_state.last_synced_at.to_rfc3339(),
                 last_attempted_sync_at: sync_state.last_attempted_sync_at.to_rfc3339(),
                 in_cooldown: sync_state.is_in_cooldown(),
-                cooldown_ends_at: sync_state.cooldown_ends_at.to_rfc3339(),
+                cooldown_ends_at: sync_state.cooldown_ends_at().to_rfc3339(),
             })
         }
     }

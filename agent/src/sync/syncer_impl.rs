@@ -1,6 +1,6 @@
 // standard crates
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 // internal crates
 use crate::authn::{self, TokenManagerExt};
@@ -20,7 +20,7 @@ use crate::sync::{
 use crate::trace;
 
 // external crates
-use chrono::{TimeDelta, Utc};
+use chrono::Utc;
 use tokio::sync::watch;
 use tracing::{debug, error, info, warn};
 
@@ -62,16 +62,16 @@ impl<HTTPClientT: http::ClientI> SyncerImpl<HTTPClientT> {
         Ok(self.subscriber_rx.clone())
     }
 
-    fn schedule_cooldown_end_notification(&self, wait: TimeDelta, source: CooldownEnd) {
-        if wait <= TimeDelta::zero() {
+    fn schedule_cooldown_end_notification(&self, wait: Duration, source: CooldownEnd) {
+        if wait.is_zero() {
             return;
         }
         // add 1 second to the cooldown period to ensure that the cooldown period is
         // cleared when sending the cooldown end event.
-        let cooldown_secs = (wait.num_seconds().max(0) + 1) as u64;
+        let wait = wait.saturating_add(Duration::from_secs(1));
         let tx = self.subscriber_tx.clone();
         tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_secs(cooldown_secs)).await;
+            tokio::time::sleep(wait).await;
             if let Err(e) = tx.send(SyncEvent::CooldownEnd(source)) {
                 error!("failed to send cooldown ended event: {:?}", e);
             }
@@ -89,8 +89,8 @@ impl<HTTPClientT: http::ClientI> SyncerImpl<HTTPClientT> {
 
     pub(super) async fn sync_if_not_in_cooldown(&mut self) -> Result<(), SyncErr> {
         if self.state.is_in_cooldown() {
-            info!("skipping device sync since the cooldown ends at {:?} (err streak: {}, last successful sync at: {:?})",
-                self.state.cooldown_ends_at,
+            info!("skipping device sync since the cooldown ends in {:?} (err streak: {}, last successful sync at: {:?})",
+                self.state.remaining_cooldown(),
                 self.state.err_streak,
                 self.state.last_synced_at
             );
@@ -103,12 +103,14 @@ impl<HTTPClientT: http::ClientI> SyncerImpl<HTTPClientT> {
         if self.state.is_in_cooldown() {
             return Err(SyncErr::InCooldownErr(SyncerInCooldownErr {
                 err_streak: self.state.err_streak,
-                cooldown_ends_at: self.state.cooldown_ends_at,
+                remaining_cooldown: self.state.remaining_cooldown(),
+                cooldown_ends_at: self.state.cooldown_ends_at(),
                 trace: trace!(),
             }));
         }
 
         self.state.last_attempted_sync_at = Utc::now();
+        self.state.last_attempted_sync = Some(Instant::now());
         let result = self.sync_impl().await;
 
         // determine the syncer's own cooldown period
@@ -116,12 +118,9 @@ impl<HTTPClientT: http::ClientI> SyncerImpl<HTTPClientT> {
             Ok(_) => (CooldownEnd::SyncSuccess, self.handle_sync_success()),
             Err(e) => (CooldownEnd::SyncFailure, self.handle_sync_failure(e)),
         };
-        self.state.cooldown_ends_at = Utc::now() + sync_wait;
+        self.state.cooldown_ends = Some(Instant::now() + sync_wait);
         self.schedule_cooldown_end_notification(sync_wait, event);
-        debug!(
-            "backend syncer cooling down for {sync_wait} (until {:?})",
-            self.state.cooldown_ends_at
-        );
+        debug!("backend syncer cooling down for {sync_wait:?}");
 
         // send an orthogonal notification when the next deployment may be attempted
         if let Ok(Some(deployment_wait)) = result {
@@ -131,7 +130,7 @@ impl<HTTPClientT: http::ClientI> SyncerImpl<HTTPClientT> {
         result.map(|_| ())
     }
 
-    fn handle_sync_success(&mut self) -> TimeDelta {
+    fn handle_sync_success(&mut self) -> Duration {
         if let Err(e) = self.subscriber_tx.send(SyncEvent::SyncSuccess) {
             error!("failed to send sync success event: {:?}", e);
         }
@@ -145,10 +144,10 @@ impl<HTTPClientT: http::ClientI> SyncerImpl<HTTPClientT> {
         }
         self.state.last_synced_at = Utc::now();
         self.state.err_streak = 0;
-        TimeDelta::seconds(self.backoff.base_secs)
+        secs(self.backoff.base_secs)
     }
 
-    fn handle_sync_failure(&mut self, e: &SyncErr) -> TimeDelta {
+    fn handle_sync_failure(&mut self, e: &SyncErr) -> Duration {
         if let Err(e) = self.subscriber_tx.send(SyncEvent::SyncFailed(SyncFailure {
             is_network_conn_err: e.is_network_conn_err(),
         })) {
@@ -164,15 +163,15 @@ impl<HTTPClientT: http::ClientI> SyncerImpl<HTTPClientT> {
                 "unable to sync with backend due to a network connection error: {:?}",
                 e
             );
-            TimeDelta::seconds(self.backoff.base_secs)
+            secs(self.backoff.base_secs)
         } else {
             error!("unable to sync with backend: {:?}", e);
             self.state.err_streak += 1;
-            TimeDelta::seconds(cooldown::calc(&self.backoff, self.state.err_streak))
+            secs(cooldown::calc(&self.backoff, self.state.err_streak))
         }
     }
 
-    async fn sync_impl(&mut self) -> Result<Option<chrono::TimeDelta>, SyncErr> {
+    async fn sync_impl(&mut self) -> Result<Option<Duration>, SyncErr> {
         let token = self.token_mngr.get_token().await?;
 
         let storage_ref = self.storage.as_ref();
@@ -196,7 +195,7 @@ impl<HTTPClientT: http::ClientI> SyncerImpl<HTTPClientT> {
         if !matches!(&result, Err(e) if e.is_network_conn_err()) {
             self.sync_system_metadata(&token.token).await;
         }
-        result
+        result.map(|wait| wait.map(|w| w.to_std().unwrap_or(Duration::ZERO)))
     }
 
     /// Best-effort: failures are logged and never affect the sync result or its
@@ -213,4 +212,9 @@ impl<HTTPClientT: http::ClientI> SyncerImpl<HTTPClientT> {
             Err(e) => warn!("unable to sync system metadata: {e}"),
         }
     }
+}
+
+/// A whole number of seconds as a `Duration`; negative counts as zero.
+fn secs(secs: i64) -> Duration {
+    Duration::from_secs(u64::try_from(secs).unwrap_or(0))
 }

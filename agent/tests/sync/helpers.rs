@@ -1,3 +1,6 @@
+// standard crates
+use std::time::{Duration, Instant};
+
 // internal crates
 use backend_api::models::{
     BaseFileRule, Deployment as BackendDeployment,
@@ -202,15 +205,34 @@ pub async fn assert_file_rule_stored(file_rule_stor: &FileRules, id: &str) {
 
 // ========================= STATE ASSERTIONS ========================= //
 
-/// Captures a before/after time window for asserting syncer `State` timestamps.
+/// Captures a before/after window, on both the system and the monotonic
+/// clock, for asserting syncer `State` after a sync.
 pub struct StateAssert {
     pub before: DateTime<Utc>,
     pub after: DateTime<Utc>,
+    pub before_instant: Instant,
+    pub after_instant: Instant,
 }
 
 impl StateAssert {
-    pub fn new(before: DateTime<Utc>, after: DateTime<Utc>) -> Self {
-        Self { before, after }
+    /// Opens the window; call [`StateAssert::end`] once the sync returns.
+    pub fn begin() -> Self {
+        let (now, instant) = (Utc::now(), Instant::now());
+        Self {
+            before: now,
+            after: now,
+            before_instant: instant,
+            after_instant: instant,
+        }
+    }
+
+    /// Closes the window.
+    pub fn end(self) -> Self {
+        Self {
+            after: Utc::now(),
+            after_instant: Instant::now(),
+            ..self
+        }
     }
 
     /// Assert `ts` falls within `[before + offset, after + offset]`.
@@ -223,26 +245,39 @@ impl StateAssert {
         );
     }
 
+    /// Assert the monotonic `instant` falls within the window shifted by `offset`.
+    pub fn assert_instant_between(&self, instant: Option<Instant>, offset: Duration) {
+        let lo = self.before_instant + offset;
+        let hi = self.after_instant + offset;
+        let instant = instant.expect("expected an instant, got None");
+        assert!(
+            instant >= lo && instant <= hi,
+            "expected instant in [{lo:?}, {hi:?}], got: {instant:?}"
+        );
+    }
+
     /// Assert state after a successful sync:
-    /// - `last_attempted_sync_at` and `last_synced_at` within the window
-    /// - `cooldown_ends_at` within the window shifted by `cooldown`
+    /// - `last_attempted_sync_at`, `last_synced_at` and `last_attempted_sync` within the window
+    /// - `cooldown_ends` within the window shifted by `cooldown`
     /// - `err_streak` equals the given value
-    pub fn assert_success(&self, state: &State, cooldown: TimeDelta, err_streak: u32) {
+    pub fn assert_success(&self, state: &State, cooldown: Duration, err_streak: u32) {
         self.assert_between(state.last_attempted_sync_at, TimeDelta::zero());
         self.assert_between(state.last_synced_at, TimeDelta::zero());
-        self.assert_between(state.cooldown_ends_at, cooldown);
+        self.assert_instant_between(state.last_attempted_sync, Duration::ZERO);
+        self.assert_instant_between(state.cooldown_ends, cooldown);
         assert_eq!(state.err_streak, err_streak);
     }
 
     /// Assert state after a failed sync (last_synced_at unchanged at UNIX_EPOCH):
-    /// - `last_attempted_sync_at` within the window
+    /// - `last_attempted_sync_at` and `last_attempted_sync` within the window
     /// - `last_synced_at` == UNIX_EPOCH
-    /// - `cooldown_ends_at` within the window shifted by `cooldown`
+    /// - `cooldown_ends` within the window shifted by `cooldown`
     /// - `err_streak` equals the given value
-    pub fn assert_failed(&self, state: &State, cooldown: TimeDelta, err_streak: u32) {
+    pub fn assert_failed(&self, state: &State, cooldown: Duration, err_streak: u32) {
         self.assert_between(state.last_attempted_sync_at, TimeDelta::zero());
         assert_eq!(state.last_synced_at, DateTime::<Utc>::UNIX_EPOCH);
-        self.assert_between(state.cooldown_ends_at, cooldown);
+        self.assert_instant_between(state.last_attempted_sync, Duration::ZERO);
+        self.assert_instant_between(state.cooldown_ends, cooldown);
         assert_eq!(state.err_streak, err_streak);
     }
 }

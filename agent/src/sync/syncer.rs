@@ -1,6 +1,7 @@
 // standard crates
 use std::future;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 // internal crates
 use crate::authn::{self, TokenManagerExt};
@@ -14,7 +15,7 @@ use crate::sync::{errors::*, syncer_impl::SyncerImpl};
 use crate::trace;
 
 // external crates
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeDelta, Utc};
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
 use tracing::{error, info};
@@ -76,11 +77,19 @@ pub struct SyncerArgs<HTTPClientT, TokenManagerT: TokenManagerExt> {
     pub system_metadata_cache: File,
 }
 
+/// The syncer's state. Decisions use the monotonic instants, which a system
+/// clock step cannot move; the `DateTime` fields are for display only. None of
+/// it is saved, so a restart starts with no cooldown.
 #[derive(Debug, Clone, PartialEq)]
 pub struct State {
+    /// System clock time of the latest sync attempt, for display.
     pub last_attempted_sync_at: DateTime<Utc>,
+    /// System clock time of the latest successful sync, for display.
     pub last_synced_at: DateTime<Utc>,
-    pub cooldown_ends_at: DateTime<Utc>,
+    /// Monotonic instant of the latest sync attempt in this process.
+    pub last_attempted_sync: Option<Instant>,
+    /// Monotonic instant the current cooldown ends, if one was started.
+    pub cooldown_ends: Option<Instant>,
     pub err_streak: u32,
 }
 
@@ -89,15 +98,38 @@ impl Default for State {
         Self {
             last_attempted_sync_at: DateTime::<Utc>::UNIX_EPOCH,
             last_synced_at: DateTime::<Utc>::UNIX_EPOCH,
-            cooldown_ends_at: DateTime::<Utc>::UNIX_EPOCH,
+            last_attempted_sync: None,
+            cooldown_ends: None,
             err_streak: 0,
         }
     }
 }
 
 impl State {
+    /// How much of the cooldown is left; zero when not in cooldown.
+    pub fn remaining_cooldown(&self) -> Duration {
+        self.cooldown_ends.map_or(Duration::ZERO, |ends| {
+            ends.saturating_duration_since(Instant::now())
+        })
+    }
+
     pub fn is_in_cooldown(&self) -> bool {
-        Utc::now() < self.cooldown_ends_at
+        !self.remaining_cooldown().is_zero()
+    }
+
+    /// When the cooldown ends by the system clock, for display: now plus the
+    /// remaining cooldown.
+    pub fn cooldown_ends_at(&self) -> DateTime<Utc> {
+        let remaining = TimeDelta::from_std(self.remaining_cooldown()).unwrap_or(TimeDelta::MAX);
+        Utc::now()
+            .checked_add_signed(remaining)
+            .unwrap_or(DateTime::<Utc>::MAX_UTC)
+    }
+
+    /// Monotonic time since the latest sync attempt, or `None` before the
+    /// first attempt in this process.
+    pub fn since_last_attempt(&self) -> Option<Duration> {
+        self.last_attempted_sync.map(|at| at.elapsed())
     }
 }
 
@@ -107,8 +139,8 @@ pub trait SyncerExt {
     async fn shutdown(&self) -> Result<(), SyncErr>;
     async fn get_sync_state(&self) -> Result<State, SyncErr>;
     async fn is_in_cooldown(&self) -> Result<bool, SyncErr>;
-    async fn get_cooldown_ends_at(&self) -> Result<DateTime<Utc>, SyncErr>;
-    async fn get_last_attempted_sync_at(&self) -> Result<DateTime<Utc>, SyncErr>;
+    async fn get_remaining_cooldown(&self) -> Result<Duration, SyncErr>;
+    async fn get_since_last_attempt(&self) -> Result<Option<Duration>, SyncErr>;
     async fn sync(&self) -> Result<(), SyncErr>;
     async fn sync_if_not_in_cooldown(&self) -> Result<(), SyncErr>;
     async fn subscribe(&self) -> Result<watch::Receiver<SyncEvent>, SyncErr>;
@@ -268,14 +300,14 @@ impl SyncerExt for Syncer {
         Ok(state.is_in_cooldown())
     }
 
-    async fn get_cooldown_ends_at(&self) -> Result<DateTime<Utc>, SyncErr> {
+    async fn get_remaining_cooldown(&self) -> Result<Duration, SyncErr> {
         let state = self.get_sync_state().await?;
-        Ok(state.cooldown_ends_at)
+        Ok(state.remaining_cooldown())
     }
 
-    async fn get_last_attempted_sync_at(&self) -> Result<DateTime<Utc>, SyncErr> {
+    async fn get_since_last_attempt(&self) -> Result<Option<Duration>, SyncErr> {
         let state = self.get_sync_state().await?;
-        Ok(state.last_attempted_sync_at)
+        Ok(state.since_last_attempt())
     }
 
     async fn sync_if_not_in_cooldown(&self) -> Result<(), SyncErr> {
@@ -298,7 +330,7 @@ impl SyncerExt for Syncer {
 mod tests {
     // standard crates
     use std::sync::{Arc, Mutex};
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     // internal crates
     use crate::test_utils::{
@@ -409,7 +441,7 @@ mod tests {
             let state = self.syncer.get_sync_state().await.unwrap();
             self.syncer
                 .set_sync_state(State {
-                    cooldown_ends_at: DateTime::<Utc>::UNIX_EPOCH,
+                    cooldown_ends: None,
                     ..state
                 })
                 .await
@@ -426,31 +458,63 @@ mod tests {
             let expected = State {
                 last_attempted_sync_at: DateTime::<Utc>::UNIX_EPOCH,
                 last_synced_at: DateTime::<Utc>::UNIX_EPOCH,
-                cooldown_ends_at: DateTime::<Utc>::UNIX_EPOCH,
+                last_attempted_sync: None,
+                cooldown_ends: None,
                 err_streak: 0,
             };
             assert_eq!(state, expected);
+            assert!(!state.is_in_cooldown());
+            assert_eq!(state.remaining_cooldown(), Duration::ZERO);
+            assert_eq!(state.since_last_attempt(), None);
         }
 
         #[tokio::test]
         async fn is_in_cooldown() {
-            // in cooldown (cooldown_ends_at is in the future)
+            // in cooldown (cooldown_ends is in the future)
             let state = State {
-                last_attempted_sync_at: Utc::now(),
-                last_synced_at: Utc::now(),
-                cooldown_ends_at: Utc::now() + TimeDelta::seconds(10),
-                err_streak: 0,
+                cooldown_ends: Some(Instant::now() + Duration::from_secs(10)),
+                ..State::default()
             };
             assert!(state.is_in_cooldown());
+            let remaining = state.remaining_cooldown();
+            assert!(remaining <= Duration::from_secs(10) && remaining > Duration::from_secs(9));
 
-            // not in cooldown (cooldown_ends_at is in the past)
+            // not in cooldown (cooldown_ends has passed)
             let state = State {
-                last_attempted_sync_at: Utc::now(),
-                last_synced_at: Utc::now(),
-                cooldown_ends_at: Utc::now() - TimeDelta::seconds(10),
-                err_streak: 0,
+                cooldown_ends: Some(Instant::now()),
+                ..State::default()
             };
             assert!(!state.is_in_cooldown());
+            assert_eq!(state.remaining_cooldown(), Duration::ZERO);
+        }
+
+        #[test]
+        fn cooldown_ends_at_is_now_plus_the_remaining_cooldown() {
+            let state = State {
+                cooldown_ends: Some(Instant::now() + Duration::from_secs(60)),
+                ..State::default()
+            };
+            let window = StateAssert::begin();
+            let ends_at = state.cooldown_ends_at();
+            let window = window.end();
+            assert!(ends_at <= window.after + TimeDelta::seconds(60));
+            assert!(ends_at >= window.before + TimeDelta::seconds(59));
+
+            // not in cooldown: it ends now
+            let state = State::default();
+            let before = Utc::now();
+            let ends_at = state.cooldown_ends_at();
+            assert!(ends_at >= before && ends_at <= Utc::now());
+        }
+
+        #[test]
+        fn since_last_attempt_is_monotonic_time_since_the_attempt() {
+            let state = State {
+                last_attempted_sync: Some(Instant::now() - Duration::from_secs(30)),
+                ..State::default()
+            };
+            let since = state.since_last_attempt().unwrap();
+            assert!(since >= Duration::from_secs(30) && since < Duration::from_secs(31));
         }
     }
 
@@ -505,7 +569,7 @@ mod tests {
 
             f.syncer
                 .set_sync_state(State {
-                    cooldown_ends_at: Utc::now() + TimeDelta::seconds(60),
+                    cooldown_ends: Some(Instant::now() + Duration::from_secs(60)),
                     ..State::default()
                 })
                 .await
@@ -517,45 +581,49 @@ mod tests {
         #[tokio::test]
         async fn false_when_not_in_cooldown() {
             let f = Fixture::new("syncer_ext_cooldown_false").await;
-            // Default state has cooldown_ends_at = UNIX_EPOCH → not in cooldown
+            // Default state has no cooldown_ends → not in cooldown
             assert!(!f.syncer.is_in_cooldown().await.unwrap());
         }
     }
 
-    pub mod get_cooldown_ends_at {
+    pub mod get_remaining_cooldown {
         use super::*;
 
         #[tokio::test]
-        async fn get_cooldown_ends_at() {
+        async fn get_remaining_cooldown() {
             let f = Fixture::new("syncer_ext_cooldown_ends").await;
-            let target = Utc::now() + TimeDelta::seconds(120);
+            assert_eq!(
+                f.syncer.get_remaining_cooldown().await.unwrap(),
+                Duration::ZERO
+            );
 
             f.syncer
                 .set_sync_state(State {
-                    cooldown_ends_at: target,
+                    cooldown_ends: Some(Instant::now() + Duration::from_secs(120)),
                     ..State::default()
                 })
                 .await
                 .unwrap();
 
-            assert_eq!(f.syncer.get_cooldown_ends_at().await.unwrap(), target);
+            let remaining = f.syncer.get_remaining_cooldown().await.unwrap();
+            assert!(remaining <= Duration::from_secs(120));
+            assert!(remaining > Duration::from_secs(119));
         }
     }
 
-    pub mod get_last_attempted_sync_at {
+    pub mod get_since_last_attempt {
         use super::*;
 
         #[tokio::test]
-        async fn get_last_attempted_sync_at() {
+        async fn get_since_last_attempt() {
             let f = Fixture::new("syncer_ext_last_attempted").await;
+            assert_eq!(f.syncer.get_since_last_attempt().await.unwrap(), None);
 
-            let before = Utc::now();
+            let before = Instant::now();
             f.syncer.sync().await.unwrap();
-            let after = Utc::now();
 
-            let ts = f.syncer.get_last_attempted_sync_at().await.unwrap();
-            assert!(ts > before);
-            assert!(ts < after);
+            let since = f.syncer.get_since_last_attempt().await.unwrap().unwrap();
+            assert!(since <= before.elapsed());
         }
     }
 
@@ -584,9 +652,9 @@ mod tests {
             f.http_client
                 .set_list_all_deployments(move || Ok(vec![backend_dep_cloned.clone()]));
 
-            let before = Utc::now();
+            let window = StateAssert::begin();
             f.syncer.sync().await.unwrap();
-            let after = Utc::now();
+            let window = window.end();
 
             assert_deployment_stored(&f.storage.deployments, "dpl_1").await;
             assert_cfg_inst_stored(&f.storage.cfg_insts.meta, "cfg_inst_1").await;
@@ -594,12 +662,8 @@ mod tests {
 
             // check the sync state
             let state = f.syncer.get_sync_state().await.unwrap();
-            assert_eq!(
-                f.syncer.get_cooldown_ends_at().await.unwrap(),
-                state.cooldown_ends_at
-            );
-            let window = StateAssert::new(before, after);
-            let base_cooldown = TimeDelta::seconds(f.backoff.base_secs);
+            assert!(!f.syncer.get_remaining_cooldown().await.unwrap().is_zero());
+            let base_cooldown = Duration::from_secs(f.backoff.base_secs as u64);
             window.assert_success(&state, base_cooldown, 0);
         }
 
@@ -626,13 +690,12 @@ mod tests {
             f.http_client.set_list_all_deployments(|| Ok(vec![]));
 
             // sync successfully
-            let before = Utc::now();
+            let window = StateAssert::begin();
             f.syncer.sync().await.unwrap();
-            let after = Utc::now();
+            let window = window.end();
 
             let state = f.syncer.get_sync_state().await.unwrap();
-            let window = StateAssert::new(before, after);
-            let base_cooldown = TimeDelta::seconds(f.backoff.base_secs);
+            let base_cooldown = Duration::from_secs(f.backoff.base_secs as u64);
             window.assert_success(&state, base_cooldown, 0);
         }
     }
@@ -647,10 +710,8 @@ mod tests {
             // set the syncer state to be in cooldown
             f.syncer
                 .set_sync_state(State {
-                    last_attempted_sync_at: DateTime::<Utc>::UNIX_EPOCH,
-                    last_synced_at: DateTime::<Utc>::UNIX_EPOCH,
-                    cooldown_ends_at: Utc::now() + TimeDelta::seconds(10),
-                    err_streak: 0,
+                    cooldown_ends: Some(Instant::now() + Duration::from_secs(10)),
+                    ..State::default()
                 })
                 .await
                 .unwrap();
@@ -697,22 +758,18 @@ mod tests {
                 }))
             });
 
-            let base_cooldown_duration = TimeDelta::seconds(f.backoff.base_secs);
+            let base_cooldown_duration = Duration::from_secs(f.backoff.base_secs as u64);
             for _ in 0..10 {
-                let before = Utc::now();
+                let window = StateAssert::begin();
                 let error = f.syncer.sync().await.unwrap_err();
-                let after = Utc::now();
+                let window = window.end();
 
                 // check error type
                 assert!(error.is_network_conn_err());
 
                 // check the sync state
                 let state = f.syncer.get_sync_state().await.unwrap();
-                assert_eq!(
-                    f.syncer.get_cooldown_ends_at().await.unwrap(),
-                    state.cooldown_ends_at
-                );
-                let window = StateAssert::new(before, after);
+                assert!(!f.syncer.get_remaining_cooldown().await.unwrap().is_zero());
                 window.assert_failed(&state, base_cooldown_duration, 0);
 
                 // double check sync state functions
@@ -721,7 +778,7 @@ mod tests {
                 // reset the syncer state
                 f.syncer
                     .set_sync_state(State {
-                        cooldown_ends_at: before,
+                        cooldown_ends: None,
                         ..state
                     })
                     .await
@@ -747,22 +804,18 @@ mod tests {
             });
 
             for i in 0..10 {
-                let before = Utc::now();
+                let window = StateAssert::begin();
                 let error = f.syncer.sync().await.unwrap_err();
-                let after = Utc::now();
+                let window = window.end();
 
                 // check error type
                 assert!(!error.is_network_conn_err());
 
                 // check the sync state
                 let state = f.syncer.get_sync_state().await.unwrap();
-                assert_eq!(
-                    f.syncer.get_cooldown_ends_at().await.unwrap(),
-                    state.cooldown_ends_at
-                );
+                assert!(!f.syncer.get_remaining_cooldown().await.unwrap().is_zero());
                 let cooldown_secs = cooldown::calc(&f.backoff, i + 1);
-                let cooldown_duration = TimeDelta::seconds(cooldown_secs);
-                let window = StateAssert::new(before, after);
+                let cooldown_duration = Duration::from_secs(cooldown_secs as u64);
                 window.assert_failed(&state, cooldown_duration, i + 1);
 
                 // double check sync state functions
@@ -771,7 +824,7 @@ mod tests {
                 // reset the syncer state
                 f.syncer
                     .set_sync_state(State {
-                        cooldown_ends_at: before,
+                        cooldown_ends: None,
                         ..state
                     })
                     .await
@@ -796,22 +849,18 @@ mod tests {
 
             // non-network connection errors
             for i in 0..10 {
-                let before = Utc::now();
+                let window = StateAssert::begin();
                 let error = f.syncer.sync().await.unwrap_err();
-                let after = Utc::now();
+                let window = window.end();
 
                 // check error type
                 assert!(!error.is_network_conn_err());
 
                 // check the sync state
                 let state = f.syncer.get_sync_state().await.unwrap();
-                assert_eq!(
-                    f.syncer.get_cooldown_ends_at().await.unwrap(),
-                    state.cooldown_ends_at
-                );
+                assert!(!f.syncer.get_remaining_cooldown().await.unwrap().is_zero());
                 let cooldown_secs = cooldown::calc(&f.backoff, i + 1);
-                let cooldown_duration = TimeDelta::seconds(cooldown_secs);
-                let window = StateAssert::new(before, after);
+                let cooldown_duration = Duration::from_secs(cooldown_secs as u64);
                 window.assert_failed(&state, cooldown_duration, i + 1);
 
                 // double check sync state functions
@@ -820,7 +869,7 @@ mod tests {
                 // reset the syncer state
                 f.syncer
                     .set_sync_state(State {
-                        cooldown_ends_at: before,
+                        cooldown_ends: None,
                         ..state
                     })
                     .await
@@ -841,18 +890,17 @@ mod tests {
 
             // network connection errors
             let cur_err_streak = 10;
-            let base_cooldown_duration = TimeDelta::seconds(f.backoff.base_secs);
+            let base_cooldown_duration = Duration::from_secs(f.backoff.base_secs as u64);
             for _ in 0..10 {
-                let before = Utc::now();
+                let window = StateAssert::begin();
                 let error = f.syncer.sync().await.unwrap_err();
-                let after = Utc::now();
+                let window = window.end();
 
                 // check error type
                 assert!(error.is_network_conn_err());
 
                 // check the sync state
                 let state = f.syncer.get_sync_state().await.unwrap();
-                let window = StateAssert::new(before, after);
                 window.assert_failed(&state, base_cooldown_duration, cur_err_streak);
 
                 // double check sync state functions
@@ -861,7 +909,7 @@ mod tests {
                 // reset the syncer state
                 f.syncer
                     .set_sync_state(State {
-                        cooldown_ends_at: before,
+                        cooldown_ends: None,
                         ..state
                     })
                     .await
@@ -874,19 +922,15 @@ mod tests {
                 .set_update_deployment(|| Ok(backend_api::models::Deployment::default()));
 
             // recovery
-            let base_cooldown_duration = TimeDelta::seconds(f.backoff.base_secs);
+            let base_cooldown_duration = Duration::from_secs(f.backoff.base_secs as u64);
             for _ in 0..10 {
-                let before = Utc::now();
+                let window = StateAssert::begin();
                 f.syncer.sync().await.unwrap();
-                let after = Utc::now();
+                let window = window.end();
 
                 // check the sync state
                 let state = f.syncer.get_sync_state().await.unwrap();
-                assert_eq!(
-                    f.syncer.get_cooldown_ends_at().await.unwrap(),
-                    state.cooldown_ends_at
-                );
-                let window = StateAssert::new(before, after);
+                assert!(!f.syncer.get_remaining_cooldown().await.unwrap().is_zero());
                 window.assert_success(&state, base_cooldown_duration, 0);
 
                 // double check sync state functions
@@ -895,7 +939,7 @@ mod tests {
                 // reset the syncer state
                 f.syncer
                     .set_sync_state(State {
-                        cooldown_ends_at: before,
+                        cooldown_ends: None,
                         ..state
                     })
                     .await
@@ -934,15 +978,14 @@ mod tests {
                 }))
             });
 
-            let before = Utc::now();
+            let window = StateAssert::begin();
             let error = f.syncer.sync().await.unwrap_err();
-            let after = Utc::now();
+            let window = window.end();
             assert!(error.is_network_conn_err());
 
             // err_streak should be unchanged (not incremented, not reset)
             let state = f.syncer.get_sync_state().await.unwrap();
-            let window = StateAssert::new(before, after);
-            let base_cooldown = TimeDelta::seconds(f.backoff.base_secs);
+            let base_cooldown = Duration::from_secs(f.backoff.base_secs as u64);
             window.assert_failed(&state, base_cooldown, 3);
         }
     }
@@ -1011,13 +1054,12 @@ mod tests {
             let f = Fixture::new("sync_system_metadata_failure").await;
             f.http_client.set_update_device(|| Err(http_err(false)));
 
-            let before = Utc::now();
+            let window = StateAssert::begin();
             f.syncer.sync().await.unwrap();
-            let after = Utc::now();
+            let window = window.end();
 
             let state = f.syncer.get_sync_state().await.unwrap();
-            let window = StateAssert::new(before, after);
-            let base_cooldown = TimeDelta::seconds(f.backoff.base_secs);
+            let base_cooldown = Duration::from_secs(f.backoff.base_secs as u64);
             window.assert_success(&state, base_cooldown, 0);
 
             assert_eq!(f.http_client.call_count(Call::UpdateDevice), 1);
@@ -1035,7 +1077,7 @@ mod tests {
 
             f.syncer
                 .set_sync_state(State {
-                    cooldown_ends_at: Utc::now() + TimeDelta::seconds(10),
+                    cooldown_ends: Some(Instant::now() + Duration::from_secs(10)),
                     ..State::default()
                 })
                 .await
@@ -1050,12 +1092,11 @@ mod tests {
         async fn syncs_when_not_in_cooldown() {
             let f = Fixture::new("sync_if_not_in_cooldown_run").await;
 
-            let before = Utc::now();
+            let window = StateAssert::begin();
             f.syncer.sync_if_not_in_cooldown().await.unwrap();
-            let after = Utc::now();
+            let window = window.end();
 
             let state = f.syncer.get_sync_state().await.unwrap();
-            let window = StateAssert::new(before, after);
             window.assert_between(state.last_attempted_sync_at, TimeDelta::zero());
         }
     }
@@ -1272,11 +1313,9 @@ mod tests {
             // independent of the deployment's cooldown (5s). Verify the
             // syncer's cooldown is short (success_wait = 1s, not 5s).
             let state = f.syncer.get_sync_state().await.unwrap();
-            let syncer_cooldown = state
-                .cooldown_ends_at
-                .signed_duration_since(state.last_synced_at);
+            let syncer_cooldown = state.remaining_cooldown();
             assert!(
-                syncer_cooldown <= TimeDelta::seconds(2),
+                syncer_cooldown <= Duration::from_secs(2),
                 "syncer cooldown should be ~1s (success_wait), got {:?}",
                 syncer_cooldown
             );

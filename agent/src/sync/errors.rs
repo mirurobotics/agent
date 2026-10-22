@@ -31,6 +31,9 @@ pub type ReceiveActorMessageErr = crate::cache::errors::ReceiveActorMessageErr;
 #[derive(Debug, thiserror::Error)]
 pub struct SyncerInCooldownErr {
     pub err_streak: u32,
+    /// How much of the cooldown was left when the sync was refused.
+    pub remaining_cooldown: std::time::Duration,
+    /// When the cooldown ends by the system clock, for display only.
     pub cooldown_ends_at: DateTime<Utc>,
     pub trace: Box<Trace>,
 }
@@ -38,10 +41,7 @@ pub struct SyncerInCooldownErr {
 impl std::fmt::Display for SyncerInCooldownErr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let err_streak = self.err_streak;
-        let cooldown_secs = self
-            .cooldown_ends_at
-            .signed_duration_since(Utc::now())
-            .num_seconds();
+        let cooldown_secs = self.remaining_cooldown.as_secs();
         let cooldown_ends_at = self.cooldown_ends_at;
         write!(f, "cannot sync device because the syncer is in cooldown (err streak of {err_streak}) for {cooldown_secs} seconds (cooldown ends at: {cooldown_ends_at})",
         )
