@@ -19,9 +19,9 @@ use tracing::debug;
 pub struct Client {
     client: reqwest::Client,
     base_url: String,
-    /// `base_url` parsed, so responses can be checked against the backend's
-    /// origin before their `Date` header is recorded.
-    backend_url: Option<reqwest::Url>,
+    /// The URL whose responses may set the clock: `base_url`, parsed. Only a
+    /// response from this URL's origin has its `Date` header recorded.
+    clock_url: Option<reqwest::Url>,
     headers: request::Headers,
     clock: Clock,
 }
@@ -91,7 +91,7 @@ impl Client {
         Ok(Client {
             client,
             base_url: base_url.to_string(),
-            backend_url: reqwest::Url::parse(base_url).ok(),
+            clock_url: reqwest::Url::parse(base_url).ok(),
             headers: request::Headers::default(),
             clock,
         })
@@ -115,7 +115,7 @@ impl Client {
             })),
             Ok(Err(e)) => Err(reqwest_err_to_http_client_err(e, req.meta, trace!())),
             Ok(Ok(response)) => {
-                self.observe_backend_date(&response);
+                self.observe_server_time(&response);
                 Ok(response::Response {
                     reqwest: response,
                     meta: req.meta,
@@ -125,11 +125,11 @@ impl Client {
     }
 
     /// Records the response's `Date` header (and `Age`, if a cache served it),
-    /// error statuses included, but only when the response came from the
-    /// backend. A request to any other host, or a redirect to one, must not set
-    /// the agent's time.
-    fn observe_backend_date(&self, response: &reqwest::Response) {
-        if !self.is_backend(response.url()) {
+    /// error statuses included, but only when the response came from
+    /// `clock_url`'s origin. A request to any other host, or a redirect to one,
+    /// must not set the agent's time.
+    fn observe_server_time(&self, response: &reqwest::Response) {
+        if !self.is_clock_source(response.url()) {
             return;
         }
         let headers = response.headers();
@@ -143,11 +143,11 @@ impl Client {
         }
     }
 
-    /// Whether `url` has the same scheme, host and port as the backend.
-    fn is_backend(&self, url: &reqwest::Url) -> bool {
-        self.backend_url
+    /// Whether `url` has the same scheme, host and port as `clock_url`.
+    fn is_clock_source(&self, url: &reqwest::Url) -> bool {
+        self.clock_url
             .as_ref()
-            .is_some_and(|backend| backend.origin() == url.origin())
+            .is_some_and(|clock_url| clock_url.origin() == url.origin())
     }
 }
 
