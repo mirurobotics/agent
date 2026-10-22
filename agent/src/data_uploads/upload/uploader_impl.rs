@@ -206,26 +206,24 @@ where
                 wait_secs,
             } => {
                 entry.attempts = attempts;
-                Self::log_retry(&entry, wait_secs, &err);
+                Self::log_failure(&entry, &err);
                 self.retry_after(&entry, wait_secs).await;
             }
             Verdict::Terminal { attempts } => {
                 entry.attempts = attempts;
-                Self::log_counted_failure(&entry, &err);
+                Self::log_failure(&entry, &err);
                 Self::log_terminal_drop(&entry, &err);
                 self.queue.ack(entry.id).await;
             }
             Verdict::OutOfAttempts { attempts } => {
                 entry.attempts = attempts;
-                Self::log_counted_failure(&entry, &err);
+                Self::log_failure(&entry, &err);
                 Self::log_dropped(&entry, &err);
                 self.queue.ack(entry.id).await;
             }
             Verdict::TooOld { attempts, age } => {
-                if !err.is_network_conn_err() {
-                    entry.attempts = attempts;
-                    Self::log_counted_failure(&entry, &err);
-                }
+                entry.attempts = attempts;
+                Self::log_failure(&entry, &err);
                 Self::log_age_drop(&entry, age, &err);
                 self.queue.ack(entry.id).await;
             }
@@ -237,24 +235,29 @@ where
     async fn retry_after(&mut self, entry: &QueueEntry, wait_secs: i64) {
         let file = &entry.job.file;
         let attempts = entry.attempts;
-        info!("upload: requeuing {file} at tail after {attempts} attempt(s)");
+        info!(
+            "upload: requeuing {file} at tail after {attempts} attempt(s), retrying in \
+             {wait_secs}s"
+        );
         let next_attempt_at = (self.now_fn)() + TimeDelta::seconds(wait_secs);
         self.queue.retry(entry.id, attempts, next_attempt_at).await;
     }
 
-    /// A network retry logs at debug, since it repeats every `base_secs` while
-    /// the device is offline; a counted one logs the failure and the wait.
-    fn log_retry(entry: &QueueEntry, wait_secs: i64, err: &UploadErr) {
-        let file = &entry.job.file;
+    /// A network error logs at debug, since it repeats every `base_secs` while
+    /// the device is offline; any other failure counts and logs at warn.
+    fn log_failure(entry: &QueueEntry, err: &UploadErr) {
         if err.is_network_conn_err() {
-            debug!(
-                "upload: network connection error for file {file}; not counting attempt, \
-                 retrying in {wait_secs}s: {err:?}"
-            );
-            return;
+            Self::log_network_conn_err(entry, err);
+        } else {
+            Self::log_counted_failure(entry, err);
         }
-        Self::log_counted_failure(entry, err);
-        info!("upload: retrying {file} in {wait_secs}s");
+    }
+
+    fn log_network_conn_err(entry: &QueueEntry, err: &UploadErr) {
+        debug!(
+            "upload: network connection error for file {}; not counting attempt: {err:?}",
+            entry.job.file
+        );
     }
 
     fn log_counted_failure(entry: &QueueEntry, err: &UploadErr) {
