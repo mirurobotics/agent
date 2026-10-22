@@ -45,6 +45,7 @@ impl MockSyncer {
                 last_synced_at: DateTime::<Utc>::UNIX_EPOCH,
                 cooldown_ends_at: DateTime::<Utc>::UNIX_EPOCH,
                 err_streak: 0,
+                last_synced: None,
             }))),
             sync_fn: Arc::new(Mutex::new(Box::new(|| Ok(())))),
 
@@ -98,6 +99,10 @@ impl SyncerExt for MockSyncer {
 
     async fn get_sync_state(&self) -> Result<State, SyncErr> {
         Ok((*self.get_sync_state_fn.lock().unwrap())())
+    }
+
+    fn latest_sync_state(&self) -> State {
+        (*self.get_sync_state_fn.lock().unwrap())()
     }
 
     async fn is_in_cooldown(&self) -> Result<bool, SyncErr> {

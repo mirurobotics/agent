@@ -54,6 +54,7 @@ pub mod run {
             last_synced_at: Utc::now(),
             cooldown_ends_at: Utc::now(),
             err_streak: 0,
+            last_synced: None,
         };
         syncer.set_state(state);
 
@@ -139,6 +140,7 @@ pub mod run {
             last_synced_at: Utc::now(),
             cooldown_ends_at: Utc::now() + TimeDelta::seconds(secs_until_cooldown_ends),
             err_streak: 0,
+            last_synced: None,
         };
         syncer.set_state(state);
 
@@ -223,6 +225,7 @@ pub mod run {
             last_synced_at: Utc::now(),
             cooldown_ends_at: Utc::now(),
             err_streak: 0,
+            last_synced: None,
         };
         syncer.set_state(state);
 
@@ -291,6 +294,7 @@ pub mod run {
             last_synced_at: Utc::now(),
             cooldown_ends_at: Utc::now() - TimeDelta::seconds(10),
             err_streak: 0,
+            last_synced: None,
         };
         syncer.set_state(state);
 
@@ -353,6 +357,7 @@ pub mod run {
             last_synced_at: Utc::now(),
             cooldown_ends_at: Utc::now(),
             err_streak: 0,
+            last_synced: None,
         };
         syncer.set_state(state);
 
@@ -415,6 +420,7 @@ pub mod run {
             last_synced_at: Utc::now(),
             cooldown_ends_at: Utc::now() - TimeDelta::seconds(10),
             err_streak: 0,
+            last_synced: None,
         };
         syncer.set_state(state);
 

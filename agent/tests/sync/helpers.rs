@@ -232,6 +232,7 @@ impl StateAssert {
         self.assert_between(state.last_synced_at, TimeDelta::zero());
         self.assert_between(state.cooldown_ends_at, cooldown);
         assert_eq!(state.err_streak, err_streak);
+        assert!(state.last_synced.is_some());
     }
 
     /// Assert state after a failed sync (last_synced_at unchanged at UNIX_EPOCH):
@@ -244,5 +245,6 @@ impl StateAssert {
         assert_eq!(state.last_synced_at, DateTime::<Utc>::UNIX_EPOCH);
         self.assert_between(state.cooldown_ends_at, cooldown);
         assert_eq!(state.err_streak, err_streak);
+        assert_eq!(state.last_synced, None);
     }
 }

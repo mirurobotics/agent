@@ -4,11 +4,12 @@ use std::sync::Arc;
 
 // internal crates
 use crate::errors::Error;
-use crate::server::{errors::*, state::State};
+use crate::server::{errors::*, response, state::State};
 use crate::services::{
     deployment as dpl_svc, device as dvc_svc, file_rule as file_rule_svc,
     git_commit as git_cmt_svc, release as rls_svc, HttpBackend,
 };
+use crate::sync::SyncerExt;
 use crate::version;
 use device_api::models as device_server;
 
@@ -55,7 +56,10 @@ pub async fn get_device(AxumState(state): AxumState<Arc<State>>) -> impl IntoRes
     handle(
         async move {
             let device = dvc_svc::get(&state.storage.device).await?;
-            Ok::<_, ServerErr>(device_server::Device::from(&device))
+            // the latest snapshot, so a sync in progress does not hold up the read
+            let sync_state = state.syncer.latest_sync_state();
+            let secs_since_last_sync = dvc_svc::secs_since_last_sync(&sync_state);
+            Ok::<_, ServerErr>(response::to_device(&device, secs_since_last_sync))
         },
         "Error getting device",
     )

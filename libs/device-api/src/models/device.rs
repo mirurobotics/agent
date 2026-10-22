@@ -22,19 +22,22 @@ pub struct Device {
     pub name: String,
     #[serde(rename = "status")]
     pub status: models::DeviceStatus,
-    /// Timestamp of when the device was last synced.
+    /// Timestamp of when the device was last synced. For display only; it comes from the device's clock, which may be wrong. Use `secs_since_last_sync` to decide how long ago the device synced.
     #[serde(rename = "last_synced_at")]
     pub last_synced_at: String,
-    /// Timestamp of the last successful connection event with the backend.
+    /// Timestamp of the last successful connection event with the backend. For display only; it comes from the device's clock, which may be wrong.
     #[serde(rename = "last_connected_at")]
     pub last_connected_at: String,
-    /// Timestamp of the last successful disconnection event with the backend.
+    /// Timestamp of the last successful disconnection event with the backend. For display only; it comes from the device's clock, which may be wrong.
     #[serde(rename = "last_disconnected_at")]
     pub last_disconnected_at: String,
+    /// Seconds since the agent last synced with the backend, measured with a clock that does not jump when the device's time changes. `null` if the agent has not synced since it started.
+    #[serde(rename = "secs_since_last_sync", deserialize_with = "Option::deserialize")]
+    pub secs_since_last_sync: Option<i64>,
 }
 
 impl Device {
-    pub fn new(object: Object, id: String, name: String, status: models::DeviceStatus, last_synced_at: String, last_connected_at: String, last_disconnected_at: String) -> Device {
+    pub fn new(object: Object, id: String, name: String, status: models::DeviceStatus, last_synced_at: String, last_connected_at: String, last_disconnected_at: String, secs_since_last_sync: Option<i64>) -> Device {
         Device {
             object,
             id,
@@ -43,6 +46,7 @@ impl Device {
             last_synced_at,
             last_connected_at,
             last_disconnected_at,
+            secs_since_last_sync,
         }
     }
 }

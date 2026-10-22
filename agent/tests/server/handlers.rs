@@ -177,6 +177,8 @@ pub mod routes {
             let actual: openapi::Device = serde_json::from_slice(&bytes).unwrap();
             // default device has empty id and offline status
             assert_eq!(actual.status, openapi::DeviceStatus::DEVICE_STATUS_OFFLINE);
+            // the fixture's syncer has no worker, so it reports not synced
+            assert_eq!(actual.secs_since_last_sync, None);
         }
 
         #[tokio::test]
