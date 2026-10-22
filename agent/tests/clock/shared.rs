@@ -76,6 +76,26 @@ pub mod system_now {
     }
 }
 
+pub mod monotonic_now {
+    use super::*;
+
+    #[test]
+    fn is_the_monotonic_clock() {
+        let fake = Fake::new(epoch());
+        let start = fake.clock.monotonic_now();
+        fake.advance(Duration::from_secs(7));
+        assert_eq!(fake.clock.monotonic_now(), start + Duration::from_secs(7));
+    }
+
+    #[test]
+    fn ignores_system_clock_jumps() {
+        let fake = Fake::new(epoch());
+        let start = fake.clock.monotonic_now();
+        fake.jump_system_clock(real());
+        assert_eq!(fake.clock.monotonic_now(), start);
+    }
+}
+
 pub mod elapsed_since {
     use super::*;
 
