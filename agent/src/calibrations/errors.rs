@@ -57,7 +57,8 @@ impl crate::errors::Error for CalibrationTooLargeErr {
     }
 }
 
-/// A buffered report that can never be sent, because its file is not UTF-8.
+/// A buffered report that can never be sent, because its file is missing or
+/// not UTF-8.
 /// Terminal, so the worker drops it instead of retrying.
 #[derive(Debug, thiserror::Error)]
 #[error("invalid calibration report: {reason}")]

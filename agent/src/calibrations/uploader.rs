@@ -84,19 +84,12 @@ where
         info!("calibrations: uploader shutdown complete");
     }
 
-    /// Send the report queued as `entry` and settle it. A shutdown mid-send
-    /// leaves the report queued, to be re-sent on the next boot.
+    /// Upload the report queued as `entry` and settle it. A shutdown
+    /// mid-upload leaves the report queued, to be re-sent on the next boot.
     async fn attempt(&mut self, entry: QueueEntry) -> Flow {
-        let result = match self.uploader.read(&entry).await {
-            Ok(Some(report)) => {
-                let send = self.uploader.send(report);
-                let Some(result) = self.serve_until(send).await else {
-                    return Flow::Shutdown;
-                };
-                result
-            }
-            Ok(None) => return Flow::Continue,
-            Err(err) => Err(err),
+        let upload = self.uploader.upload(&entry);
+        let Some(result) = self.serve_until(upload).await else {
+            return Flow::Shutdown;
         };
         self.uploader.finish(entry, result).await;
         Flow::Continue

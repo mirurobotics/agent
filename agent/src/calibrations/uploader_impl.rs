@@ -11,9 +11,7 @@ use crate::calibrations::{
     sender::Sender,
 };
 use crate::errors::Error;
-use crate::filesys::{
-    dirs, errors::ConvertUTF8Err, files, Dir, File, FileSysErr, PathExt, WriteOptions,
-};
+use crate::filesys::{dirs, files, Dir, File, FileSysErr, PathExt, WriteOptions};
 use crate::queue::{self, Persistence, RetryPolicy, Verdict};
 use crate::trace;
 
@@ -120,7 +118,7 @@ where
 
     /// Queue `report` and return its id. The queue entry is written before
     /// the report file, so a crash between the two leaves an entry without a
-    /// file, which [`Self::read`] drops. On error nothing is queued.
+    /// file, which [`Self::upload`] fails for good. On error nothing is queued.
     pub(crate) async fn enqueue(&mut self, report: Report) -> Result<Uuid, CalibrationsErr> {
         let bytes = report.data.into_bytes();
         self.verify_size(bytes.len() as u64)?;
@@ -150,35 +148,23 @@ where
         self.queue.reset_invalid_deadlines(now).await;
     }
 
-    /// The report to send for `entry`. `Ok(None)` when its file is gone: the
-    /// entry is dropped, since there is nothing left to send.
-    pub(crate) async fn read(
-        &mut self,
+    /// Upload the report queued as `entry`: read its file, then send it. The
+    /// future owns what it needs and borrows nothing from `self`, so the
+    /// worker can serve commands while it runs.
+    pub(crate) fn upload(
+        &self,
         entry: &QueueEntry,
-    ) -> Result<Option<Report>, CalibrationsErr> {
-        let id = entry.id;
+    ) -> impl Future<Output = Result<(), CalibrationsErr>> {
+        let sender = self.sender.clone();
         let metadata = entry.job.clone();
-        match files::read_string(&self.report_file(id)).await {
-            Ok(data) => Ok(Some(Report { metadata, data })),
-            Err(FileSysErr::PathDoesNotExistErr(_)) => {
-                error!("calibrations: dropping report {id}, whose file is missing");
-                self.queue.ack(id).await;
-                Ok(None)
-            }
-            Err(FileSysErr::ConvertUTF8Err(e)) => Err(unreadable(e)),
-            Err(e) => Err(e.into()),
+        let file = self.report_file(entry.id);
+        async move {
+            let data = read(&file).await?;
+            sender.send(&Report { metadata, data }).await
         }
     }
 
-    /// Build the upload of `report`. The future owns what it needs and
-    /// borrows nothing from `self`, so the worker can serve commands while it
-    /// runs.
-    pub(crate) fn send(&self, report: Report) -> impl Future<Output = Result<(), CalibrationsErr>> {
-        let sender = self.sender.clone();
-        async move { sender.send(&report).await }
-    }
-
-    /// Settle `entry` once its send (or read) ended in `result`: remove it
+    /// Settle `entry` once its upload ended in `result`: remove it
     /// when sent, otherwise retry or drop it as the retry policy says.
     pub(crate) async fn finish(&mut self, entry: QueueEntry, result: Result<(), CalibrationsErr>) {
         let err = match result {
@@ -267,10 +253,23 @@ async fn delete(file: &File) {
     }
 }
 
-/// A report file that is not UTF-8 can never be sent.
-fn unreadable(e: ConvertUTF8Err) -> CalibrationsErr {
+/// The data in report `file`. A missing file or one that isn't UTF-8 can
+/// never be sent, so either is a terminal [`InvalidReportErr`]; any other
+/// read error is retried.
+async fn read(file: &File) -> Result<String, CalibrationsErr> {
+    match files::read_string(file).await {
+        Ok(data) => Ok(data),
+        Err(FileSysErr::PathDoesNotExistErr(_)) => Err(invalid("the report file is missing")),
+        Err(FileSysErr::ConvertUTF8Err(e)) => {
+            Err(invalid(&format!("the report file is not UTF-8: {e}")))
+        }
+        Err(e) => Err(e.into()),
+    }
+}
+
+fn invalid(reason: &str) -> CalibrationsErr {
     CalibrationsErr::InvalidReportErr(InvalidReportErr {
-        reason: format!("the report file is not UTF-8: {e}"),
+        reason: reason.to_string(),
         trace: trace!(),
     })
 }
