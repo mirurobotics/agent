@@ -90,7 +90,7 @@ where
 {
     pub(crate) async fn run(mut self) {
         loop {
-            match self.uploader.next_attempt().await {
+            match self.uploader.next_attempt() {
                 NextAttempt::Ready(entry) => {
                     if let Flow::Shutdown = self.run_attempt(entry).await {
                         break;

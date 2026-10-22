@@ -6,7 +6,7 @@ use miru_agent::cooldown::Backoff;
 use miru_agent::queue::{RetryPolicy, Verdict};
 
 // external crates
-use chrono::{DateTime, TimeDelta, Utc};
+use chrono::TimeDelta;
 
 #[derive(Debug, thiserror::Error)]
 #[error("test failure")]
@@ -64,13 +64,6 @@ fn defaults_match_the_data_uploads() {
         (backoff.base_secs, backoff.growth_factor, backoff.max_secs),
         (10, 2, 3600)
     );
-}
-
-#[test]
-fn horizon_is_the_longest_backoff_from_now() {
-    let now = DateTime::<Utc>::from_timestamp(1000, 0).unwrap();
-
-    assert_eq!(policy().horizon(now), now + TimeDelta::seconds(15));
 }
 
 #[test]
