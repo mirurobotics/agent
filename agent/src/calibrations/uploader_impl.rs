@@ -151,8 +151,9 @@ where
         self.queue.next_attempt(now, horizon).await
     }
 
-    /// Make every waiting report due now, once Miru is reachable again.
-    pub(crate) async fn retry_now(&mut self) {
+    /// Clear every report's retry cooldown so it is due now, once Miru is
+    /// reachable again.
+    pub(crate) async fn clear_retry_cooldowns(&mut self) {
         let now = (self.now_fn)();
         self.queue.reset_invalid_deadlines(now).await;
     }

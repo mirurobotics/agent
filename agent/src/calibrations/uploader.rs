@@ -130,7 +130,7 @@ where
                 }
                 event = next_sync_event(&mut self.events) => {
                     if self.reconnected(event) {
-                        self.uploader.retry_now().await;
+                        self.uploader.clear_retry_cooldowns().await;
                         return Flow::Continue;
                     }
                 }
