@@ -1079,22 +1079,27 @@ mod durability {
         (uploader, handle, sleeps)
     }
 
-    /// Seed `path` with one entry stamped `deadline`, as a snapshot written
-    /// before a clock step would look.
+    /// Seed `path` with one retried entry carrying the wall-clock
+    /// `next_attempt_at` an older agent saved.
     async fn seed(path: &File, deadline: DateTime<Utc>) -> Job {
         let job = make_job("stranded.log");
-        let mut snapshot = open(path).await;
-        snapshot
-            .patch(QueueSnapshot {
-                entries: vec![QueueEntry {
-                    id: uuid::Uuid::new_v4(),
-                    job: job.clone(),
-                    attempts: 1,
-                    next_attempt_at: Some(deadline),
-                }],
-            })
-            .await
-            .unwrap();
+        let snapshot = QueueSnapshot {
+            entries: vec![QueueEntry {
+                id: uuid::Uuid::new_v4(),
+                job: job.clone(),
+                attempts: 1,
+                next_attempt_at: None,
+            }],
+        };
+        let mut value = serde_json::to_value(&snapshot).unwrap();
+        value["entries"][0]["next_attempt_at"] = serde_json::json!(deadline);
+        miru_agent::filesys::files::write_string(
+            path,
+            &value.to_string(),
+            miru_agent::filesys::WriteOptions::OVERWRITE_ATOMIC,
+        )
+        .await
+        .unwrap();
         job
     }
 
@@ -1228,38 +1233,13 @@ mod durability {
         timed(handle).await.unwrap();
     }
 
+    /// Older agents saved a wall-clock deadline; it is ignored, so however
+    /// far out a clock step pushed it, the entry uploads without waiting.
     #[tokio::test]
-    async fn a_deadline_past_the_max_backoff_is_pulled_back_before_sleeping() {
+    async fn a_saved_deadline_is_ignored_after_a_restart() {
         let dir = test_dirs::temp("uploader_stranded").unwrap();
         let path = dir.to_dir().file("upload_queue.json");
-        // 48h out: unreachable under the default 1h maximum backoff, so only a
-        // clock step could have produced it
-        seed(&path, Utc::now() + TimeDelta::hours(48)).await;
-        let (mock, mut started_rx) = MockUploadExecutor::new();
-        mock.push_step(MockStep::Ok);
-
-        let (uploader, handle, sleeps) =
-            spawn_persisted_with_test_clock(mock.clone(), open(&path).await);
-
-        // the worker waits one maximum backoff, not 48 hours, and then uploads
-        timed(started_rx.recv()).await.unwrap();
-        assert_eq!(
-            *sleeps.lock().unwrap(),
-            vec![Duration::from_secs(3600)],
-            "the stranded deadline should have been pulled back to the horizon"
-        );
-
-        timed(uploader.shutdown()).await.unwrap();
-        timed(handle).await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn a_deadline_inside_the_max_backoff_is_left_alone() {
-        let dir = test_dirs::temp("uploader_backoff_kept").unwrap();
-        let path = dir.to_dir().file("upload_queue.json");
-        // an ordinary backoff stamp: the worker must honor it rather than
-        // treating every future deadline as a clock anomaly
-        seed(&path, Utc::now() + TimeDelta::seconds(60)).await;
+        let job = seed(&path, Utc::now() + TimeDelta::hours(48)).await;
         let (mock, mut started_rx) = MockUploadExecutor::new();
         mock.push_step(MockStep::Ok);
 
@@ -1267,11 +1247,9 @@ mod durability {
             spawn_persisted_with_test_clock(mock.clone(), open(&path).await);
 
         timed(started_rx.recv()).await.unwrap();
-        let waited = sleeps.lock().unwrap().first().copied().unwrap();
-        assert!(
-            waited <= Duration::from_secs(60),
-            "an in-range backoff must be honored, waited {waited:?}"
-        );
+        await_drained(&uploader).await;
+        assert!(sleeps.lock().unwrap().is_empty());
+        assert_eq!(mock.recorded_calls(), vec![job]);
 
         timed(uploader.shutdown()).await.unwrap();
         timed(handle).await.unwrap();

@@ -114,10 +114,9 @@ where
     }
 
     /// The entry to attempt now, or how long until one is eligible.
-    pub(crate) async fn next_attempt(&mut self) -> NextAttempt<Job> {
-        let now = self.clock.system_now();
-        let horizon = self.options.retry.horizon(now);
-        self.queue.next_attempt(now, horizon).await
+    pub(crate) fn next_attempt(&self) -> NextAttempt<Job> {
+        self.queue
+            .next_attempt(self.clock.system_now(), self.clock.monotonic_now())
     }
 
     /// Build one executor attempt on `entry`, bounded by its size-scaled
@@ -229,8 +228,8 @@ where
         }
     }
 
-    /// Retry `entry` at the tail once `wait_secs` have passed, recording its
-    /// attempt count.
+    /// Retry `entry` at the tail once `wait_secs` have passed on the
+    /// monotonic clock, recording its attempt count.
     async fn retry_after(&mut self, entry: &QueueEntry, wait_secs: i64) {
         let file = &entry.job.file;
         let attempts = entry.attempts;
@@ -238,7 +237,8 @@ where
             "upload: requeuing {file} at tail after {attempts} attempt(s), retrying in \
              {wait_secs}s"
         );
-        let next_attempt_at = self.clock.system_now() + TimeDelta::seconds(wait_secs);
+        let wait = Duration::from_secs(u64::try_from(wait_secs).unwrap_or(0));
+        let next_attempt_at = self.clock.monotonic_now() + wait;
         self.queue.retry(entry.id, attempts, next_attempt_at).await;
     }
 

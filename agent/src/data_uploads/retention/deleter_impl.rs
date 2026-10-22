@@ -1,6 +1,6 @@
 // standard crates
 use std::fs::Metadata;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 // internal crates
 use crate::clock::Clock;
@@ -14,15 +14,15 @@ use crate::filesys::{errors::FileSysErr, files};
 use crate::queue::Persistence;
 
 // external crates
-use chrono::{DateTime, TimeDelta, Utc};
+use chrono::{DateTime, Utc};
 use tracing::{error, info, warn};
 
 const DEFAULT_QUEUE_CAPACITY: usize = 4096;
 const DEFAULT_ATTEMPTS: u32 = 10;
 
 pub struct DeleterArgs {
-    /// The clock that decides when a job's TTL has elapsed and when a failed
-    /// delete may be retried.
+    /// System time decides when a job's TTL has elapsed; monotonic time
+    /// decides when a failed delete may be retried.
     pub clock: Clock,
     pub queue_capacity: usize,
     pub snapshot_file: Option<DeleteQueueSnapshotFile>,
@@ -92,16 +92,17 @@ impl DeleterImpl {
 
     pub(crate) async fn sweep(&mut self) -> Result<(), DeleteErr> {
         let now = self.clock.system_now();
+        let instant = self.clock.monotonic_now();
         // Budget: one visit per entry that is due at `now`. A retried entry is
         // requeued at the tail, behind every entry not yet visited, so this
         // budget is exactly enough to visit each due entry once and never
         // twice.
-        for _ in 0..self.queue.count_ready(now) {
-            let Some(entry) = self.queue.next_ready(now) else {
+        for _ in 0..self.queue.count_ready(now, instant) {
+            let Some(entry) = self.queue.next_ready(now, instant) else {
                 break;
             };
             match Self::sweep_entry(&entry.job).await {
-                SweepOutcome::Failed => self.handle_counted_failure(entry, now).await,
+                SweepOutcome::Failed => self.handle_counted_failure(entry).await,
                 SweepOutcome::Deleted | SweepOutcome::AlreadyGone | SweepOutcome::Changed => {
                     self.queue.ack(entry.id).await;
                 }
@@ -112,7 +113,7 @@ impl DeleterImpl {
 
     /// Counted failures bump the attempt budget. Drop when the budget is
     /// exhausted; otherwise stamp the growing backoff and requeue at the tail.
-    async fn handle_counted_failure(&mut self, mut entry: QueueEntry, now: DateTime<Utc>) {
+    async fn handle_counted_failure(&mut self, mut entry: QueueEntry) {
         entry.attempts += 1;
         if entry.attempts >= self.attempts {
             Self::log_exhausted_drop(&entry);
@@ -125,7 +126,8 @@ impl DeleterImpl {
             "delete: attempt {} of {} failed for {}; retrying in {wait}s",
             entry.attempts, self.attempts, entry.job.file
         );
-        let next_attempt_at = now + TimeDelta::seconds(wait);
+        let wait = Duration::from_secs(u64::try_from(wait).unwrap_or(0));
+        let next_attempt_at = self.clock.monotonic_now() + wait;
         self.queue
             .retry(entry.id, entry.attempts, next_attempt_at)
             .await;
@@ -227,6 +229,8 @@ impl DeleterImpl {
 #[cfg(test)]
 mod tests {
     // standard crates
+    use std::time::Duration;
+
     // internal crates
     use super::{DeleterArgs, DeleterImpl, SweepOutcome};
     use crate::cooldown;
@@ -863,7 +867,7 @@ mod tests {
             assert_eq!(entry.attempts, 1);
             assert_eq!(
                 entry.next_attempt_at,
-                Some(DateTime::from_timestamp(1010, 0).unwrap())
+                Some(clock.monotonic_now() + Duration::from_secs(10))
             );
 
             // still deferred: the next sweep must not touch it.
@@ -873,6 +877,28 @@ mod tests {
 
             // due exactly at next_attempt_at.
             clock.advance_secs(1);
+            deleter.sweep().await.unwrap();
+            assert_eq!(deleter.queue.queue_entries()[0].attempts, 2);
+        }
+
+        /// The deadline is on the monotonic clock: a system clock jump far
+        /// past it does not bring the retry forward.
+        #[tokio::test]
+        async fn a_system_clock_jump_does_not_end_the_wait() {
+            let dir = test_dirs::temp("delete-backoff-jump").unwrap();
+            let clock = FakeClock::at_secs(1000);
+            let mut deleter = backoff_deleter(&clock, None).await;
+            deleter
+                .enqueue(undeletable_dir_job(&dir, at(1000)).await)
+                .await
+                .unwrap();
+            deleter.sweep().await.unwrap();
+
+            clock.set_system(at(1000 + 86_400));
+            deleter.sweep().await.unwrap();
+            assert_eq!(deleter.queue.queue_entries()[0].attempts, 1);
+
+            clock.advance_secs(10);
             deleter.sweep().await.unwrap();
             assert_eq!(deleter.queue.queue_entries()[0].attempts, 2);
         }
@@ -888,21 +914,24 @@ mod tests {
                 .unwrap();
 
             // 10, 20, 40, then pinned at the 40s cap.
-            let mut at = 1000;
+            let start = clock.monotonic_now();
+            let mut elapsed = 0;
             for wait in [10, 20, 40, 40, 40] {
                 deleter.sweep().await.unwrap();
-                at += wait;
+                elapsed += wait;
                 assert_eq!(
                     deleter.queue.queue_entries()[0].next_attempt_at,
-                    Some(DateTime::from_timestamp(at, 0).unwrap()),
+                    Some(start + Duration::from_secs(elapsed)),
                     "after a {wait}s wait"
                 );
-                clock.advance_secs(wait as u64);
+                clock.advance_secs(wait);
             }
         }
 
+        /// The retry deadline is not saved, so a restart retries right away;
+        /// the attempt count is saved, so the backoff keeps growing.
         #[tokio::test]
-        async fn next_attempt_at_survives_a_reload() {
+        async fn the_retry_deadline_does_not_survive_a_reload() {
             let dir = test_dirs::temp("delete-backoff-reload").unwrap();
             let state_path = dir.file("delete_queue.json");
             let clock = FakeClock::at_secs(1000);
@@ -914,12 +943,14 @@ mod tests {
             deleter.sweep().await.unwrap();
             drop(deleter);
 
-            let restored = backoff_deleter(&clock, Some(&state_path)).await;
+            let mut restored = backoff_deleter(&clock, Some(&state_path)).await;
+            let entry = restored.queue.queue_entries()[0].clone();
+            assert_eq!((entry.attempts, entry.next_attempt_at), (1, None));
 
-            assert_eq!(
-                restored.queue.queue_entries()[0].next_attempt_at,
-                Some(DateTime::from_timestamp(1010, 0).unwrap())
-            );
+            restored.sweep().await.unwrap();
+            let entry = restored.queue.queue_entries()[0].clone();
+            let deadline = clock.monotonic_now() + Duration::from_secs(20);
+            assert_eq!((entry.attempts, entry.next_attempt_at), (2, Some(deadline)));
         }
 
         /// The sweep's loop budget comes from `count_ready` and its pops from
@@ -936,13 +967,14 @@ mod tests {
                 .unwrap();
             deleter.sweep().await.unwrap();
 
-            let deferred = DateTime::from_timestamp(1005, 0).unwrap();
-            assert_eq!(deleter.queue.count_ready(deferred), 0);
-            assert!(deleter.queue.next_ready(deferred).is_none());
+            let now = clock.system_now();
+            let deferred = clock.monotonic_now() + Duration::from_secs(5);
+            assert_eq!(deleter.queue.count_ready(now, deferred), 0);
+            assert!(deleter.queue.next_ready(now, deferred).is_none());
 
-            let due = DateTime::from_timestamp(1010, 0).unwrap();
-            assert_eq!(deleter.queue.count_ready(due), 1);
-            assert!(deleter.queue.next_ready(due).is_some());
+            let due = clock.monotonic_now() + Duration::from_secs(10);
+            assert_eq!(deleter.queue.count_ready(now, due), 1);
+            assert!(deleter.queue.next_ready(now, due).is_some());
         }
     }
 

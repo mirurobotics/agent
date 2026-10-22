@@ -8,6 +8,9 @@
 //! per-worker artifact — and this file is released user data, so a shape change
 //! would wipe a real queue rather than fail.
 
+// standard crates
+use std::time::Instant;
+
 // internal crates
 use crate::queue::file::queue_suite;
 use crate::test_utils::filesys::{abs_path, dirs as test_dirs};
@@ -73,10 +76,11 @@ mod wire {
     use super::*;
 
     /// Pins the persisted wire format on the read side: an entry is
-    /// `{id, job, attempts, next_attempt_at}` with the job's fields nested
+    /// `{id, job, attempts}` with the job's fields nested
     /// rather than flattened. A snapshot that no longer parses is copied aside
     /// and the queue starts empty, so a shape change would drop a live user's
-    /// queued jobs — this test is the guard.
+    /// queued jobs — this test is the guard. The `next_attempt_at` older
+    /// agents wrote must still parse; it is ignored.
     ///
     /// `upload_job` is deterministic, so the expected job comes from it. The
     /// raw `"file"` value is a plain host-rooted string rather than `File`'s
@@ -109,7 +113,7 @@ mod wire {
         let queue = Queue::from_snapshot(8, open(&path).await, Persistence::BestEffort);
 
         assert_eq!(queue.len(), 1);
-        let entry = queue.next_ready(Utc::now()).unwrap();
+        let entry = queue.next_ready(Utc::now(), Instant::now()).unwrap();
         assert_eq!(entry.id, id);
         assert_eq!(entry.job, expected);
     }
@@ -146,7 +150,8 @@ mod wire {
             .unwrap_or_else(|| panic!("entry is not an object: {raw}"));
         let mut keys: Vec<&str> = entry.keys().map(String::as_str).collect();
         keys.sort_unstable();
-        assert_eq!(keys, ["attempts", "id", "job", "next_attempt_at"], "{raw}");
+        // the retry deadline is in memory only and never written
+        assert_eq!(keys, ["attempts", "id", "job"], "{raw}");
 
         // the job stays a nested object; it is never flattened into the entry
         assert!(entry["job"].is_object(), "job is not nested: {raw}");
@@ -156,7 +161,6 @@ mod wire {
             "id is not a uuid string: {raw}"
         );
         assert_eq!(entry["attempts"], 0, "{raw}");
-        assert_eq!(entry["next_attempt_at"], serde_json::Value::Null, "{raw}");
     }
 
     #[tokio::test]
@@ -172,11 +176,10 @@ mod wire {
             }],
         };
 
-        // strip the field a pre-backoff agent never wrote
-        let mut value = serde_json::to_value(&snapshot).unwrap();
-        for entry in value["entries"].as_array_mut().unwrap() {
-            entry.as_object_mut().unwrap().remove("next_attempt_at");
-        }
+        // the deadline is never serialized, so this is also the shape a
+        // pre-backoff agent wrote
+        let value = serde_json::to_value(&snapshot).unwrap();
+        assert!(value["entries"][0].get("next_attempt_at").is_none());
         files::write_string(&path, &value.to_string(), WriteOptions::OVERWRITE_ATOMIC)
             .await
             .unwrap();
@@ -184,7 +187,7 @@ mod wire {
         // if deserialization failed, new_with_default would copy the file
         // aside and start empty, and the pop below would find nothing
         let queue = Queue::from_snapshot(8, open(&path).await, Persistence::BestEffort);
-        let entry = queue.next_ready(Utc::now()).unwrap();
+        let entry = queue.next_ready(Utc::now(), Instant::now()).unwrap();
         assert_eq!(entry.attempts, 2);
         assert_eq!(entry.next_attempt_at, None);
     }

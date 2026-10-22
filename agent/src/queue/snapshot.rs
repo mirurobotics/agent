@@ -1,9 +1,11 @@
+// standard crates
+use std::time::Instant;
+
 // internal crates
 use crate::filesys::state_file::StateFile;
 use crate::models::Patch;
 
 // external crates
-use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -14,9 +16,12 @@ pub struct QueueEntry<J> {
     pub job: J,
     #[serde(default)]
     pub attempts: u32,
-    /// Earliest instant this entry is eligible; `None` means "eligible now".
-    #[serde(default)]
-    pub next_attempt_at: Option<DateTime<Utc>>,
+    /// Monotonic instant before which this entry is not retried; `None` means
+    /// "eligible now". Kept in memory only: snapshots never save it, and a
+    /// `next_attempt_at` in a snapshot written by an older agent is ignored,
+    /// so after a restart every entry is eligible right away.
+    #[serde(skip)]
+    pub next_attempt_at: Option<Instant>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
