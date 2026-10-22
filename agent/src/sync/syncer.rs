@@ -1,4 +1,5 @@
 // standard crates
+use std::future;
 use std::sync::Arc;
 
 // internal crates
@@ -45,6 +46,23 @@ pub enum SyncEvent {
     SyncSuccess,
     SyncFailed(SyncFailure),
     CooldownEnd(CooldownEnd),
+}
+
+/// Wait for the next sync event. A missing subscription remains pending so
+/// subscribers can disable this branch without preventing their other work.
+pub(crate) async fn next_sync_event(
+    subscriber: &mut Option<watch::Receiver<SyncEvent>>,
+) -> Option<SyncEvent> {
+    let Some(subscriber) = subscriber.as_mut() else {
+        return future::pending().await;
+    };
+
+    if subscriber.changed().await.is_err() {
+        return None;
+    }
+
+    let event = subscriber.borrow_and_update().clone();
+    Some(event)
 }
 
 // ================================ ARGS AND STATE ================================= //
@@ -1368,6 +1386,44 @@ mod tests {
 
             assert!(saw_deployment_wait);
             assert!(saw_sync_success);
+        }
+    }
+
+    mod next_sync_event {
+        use super::super::*;
+
+        #[tokio::test]
+        async fn returns_next_event() {
+            let (tx, rx) = watch::channel(SyncEvent::SyncSuccess);
+            let mut subscriber = Some(rx);
+            tx.send(SyncEvent::CooldownEnd(CooldownEnd::SyncSuccess))
+                .unwrap();
+
+            assert!(matches!(
+                next_sync_event(&mut subscriber).await,
+                Some(SyncEvent::CooldownEnd(CooldownEnd::SyncSuccess))
+            ));
+        }
+
+        #[tokio::test]
+        async fn returns_none_when_stream_ends() {
+            let (tx, rx) = watch::channel(SyncEvent::SyncSuccess);
+            let mut subscriber = Some(rx);
+            drop(tx);
+
+            assert!(next_sync_event(&mut subscriber).await.is_none());
+        }
+
+        #[tokio::test]
+        async fn missing_subscription_remains_pending() {
+            let mut subscriber = None;
+
+            assert!(tokio::time::timeout(
+                std::time::Duration::from_millis(10),
+                next_sync_event(&mut subscriber),
+            )
+            .await
+            .is_err());
         }
     }
 }
