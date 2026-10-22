@@ -18,7 +18,6 @@ use miru_agent::data_uploads::upload::{
 use miru_agent::errors::Error;
 use miru_agent::filesys::File;
 use miru_agent::models::FileRuleRetention;
-use miru_agent::queue::RetryPolicy;
 
 // external crates
 use chrono::{DateTime, TimeDelta, Utc};
@@ -219,10 +218,7 @@ async fn attempt_cap_drops_job() {
     }
     mock.push_step(MockStep::Ok);
     let options = UploaderOptions {
-        retry: RetryPolicy {
-            attempts: 3,
-            ..RetryPolicy::default()
-        },
+        attempts: 3,
         ..UploaderOptions::default()
     };
     let (uploader, handle, _sleeps) = spawn_with_test_clock(mock.clone(), options);
@@ -279,14 +275,11 @@ async fn retry_backoff_follows_expected_sequence() {
     mock.push_step(MockStep::Ok);
     // pin the backoff so the assertion is independent of production defaults
     let options = UploaderOptions {
-        retry: RetryPolicy {
-            attempts: 5,
-            backoff: miru_agent::cooldown::Backoff {
-                base_secs: 1,
-                growth_factor: 2,
-                max_secs: 4,
-            },
-            ..RetryPolicy::default()
+        attempts: 5,
+        backoff: miru_agent::cooldown::Backoff {
+            base_secs: 1,
+            growth_factor: 2,
+            max_secs: 4,
         },
         ..UploaderOptions::default()
     };
@@ -323,13 +316,10 @@ async fn hung_attempt_times_out_and_is_retried() {
     let options = UploaderOptions {
         attempt_timeout_floor: Duration::from_secs(1),
         attempt_timeout_bytes_per_sec: 64 * 1024,
-        retry: RetryPolicy {
-            backoff: miru_agent::cooldown::Backoff {
-                base_secs: 1,
-                growth_factor: 2,
-                max_secs: 4,
-            },
-            ..RetryPolicy::default()
+        backoff: miru_agent::cooldown::Backoff {
+            base_secs: 1,
+            growth_factor: 2,
+            max_secs: 4,
         },
         ..UploaderOptions::default()
     };
@@ -366,10 +356,7 @@ async fn network_failures_never_drop_job() {
     mock.push_step(MockStep::Ok);
     // a budget the network failures would blow through if they counted
     let options = UploaderOptions {
-        retry: RetryPolicy {
-            attempts: 3,
-            ..RetryPolicy::default()
-        },
+        attempts: 3,
         ..UploaderOptions::default()
     };
     let (uploader, handle, _sleeps) = spawn_with_test_clock(mock.clone(), options);
@@ -394,13 +381,10 @@ async fn network_failure_uses_flat_cooldown() {
     mock.push_step(MockStep::Ok);
     // pin the backoff so the assertion is independent of production defaults
     let options = UploaderOptions {
-        retry: RetryPolicy {
-            backoff: miru_agent::cooldown::Backoff {
-                base_secs: 1,
-                growth_factor: 2,
-                max_secs: 30,
-            },
-            ..RetryPolicy::default()
+        backoff: miru_agent::cooldown::Backoff {
+            base_secs: 1,
+            growth_factor: 2,
+            max_secs: 30,
         },
         ..UploaderOptions::default()
     };
@@ -466,10 +450,7 @@ async fn network_failures_do_not_consume_attempt_budget() {
     }
     mock.push_step(MockStep::Ok);
     let options = UploaderOptions {
-        retry: RetryPolicy {
-            attempts: 3,
-            ..RetryPolicy::default()
-        },
+        attempts: 3,
         ..UploaderOptions::default()
     };
     let (uploader, handle, _sleeps) = spawn_with_test_clock(mock.clone(), options);
@@ -857,13 +838,10 @@ mod retention_producer {
             mock.clone(),
             deleter.clone(),
             UploaderOptions {
-                retry: RetryPolicy {
-                    backoff: miru_agent::cooldown::Backoff {
-                        base_secs: 1,
-                        growth_factor: 2,
-                        max_secs: 4,
-                    },
-                    ..RetryPolicy::default()
+                backoff: miru_agent::cooldown::Backoff {
+                    base_secs: 1,
+                    growth_factor: 2,
+                    max_secs: 4,
                 },
                 ..UploaderOptions::default()
             },
@@ -1258,6 +1236,6 @@ mod durability {
 #[test]
 fn default_options_retry_for_hours() {
     let options = UploaderOptions::default();
-    assert_eq!(options.retry.attempts, 30);
-    assert_eq!(options.retry.backoff.max_secs, 3600);
+    assert_eq!(options.attempts, 30);
+    assert_eq!(options.backoff.max_secs, 3600);
 }

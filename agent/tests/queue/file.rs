@@ -14,15 +14,11 @@
 //! This file itself contains no tests: only the fixtures, the generic cases,
 //! and the macro.
 
-// standard crates
-use std::time::Duration;
-
 // internal crates
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::filesys::{dirs, files, Dir, File, PathExt, WriteOptions};
 use miru_agent::queue::{
-    EnqueueErr, FileQueue, NextAttempt, Persistence, QueueEntry, QueueJob, QueueSnapshot,
-    QueueSnapshotFile,
+    EnqueueErr, FileQueue, Persistence, QueueEntry, QueueJob, QueueSnapshot, QueueSnapshotFile,
 };
 
 // external crates
@@ -683,58 +679,6 @@ pub mod cases {
         }
     }
 
-    // ------------------------------- next_attempt -------------------------------- //
-
-    pub mod next_attempt {
-        use super::*;
-
-        fn horizon() -> DateTime<Utc> {
-            now() + TimeDelta::hours(1)
-        }
-
-        pub async fn is_empty_when_empty<J: QueueJob>(_make: fn(&str) -> J) {
-            let mut queue = FileQueue::<J>::new(DEFAULT_CAPACITY);
-
-            let next = queue.next_attempt(now(), horizon()).await;
-
-            assert_eq!(next, NextAttempt::Empty);
-        }
-
-        pub async fn returns_the_ready_entry<J: QueueJob>(make: fn(&str) -> J) {
-            let mut queue = FileQueue::<J>::new(DEFAULT_CAPACITY);
-            enqueue_waiting(&mut queue, make("a.log"), 1, now() + TimeDelta::minutes(5)).await;
-            enqueue(&mut queue, make("b.log")).await;
-
-            let NextAttempt::Ready(entry) = queue.next_attempt(now(), horizon()).await else {
-                panic!("expected a ready entry");
-            };
-
-            assert_eq!(entry.job, make("b.log"));
-        }
-
-        pub async fn waits_for_the_earliest_deadline<J: QueueJob>(make: fn(&str) -> J) {
-            let mut queue = FileQueue::<J>::new(DEFAULT_CAPACITY);
-            for (name, minutes) in [("a.log", 20), ("b.log", 5)] {
-                let deadline = now() + TimeDelta::minutes(minutes);
-                enqueue_waiting(&mut queue, make(name), 1, deadline).await;
-            }
-
-            let next = queue.next_attempt(now(), horizon()).await;
-
-            assert_eq!(next, NextAttempt::Backoff(Duration::from_secs(5 * 60)));
-        }
-
-        pub async fn pulls_in_a_deadline_past_the_horizon<J: QueueJob>(make: fn(&str) -> J) {
-            let mut queue = FileQueue::<J>::new(DEFAULT_CAPACITY);
-            enqueue_waiting(&mut queue, make("a.log"), 1, now() + TimeDelta::days(2)).await;
-
-            let next = queue.next_attempt(now(), horizon()).await;
-
-            assert_eq!(next, NextAttempt::Backoff(Duration::from_secs(3600)));
-            assert_eq!(queue.earliest_next_attempt(), Some(horizon()));
-        }
-    }
-
     // -------------------------------- durability --------------------------------- //
 
     /// What the snapshot must still hold while a worker is mid-job.
@@ -882,15 +826,6 @@ macro_rules! queue_suite {
             count_ready {
                 disk: [],
                 mem: [counts_only_ready_entries],
-            },
-            next_attempt {
-                disk: [],
-                mem: [
-                    is_empty_when_empty,
-                    returns_the_ready_entry,
-                    waits_for_the_earliest_deadline,
-                    pulls_in_a_deadline_past_the_horizon,
-                ],
             },
             reset_invalid_deadlines {
                 disk: [persists],

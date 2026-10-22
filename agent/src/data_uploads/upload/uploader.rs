@@ -11,10 +11,9 @@ use crate::data_uploads::{
         executor::UploadExecutor,
         job::Job,
         queue::{QueueEntry, QueueSnapshotFile},
-        uploader_impl::{UploaderImpl, UploaderOptions},
+        uploader_impl::{NextAttempt, UploaderImpl, UploaderOptions},
     },
 };
-use crate::queue::NextAttempt;
 use crate::trace;
 
 // external crates
