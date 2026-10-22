@@ -343,6 +343,7 @@ async fn init_calibrations(
         events,
         options: calibrations::UploaderOptions::default(),
         sleep_fn: tokio::time::sleep,
+        now_fn: chrono::Utc::now,
     };
     let (uploader, handle) = calibrations::Uploader::spawn(64, args);
     (Arc::new(uploader), handle)

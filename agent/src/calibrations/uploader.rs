@@ -8,7 +8,7 @@ use crate::calibrations::{
     errors::{CalibrationsErr, ReceiveActorMessageErr, SendActorMessageErr},
     report::{QueueEntry, QueueSnapshotFile, Report},
     sender::Sender,
-    uploader_impl::{UploaderImpl, UploaderOptions},
+    uploader_impl::{NextAttempt, UploaderImpl, UploaderOptions},
 };
 use crate::filesys::Dir;
 use crate::sync::syncer::SyncEvent;
@@ -16,22 +16,25 @@ use crate::trace;
 use crate::workers::next_sync_event;
 
 // external crates
+use chrono::{DateTime, Utc};
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
 use tracing::{error, info};
 use uuid::Uuid;
 
-pub struct UploaderArgs<S, F> {
+pub struct UploaderArgs<S, F, N> {
     /// Where the queue persists; `None` keeps it in memory only.
     pub snapshot_file: Option<QueueSnapshotFile>,
     /// The directory holding one content file per queued report.
     pub reports: Dir,
     pub sender: Arc<S>,
-    /// Sync events; a successful sync ends a backoff early. `None` disables
+    /// Sync events; a successful sync makes every waiting report due at once. `None` disables
     /// the early retry.
     pub events: Option<watch::Receiver<SyncEvent>>,
     pub options: UploaderOptions,
     pub sleep_fn: F,
+    /// The clock that report backoffs and ages are measured against.
+    pub now_fn: N,
 }
 
 // ================================== WORKER ======================================= //
@@ -53,26 +56,28 @@ enum Flow {
     Shutdown,
 }
 
-struct Worker<S, F> {
+struct Worker<S, F, N> {
     receiver: mpsc::Receiver<Command>,
-    uploader: UploaderImpl,
+    uploader: UploaderImpl<N>,
     sender: Arc<S>,
     events: Option<watch::Receiver<SyncEvent>>,
     sleep_fn: F,
 }
 
-impl<S, F, Fut> Worker<S, F>
+impl<S, F, Fut, N> Worker<S, F, N>
 where
     S: Sender + 'static,
     F: Fn(Duration) -> Fut + Send + 'static,
     Fut: Future<Output = ()> + Send + 'static,
+    N: Fn() -> DateTime<Utc> + Send + Sync + 'static,
 {
     async fn run(mut self) {
         self.uploader.sweep().await;
         loop {
-            let flow = match self.uploader.next_ready() {
-                Some(entry) => self.attempt(entry).await,
-                None => self.idle().await,
+            let flow = match self.uploader.next_attempt().await {
+                NextAttempt::Ready(entry) => self.attempt(entry).await,
+                NextAttempt::Empty => self.idle().await,
+                NextAttempt::Backoff(wait) => self.back_off(wait).await,
             };
             if let Flow::Shutdown = flow {
                 break;
@@ -81,12 +86,10 @@ where
         info!("calibrations: uploader shutdown complete");
     }
 
-    /// Send the report queued as `entry`, settle it, then wait out any
-    /// backoff. A shutdown mid-send leaves the report queued, to be re-sent on
-    /// the next boot.
+    /// Send the report queued as `entry` and settle it. A shutdown mid-send
+    /// leaves the report queued, to be re-sent on the next boot.
     async fn attempt(&mut self, entry: QueueEntry) -> Flow {
-        let id = entry.id;
-        let result = match self.uploader.read(entry).await {
+        let result = match self.uploader.read(&entry).await {
             Ok(Some(report)) => {
                 let sender = self.sender.clone();
                 let send = self.serve_until(async move { sender.send(&report).await });
@@ -98,10 +101,8 @@ where
             Ok(None) => return Flow::Continue,
             Err(err) => Err(err),
         };
-        match self.uploader.finish(id, result).await {
-            Some(wait) => self.back_off(wait).await,
-            None => Flow::Continue,
-        }
+        self.uploader.finish(entry, result).await;
+        Flow::Continue
     }
 
     /// Drive `fut` to completion while serving commands, so intake never
@@ -121,9 +122,9 @@ where
         }
     }
 
-    /// Wait out `wait` while serving commands, ending early when a sync
-    /// succeeds (Miru is reachable again). The sleep is never restarted, so
-    /// intake can't extend a backoff.
+    /// Wait `wait` for the earliest report to come due, while serving
+    /// commands. A new report or a successful sync (Miru is reachable again,
+    /// so every waiting report is made due) ends the wait early.
     async fn back_off(&mut self, wait: Duration) -> Flow {
         let sleep = (self.sleep_fn)(wait);
         tokio::pin!(sleep);
@@ -131,12 +132,15 @@ where
             tokio::select! {
                 _ = &mut sleep => return Flow::Continue,
                 cmd = self.receiver.recv() => {
-                    if let Flow::Shutdown = self.handle(cmd).await {
-                        return Flow::Shutdown;
+                    let is_new_report = matches!(cmd, Some(Command::Enqueue { .. }));
+                    let flow = self.handle(cmd).await;
+                    if is_new_report || matches!(flow, Flow::Shutdown) {
+                        return flow;
                     }
                 }
                 event = next_sync_event(&mut self.events) => {
                     if self.reconnected(event) {
+                        self.uploader.retry_now().await;
                         return Flow::Continue;
                     }
                 }
@@ -198,23 +202,33 @@ fn respond<T>(respond_to: oneshot::Sender<T>, value: T, op: &str) {
 // ================================== HANDLE ======================================= //
 /// Handle to the calibration uploader: one task that owns the calibration
 /// queue, queues what intake sends it, and uploads reports to Miru one at a
-/// time, oldest first. It keeps serving intake during an upload or a backoff.
+/// time, oldest due first, retrying a failed report at the tail after its own
+/// backoff. It keeps serving intake during an upload or a backoff.
 #[derive(Debug)]
 pub struct Uploader {
     sender: mpsc::Sender<Command>,
 }
 
 impl Uploader {
-    pub fn spawn<S, F, Fut>(buffer_size: usize, args: UploaderArgs<S, F>) -> (Self, JoinHandle<()>)
+    pub fn spawn<S, F, Fut, N>(
+        buffer_size: usize,
+        args: UploaderArgs<S, F, N>,
+    ) -> (Self, JoinHandle<()>)
     where
         S: Sender + 'static,
         F: Fn(Duration) -> Fut + Send + 'static,
         Fut: Future<Output = ()> + Send + 'static,
+        N: Fn() -> DateTime<Utc> + Send + Sync + 'static,
     {
         let (sender, receiver) = mpsc::channel(buffer_size);
         let worker = Worker {
             receiver,
-            uploader: UploaderImpl::new(args.snapshot_file, args.reports, args.options),
+            uploader: UploaderImpl::new(
+                args.snapshot_file,
+                args.reports,
+                args.options,
+                args.now_fn,
+            ),
             sender: args.sender,
             events: args.events,
             sleep_fn: args.sleep_fn,

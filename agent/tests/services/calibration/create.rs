@@ -53,6 +53,7 @@ impl Fixture {
             events: None,
             options,
             sleep_fn: tokio::time::sleep,
+            now_fn: Utc::now,
         };
         let (uploader, _) = Uploader::spawn(64, args);
         let layout = Layout::new(dir.to_dir());
