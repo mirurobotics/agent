@@ -325,7 +325,7 @@ paths:
 
         never read from the request body. The first report of a new
 
-        `component_slug` creates a component, and the first report of a new
+        `component` creates a component, and the first report of a new
 
         `role` or `aspect` for a component adds it to the component''s `roles`
 
@@ -2153,7 +2153,7 @@ components:
       title: Create Calibration Request
       type: object
       required:
-      - component_slug
+      - component
       - content
       - reported_at
       properties:
@@ -2162,7 +2162,7 @@ components:
           example: dpl_123
           description: ID of the deployment the device is on. Omitted if the device
             is on no deployment.
-        component_slug:
+        component:
           type: string
           example: arm
           description: Slug of the component the calibrated unit belongs to. A new

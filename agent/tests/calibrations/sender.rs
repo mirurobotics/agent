@@ -50,7 +50,7 @@ pub mod new_request {
     fn maps_the_metadata() {
         let request = new_request(&full_report());
 
-        assert_eq!(request.component_slug, "arm");
+        assert_eq!(request.component, "arm");
         assert_eq!(
             (request.role, request.aspect),
             (Some("left".to_string()), Some("pose".to_string()))
@@ -81,7 +81,7 @@ pub mod new_request {
             .map(String::as_str)
             .collect();
         keys.sort_unstable();
-        assert_eq!(keys, ["component_slug", "content", "reported_at"]);
+        assert_eq!(keys, ["component", "content", "reported_at"]);
     }
 
     #[test]
@@ -120,7 +120,7 @@ pub mod send {
         assert_eq!(requests[0].token.as_deref(), Some("tok"));
         let body: Value = serde_json::from_str(requests[0].body.as_deref().unwrap()).unwrap();
         assert_eq!(body["reported_at"], received_at().to_rfc3339());
-        assert_eq!(body["component_slug"], "arm");
+        assert_eq!(body["component"], "arm");
     }
 
     #[tokio::test]

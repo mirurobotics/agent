@@ -69,7 +69,7 @@ pub fn new_request(report: &Report) -> CreateCalibrationRequest {
     };
     CreateCalibrationRequest {
         deployment_id: metadata.deployment_id.clone(),
-        component_slug: metadata.component_slug.clone(),
+        component: metadata.component.clone(),
         role: metadata.role.clone(),
         serial_number: metadata.serial_number.clone(),
         aspect: metadata.aspect.clone(),

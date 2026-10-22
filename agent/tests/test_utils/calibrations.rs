@@ -15,11 +15,11 @@ pub fn received_at() -> DateTime<Utc> {
     DateTime::from_timestamp(1000, 0).unwrap()
 }
 
-/// A sendable report told apart from others by its `component_slug`.
+/// A sendable report told apart from others by its `component`.
 pub fn report(slug: &str) -> Report {
     Report {
         metadata: ReportMetadata {
-            component_slug: slug.to_string(),
+            component: slug.to_string(),
             format: InstanceFormat::Json,
             role: None,
             aspect: None,
