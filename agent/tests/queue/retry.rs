@@ -151,3 +151,19 @@ fn a_terminal_error_past_the_age_cap_is_still_terminal() {
         Verdict::Terminal { attempts: 1 }
     );
 }
+
+#[test]
+fn a_network_error_marked_terminal_is_still_a_network_error() {
+    let both = Failure {
+        network: true,
+        terminal: true,
+    };
+
+    assert_eq!(
+        policy().on_failure(&both, 2, young()),
+        Verdict::Retry {
+            attempts: 2,
+            wait_secs: 10
+        }
+    );
+}

@@ -60,24 +60,32 @@ impl RetryPolicy {
     /// The verdict on a job that failed with `err` after `attempts` counted
     /// attempts, `age` after it was first seen.
     pub fn on_failure(&self, err: &impl Error, attempts: u32, age: TimeDelta) -> Verdict {
-        let network = err.is_network_conn_err();
-        let attempts = if network {
-            attempts
-        } else {
-            attempts.saturating_add(1)
-        };
-        if !network && err.is_terminal() {
+        if err.is_network_conn_err() {
+            return self.on_network_failure(attempts, age);
+        }
+        self.on_counted_failure(err.is_terminal(), attempts.saturating_add(1), age)
+    }
+
+    /// A network error leaves `attempts` as it is and waits a flat
+    /// `base_secs`, even if the error is also marked terminal.
+    fn on_network_failure(&self, attempts: u32, age: TimeDelta) -> Verdict {
+        if age >= self.max_age {
+            return Verdict::TooOld { attempts, age };
+        }
+        let wait_secs = self.backoff.base_secs.max(0);
+        Verdict::Retry {
+            attempts,
+            wait_secs,
+        }
+    }
+
+    /// Any other failure, with `attempts` already counting it.
+    fn on_counted_failure(&self, terminal: bool, attempts: u32, age: TimeDelta) -> Verdict {
+        if terminal {
             return Verdict::Terminal { attempts };
         }
         if age >= self.max_age {
             return Verdict::TooOld { attempts, age };
-        }
-        if network {
-            let wait_secs = self.backoff.base_secs.max(0);
-            return Verdict::Retry {
-                attempts,
-                wait_secs,
-            };
         }
         if attempts >= self.attempts {
             return Verdict::OutOfAttempts { attempts };
