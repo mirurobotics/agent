@@ -22,7 +22,7 @@ fn metadata(name: &str) -> ReportMetadata {
         aspect: Some("pose".to_string()),
         serial_number: Some("SN-1".to_string()),
         deployment_id: Some("dpl_1".to_string()),
-        calibrated_at: DateTime::from_timestamp(1000, 0).unwrap(),
+        reported_at: DateTime::from_timestamp(1000, 0).unwrap(),
     }
 }
 
@@ -80,7 +80,7 @@ mod wire {
                 r#"{{"entries":[{{"id":"{id}","job":{{"#,
                 r#""component":"arm","format":"yaml","#,
                 r#""role":"aligner-1","aspect":"pose","serial_number":"SN-1","#,
-                r#""deployment_id":"dpl_1","calibrated_at":"1970-01-01T00:16:40Z""#,
+                r#""deployment_id":"dpl_1","reported_at":"1970-01-01T00:16:40Z""#,
                 r#"}},"attempts":0,"next_attempt_at":null}}]}}"#,
             ),
             id = id,
@@ -104,7 +104,7 @@ mod wire {
         let path = dir.to_dir().file("queue.json");
         let raw = concat!(
             r#"{"entries":[{"job":{"component":"arm","format":"yaml","#,
-            r#""calibrated_at":"1970-01-01T00:16:40Z"}}]}"#,
+            r#""reported_at":"1970-01-01T00:16:40Z"}}]}"#,
         );
         files::write_string(&path, raw, WriteOptions::OVERWRITE_ATOMIC)
             .await
@@ -141,10 +141,10 @@ mod wire {
             keys,
             [
                 "aspect",
-                "calibrated_at",
                 "component",
                 "deployment_id",
                 "format",
+                "reported_at",
                 "role",
                 "serial_number",
             ],

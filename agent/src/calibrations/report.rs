@@ -35,7 +35,7 @@ pub struct ReportMetadata {
     #[serde(default)]
     pub deployment_id: Option<String>,
     /// When the agent received the calibration.
-    pub calibrated_at: DateTime<Utc>,
+    pub reported_at: DateTime<Utc>,
 }
 
 impl queue::QueueJob for ReportMetadata {
@@ -54,7 +54,7 @@ impl queue::QueueJob for ReportMetadata {
         if let Some(aspect) = &self.aspect {
             name.push_str(&format!(" (aspect {aspect})"));
         }
-        format!("{name} received at {}", self.calibrated_at.to_rfc3339())
+        format!("{name} received at {}", self.reported_at.to_rfc3339())
     }
 }
 

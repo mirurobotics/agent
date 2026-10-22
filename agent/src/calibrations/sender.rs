@@ -59,10 +59,8 @@ impl<C: ClientI, T: TokenManagerExt> Sender for HttpSender<C, T> {
     }
 }
 
-/// The backend request for `report`. `reported_at` is the agent's receive
-/// time, [`crate::calibrations::ReportMetadata::calibrated_at`]. It takes
-/// `report` by value so the data moves into the request instead of being
-/// copied.
+/// The backend request for `report`. It takes `report` by value so the data
+/// moves into the request instead of being copied.
 pub fn new_request(report: Report) -> CreateCalibrationRequest {
     let metadata = report.metadata;
     let content = InstanceContent {
@@ -76,6 +74,6 @@ pub fn new_request(report: Report) -> CreateCalibrationRequest {
         serial_number: metadata.serial_number,
         aspect: metadata.aspect,
         content: Box::new(content),
-        reported_at: metadata.calibrated_at.to_rfc3339(),
+        reported_at: metadata.reported_at.to_rfc3339(),
     }
 }

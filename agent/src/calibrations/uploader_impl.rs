@@ -27,7 +27,7 @@ pub struct UploaderOptions {
     /// The largest report data accepted, in bytes.
     pub max_report_bytes: u64,
     /// When a failed report is retried and when it is dropped. Its age is
-    /// measured from `calibrated_at`.
+    /// measured from `reported_at`.
     pub retry: RetryPolicy,
 }
 
@@ -50,7 +50,7 @@ impl Default for UploaderOptions {
 pub(crate) struct Attempt {
     id: Uuid,
     attempts: u32,
-    calibrated_at: DateTime<Utc>,
+    reported_at: DateTime<Utc>,
 }
 
 /// What the queue holds for the worker to do next.
@@ -172,7 +172,7 @@ where
         let attempt = Attempt {
             id: entry.id,
             attempts: entry.attempts,
-            calibrated_at: entry.job.calibrated_at,
+            reported_at: entry.job.reported_at,
         };
         let sender = self.sender.clone();
         let file = self.report_file(entry.id);
@@ -199,7 +199,7 @@ where
             }
             Err(err) => err,
         };
-        let age = (self.now_fn)() - attempt.calibrated_at;
+        let age = (self.now_fn)() - attempt.reported_at;
         match self.options.retry.on_failure(&err, attempt.attempts, age) {
             Verdict::Retry {
                 attempts,

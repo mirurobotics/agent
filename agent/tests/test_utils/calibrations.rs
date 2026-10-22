@@ -25,7 +25,7 @@ pub fn report(slug: &str) -> Report {
             aspect: None,
             serial_number: None,
             deployment_id: None,
-            calibrated_at: received_at(),
+            reported_at: received_at(),
         },
         data: r#"{"offset":[1,2,3]}"#.to_string(),
     }
