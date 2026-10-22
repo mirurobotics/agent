@@ -7,8 +7,8 @@
 //! emits one `mod` per group holding one `#[tokio::test]` per case, each named
 //! exactly after the case function — so a failing test path
 //! (`upload::queue::enqueue::persists`) greps straight to its body here. The
-//! suite therefore runs against `upload::Job` (always due on arrival) and
-//! `retention::Job` (due only once its TTL elapses), proving the `due_at` hook
+//! suite therefore runs against `upload::Job` (always ready on arrival) and
+//! `retention::Job` (ready only once its TTL elapses), proving the `ready_at` hook
 //! in both states.
 //!
 //! This file itself contains no tests: only the fixtures, the generic cases,

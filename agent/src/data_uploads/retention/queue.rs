@@ -8,8 +8,8 @@ use chrono::{DateTime, Utc};
 impl queue::QueueJob for Job {
     const LABEL: &'static str = "delete";
 
-    fn due_at(&self) -> DateTime<Utc> {
-        Job::due_at(self)
+    fn ready_at(&self) -> DateTime<Utc> {
+        Job::ready_at(self)
     }
 
     fn name(&self) -> String {

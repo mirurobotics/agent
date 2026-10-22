@@ -20,8 +20,8 @@ pub struct Job {
 
 impl Job {
     /// `last_observed_at` plus the TTL. A TTL too large to represent saturates
-    /// to the far future — the job is simply never due.
-    pub fn due_at(&self) -> DateTime<Utc> {
+    /// to the far future — the job is simply never ready.
+    pub fn ready_at(&self) -> DateTime<Utc> {
         i64::try_from(self.ttl_secs)
             .ok()
             .and_then(Duration::try_seconds)
@@ -55,14 +55,14 @@ mod tests {
     }
 
     #[test]
-    fn due_at_adds_ttl_and_saturates_on_overflow() {
+    fn ready_at_adds_ttl_and_saturates_on_overflow() {
         assert_eq!(
-            job(1000, 300).due_at(),
+            job(1000, 300).ready_at(),
             DateTime::from_timestamp(1300, 0).unwrap()
         );
 
         // a TTL beyond what chrono can represent saturates to "never due"
         // instead of panicking.
-        assert_eq!(job(1000, u64::MAX).due_at(), DateTime::<Utc>::MAX_UTC);
+        assert_eq!(job(1000, u64::MAX).ready_at(), DateTime::<Utc>::MAX_UTC);
     }
 }
