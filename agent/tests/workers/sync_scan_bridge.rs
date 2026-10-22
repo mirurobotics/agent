@@ -466,7 +466,7 @@ pub mod resolve_and_push {
         // subscribes is never seen, so keep firing until it reacts
         wait_until(|| {
             fire_sync_success(&b.syncer);
-            b.scanner.update_rules_calls().len() == 1
+            b.scanner.update_rules_calls().len() >= 1
         })
         .await;
         let payload = b.scanner.update_rules_calls()[0].1.clone();
