@@ -492,55 +492,103 @@ async fn network_failures_do_not_consume_attempt_budget() {
     assert_eq!(mock.recorded_calls(), expected);
 }
 
+/// Options whose age cap is 30s of retry backoff waited out.
+fn thirty_second_age_cap() -> UploaderOptions {
+    let mut options = UploaderOptions::default();
+    options.retry.max_age = TimeDelta::seconds(30);
+    options
+}
+
+// The age cap counts retry backoff actually waited out: with a 30s cap and a
+// flat 10s network cooldown, A survives three network failures (10s, 20s, 30s
+// waited) and is dropped on the fourth. That is the only way a misclassified
+// permanent failure ever exits.
 #[tokio::test]
 async fn network_failure_past_max_job_age_drops_job() {
     let (mock, mut started_rx) = MockUploadExecutor::new();
-    mock.push_step(MockStep::NetworkErr);
+    for _ in 0..4 {
+        mock.push_step(MockStep::NetworkErr);
+    }
     mock.push_step(MockStep::Ok);
-    let (uploader, handle, _sleeps) =
-        spawn_with_test_clock(mock.clone(), UploaderOptions::default());
-    // first observed past the backstop, so the network exemption no longer
-    // applies — the only way a misclassified permanent failure ever exits
-    let mut job_a = make_job("a.log");
-    job_a.first_observed_at = Utc::now() - TimeDelta::days(8);
+    let (uploader, handle, sleeps) = spawn_with_test_clock(mock.clone(), thirty_second_age_cap());
+    let job_a = make_job("a.log");
     let job_b = make_job("b.log");
 
     timed(uploader.enqueue(job_a.clone())).await.unwrap();
-    timed(started_rx.recv()).await.unwrap();
+    for _ in 0..4 {
+        timed(started_rx.recv()).await.unwrap();
+    }
 
-    // A was dropped on its single network failure, not requeued: B runs next
+    // A was dropped on its fourth network failure, not requeued: B runs next
     timed(uploader.enqueue(job_b.clone())).await.unwrap();
     timed(started_rx.recv()).await.unwrap();
     assert_eq!(timed(uploader.len()).await.unwrap(), 0);
 
     timed(uploader.shutdown()).await.unwrap();
     timed(handle).await.unwrap();
-    assert_eq!(mock.recorded_calls(), vec![job_a, job_b]);
+    let mut expected = vec![job_a; 4];
+    expected.push(job_b);
+    assert_eq!(mock.recorded_calls(), expected);
+    assert_eq!(*sleeps.lock().unwrap(), vec![Duration::from_secs(10); 3]);
 }
 
+// The age cap applies to every failure, not only network ones: counted
+// failures back off 10s then 20s, so A is dropped on its third failure.
 #[tokio::test]
 async fn counted_failure_past_max_job_age_drops_job() {
     let (mock, mut started_rx) = MockUploadExecutor::new();
+    for _ in 0..3 {
+        mock.push_step(MockStep::Err);
+    }
+    mock.push_step(MockStep::Ok);
+    let (uploader, handle, sleeps) = spawn_with_test_clock(mock.clone(), thirty_second_age_cap());
+    let job_a = make_job("a.log");
+    let job_b = make_job("b.log");
+
+    timed(uploader.enqueue(job_a.clone())).await.unwrap();
+    for _ in 0..3 {
+        timed(started_rx.recv()).await.unwrap();
+    }
+
+    // A was dropped on its third counted failure, not requeued: B runs next
+    timed(uploader.enqueue(job_b.clone())).await.unwrap();
+    timed(started_rx.recv()).await.unwrap();
+    assert_eq!(timed(uploader.len()).await.unwrap(), 0);
+
+    timed(uploader.shutdown()).await.unwrap();
+    timed(handle).await.unwrap();
+    let mut expected = vec![job_a; 3];
+    expected.push(job_b);
+    assert_eq!(mock.recorded_calls(), expected);
+    assert_eq!(
+        *sleeps.lock().unwrap(),
+        vec![Duration::from_secs(10), Duration::from_secs(20)]
+    );
+}
+
+// A robot without an RTC stamps observations at 1970 until NTP syncs. Once
+// the clock is corrected, a failure must not read the job as decades old and
+// drop it: it is retried like any other.
+#[tokio::test]
+async fn failure_on_a_pre_ntp_observation_is_retried() {
+    let (mock, mut started_rx) = MockUploadExecutor::new();
+    mock.push_step(MockStep::NetworkErr);
     mock.push_step(MockStep::Err);
     mock.push_step(MockStep::Ok);
     let (uploader, handle, _sleeps) =
         spawn_with_test_clock(mock.clone(), UploaderOptions::default());
-    // the age cap applies to every failure, not only network ones
-    let mut job_a = make_job("a.log");
-    job_a.first_observed_at = Utc::now() - TimeDelta::days(8);
-    let job_b = make_job("b.log");
+    let mut job = make_job("a.log");
+    job.first_observed_at = DateTime::UNIX_EPOCH;
+    job.last_observed_at = DateTime::UNIX_EPOCH;
 
-    timed(uploader.enqueue(job_a.clone())).await.unwrap();
-    timed(started_rx.recv()).await.unwrap();
-
-    // A was dropped on its first counted failure, not requeued: B runs next
-    timed(uploader.enqueue(job_b.clone())).await.unwrap();
-    timed(started_rx.recv()).await.unwrap();
-    assert_eq!(timed(uploader.len()).await.unwrap(), 0);
+    timed(uploader.enqueue(job.clone())).await.unwrap();
+    for _ in 0..3 {
+        timed(started_rx.recv()).await.unwrap();
+    }
 
     timed(uploader.shutdown()).await.unwrap();
     timed(handle).await.unwrap();
-    assert_eq!(mock.recorded_calls(), vec![job_a, job_b]);
+    assert_eq!(mock.recorded_calls(), vec![job; 3]);
 }
 
 #[tokio::test]
@@ -1093,6 +1141,7 @@ mod durability {
                     job: job.clone(),
                     attempts: 1,
                     next_attempt_at: Some(deadline),
+                    waited_secs: 0,
                 }],
             })
             .await

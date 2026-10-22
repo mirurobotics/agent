@@ -125,7 +125,12 @@ impl DeleterImpl {
         );
         let next_attempt_at = now + TimeDelta::seconds(wait);
         self.queue
-            .retry(entry.id, entry.attempts, next_attempt_at)
+            .retry(
+                entry.id,
+                entry.attempts,
+                next_attempt_at,
+                u64::try_from(wait).unwrap_or(0),
+            )
             .await;
     }
 

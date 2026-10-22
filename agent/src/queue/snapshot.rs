@@ -17,6 +17,14 @@ pub struct QueueEntry<J> {
     /// Earliest instant this entry is eligible; `None` means "eligible now".
     #[serde(default)]
     pub next_attempt_at: Option<DateTime<Utc>>,
+    /// Total retry backoff this entry has waited out. Unlike time since the
+    /// job was created, it does not depend on the system clock being right.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub waited_secs: u64,
+}
+
+fn is_zero(n: &u64) -> bool {
+    *n == 0
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

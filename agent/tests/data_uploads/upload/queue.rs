@@ -159,6 +159,32 @@ mod wire {
         assert_eq!(entry["next_attempt_at"], serde_json::Value::Null, "{raw}");
     }
 
+    /// The retry-wait tally survives a restart, and is only written once it
+    /// is non-zero so a fresh entry keeps the pinned key set.
+    #[tokio::test]
+    async fn waited_secs_round_trips() {
+        let dir = test_dirs::temp("upload_queue_test").unwrap();
+        let path = dir.to_dir().file("upload_queue.json");
+        let next_attempt_at = Utc::now();
+        let id = {
+            let mut queue = Queue::from_snapshot(8, open(&path).await, Persistence::BestEffort);
+            let id = queue.enqueue(make_job("a.log")).await.unwrap();
+            assert!(queue.retry(id, 0, next_attempt_at, 10).await);
+            assert!(queue.retry(id, 1, next_attempt_at, 20).await);
+            id
+        };
+
+        let raw: serde_json::Value =
+            serde_json::from_str(&files::read_string(&path).await.unwrap()).unwrap();
+        assert_eq!(raw["entries"][0]["waited_secs"], 30);
+
+        let queue = Queue::from_snapshot(8, open(&path).await, Persistence::BestEffort);
+        let entry = queue.next_ready(next_attempt_at).unwrap();
+        assert_eq!(entry.id, id);
+        assert_eq!(entry.attempts, 1);
+        assert_eq!(entry.waited_secs, 30);
+    }
+
     #[tokio::test]
     async fn legacy_snapshot_without_next_attempt_at_loads() {
         let dir = test_dirs::temp("upload_queue_test").unwrap();
@@ -169,6 +195,7 @@ mod wire {
                 job: make_job("a.log"),
                 attempts: 2,
                 next_attempt_at: None,
+                waited_secs: 0,
             }],
         };
 

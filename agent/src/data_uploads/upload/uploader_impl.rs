@@ -27,7 +27,8 @@ pub struct UploaderOptions {
     /// the backend confirms it, so it still counts against this.
     pub queue_capacity: usize,
     /// When a failed job is retried and when it is dropped. A job's age is
-    /// measured from when its file was first observed.
+    /// the retry backoff it has waited out, so a system clock that jumps
+    /// (NTP correcting a robot that booted at 1970) can't age it.
     pub retry: RetryPolicy,
     /// Fixed floor of the per-attempt upload deadline. Covers control-plane
     /// RPCs (create/confirm, each bounded at 3 × 10s attempts) and connection
@@ -199,7 +200,11 @@ where
     /// errors are expected and don't count toward the attempt budget; any
     /// other failure does.
     async fn handle_failure(&mut self, mut entry: QueueEntry, err: UploadErr) {
-        let age = (self.now_fn)() - entry.job.first_observed_at;
+        // Age is the retry backoff the job has waited out, not the time since
+        // its file was first observed: a robot that booted with its clock at
+        // 1970 stamps observations decades in the past, and NTP correcting
+        // the clock must not make every queued upload look too old to retry.
+        let age = TimeDelta::seconds(i64::try_from(entry.waited_secs).unwrap_or(i64::MAX));
         match self.options.retry.on_failure(&err, entry.attempts, age) {
             Verdict::Retry {
                 attempts,
@@ -240,7 +245,10 @@ where
              {wait_secs}s"
         );
         let next_attempt_at = (self.now_fn)() + TimeDelta::seconds(wait_secs);
-        self.queue.retry(entry.id, attempts, next_attempt_at).await;
+        let waited_secs = u64::try_from(wait_secs).unwrap_or(0);
+        self.queue
+            .retry(entry.id, attempts, next_attempt_at, waited_secs)
+            .await;
     }
 
     /// A network error logs at debug, since it repeats every `base_secs` while
@@ -291,9 +299,9 @@ where
 
     fn log_age_drop(entry: &QueueEntry, age: TimeDelta, err: &UploadErr) {
         error!(
-            "dropping upload job: still failing {} days after the file was first observed \
+            "dropping upload job: still failing after {}s of retry backoff \
              (rule {}, file {}, digest {}, attempt {}): {err:?}",
-            age.num_days(),
+            age.num_seconds(),
             entry.job.file_rule_id,
             entry.job.file,
             entry.job.digest,

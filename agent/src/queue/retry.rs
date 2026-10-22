@@ -58,7 +58,7 @@ impl RetryPolicy {
     }
 
     /// The verdict on a job that failed with `err` after `attempts` counted
-    /// attempts, `age` after it was first seen.
+    /// attempts and is `age` old. The caller decides how age is measured.
     pub fn on_failure(&self, err: &impl Error, attempts: u32, age: TimeDelta) -> Verdict {
         if err.is_network_conn_err() {
             return self.on_network_failure(attempts, age);
