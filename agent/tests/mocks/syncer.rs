@@ -101,6 +101,10 @@ impl SyncerExt for MockSyncer {
         Ok((*self.get_sync_state_fn.lock().unwrap())())
     }
 
+    fn latest_sync_state(&self) -> State {
+        (*self.get_sync_state_fn.lock().unwrap())()
+    }
+
     async fn is_in_cooldown(&self) -> Result<bool, SyncErr> {
         let state = self.get_sync_state().await.unwrap();
         Ok(state.is_in_cooldown())

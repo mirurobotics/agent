@@ -19,9 +19,12 @@ use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
 use tracing::{error, info};
 
+/// Runs `$op`, publishes the worker's state, then responds, so a caller
+/// that awaited the response sees the new state in `latest_sync_state`.
 macro_rules! dispatch {
-    ($op:expr, $respond_to:expr, $msg:expr) => {{
+    ($worker:expr, $op:expr, $respond_to:expr, $msg:expr) => {{
         let result = $op;
+        $worker.publish_state();
         if $respond_to.send(result).is_err() {
             error!($msg);
         }
@@ -107,6 +110,9 @@ impl State {
 pub trait SyncerExt {
     async fn shutdown(&self) -> Result<(), SyncErr>;
     async fn get_sync_state(&self) -> Result<State, SyncErr>;
+    /// The sync state as of the syncer's latest finished command. Unlike
+    /// [`SyncerExt::get_sync_state`], it does not wait for a sync in progress.
+    fn latest_sync_state(&self) -> State;
     async fn is_in_cooldown(&self) -> Result<bool, SyncErr>;
     async fn get_cooldown_ends_at(&self) -> Result<DateTime<Utc>, SyncErr>;
     async fn get_last_attempted_sync_at(&self) -> Result<DateTime<Utc>, SyncErr>;
@@ -141,15 +147,30 @@ pub enum Command {
 pub struct Worker<HTTPClientT: Send> {
     syncer: SyncerImpl<HTTPClientT>,
     receiver: mpsc::Receiver<Command>,
+    state_tx: watch::Sender<State>,
 }
 
 impl<HTTPClientT: Send> Worker<HTTPClientT> {
     pub fn new(syncer: SyncerImpl<HTTPClientT>, receiver: mpsc::Receiver<Command>) -> Self {
-        Self { syncer, receiver }
+        let (state_tx, _) = watch::channel(State::default());
+        Self {
+            syncer,
+            receiver,
+            state_tx,
+        }
+    }
+
+    /// Receives the sync state after each command the worker finishes.
+    pub fn state_receiver(&self) -> watch::Receiver<State> {
+        self.state_tx.subscribe()
     }
 }
 
 impl<HTTPClientT: http::ClientI> Worker<HTTPClientT> {
+    fn publish_state(&self) {
+        self.state_tx.send_replace(self.syncer.state().clone());
+    }
+
     pub async fn run(mut self) {
         while let Some(cmd) = self.receiver.recv().await {
             match cmd {
@@ -161,6 +182,7 @@ impl<HTTPClientT: http::ClientI> Worker<HTTPClientT> {
                 }
                 Command::GetSyncState { respond_to } => {
                     dispatch!(
+                        self,
                         self.syncer.get_sync_state().await,
                         respond_to,
                         "Actor failed to send state response"
@@ -169,12 +191,14 @@ impl<HTTPClientT: http::ClientI> Worker<HTTPClientT> {
                 #[cfg(test)]
                 Command::SetSyncState { state, respond_to } => {
                     self.syncer.set_sync_state(state);
+                    self.publish_state();
                     if let Err(e) = respond_to.send(Ok(())) {
                         error!("Actor failed to send set sync state response: {:?}", e);
                     }
                 }
                 Command::SyncIfNotInCooldown { respond_to } => {
                     dispatch!(
+                        self,
                         self.syncer.sync_if_not_in_cooldown().await,
                         respond_to,
                         "Actor failed to send sync if not in cooldown response"
@@ -182,6 +206,7 @@ impl<HTTPClientT: http::ClientI> Worker<HTTPClientT> {
                 }
                 Command::Sync { respond_to } => {
                     dispatch!(
+                        self,
                         self.syncer.sync().await,
                         respond_to,
                         "Actor failed to send sync response"
@@ -189,6 +214,7 @@ impl<HTTPClientT: http::ClientI> Worker<HTTPClientT> {
                 }
                 Command::Subscribe { respond_to } => {
                     dispatch!(
+                        self,
                         self.syncer.subscribe(),
                         respond_to,
                         "Actor failed to send subscribe response"
@@ -202,6 +228,7 @@ impl<HTTPClientT: http::ClientI> Worker<HTTPClientT> {
 #[derive(Debug)]
 pub struct Syncer {
     sender: mpsc::Sender<Command>,
+    state_rx: watch::Receiver<State>,
 }
 
 impl Syncer {
@@ -210,16 +237,23 @@ impl Syncer {
         args: SyncerArgs<http::Client, authn::TokenManager>,
     ) -> Result<(Self, JoinHandle<()>), SyncErr> {
         let (sender, receiver) = mpsc::channel(buffer_size);
-        let worker = Worker {
-            syncer: SyncerImpl::new(args),
-            receiver,
-        };
+        let worker = Worker::new(SyncerImpl::new(args), receiver);
+        let state_rx = worker.state_receiver();
         let worker_handle = tokio::spawn(worker.run());
-        Ok((Self { sender }, worker_handle))
+        Ok((Self::with_state(sender, state_rx), worker_handle))
     }
 
+    /// A handle with no worker publishing its state, so
+    /// [`SyncerExt::latest_sync_state`] stays at the default.
     pub fn new(sender: mpsc::Sender<Command>) -> Self {
-        Self { sender }
+        let (_, state_rx) = watch::channel(State::default());
+        Self::with_state(sender, state_rx)
+    }
+
+    /// A handle that reads the latest state from `state_rx`, usually
+    /// [`Worker::state_receiver`].
+    pub fn with_state(sender: mpsc::Sender<Command>, state_rx: watch::Receiver<State>) -> Self {
+        Self { sender, state_rx }
     }
 
     async fn send_command<R>(
@@ -262,6 +296,10 @@ impl SyncerExt for Syncer {
     async fn get_sync_state(&self) -> Result<State, SyncErr> {
         self.send_command(|tx| Command::GetSyncState { respond_to: tx })
             .await?
+    }
+
+    fn latest_sync_state(&self) -> State {
+        self.state_rx.borrow().clone()
     }
 
     async fn is_in_cooldown(&self) -> Result<bool, SyncErr> {
@@ -335,8 +373,9 @@ mod tests {
     ) -> Result<(Syncer, JoinHandle<()>), SyncErr> {
         let (sender, receiver) = mpsc::channel(buffer_size);
         let worker = Worker::new(SyncerImpl::new(args), receiver);
+        let state_rx = worker.state_receiver();
         let worker_handle = tokio::spawn(worker.run());
-        Ok((Syncer::new(sender), worker_handle))
+        Ok((Syncer::with_state(sender, state_rx), worker_handle))
     }
 
     // ========================= FIXTURE ========================= //
@@ -531,6 +570,63 @@ mod tests {
 
             syncer.shutdown().await.unwrap();
             worker_handler.await.unwrap();
+        }
+    }
+
+    pub mod latest_sync_state {
+        use super::*;
+
+        #[tokio::test]
+        async fn default_before_any_command() {
+            let f = Fixture::new("syncer_latest_state_default").await;
+            assert_eq!(f.syncer.latest_sync_state(), State::default());
+        }
+
+        #[tokio::test]
+        async fn matches_state_after_sync() {
+            let f = Fixture::new("syncer_latest_state_after_sync").await;
+            f.syncer.sync().await.unwrap();
+
+            let state = f.syncer.get_sync_state().await.unwrap();
+            assert!(state.last_synced.is_some());
+            assert_eq!(f.syncer.latest_sync_state(), state);
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn does_not_wait_for_sync_in_progress() {
+            let f = Fixture::new("syncer_latest_state_mid_sync").await;
+            f.syncer.sync().await.unwrap();
+            f.reset_cooldown().await;
+            let before = f.syncer.latest_sync_state();
+
+            // hold the next sync inside its deployment fetch until released
+            let (entered_tx, entered_rx) = std::sync::mpsc::channel::<()>();
+            let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+            let (entered_tx, release_rx) = (Mutex::new(entered_tx), Mutex::new(release_rx));
+            f.http_client.set_list_all_deployments(move || {
+                let _ = entered_tx.lock().unwrap().send(());
+                let _ = release_rx
+                    .lock()
+                    .unwrap()
+                    .recv_timeout(Duration::from_secs(10));
+                Ok(vec![])
+            });
+
+            let check = async {
+                tokio::task::spawn_blocking(move || {
+                    entered_rx.recv_timeout(Duration::from_secs(10)).unwrap()
+                })
+                .await
+                .unwrap();
+                // mid-sync: the previous state, without waiting for the sync
+                assert_eq!(f.syncer.latest_sync_state(), before);
+                release_tx.send(()).unwrap();
+            };
+            let (result, ()) = tokio::join!(f.syncer.sync(), check);
+            result.unwrap();
+
+            let after = f.syncer.latest_sync_state();
+            assert!(after.last_synced > before.last_synced);
         }
     }
 

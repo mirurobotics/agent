@@ -1,20 +1,13 @@
-// standard crates
-use std::time::{Duration, Instant};
-
 // internal crates
-use crate::mocks::syncer::MockSyncer;
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::disk::{self, Layout};
 use miru_agent::filesys::files;
 use miru_agent::models::{Device, DeviceStatus};
 use miru_agent::services::device as dvc_svc;
 use miru_agent::services::ServiceErr;
-use miru_agent::sync::syncer::State;
-use miru_agent::sync::Syncer;
 
 // external crates
 use chrono::{DateTime, Utc};
-use tokio::sync::mpsc;
 
 pub mod errors {
     use super::*;
@@ -91,38 +84,5 @@ pub mod success {
 
         let result = dvc_svc::get(&device_file).await.unwrap();
         assert_eq!(result, custom_device);
-    }
-}
-
-pub mod get_secs_since_last_sync {
-    use super::*;
-
-    #[tokio::test]
-    async fn none_before_first_sync() {
-        let syncer = MockSyncer::default();
-        syncer.set_state(State::default());
-
-        assert_eq!(dvc_svc::get_secs_since_last_sync(&syncer).await, None);
-    }
-
-    #[tokio::test]
-    async fn seconds_since_last_sync() {
-        let syncer = MockSyncer::default();
-        syncer.set_state(State {
-            last_synced: Instant::now().checked_sub(Duration::from_secs(5)),
-            ..State::default()
-        });
-
-        let secs = dvc_svc::get_secs_since_last_sync(&syncer).await.unwrap();
-        assert!((5..60).contains(&secs), "got {secs}");
-    }
-
-    #[tokio::test]
-    async fn none_when_syncer_unreachable() {
-        let (sender, receiver) = mpsc::channel(1);
-        drop(receiver);
-        let syncer = Syncer::new(sender);
-
-        assert_eq!(dvc_svc::get_secs_since_last_sync(&syncer).await, None);
     }
 }

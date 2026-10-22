@@ -82,6 +82,10 @@ impl<HTTPClientT: http::ClientI> SyncerImpl<HTTPClientT> {
         Ok(self.state.clone())
     }
 
+    pub(super) fn state(&self) -> &State {
+        &self.state
+    }
+
     #[cfg(test)]
     pub(super) fn set_sync_state(&mut self, state: State) {
         self.state = state;
