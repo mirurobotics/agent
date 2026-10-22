@@ -150,32 +150,41 @@ where
 
     /// Upload the report queued as `entry`: read its file, then send it. The
     /// future owns what it needs and borrows nothing from `self`, so the
-    /// worker can serve commands while it runs.
+    /// worker can serve commands while it runs. `entry` is a copy; the queue
+    /// keeps its own until [`Self::finish`].
     pub(crate) fn upload(
         &self,
-        entry: &QueueEntry,
+        entry: QueueEntry,
     ) -> impl Future<Output = Result<(), CalibrationsErr>> {
         let sender = self.sender.clone();
-        let metadata = entry.job.clone();
         let file = self.report_file(entry.id);
         async move {
             let data = read(&file).await?;
-            sender.send(Report { metadata, data }).await
+            sender
+                .send(Report {
+                    metadata: entry.job,
+                    data,
+                })
+                .await
         }
     }
 
-    /// Settle `entry` once its upload ended in `result`: remove it
+    /// Settle report `id` once its upload ended in `result`: remove it
     /// when sent, otherwise retry or drop it as the retry policy says.
-    pub(crate) async fn finish(&mut self, entry: QueueEntry, result: Result<(), CalibrationsErr>) {
+    pub(crate) async fn finish(&mut self, id: Uuid, result: Result<(), CalibrationsErr>) {
         let err = match result {
             Ok(()) => {
-                self.remove(entry.id).await;
-                info!("calibrations: uploaded report {}", entry.id);
+                self.remove(id).await;
+                info!("calibrations: uploaded report {id}");
                 return;
             }
             Err(err) => err,
         };
-        let id = entry.id;
+        // the queue's copy, since `upload` consumed the worker's
+        let Some(entry) = self.queue.iter().find(|entry| entry.id == id) else {
+            warn!("calibrations: report {id} left the queue during its upload");
+            return;
+        };
         let age = (self.now_fn)() - entry.job.calibrated_at;
         match self.options.retry.on_failure(&err, entry.attempts, age) {
             Verdict::Retry {
@@ -183,7 +192,7 @@ where
                 wait_secs,
             } => {
                 log_retry(id, attempts, &err);
-                self.retry_after(&entry, attempts, wait_secs).await;
+                self.retry_after(id, attempts, wait_secs).await;
             }
             Verdict::Terminal { .. } => {
                 error!("calibrations: dropping report {id}, which can never be uploaded: {err}");
@@ -201,10 +210,10 @@ where
         }
     }
 
-    /// Move `entry` to the tail, due again in `wait_secs`.
-    async fn retry_after(&mut self, entry: &QueueEntry, attempts: u32, wait_secs: i64) {
+    /// Move report `id` to the tail, due again in `wait_secs`.
+    async fn retry_after(&mut self, id: Uuid, attempts: u32, wait_secs: i64) {
         let next_attempt_at = (self.now_fn)() + TimeDelta::seconds(wait_secs.max(0));
-        self.queue.retry(entry.id, attempts, next_attempt_at).await;
+        self.queue.retry(id, attempts, next_attempt_at).await;
     }
 
     /// Dequeue report `id`, then delete its file. The entry goes first, so a
