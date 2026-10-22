@@ -6,8 +6,6 @@
 //! through `super::` within `test_utils/` — never `crate::mocks::…` or
 //! `crate::sync::…`, which resolve differently in the two trees.
 
-#[path = "../mocks/calibration_sender.rs"]
-pub mod calibration_sender;
 #[path = "../errors/harnesses.rs"]
 pub mod error_harnesses;
 #[path = "filesys/mod.rs"]

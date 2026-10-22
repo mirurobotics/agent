@@ -87,12 +87,11 @@ where
     /// Upload the report queued as `entry` and settle it. A shutdown
     /// mid-upload leaves the report queued, to be re-sent on the next boot.
     async fn attempt(&mut self, entry: QueueEntry) -> Flow {
-        let id = entry.id;
-        let upload = self.uploader.upload(entry);
+        let (attempt, upload) = self.uploader.upload(entry);
         let Some(result) = self.serve_until(upload).await else {
             return Flow::Shutdown;
         };
-        self.uploader.finish(id, result).await;
+        self.uploader.finish(attempt, result).await;
         Flow::Continue
     }
 

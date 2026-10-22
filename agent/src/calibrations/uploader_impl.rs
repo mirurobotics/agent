@@ -44,6 +44,15 @@ impl Default for UploaderOptions {
     }
 }
 
+/// What [`UploaderImpl::finish`] needs from a queue entry whose upload is in
+/// flight, since the entry itself moved into the upload.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Attempt {
+    id: Uuid,
+    attempts: u32,
+    calibrated_at: DateTime<Utc>,
+}
+
 /// What the queue holds for the worker to do next.
 pub(crate) type NextAttempt = queue::NextAttempt<ReportMetadata>;
 
@@ -150,28 +159,35 @@ where
 
     /// Upload the report queued as `entry`: read its file, then send it. The
     /// future owns what it needs and borrows nothing from `self`, so the
-    /// worker can serve commands while it runs. `entry` is a copy; the queue
-    /// keeps its own until [`Self::finish`].
+    /// worker can serve commands while it runs. The entry's metadata moves
+    /// into the request, so the returned [`Attempt`] keeps what
+    /// [`Self::finish`] needs afterwards.
     pub(crate) fn upload(
         &self,
         entry: QueueEntry,
-    ) -> impl Future<Output = Result<(), CalibrationsErr>> {
+    ) -> (Attempt, impl Future<Output = Result<(), CalibrationsErr>>) {
+        let attempt = Attempt {
+            id: entry.id,
+            attempts: entry.attempts,
+            calibrated_at: entry.job.calibrated_at,
+        };
         let sender = self.sender.clone();
         let file = self.report_file(entry.id);
-        async move {
+        let upload = async move {
             let data = read(&file).await?;
-            sender
-                .send(Report {
-                    metadata: entry.job,
-                    data,
-                })
-                .await
-        }
+            let report = Report {
+                metadata: entry.job,
+                data,
+            };
+            sender.send(report).await
+        };
+        (attempt, upload)
     }
 
-    /// Settle report `id` once its upload ended in `result`: remove it
+    /// Settle `attempt` once its upload ended in `result`: remove the report
     /// when sent, otherwise retry or drop it as the retry policy says.
-    pub(crate) async fn finish(&mut self, id: Uuid, result: Result<(), CalibrationsErr>) {
+    pub(crate) async fn finish(&mut self, attempt: Attempt, result: Result<(), CalibrationsErr>) {
+        let id = attempt.id;
         let err = match result {
             Ok(()) => {
                 self.remove(id).await;
@@ -180,13 +196,8 @@ where
             }
             Err(err) => err,
         };
-        // the queue's copy, since `upload` consumed the worker's
-        let Some(entry) = self.queue.iter().find(|entry| entry.id == id) else {
-            warn!("calibrations: report {id} left the queue during its upload");
-            return;
-        };
-        let age = (self.now_fn)() - entry.job.calibrated_at;
-        match self.options.retry.on_failure(&err, entry.attempts, age) {
+        let age = (self.now_fn)() - attempt.calibrated_at;
+        match self.options.retry.on_failure(&err, attempt.attempts, age) {
             Verdict::Retry {
                 attempts,
                 wait_secs,
@@ -281,23 +292,4 @@ fn invalid(reason: &str) -> CalibrationsErr {
         reason: reason.to_string(),
         trace: trace!(),
     })
-}
-
-#[cfg(test)]
-mod tests {
-    // internal crates
-    use super::*;
-    use crate::test_utils::calibration_sender::MockCalibrationSender;
-
-    #[tokio::test]
-    async fn finish_skips_a_report_no_longer_queued() {
-        let (sender, _started) = MockCalibrationSender::new();
-        let reports = Dir::new("/nonexistent/reports");
-        let options = UploaderOptions::default();
-        let mut uploader = UploaderImpl::new(sender, None, reports, options, Utc::now);
-
-        uploader.finish(Uuid::new_v4(), Err(invalid("gone"))).await;
-
-        assert_eq!(uploader.len(), 0);
-    }
 }
