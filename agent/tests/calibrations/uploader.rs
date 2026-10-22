@@ -420,7 +420,7 @@ async fn stores_metadata_in_the_queue_and_data_in_a_report_file() {
 
     let snapshot: serde_json::Value = files::read_json(&h.layout.queue()).await.unwrap();
     assert_eq!(snapshot["entries"][0]["id"], json!(id.to_string()));
-    assert_eq!(snapshot["entries"][0]["job"]["component_slug"], json!("a"));
+    assert_eq!(snapshot["entries"][0]["job"]["component"], json!("a"));
     assert_eq!(snapshot["entries"][0]["job"]["format"], json!("json"));
     let data = files::read_string(&h.report_file(id)).await.unwrap();
     assert_eq!(data, report("a").data);

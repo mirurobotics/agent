@@ -15,8 +15,8 @@ pub struct CreateCalibrationRequest {
     #[serde(rename = "deployment_id", skip_serializing_if = "Option::is_none")]
     pub deployment_id: Option<String>,
     /// Slug of the component the calibrated unit belongs to. A new slug creates a component.
-    #[serde(rename = "component_slug")]
-    pub component_slug: String,
+    #[serde(rename = "component")]
+    pub component: String,
     /// Slug of the role the calibrated unit fills on the device, such as `aligner-1` or `front-left`. Distinguishes several units of one component on a device. Validated like a slug. Miru resolves it to one of the component's `roles`, creating the role the first time it is reported.
     #[serde(rename = "role", skip_serializing_if = "Option::is_none")]
     pub role: Option<String>,
@@ -35,10 +35,10 @@ pub struct CreateCalibrationRequest {
 }
 
 impl CreateCalibrationRequest {
-    pub fn new(component_slug: String, content: models::InstanceContent, reported_at: String) -> CreateCalibrationRequest {
+    pub fn new(component: String, content: models::InstanceContent, reported_at: String) -> CreateCalibrationRequest {
         CreateCalibrationRequest {
             deployment_id: None,
-            component_slug,
+            component,
             role: None,
             serial_number: None,
             aspect: None,

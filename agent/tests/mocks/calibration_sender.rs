@@ -48,12 +48,10 @@ impl MockCalibrationSender {
         self.script.lock().unwrap().push_back(step);
     }
 
-    /// The `component_slug` of every report `send` was called with, in order.
+    /// The `component` of every report `send` was called with, in order.
     pub fn sent(&self) -> Vec<String> {
         let sent = self.sent.lock().unwrap();
-        sent.iter()
-            .map(|r| r.metadata.component_slug.clone())
-            .collect()
+        sent.iter().map(|r| r.metadata.component.clone()).collect()
     }
 
     /// Every report `send` was called with, in order.

@@ -22,7 +22,7 @@ pub struct Report {
 /// was taken under.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ReportMetadata {
-    pub component_slug: String,
+    pub component: String,
     /// The format [`Report::data`] is serialized in.
     pub format: InstanceFormat,
     #[serde(default)]
@@ -47,7 +47,7 @@ impl queue::QueueJob for ReportMetadata {
     }
 
     fn name(&self) -> String {
-        let mut name = format!("calibration of {}", self.component_slug);
+        let mut name = format!("calibration of {}", self.component);
         if let Some(role) = &self.role {
             name.push_str(&format!(" (role {role})"));
         }
