@@ -221,7 +221,11 @@ where
                 Self::log_dropped(&entry, &err);
                 self.queue.ack(entry.id).await;
             }
-            Verdict::TooOld { age } => {
+            Verdict::TooOld { attempts, age } => {
+                if !err.is_network_conn_err() {
+                    entry.attempts = attempts;
+                    Self::log_counted_failure(&entry, &err);
+                }
                 Self::log_age_drop(&entry, age, &err);
                 self.queue.ack(entry.id).await;
             }
@@ -284,9 +288,8 @@ where
 
     fn log_age_drop(entry: &QueueEntry, age: TimeDelta, err: &UploadErr) {
         error!(
-            "dropping upload job: network-classified failures only, for {} days since the file \
-             was first observed (rule {}, file {}, digest {}, attempt {}); suspect a permanent \
-             failure misclassified as a network error: {err:?}",
+            "dropping upload job: still failing {} days after the file was first observed \
+             (rule {}, file {}, digest {}, attempt {}): {err:?}",
             age.num_days(),
             entry.job.file_rule_id,
             entry.job.file,

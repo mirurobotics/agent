@@ -7,8 +7,9 @@ use chrono::{DateTime, TimeDelta, Utc};
 
 /// When a queued job that failed is retried, and when it is given up on. A
 /// network error doesn't count as an attempt: the job waits a flat
-/// `backoff.base_secs`, until it is older than `max_age`. Any other failure
-/// counts, and the job waits out a backoff that grows with its attempts.
+/// `backoff.base_secs`. Any other failure counts, and the job waits out a
+/// backoff that grows with its attempts. Whatever the error, a job older than
+/// `max_age` is dropped.
 #[derive(Clone, Copy, Debug)]
 pub struct RetryPolicy {
     /// Total counted attempts per job before it is dropped.
@@ -16,8 +17,8 @@ pub struct RetryPolicy {
     /// Backoff between counted attempts; the exponent is the job's attempt
     /// count minus one.
     pub backoff: cooldown::Backoff,
-    /// Backstop on the network-error exemption: a job older than this is
-    /// dropped even if every failure so far was a network error.
+    /// Age past which a failing job is dropped, whatever the error. This is
+    /// what ends a job that only ever fails with network errors.
     pub max_age: TimeDelta,
 }
 
@@ -45,8 +46,8 @@ pub enum Verdict {
     Terminal { attempts: u32 },
     /// Drop it: it has used up its attempts.
     OutOfAttempts { attempts: u32 },
-    /// Drop it: only network errors so far, but it is older than `max_age`.
-    TooOld { age: TimeDelta },
+    /// Drop it: it is older than `max_age`.
+    TooOld { attempts: u32, age: TimeDelta },
 }
 
 impl RetryPolicy {
@@ -59,19 +60,24 @@ impl RetryPolicy {
     /// The verdict on a job that failed with `err` after `attempts` counted
     /// attempts, `age` after it was first seen.
     pub fn on_failure(&self, err: &impl Error, attempts: u32, age: TimeDelta) -> Verdict {
-        if err.is_network_conn_err() {
-            if age >= self.max_age {
-                return Verdict::TooOld { age };
-            }
+        let network = err.is_network_conn_err();
+        let attempts = if network {
+            attempts
+        } else {
+            attempts.saturating_add(1)
+        };
+        if !network && err.is_terminal() {
+            return Verdict::Terminal { attempts };
+        }
+        if age >= self.max_age {
+            return Verdict::TooOld { attempts, age };
+        }
+        if network {
             let wait_secs = self.backoff.base_secs.max(0);
             return Verdict::Retry {
                 attempts,
                 wait_secs,
             };
-        }
-        let attempts = attempts.saturating_add(1);
-        if err.is_terminal() {
-            return Verdict::Terminal { attempts };
         }
         if attempts >= self.attempts {
             return Verdict::OutOfAttempts { attempts };

@@ -92,7 +92,7 @@ fn a_network_error_past_the_age_backstop_is_too_old() {
 
     assert_eq!(
         policy().on_failure(&NETWORK, 0, age),
-        Verdict::TooOld { age }
+        Verdict::TooOld { attempts: 0, age }
     );
 }
 
@@ -135,15 +135,19 @@ fn a_terminal_error_is_dropped_at_once() {
 }
 
 #[test]
-fn age_only_ends_the_network_exemption() {
-    // an old job that fails for another reason still gets its attempts
-    let verdict = policy().on_failure(&RETRYABLE, 0, TimeDelta::days(30));
+fn a_counted_failure_past_the_age_cap_is_too_old() {
+    let age = TimeDelta::days(7);
 
     assert_eq!(
-        verdict,
-        Verdict::Retry {
-            attempts: 1,
-            wait_secs: 10
-        }
+        policy().on_failure(&RETRYABLE, 0, age),
+        Verdict::TooOld { attempts: 1, age }
+    );
+}
+
+#[test]
+fn a_terminal_error_past_the_age_cap_is_still_terminal() {
+    assert_eq!(
+        policy().on_failure(&TERMINAL, 0, TimeDelta::days(30)),
+        Verdict::Terminal { attempts: 1 }
     );
 }
