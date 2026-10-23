@@ -11,12 +11,11 @@ use crate::calibrations::{
     uploader_impl::{NextAttempt, UploaderImpl, UploaderOptions},
 };
 use crate::filesys::Dir;
-use crate::sync::syncer::{next_sync_event, SyncEvent};
 use crate::trace;
 
 // external crates
 use chrono::{DateTime, Utc};
-use tokio::sync::{mpsc, oneshot, watch};
+use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{error, info};
 use uuid::Uuid;
@@ -27,9 +26,6 @@ pub struct UploaderArgs<S, F, N> {
     /// The directory holding one data file per queued report.
     pub reports: Dir,
     pub sender: Arc<S>,
-    /// Sync events; a successful sync makes every waiting report due at once. `None` disables
-    /// the early retry.
-    pub events: Option<watch::Receiver<SyncEvent>>,
     pub options: UploaderOptions,
     pub sleep_fn: F,
     /// The clock that report backoffs and ages are measured against.
@@ -58,7 +54,6 @@ enum Flow {
 struct Worker<S, F, N> {
     receiver: mpsc::Receiver<Command>,
     uploader: UploaderImpl<S, N>,
-    events: Option<watch::Receiver<SyncEvent>>,
     sleep_fn: F,
 }
 
@@ -97,10 +92,6 @@ where
 
     /// Drive `fut` to completion while serving commands, so intake never
     /// waits on Miru. `None` when a shutdown arrived; `fut` is then dropped.
-    ///
-    /// Sync events are consumed here too. The watch keeps only the latest
-    /// event, so a successful sync left unread until `fut` finished could be
-    /// overwritten by a later one and its early retry lost.
     async fn serve_until<T>(&mut self, fut: impl Future<Output = T>) -> Option<T> {
         tokio::pin!(fut);
         loop {
@@ -112,18 +103,12 @@ where
                         return None;
                     }
                 }
-                event = next_sync_event(&mut self.events) => {
-                    if self.reconnected(event) {
-                        self.uploader.clear_retry_cooldowns().await;
-                    }
-                }
             }
         }
     }
 
     /// Wait `wait` for the earliest report to come due, while serving
-    /// commands. A new report or a successful sync (Miru is reachable again,
-    /// so every waiting report is made due) ends the wait early.
+    /// commands. A new report ends the wait early.
     async fn back_off(&mut self, wait: Duration) -> Flow {
         let sleep = (self.sleep_fn)(wait);
         tokio::pin!(sleep);
@@ -137,39 +122,14 @@ where
                         return flow;
                     }
                 }
-                event = next_sync_event(&mut self.events) => {
-                    if self.reconnected(event) {
-                        self.uploader.clear_retry_cooldowns().await;
-                        return Flow::Continue;
-                    }
-                }
             }
         }
     }
 
-    /// Wait for a command or a sync event with nothing ready to send.
+    /// Wait for a command with nothing ready to send.
     async fn idle(&mut self) -> Flow {
-        tokio::select! {
-            cmd = self.receiver.recv() => self.handle(cmd).await,
-            event = next_sync_event(&mut self.events) => {
-                self.reconnected(event);
-                Flow::Continue
-            }
-        }
-    }
-
-    /// Whether `event` is a successful sync. An ended event stream disables the
-    /// subscription.
-    fn reconnected(&mut self, event: Option<SyncEvent>) -> bool {
-        match event {
-            Some(SyncEvent::SyncSuccess) => true,
-            Some(_) => false,
-            None => {
-                error!("calibrations: syncer event stream ended; no early retry on reconnect");
-                self.events = None;
-                false
-            }
-        }
+        let cmd = self.receiver.recv().await;
+        self.handle(cmd).await
     }
 
     /// Serve `cmd`. Every handle dropping counts as a shutdown.
@@ -229,7 +189,6 @@ impl Uploader {
                 args.options,
                 args.now_fn,
             ),
-            events: args.events,
             sleep_fn: args.sleep_fn,
         };
         (Self { sender }, tokio::spawn(worker.run()))

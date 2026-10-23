@@ -1,4 +1,4 @@
-//! The calibration uploader: drain order, backoff, dropping, reconnect,
+//! The calibration uploader: drain order, backoff, dropping,
 //! serving intake while busy, and shutdown.
 
 // standard crates
@@ -18,14 +18,13 @@ use miru_agent::disk::layout::CalibrationsLayout;
 use miru_agent::errors::{Code, Error, HTTPCode};
 use miru_agent::filesys::{dirs, files, File, PathExt, WriteOptions};
 use miru_agent::queue::{Persistence, RetryPolicy};
-use miru_agent::sync::syncer::{CooldownEnd, SyncEvent};
 
 // external crates
 use chrono::{DateTime, TimeDelta, Utc};
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use serde_json::json;
-use tokio::sync::{mpsc, oneshot, watch};
+use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
@@ -37,9 +36,6 @@ struct Harness {
     layout: CalibrationsLayout,
     sender: Arc<MockCalibrationSender>,
     started: mpsc::UnboundedReceiver<()>,
-    /// Dropping it ends the uploader's event stream; `None` before a spawn
-    /// spawns without one.
-    events: Option<watch::Sender<SyncEvent>>,
     sleep: Arc<SleepController>,
     /// The uploader's clock. It starts when the fixture reports were received
     /// and moves only when a backoff sleep completes.
@@ -53,13 +49,11 @@ impl Harness {
         let dir = test_dirs::temp("calibration_uploader_test").unwrap();
         let layout = layout(&dir);
         let (sender, started) = MockCalibrationSender::new();
-        let (events, _) = watch::channel(SyncEvent::SyncSuccess);
         Self {
             _dir: dir,
             layout,
             sender,
             started,
-            events: Some(events),
             sleep: Arc::new(SleepController::new()),
             clock: Arc::new(Mutex::new(received_at())),
             uploader: None,
@@ -93,7 +87,6 @@ impl Harness {
             snapshot_file,
             reports: self.layout.reports(),
             sender: self.sender.clone(),
-            events: self.events.as_ref().map(watch::Sender::subscribe),
             options,
             sleep_fn: self.sleep_fn(),
             now_fn: self.now_fn(),
@@ -138,10 +131,6 @@ impl Harness {
 
     async fn len(&self) -> usize {
         guard(self.uploader().len()).await.unwrap()
-    }
-
-    fn sync(&self, event: SyncEvent) {
-        self.events.as_ref().unwrap().send(event).unwrap();
     }
 
     fn report_file(&self, id: Uuid) -> File {
@@ -445,79 +434,6 @@ async fn report_files_with_no_queue_entry_are_deleted_at_start() {
 }
 
 #[tokio::test]
-async fn a_successful_sync_retries_waiting_reports_at_once() {
-    let mut h = Harness::new();
-    h.sender.push(Step::Network);
-    preloaded(&h, &["a", "b"]).await;
-    h.spawn().await;
-
-    // `a` waits out its backoff at the tail while `b` is sent
-    h.await_sleep().await;
-    assert_eq!(h.sender.sent(), strings(&["a", "b"]));
-    assert_eq!(h.len().await, 1);
-
-    // a successful sync ends the wait without the sleep being released
-    h.sync(SyncEvent::SyncSuccess);
-
-    h.await_drained(&["a", "b", "a"]).await;
-    assert_eq!(h.sleeps_secs(), [10]);
-}
-
-#[tokio::test]
-async fn a_successful_sync_during_an_upload_retries_waiting_reports() {
-    let mut h = Harness::new();
-    let (release, hang) = oneshot::channel();
-    h.sender.push(Step::Network);
-    h.sender.push(Step::Hang(hang));
-    preloaded(&h, &["a", "b"]).await;
-    h.spawn().await;
-
-    // `a` fails and backs off at the tail while `b` is still in flight
-    h.await_started().await;
-    h.await_started().await;
-
-    // a later event replaces the success in the watch before `b` finishes
-    h.sync(SyncEvent::SyncSuccess);
-    tokio::time::sleep(Duration::from_millis(20)).await;
-    h.sync(SyncEvent::CooldownEnd(CooldownEnd::SyncSuccess));
-    tokio::time::sleep(Duration::from_millis(20)).await;
-    release.send(()).unwrap();
-
-    // `a` is retried at once, without waiting out its backoff
-    h.await_drained(&["a", "b", "a"]).await;
-    assert!(h.sleeps_secs().is_empty());
-}
-
-#[tokio::test]
-async fn other_sync_events_do_not_end_a_wait() {
-    let mut h = Harness::new();
-    h.sender.push(Step::Network);
-    h.spawn().await;
-    h.enqueue("a").await;
-    h.await_sleep().await;
-
-    h.sync(SyncEvent::CooldownEnd(CooldownEnd::SyncSuccess));
-    tokio::time::sleep(Duration::from_millis(20)).await;
-
-    assert_eq!(h.sender.sent(), strings(&["a"]));
-    h.await_sleep().await;
-    h.sleep.release().await;
-    h.await_drained(&["a", "a"]).await;
-}
-
-#[tokio::test]
-async fn sync_events_while_idle_are_ignored() {
-    let mut h = Harness::new();
-    h.spawn().await;
-
-    h.sync(SyncEvent::SyncSuccess);
-    h.sync(SyncEvent::CooldownEnd(CooldownEnd::SyncSuccess));
-    h.enqueue("a").await;
-
-    h.await_drained(&["a"]).await;
-}
-
-#[tokio::test]
 async fn retryable_errors_back_off_within_bounds() {
     let mut h = Harness::new();
     for _ in 0..11 {
@@ -791,47 +707,6 @@ async fn commands_after_shutdown_fail() {
         matches!(err, CalibrationsErr::SendActorMessageErr(_)),
         "{err:?}"
     );
-}
-
-#[tokio::test]
-async fn drains_without_sync_events() {
-    let mut h = Harness::new();
-    h.events = None;
-    h.spawn().await;
-
-    h.enqueue("a").await;
-
-    h.await_drained(&["a"]).await;
-}
-
-#[tokio::test]
-async fn an_ended_event_stream_does_not_cut_a_wait_short() {
-    let mut h = Harness::new();
-    h.sender.push(Step::Server);
-    h.spawn().await;
-    h.enqueue("a").await;
-    h.await_sleep().await;
-
-    h.events = None;
-    tokio::time::sleep(Duration::from_millis(20)).await;
-
-    assert_eq!(h.sender.sent(), strings(&["a"]));
-    h.await_sleep().await;
-    h.sleep.release().await;
-    h.await_drained(&["a", "a"]).await;
-}
-
-#[tokio::test]
-async fn an_ended_event_stream_does_not_stop_an_idle_uploader() {
-    let mut h = Harness::new();
-    h.spawn().await;
-    assert_eq!(h.len().await, 0);
-
-    h.events = None;
-    tokio::time::sleep(Duration::from_millis(20)).await;
-    h.enqueue("a").await;
-
-    h.await_drained(&["a"]).await;
 }
 
 #[tokio::test]

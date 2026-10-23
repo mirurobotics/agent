@@ -142,15 +142,6 @@ where
         self.queue.next_attempt(now, horizon).await
     }
 
-    /// Clear every report's retry cooldown so it is due now, once Miru is
-    /// reachable again. This is expected, so unlike a clock jump it does not
-    /// warn.
-    pub(crate) async fn clear_retry_cooldowns(&mut self) {
-        let now = (self.now_fn)();
-        let cleared = self.queue.pull_deadlines_to(now).await;
-        info!("calibrations: cleared the retry cooldown of {cleared} report(s)");
-    }
-
     /// Upload the report queued as `entry`: read its file, then send it. The
     /// future owns what it needs and borrows nothing from `self`, so the
     /// worker can serve commands while it runs. The metadata is cloned into
