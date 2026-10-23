@@ -53,6 +53,11 @@ impl MockCalibrationSender {
         let sent = self.sent.lock().unwrap();
         sent.iter().map(|r| r.metadata.component.clone()).collect()
     }
+
+    /// Every report `send` was called with, in order.
+    pub fn reports(&self) -> Vec<Report> {
+        self.sent.lock().unwrap().clone()
+    }
 }
 
 fn request_failed(status: u16) -> CalibrationsErr {
