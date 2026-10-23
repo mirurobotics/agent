@@ -312,15 +312,16 @@ fn invalid(reason: &str) -> CalibrationsErr {
 mod tests {
     // standard crates
     use std::sync::{Arc, Mutex};
+    use std::time::Duration;
 
     // internal crates
-    use super::{NextAttempt, UploaderImpl, UploaderOptions};
+    use super::{NextAttempt, QueueEntry, UploaderImpl, UploaderOptions};
     use crate::test_utils::calibration_sender::{MockCalibrationSender, Step};
     use crate::test_utils::calibrations::{layout, received_at, report};
     use crate::test_utils::filesys::dirs as test_dirs;
-    use miru_agent::calibrations::{CalibrationsErr, Queue, QueueSnapshotFile};
+    use miru_agent::calibrations::{Queue, QueueSnapshotFile};
     use miru_agent::disk::layout::CalibrationsLayout;
-    use miru_agent::errors::{Code, Error, HTTPCode};
+    use miru_agent::errors::{Error, HTTPCode};
     use miru_agent::filesys::{dirs, files, File, PathExt, WriteOptions};
     use miru_agent::queue::{Persistence, RetryPolicy};
 
@@ -428,25 +429,29 @@ mod tests {
         ids
     }
 
+    /// The entry `next` says is due now, if any.
+    fn ready(next: NextAttempt) -> Option<QueueEntry> {
+        match next {
+            NextAttempt::Ready(entry) => Some(entry),
+            _ => None,
+        }
+    }
+
     /// Attempt the report due now and settle it.
     async fn attempt_due(u: &mut TestUploader) {
-        let NextAttempt::Ready(entry) = u.next_attempt().await else {
-            panic!("no report is due");
-        };
+        let entry = ready(u.next_attempt().await).expect("no report is due");
         let result = u.attempt(&entry).await;
         u.finish_attempt(entry, result).await;
     }
 
-    /// How long until the earliest report is due, in seconds.
-    async fn backoff_secs(u: &mut TestUploader) -> u64 {
-        let NextAttempt::Backoff(wait) = u.next_attempt().await else {
-            panic!("expected every report to be backing off");
-        };
-        wait.as_secs()
+    /// Assert that every report is backing off and the earliest is due in `secs`.
+    async fn assert_backoff(u: &mut TestUploader, secs: u64) {
+        let wait = Duration::from_secs(secs);
+        assert_eq!(u.next_attempt().await, NextAttempt::Backoff(wait));
     }
 
-    async fn is_empty(u: &mut TestUploader) -> bool {
-        matches!(u.next_attempt().await, NextAttempt::Empty)
+    async fn assert_empty(u: &mut TestUploader) {
+        assert_eq!(u.next_attempt().await, NextAttempt::Empty);
     }
 
     fn strings(names: &[&str]) -> Vec<String> {
@@ -489,7 +494,7 @@ mod tests {
 
         let err = u.enqueue(report("b")).await.unwrap_err();
 
-        assert!(matches!(err, CalibrationsErr::QueueFullErr(_)), "{err:?}");
+        assert!(format!("{err:?}").starts_with("QueueFullErr"), "{err:?}");
         assert_eq!(err.code().as_str(), "calibration_buffer_full");
         assert_eq!(err.http_status(), HTTPCode::INSUFFICIENT_STORAGE);
         assert_eq!(err.params(), Some(json!({ "max_reports": 1 })));
@@ -509,8 +514,7 @@ mod tests {
 
         let err = u.enqueue(big).await.unwrap_err();
 
-        assert!(matches!(err, CalibrationsErr::TooLargeErr(_)), "{err:?}");
-        assert!(matches!(err.code(), Code::CalibrationTooLarge));
+        assert!(format!("{err:?}").starts_with("TooLargeErr"), "{err:?}");
         assert_eq!(err.code().as_str(), "calibration_too_large");
         assert_eq!(err.http_status(), HTTPCode::PAYLOAD_TOO_LARGE);
         assert_eq!(err.params(), Some(json!({ "max_bytes": 100 })));
@@ -530,8 +534,8 @@ mod tests {
 
         let err = u.enqueue(report("a")).await.unwrap_err();
 
-        assert!(matches!(err, CalibrationsErr::FileSysErr(_)), "{err:?}");
-        assert!(matches!(err.code(), Code::InternalServerError), "{err}");
+        assert!(format!("{err:?}").starts_with("FileSysErr"), "{err:?}");
+        assert_eq!(err.code().as_str(), "internal_server_error");
         assert_eq!(u.len(), 0);
     }
 
@@ -548,7 +552,7 @@ mod tests {
 
         let err = u.enqueue(report("a")).await.unwrap_err();
 
-        assert!(matches!(err, CalibrationsErr::FileSysErr(_)), "{err:?}");
+        assert!(format!("{err:?}").starts_with("FileSysErr"), "{err:?}");
         assert_eq!(u.len(), 0);
         assert!(!f.layout.reports().exists());
     }
@@ -631,7 +635,7 @@ mod tests {
         attempt_due(&mut u).await;
 
         assert_eq!(f.sent(), strings(&["a"]));
-        assert!(is_empty(&mut u).await);
+        assert_empty(&mut u).await;
         assert!(!f.report_file(id).exists());
         assert_eq!(f.queued_on_disk().await, 0);
     }
@@ -668,13 +672,13 @@ mod tests {
 
         for expected in [10, 20, 40, 80, 160, 320, 640, 1280, 2560, 3600, 3600] {
             attempt_due(&mut u).await;
-            assert_eq!(backoff_secs(&mut u).await, expected);
+            assert_backoff(&mut u, expected).await;
             f.advance_secs(expected);
         }
         attempt_due(&mut u).await;
 
         assert_eq!(f.sent(), strings(&["a"; 12]));
-        assert!(is_empty(&mut u).await);
+        assert_empty(&mut u).await;
     }
 
     #[tokio::test]
@@ -688,13 +692,13 @@ mod tests {
 
         for _ in 0..3 {
             attempt_due(&mut u).await;
-            assert_eq!(backoff_secs(&mut u).await, 10);
+            assert_backoff(&mut u, 10).await;
             f.advance_secs(10);
         }
         attempt_due(&mut u).await;
 
         assert_eq!(f.sent(), strings(&["a"; 4]));
-        assert!(is_empty(&mut u).await);
+        assert_empty(&mut u).await;
     }
 
     #[tokio::test]
@@ -709,15 +713,15 @@ mod tests {
         // `a` fails and waits at the tail while `b` is sent
         attempt_due(&mut u).await;
         attempt_due(&mut u).await;
-        assert_eq!(backoff_secs(&mut u).await, 10);
+        assert_backoff(&mut u, 10).await;
         f.advance_secs(10);
         attempt_due(&mut u).await;
-        assert_eq!(backoff_secs(&mut u).await, 20);
+        assert_backoff(&mut u, 20).await;
         f.advance_secs(20);
         attempt_due(&mut u).await;
 
         assert_eq!(f.sent(), strings(&["a", "b", "a", "a"]));
-        assert!(is_empty(&mut u).await);
+        assert_empty(&mut u).await;
     }
 
     #[tokio::test]
@@ -738,13 +742,13 @@ mod tests {
 
         for expected in [10, 20] {
             attempt_due(&mut u).await;
-            assert_eq!(backoff_secs(&mut u).await, expected);
+            assert_backoff(&mut u, expected).await;
             f.advance_secs(expected);
         }
         attempt_due(&mut u).await;
 
         assert_eq!(f.sent(), strings(&["a"; 3]));
-        assert!(is_empty(&mut u).await);
+        assert_empty(&mut u).await;
         assert!(!f.report_file(id).exists());
     }
 
@@ -766,13 +770,13 @@ mod tests {
 
         for _ in 0..3 {
             attempt_due(&mut u).await;
-            assert_eq!(backoff_secs(&mut u).await, 10);
+            assert_backoff(&mut u, 10).await;
             f.advance_secs(10);
         }
         attempt_due(&mut u).await;
 
         assert_eq!(f.sent(), strings(&["a"; 4]));
-        assert!(is_empty(&mut u).await);
+        assert_empty(&mut u).await;
     }
 
     #[tokio::test]
@@ -785,7 +789,7 @@ mod tests {
 
         attempt_due(&mut u).await;
 
-        assert!(is_empty(&mut u).await);
+        assert_empty(&mut u).await;
         assert!(!f.report_file(id).exists());
     }
 
@@ -799,7 +803,7 @@ mod tests {
 
         attempt_due(&mut u).await;
 
-        assert!(is_empty(&mut u).await);
+        assert_empty(&mut u).await;
         assert!(!f.report_file(id).exists());
     }
 
@@ -813,12 +817,13 @@ mod tests {
         assert!(queue.retry(ids[0], 1, far).await);
         let mut u = f.uploader().await;
 
-        assert_eq!(backoff_secs(&mut u).await, 3600);
+        assert_eq!(ready(u.next_attempt().await), None);
+        assert_backoff(&mut u, 3600).await;
         f.advance_secs(3600);
         attempt_due(&mut u).await;
 
         assert_eq!(f.sent(), strings(&["a"]));
-        assert!(is_empty(&mut u).await);
+        assert_empty(&mut u).await;
     }
 
     #[tokio::test]
@@ -831,7 +836,7 @@ mod tests {
         attempt_due(&mut u).await;
 
         assert_eq!(f.sent(), strings(&["a"]));
-        assert!(is_empty(&mut u).await);
+        assert_empty(&mut u).await;
         assert!(!f.report_file(id).exists());
     }
 
@@ -852,7 +857,7 @@ mod tests {
         attempt_due(&mut u).await;
 
         assert_eq!(f.sent(), strings(&["b"]));
-        assert!(is_empty(&mut u).await);
+        assert_empty(&mut u).await;
         assert!(!f.report_file(ids[0]).exists());
     }
 
@@ -867,7 +872,7 @@ mod tests {
         attempt_due(&mut u).await;
 
         assert_eq!(f.sent(), strings(&["b"]));
-        assert!(is_empty(&mut u).await);
+        assert_empty(&mut u).await;
     }
 
     #[tokio::test]
@@ -884,7 +889,7 @@ mod tests {
 
         assert!(f.sent().is_empty());
         assert_eq!(u.len(), 1);
-        assert_eq!(backoff_secs(&mut u).await, 10);
+        assert_backoff(&mut u, 10).await;
 
         dirs::delete(&dir).await.unwrap();
         files::write_string(
@@ -898,6 +903,6 @@ mod tests {
         attempt_due(&mut u).await;
 
         assert_eq!(f.sent(), strings(&["a"]));
-        assert!(is_empty(&mut u).await);
+        assert_empty(&mut u).await;
     }
 }
