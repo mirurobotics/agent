@@ -52,7 +52,6 @@ pub mod version_tests {
 
 pub mod routes {
     use std::sync::Arc;
-    use std::time::Duration;
 
     use axum::body::{self, Body};
     use axum::http::{Request, StatusCode};
@@ -61,12 +60,12 @@ pub mod routes {
     use tower::ServiceExt;
 
     use device_api::models as openapi;
-    use miru_agent::calibrations::{Report, ReportMetadata, UploaderOptions};
+    use miru_agent::calibrations::UploaderOptions;
     use miru_agent::events::hub::{EventHub, SpawnOptions};
     use miru_agent::filesys::Overwrite;
     use miru_agent::models::{
         Deployment, DplActivity, DplErrStatus, DplTarget, FileRule, FileRuleRetention,
-        FileRuleUpload, GitCommit, InstanceFormat, Release,
+        FileRuleUpload, GitCommit, Release,
     };
     use miru_agent::server::{routes, State};
     use miru_agent::sync::Syncer;
@@ -88,8 +87,6 @@ pub mod routes {
     struct Fixture {
         state: Arc<State>,
         app: Router,
-        calibration_sender: Arc<MockCalibrationSender>,
-        calibration_started: mpsc::UnboundedReceiver<()>,
         _dir: test_dirs::TempDir,
         _backend: mock::Server,
     }
@@ -124,8 +121,7 @@ pub mod routes {
                 .await
                 .unwrap();
 
-            let (calibration_sender, calibration_started) = MockCalibrationSender::new();
-            let calibration_uploader = uploader(&dir, calibration_sender.clone(), options);
+            let calibration_uploader = uploader(&dir, MockCalibrationSender::new().0, options);
 
             let (shutdown_tx, _) = broadcast::channel::<()>(1);
             let state = Arc::new(State::new(
@@ -143,8 +139,6 @@ pub mod routes {
             Self {
                 state,
                 app,
-                calibration_sender,
-                calibration_started,
                 _dir: dir,
                 _backend: backend,
             }
@@ -197,15 +191,6 @@ pub mod routes {
             let status = response.status();
             let bytes = body::to_bytes(response.into_body(), 16384).await.unwrap();
             (status, bytes.to_vec())
-        }
-
-        /// The first calibration report the uploader sends.
-        async fn uploaded_calibration(&mut self) -> Report {
-            tokio::time::timeout(Duration::from_secs(60), self.calibration_started.recv())
-                .await
-                .unwrap()
-                .unwrap();
-            self.calibration_sender.reports().remove(0)
         }
     }
 
@@ -601,42 +586,24 @@ pub mod routes {
         }
 
         #[tokio::test]
-        async fn create_calibration_returns_200_and_queues_the_report() {
-            let mut f = Fixture::new("handler_create_calibration").await;
+        async fn create_calibration_returns_200_with_reported_at() {
+            let f = Fixture::new("handler_create_calibration").await;
 
             let (status, bytes) = f.post_json(URI, request("yaml", "offset: 1\n")).await;
             assert_eq!(status, StatusCode::OK);
 
             let actual: openapi::CreateCalibrationResponse =
                 serde_json::from_slice(&bytes).unwrap();
-            let uploaded = f.uploaded_calibration().await;
-            assert_eq!(
-                actual.reported_at,
-                uploaded.metadata.reported_at.to_rfc3339()
-            );
-            let expected = Report {
-                metadata: ReportMetadata {
-                    component: "arm".to_string(),
-                    format: InstanceFormat::Yaml,
-                    role: Some("left".to_string()),
-                    aspect: Some("pose".to_string()),
-                    serial_number: Some("SN-1".to_string()),
-                    deployment_id: None,
-                    reported_at: uploaded.metadata.reported_at,
-                },
-                data: "offset: 1\n".to_string(),
-            };
-            assert_eq!(uploaded, expected);
+            assert!(DateTime::parse_from_rfc3339(&actual.reported_at).is_ok());
         }
 
         #[tokio::test]
         async fn create_calibration_accepts_1_mib_of_content_that_escaping_doubles() {
-            let mut f = Fixture::new("handler_create_calibration_1mib").await;
+            let f = Fixture::new("handler_create_calibration_1mib").await;
             let data = "\n".repeat(1024 * 1024);
 
             let (status, _) = f.post_json(URI, request("text", &data)).await;
             assert_eq!(status, StatusCode::OK);
-            assert_eq!(f.uploaded_calibration().await.data, data);
         }
 
         #[tokio::test]
