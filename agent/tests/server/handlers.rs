@@ -68,7 +68,7 @@ pub mod routes {
         Deployment, DplActivity, DplErrStatus, DplTarget, FileRule, FileRuleRetention,
         FileRuleUpload, GitCommit, InstanceFormat, Release,
     };
-    use miru_agent::server::{handlers::MAX_CALIBRATION_REQUEST_BYTES, routes, State};
+    use miru_agent::server::{routes, State};
     use miru_agent::sync::Syncer;
 
     use crate::mocks::calibration_sender::MockCalibrationSender;
@@ -652,7 +652,7 @@ pub mod routes {
         #[tokio::test]
         async fn create_calibration_returns_413_when_body_is_over_the_limit() {
             let f = Fixture::new("handler_create_calibration_body_too_large").await;
-            let data = "x".repeat(MAX_CALIBRATION_REQUEST_BYTES);
+            let data = "x".repeat(routes::MAX_REQUEST_BYTES);
 
             let (status, bytes) = f.post_json(URI, request("text", &data)).await;
             assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);

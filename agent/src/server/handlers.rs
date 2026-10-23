@@ -5,7 +5,7 @@ use std::sync::Arc;
 // internal crates
 use crate::errors::Error;
 use crate::models::InstanceFormat;
-use crate::server::{errors::*, state::State};
+use crate::server::{errors::*, routes, state::State};
 use crate::services::{
     calibration as calibration_svc, deployment as dpl_svc, device as dvc_svc,
     file_rule as file_rule_svc, git_commit as git_cmt_svc, release as rls_svc, HttpBackend,
@@ -174,10 +174,6 @@ pub async fn get_file_rule(
 }
 
 // =============================== CALIBRATIONS ==================================== //
-/// The largest calibration request body: 1 MiB of content doubled by JSON
-/// escaping (newlines, quotes), plus room for the other fields.
-pub const MAX_CALIBRATION_REQUEST_BYTES: usize = 2 * 1024 * 1024 + 64 * 1024;
-
 pub async fn create_calibration(
     AxumState(state): AxumState<Arc<State>>,
     request: Result<Json<device_server::CreateCalibrationRequest>, JsonRejection>,
@@ -221,11 +217,11 @@ fn to_create_params(
     })
 }
 
-/// A body over the route's limit is 413; any other unreadable body is 422.
+/// A body over the limit is 413; any other unreadable body is 422.
 fn reject_body(rejection: JsonRejection) -> ServerErr {
     if rejection.status() == StatusCode::PAYLOAD_TOO_LARGE {
         return ServerErr::CalibrationRequestTooLargeErr(CalibrationRequestTooLargeErr {
-            max_request_bytes: MAX_CALIBRATION_REQUEST_BYTES,
+            max_request_bytes: routes::MAX_REQUEST_BYTES,
             trace: trace!(),
         });
     }

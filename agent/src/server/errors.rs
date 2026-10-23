@@ -95,7 +95,7 @@ impl crate::errors::Error for InvalidRequestErr {
     }
 }
 
-/// A calibration request body over the route's body limit: 413
+/// A calibration request body over the server's body limit: 413
 /// `calibration_too_large`, the code an oversized report gets.
 #[derive(Debug, thiserror::Error)]
 #[error("calibration request is over the {max_request_bytes}-byte cap")]

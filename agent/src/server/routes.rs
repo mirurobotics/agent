@@ -20,13 +20,19 @@ use tower_http::{
 };
 use tracing::Level;
 
+/// The largest request body any route accepts, sized for a calibration: 1 MiB
+/// of content doubled by JSON escaping (newlines, quotes), plus room for the
+/// other fields.
+pub const MAX_REQUEST_BYTES: usize = 2 * 1024 * 1024 + 64 * 1024;
+
 /// Build the router both transports serve, including shared middleware.
 pub fn router(state: Arc<State>) -> Router {
     middleware(table(state))
 }
 
-/// Authorization redaction and request tracing applied to every transport.
-/// Redaction runs outermost so trace spans never log a token.
+/// Authorization redaction, request tracing and the request body limit
+/// applied to every transport. Redaction runs outermost so trace spans never
+/// log a token.
 fn middleware(router: Router) -> Router {
     router.layer(
         ServiceBuilder::new()
@@ -40,7 +46,8 @@ fn middleware(router: Router) -> Router {
                             .level(Level::INFO)
                             .latency_unit(LatencyUnit::Micros),
                     ),
-            ),
+            )
+            .layer(DefaultBodyLimit::max(MAX_REQUEST_BYTES)),
     )
 }
 
@@ -110,9 +117,7 @@ fn table(state: Arc<State>) -> Router {
         // ============================= CALIBRATIONS ============================== //
         .route(
             format!("/{api_version}/calibrations").as_str(),
-            post(handlers::create_calibration).layer(DefaultBodyLimit::max(
-                handlers::MAX_CALIBRATION_REQUEST_BYTES,
-            )),
+            post(handlers::create_calibration),
         )
         // ============================== EVENTS =================================== //
         .route(
