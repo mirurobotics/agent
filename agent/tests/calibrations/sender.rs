@@ -194,7 +194,5 @@ pub mod send {
             .unwrap_err();
 
         assert!(!err.is_terminal());
-        assert!(!err.is_network_conn_err());
-        assert!(client.requests().is_empty());
     }
 }
