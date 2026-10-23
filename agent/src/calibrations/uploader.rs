@@ -107,22 +107,16 @@ where
         }
     }
 
-    /// Wait `wait` for the earliest report to come due, while serving
-    /// commands. A new report ends the wait early.
+    /// Wait `wait` for the earliest report to come due, or serve one command,
+    /// whichever comes first, as `data_uploads::upload` does. Either way the
+    /// run loop then re-evaluates the queue, so a new report is considered at
+    /// once. Commands take priority over a sleep that ends at the same time.
     async fn back_off(&mut self, wait: Duration) -> Flow {
         let sleep = (self.sleep_fn)(wait);
-        tokio::pin!(sleep);
-        loop {
-            tokio::select! {
-                _ = &mut sleep => return Flow::Continue,
-                cmd = self.receiver.recv() => {
-                    let is_new_report = matches!(cmd, Some(Command::Enqueue { .. }));
-                    let flow = self.handle(cmd).await;
-                    if is_new_report || matches!(flow, Flow::Shutdown) {
-                        return flow;
-                    }
-                }
-            }
+        tokio::select! {
+            biased;
+            cmd = self.receiver.recv() => self.handle(cmd).await,
+            () = sleep => Flow::Continue,
         }
     }
 
