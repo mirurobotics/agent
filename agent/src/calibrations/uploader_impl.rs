@@ -175,36 +175,41 @@ where
         entry: QueueEntry,
         result: Result<(), CalibrationsErr>,
     ) {
-        let id = entry.id;
-        let err = match result {
+        match result {
             Ok(()) => {
-                self.remove(id).await;
-                info!("calibrations: uploaded report {id}");
-                return;
+                Self::log_success(&entry);
+                self.remove(entry.id).await;
             }
-            Err(err) => err,
-        };
+            Err(err) => self.handle_failure(entry, err).await,
+        }
+    }
+
+    /// Settle a failed attempt as the retry policy says. Network connection
+    /// errors are expected and don't count toward the attempt budget; any
+    /// other failure does.
+    async fn handle_failure(&mut self, mut entry: QueueEntry, err: CalibrationsErr) {
         let age = (self.now_fn)() - entry.job.reported_at;
         match self.options.retry.on_failure(&err, entry.attempts, age) {
             Verdict::Retry {
                 attempts,
                 wait_secs,
             } => {
-                log_retry(id, attempts, &err);
-                self.retry_after(id, attempts, wait_secs).await;
+                entry.attempts = attempts;
+                Self::log_failure(&entry, &err);
+                self.retry_after(entry.id, attempts, wait_secs).await;
             }
             Verdict::Terminal { .. } => {
-                error!("calibrations: dropping report {id}, which can never be uploaded: {err}");
-                self.remove(id).await;
+                Self::log_terminal_drop(&entry, &err);
+                self.remove(entry.id).await;
             }
             Verdict::OutOfAttempts { attempts } => {
-                error!("calibrations: dropping report {id} after {attempts} attempts: {err}");
-                self.remove(id).await;
+                entry.attempts = attempts;
+                Self::log_dropped(&entry, &err);
+                self.remove(entry.id).await;
             }
             Verdict::TooOld { age, .. } => {
-                let days = age.num_days();
-                error!("calibrations: dropping report {id}, still unsent after {days} days: {err}");
-                self.remove(id).await;
+                Self::log_age_drop(&entry, age, &err);
+                self.remove(entry.id).await;
             }
         }
     }
@@ -238,17 +243,45 @@ where
     fn report_file(&self, id: Uuid) -> File {
         self.reports.file(&id.hyphenated().to_string())
     }
-}
 
-/// A network error doesn't count as an attempt and repeats every base
-/// backoff while the device is offline, so it logs at debug, as in
-/// `data_uploads::upload`. Any other retry logs at warn.
-fn log_retry(id: Uuid, attempts: u32, err: &CalibrationsErr) {
-    if err.is_network_conn_err() {
-        debug!("calibrations: failed to reach Miru with report {id}; will retry: {err}");
-        return;
+    /// A network error logs at debug, since it repeats every base backoff
+    /// while the device is offline; any other failure counts and logs at warn.
+    fn log_failure(entry: &QueueEntry, err: &CalibrationsErr) {
+        if err.is_network_conn_err() {
+            Self::log_network_conn_err(entry, err);
+        } else {
+            Self::log_counted_failure(entry, err);
+        }
     }
-    warn!("calibrations: attempt {attempts} to upload report {id} failed; will retry: {err}");
+
+    fn log_network_conn_err(entry: &QueueEntry, err: &CalibrationsErr) {
+        let id = entry.id;
+        debug!("calibrations: failed to reach Miru with report {id}; will retry: {err}");
+    }
+
+    fn log_counted_failure(entry: &QueueEntry, err: &CalibrationsErr) {
+        let (id, attempts) = (entry.id, entry.attempts);
+        warn!("calibrations: attempt {attempts} to upload report {id} failed; will retry: {err}");
+    }
+
+    fn log_success(entry: &QueueEntry) {
+        info!("calibrations: uploaded report {}", entry.id);
+    }
+
+    fn log_dropped(entry: &QueueEntry, err: &CalibrationsErr) {
+        let (id, attempts) = (entry.id, entry.attempts);
+        error!("calibrations: dropping report {id} after {attempts} attempts: {err}");
+    }
+
+    fn log_age_drop(entry: &QueueEntry, age: TimeDelta, err: &CalibrationsErr) {
+        let (id, days) = (entry.id, age.num_days());
+        error!("calibrations: dropping report {id}, still unsent after {days} days: {err}");
+    }
+
+    fn log_terminal_drop(entry: &QueueEntry, err: &CalibrationsErr) {
+        let id = entry.id;
+        error!("calibrations: dropping report {id}, which can never be uploaded: {err}");
+    }
 }
 
 /// The report id a report file is named after, or `None` for any other file.
