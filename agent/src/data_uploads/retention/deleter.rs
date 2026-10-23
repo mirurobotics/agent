@@ -66,7 +66,6 @@ impl Worker {
         while let Some(cmd) = self.receiver.recv().await {
             match cmd {
                 Command::Shutdown { respond_to } => {
-                    self.deleter.save_uptime().await;
                     if let Err(e) = respond_to.send(Ok(())) {
                         error!("Actor failed to send shutdown response: {:?}", e);
                     }

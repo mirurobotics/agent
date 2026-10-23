@@ -1,10 +1,8 @@
 // internal crates
 use crate::test_utils::{
-    clock::FakeClock,
     filesys::{dirs as test_dirs, files as test_files},
     retention::undeletable_dir_job,
 };
-use miru_agent::clock::{UptimeFile, UptimeState};
 use miru_agent::cooldown;
 use miru_agent::data_uploads::retention::errors::EnqueueErr;
 use miru_agent::data_uploads::retention::{DeleteErr, Deleter, DeleterArgs, DeleterExt, Job};
@@ -151,28 +149,4 @@ async fn wedged_job_is_given_up_on_through_the_actor() {
 
     deleter.shutdown().await.unwrap();
     handle.await.unwrap();
-}
-
-// Shutdown saves the uptime, so a clean restart loses none of it.
-#[tokio::test]
-async fn shutdown_saves_the_uptime() {
-    let dir = test_dirs::temp("delete-actor-uptime").unwrap();
-    let path = dir.file("uptime.json");
-    let open = || UptimeFile::new_with_default(path.clone(), UptimeState::default());
-    let fake = FakeClock::new(1000);
-    let (deleter, handle) = Deleter::spawn(
-        16,
-        DeleterArgs {
-            clock: fake.clock(),
-            uptime_file: Some(open().await.unwrap()),
-            ..DeleterArgs::default()
-        },
-    )
-    .unwrap();
-
-    fake.advance(30);
-    deleter.shutdown().await.unwrap();
-    handle.await.unwrap();
-
-    assert_eq!(open().await.unwrap().read().secs, 30);
 }

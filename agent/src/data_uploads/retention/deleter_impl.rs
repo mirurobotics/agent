@@ -1,9 +1,9 @@
 // standard crates
 use std::fs::Metadata;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 // internal crates
-use crate::clock::{Clock, Uptime, UptimeFile};
+use crate::clock::{Clock, Uptime};
 use crate::cooldown;
 use crate::data_uploads::retention::{
     errors::*,
@@ -21,11 +21,9 @@ const DEFAULT_QUEUE_CAPACITY: usize = 4096;
 const DEFAULT_ATTEMPTS: u32 = 10;
 
 pub struct DeleterArgs {
-    /// Counts the agent's uptime, on which every TTL runs.
-    pub clock: Clock,
-    /// Where the agent's uptime is saved, so uptime deadlines survive a
-    /// restart. `None` counts uptime from zero in each process.
-    pub uptime_file: Option<UptimeFile>,
+    /// The agent's uptime, on which every TTL runs. `AppState` saves it, so
+    /// uptime deadlines survive a restart.
+    pub uptime: Uptime,
     pub queue_capacity: usize,
     pub snapshot_file: Option<DeleteQueueSnapshotFile>,
     pub attempts: u32,
@@ -35,8 +33,7 @@ pub struct DeleterArgs {
 impl Default for DeleterArgs {
     fn default() -> Self {
         Self {
-            clock: Clock::new(),
-            uptime_file: None,
+            uptime: Uptime::new(Clock::new(), Duration::ZERO),
             queue_capacity: DEFAULT_QUEUE_CAPACITY,
             snapshot_file: None,
             attempts: DEFAULT_ATTEMPTS,
@@ -82,7 +79,7 @@ impl DeleterImpl {
         };
         Self {
             queue,
-            uptime: Uptime::new(args.clock, args.uptime_file),
+            uptime: args.uptime,
             attempts: args.attempts,
             backoff: args.backoff,
         }
@@ -101,7 +98,6 @@ impl DeleterImpl {
     }
 
     pub(crate) async fn sweep(&mut self) -> Result<(), DeleteErr> {
-        self.uptime.save_if_due().await;
         self.start_unset_deadlines().await;
         let now = self.uptime.now_as_datetime();
         // Retry deadlines saved before they were counted in uptime hold
@@ -147,11 +143,6 @@ impl DeleterImpl {
                 true
             })
             .await;
-    }
-
-    /// Save the uptime now, so a clean restart loses none of it.
-    pub(crate) async fn save_uptime(&mut self) {
-        self.uptime.save().await;
     }
 
     /// Counted failures bump the attempt budget. Drop when the budget is
@@ -335,7 +326,7 @@ mod tests {
     /// and no backoff.
     fn deleter(clock: &Clock) -> DeleterImpl {
         DeleterImpl::new(DeleterArgs {
-            clock: clock.clock(),
+            uptime: clock.uptime(),
             backoff: NO_BACKOFF,
             ..DeleterArgs::default()
         })
@@ -396,7 +387,7 @@ mod tests {
             let tmp = temp_file(b"aaaa").await;
             let clock = Clock::new(1000);
             let mut deleter = DeleterImpl::new(DeleterArgs {
-                clock: clock.clock(),
+                uptime: clock.uptime(),
                 snapshot_file: Some(snapshot_file(&state_path).await),
                 ..DeleterArgs::default()
             });
@@ -417,7 +408,7 @@ mod tests {
             let tmp_b = temp_file(b"bbbb").await;
             let clock = Clock::new(1000);
             let mut deleter = DeleterImpl::new(DeleterArgs {
-                clock: clock.clock(),
+                uptime: clock.uptime(),
                 queue_capacity: 1,
                 ..DeleterArgs::default()
             });
@@ -442,7 +433,7 @@ mod tests {
             let tmp = temp_file(b"aaaa").await;
             let clock = Clock::new(1000);
             let mut deleter = DeleterImpl::new(DeleterArgs {
-                clock: clock.clock(),
+                uptime: clock.uptime(),
                 snapshot_file: Some(snapshot_file(&state_path).await),
                 ..DeleterArgs::default()
             });
@@ -716,7 +707,7 @@ mod tests {
             let waiting = temp_file(b"bbbb").await;
             let clock = Clock::new(1000);
             let mut deleter = DeleterImpl::new(DeleterArgs {
-                clock: clock.clock(),
+                uptime: clock.uptime(),
                 snapshot_file: Some(snapshot_file(&state_path).await),
                 ..DeleterArgs::default()
             });
@@ -754,7 +745,7 @@ mod tests {
             let due = temp_file(b"cccc").await;
             let clock = Clock::new(1000);
             let mut deleter = DeleterImpl::new(DeleterArgs {
-                clock: clock.clock(),
+                uptime: clock.uptime(),
                 snapshot_file: Some(snapshot_file(&state_path).await),
                 ..DeleterArgs::default()
             });
@@ -808,7 +799,7 @@ mod tests {
             let dir = test_dirs::temp("delete-attempts-cap").unwrap();
             let clock = Clock::new(1000);
             let mut deleter = DeleterImpl::new(DeleterArgs {
-                clock: clock.clock(),
+                uptime: clock.uptime(),
                 attempts: 3,
                 backoff: NO_BACKOFF,
                 ..DeleterArgs::default()
@@ -852,7 +843,7 @@ mod tests {
             let tmp = temp_file(b"aaaa").await;
             let clock = Clock::new(1000);
             let mut deleter = DeleterImpl::new(DeleterArgs {
-                clock: clock.clock(),
+                uptime: clock.uptime(),
                 snapshot_file: Some(snapshot_file(&state_path).await),
                 ..DeleterArgs::default()
             });
@@ -894,7 +885,7 @@ mod tests {
                 None => None,
             };
             DeleterImpl::new(DeleterArgs {
-                clock: clock.clock(),
+                uptime: clock.uptime(),
                 backoff: BACKOFF,
                 snapshot_file,
                 ..DeleterArgs::default()
@@ -1002,28 +993,28 @@ mod tests {
     /// Each TTL is counted on the agent's uptime, never on the system clock.
     mod deadlines {
         use super::*;
-        use crate::clock::UptimeFile;
+        use crate::clock::{UptimeFile, UptimeSaver};
         use crate::data_uploads::retention::queue::QueueEntry;
         use uuid::Uuid;
 
         /// 2026-10-20T00:00:00Z, a real date.
         const REAL_DATE: i64 = 1_792_454_400;
 
-        async fn uptime_file(path: &File) -> UptimeFile {
-            UptimeFile::new_with_default(path.clone(), Default::default())
-                .await
-                .unwrap()
-        }
-
-        /// A deleter on `clock` persisting its queue and uptime under `dir`.
-        async fn persisted(clock: &Clock, dir: &Dir) -> DeleterImpl {
-            DeleterImpl::new(DeleterArgs {
-                clock: clock.clock(),
-                uptime_file: Some(uptime_file(&dir.file("uptime.json")).await),
+        /// A deleter on `clock` persisting its queue under `dir`, with the
+        /// uptime saver for the same directory, as one run of the agent.
+        async fn persisted(clock: &Clock, dir: &Dir) -> (DeleterImpl, UptimeSaver) {
+            let uptime_file =
+                UptimeFile::new_with_default(dir.file("uptime.json"), Default::default())
+                    .await
+                    .unwrap();
+            let saver = UptimeSaver::new(clock.clock(), Some(uptime_file));
+            let deleter = DeleterImpl::new(DeleterArgs {
+                uptime: saver.uptime(),
                 backoff: NO_BACKOFF,
                 snapshot_file: Some(snapshot_file(&dir.file("delete_queue.json")).await),
                 ..DeleterArgs::default()
-            })
+            });
+            (deleter, saver)
         }
 
         fn only_job(deleter: &DeleterImpl) -> Job {
@@ -1093,18 +1084,19 @@ mod tests {
             let dir = test_dirs::temp("delete-deadlines-restart-offline").unwrap();
             let tmp = temp_file(b"aaaa").await;
             let clock = Clock::new(1000);
-            let mut deleter = persisted(&clock, &dir).await;
+            let (mut deleter, mut saver) = persisted(&clock, &dir).await;
             deleter
                 .enqueue(make_job(tmp.file(), 1000, 3600).await)
                 .await
                 .unwrap();
             clock.advance(1200);
             deleter.sweep().await.unwrap();
-            drop(deleter);
+            saver.save().await;
+            drop((deleter, saver));
 
             let clock = clock.restart();
             clock.set_system(1);
-            let mut restored = persisted(&clock, &dir).await;
+            let (mut restored, _saver) = persisted(&clock, &dir).await;
             clock.advance(2399);
             restored.sweep().await.unwrap();
             assert!(tmp.file().exists());
@@ -1133,7 +1125,7 @@ mod tests {
                 .await
                 .unwrap();
             let clock = Clock::new(REAL_DATE);
-            let mut deleter = persisted(&clock, &dir).await;
+            let (mut deleter, _saver) = persisted(&clock, &dir).await;
 
             deleter.sweep().await.unwrap();
             assert!(tmp.file().exists());
@@ -1166,7 +1158,7 @@ mod tests {
                 .await
                 .unwrap();
             let clock = Clock::new(REAL_DATE);
-            let mut deleter = persisted(&clock, &dir).await;
+            let (mut deleter, _saver) = persisted(&clock, &dir).await;
 
             deleter.sweep().await.unwrap();
             assert!(tmp.file().exists());
@@ -1187,7 +1179,7 @@ mod tests {
             let state_path = dir.file("delete_queue.json");
             let clock = Clock::new(1000);
             let mut deleter = DeleterImpl::new(DeleterArgs {
-                clock: clock.clock(),
+                uptime: clock.uptime(),
                 backoff: NO_BACKOFF,
                 snapshot_file: Some(snapshot_file(&state_path).await),
                 ..DeleterArgs::default()
@@ -1220,7 +1212,7 @@ mod tests {
             let state_path = dir.file("delete_queue.json");
             let clock = Clock::new(1000);
             let mut deleter = DeleterImpl::new(DeleterArgs {
-                clock: clock.clock(),
+                uptime: clock.uptime(),
                 attempts: 1,
                 snapshot_file: Some(snapshot_file(&state_path).await),
                 ..DeleterArgs::default()
