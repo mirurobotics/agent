@@ -453,7 +453,7 @@ mod tests {
         names.iter().map(|name| name.to_string()).collect()
     }
 
-    // ================================ OPTIONS ================================ //
+    // =============================== OPTIONS ================================ //
     #[test]
     fn default_options_are_1000_reports_of_1_mib() {
         let options = UploaderOptions::default();
@@ -461,93 +461,7 @@ mod tests {
         assert_eq!(options.max_report_bytes, 1024 * 1024);
     }
 
-    // ================================ ENQUEUE ================================ //
-    #[tokio::test]
-    async fn stores_metadata_in_the_queue_and_data_in_a_report_file() {
-        let f = Fixture::new();
-        let mut u = f.uploader().await;
-
-        let id = u.enqueue(report("a")).await.unwrap();
-
-        let entry = QueueEntry {
-            id,
-            job: report("a").metadata,
-            attempts: 0,
-            next_attempt_at: None,
-        };
-        assert_eq!(f.queued_on_disk().await, [entry]);
-        let data = files::read_string(&f.report_file(id)).await.unwrap();
-        assert_eq!(data, report("a").data);
-    }
-
-    #[tokio::test]
-    async fn a_full_queue_rejects_a_report_and_keeps_what_it_holds() {
-        let f = Fixture::new();
-        let options = UploaderOptions {
-            capacity: 1,
-            ..UploaderOptions::default()
-        };
-        let mut u = f.uploader_with(options).await;
-        u.enqueue(report("a")).await.unwrap();
-
-        let err = u.enqueue(report("b")).await.unwrap_err();
-
-        assert!(matches!(err, CalibrationsErr::QueueFullErr(_)), "{err:?}");
-        assert_eq!(u.len(), 1);
-    }
-
-    #[tokio::test]
-    async fn an_oversized_report_is_rejected_and_writes_nothing() {
-        let f = Fixture::new();
-        let options = UploaderOptions {
-            max_report_bytes: 100,
-            ..UploaderOptions::default()
-        };
-        let mut u = f.uploader_with(options).await;
-        let mut big = report("arm");
-        big.data = "x".repeat(200);
-
-        let err = u.enqueue(big).await.unwrap_err();
-
-        assert!(matches!(err, CalibrationsErr::TooLargeErr(_)), "{err:?}");
-        assert_eq!(u.len(), 0);
-        assert!(!f.layout.reports().exists());
-    }
-
-    #[tokio::test]
-    async fn a_report_file_write_failure_queues_nothing() {
-        let f = Fixture::new();
-        // a regular file where the reports directory should be
-        let blocker = File::new(f.layout.reports().path().clone());
-        files::write_string(&blocker, "x", WriteOptions::OVERWRITE_ATOMIC)
-            .await
-            .unwrap();
-        let mut u = f.uploader().await;
-
-        let err = u.enqueue(report("a")).await.unwrap_err();
-
-        assert!(matches!(err, CalibrationsErr::FileSysErr(_)), "{err:?}");
-        assert_eq!(u.len(), 0);
-    }
-
-    #[tokio::test]
-    async fn a_queue_write_failure_queues_nothing() {
-        let f = Fixture::new();
-        let mut u = f.uploader().await;
-        // a non-empty directory where the queue file should be can't be replaced
-        files::delete(&f.layout.queue()).await.unwrap();
-        let blocker = f.layout.root.subdir("queue.json");
-        files::write_string(&blocker.file("x"), "x", WriteOptions::OVERWRITE_ATOMIC)
-            .await
-            .unwrap();
-
-        let err = u.enqueue(report("a")).await.unwrap_err();
-
-        assert!(matches!(err, CalibrationsErr::FileSysErr(_)), "{err:?}");
-        assert_eq!(u.len(), 0);
-        assert!(!f.layout.reports().exists());
-    }
-
+    // ================================= NEW ================================== //
     #[tokio::test]
     async fn without_a_queue_file_the_queue_lives_in_memory() {
         let f = Fixture::new();
@@ -559,7 +473,32 @@ mod tests {
         assert!(!f.layout.queue().exists());
     }
 
-    // ============================= PRUNE ORPHANS ============================= //
+    // ============================ PRUNE ORPHANS ============================= //
+    #[tokio::test]
+    async fn a_missing_reports_directory_is_not_created() {
+        let f = Fixture::new();
+        let u = f.uploader().await;
+
+        u.prune_orphans().await;
+
+        assert!(!f.layout.reports().exists());
+    }
+
+    #[tokio::test]
+    async fn an_unlistable_reports_directory_is_left_alone() {
+        let f = Fixture::new();
+        // a regular file where the reports directory should be
+        let blocker = File::new(f.layout.reports().path().clone());
+        files::write_string(&blocker, "x", WriteOptions::OVERWRITE_ATOMIC)
+            .await
+            .unwrap();
+        let u = f.uploader().await;
+
+        u.prune_orphans().await;
+
+        assert!(blocker.exists());
+    }
+
     #[tokio::test]
     async fn report_files_with_no_queue_entry_are_pruned() {
         let f = Fixture::new();
@@ -599,32 +538,158 @@ mod tests {
         assert!(!odd.exists());
     }
 
+    // =============================== ENQUEUE ================================ //
     #[tokio::test]
-    async fn a_missing_reports_directory_is_not_created() {
+    async fn stores_metadata_in_the_queue_and_data_in_a_report_file() {
         let f = Fixture::new();
-        let u = f.uploader().await;
+        let mut u = f.uploader().await;
 
-        u.prune_orphans().await;
+        let id = u.enqueue(report("a")).await.unwrap();
 
+        let entry = QueueEntry {
+            id,
+            job: report("a").metadata,
+            attempts: 0,
+            next_attempt_at: None,
+        };
+        assert_eq!(f.queued_on_disk().await, [entry]);
+        let data = files::read_string(&f.report_file(id)).await.unwrap();
+        assert_eq!(data, report("a").data);
+    }
+
+    #[tokio::test]
+    async fn an_oversized_report_is_rejected_and_writes_nothing() {
+        let f = Fixture::new();
+        let options = UploaderOptions {
+            max_report_bytes: 100,
+            ..UploaderOptions::default()
+        };
+        let mut u = f.uploader_with(options).await;
+        let mut big = report("arm");
+        big.data = "x".repeat(200);
+
+        let err = u.enqueue(big).await.unwrap_err();
+
+        assert!(matches!(err, CalibrationsErr::TooLargeErr(_)), "{err:?}");
+        assert_eq!(u.len(), 0);
         assert!(!f.layout.reports().exists());
     }
 
     #[tokio::test]
-    async fn an_unlistable_reports_directory_is_left_alone() {
+    async fn a_full_queue_rejects_a_report_and_keeps_what_it_holds() {
+        let f = Fixture::new();
+        let options = UploaderOptions {
+            capacity: 1,
+            ..UploaderOptions::default()
+        };
+        let mut u = f.uploader_with(options).await;
+        u.enqueue(report("a")).await.unwrap();
+
+        let err = u.enqueue(report("b")).await.unwrap_err();
+
+        assert!(matches!(err, CalibrationsErr::QueueFullErr(_)), "{err:?}");
+        assert_eq!(u.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_queue_write_failure_queues_nothing() {
+        let f = Fixture::new();
+        let mut u = f.uploader().await;
+        // a non-empty directory where the queue file should be can't be replaced
+        files::delete(&f.layout.queue()).await.unwrap();
+        let blocker = f.layout.root.subdir("queue.json");
+        files::write_string(&blocker.file("x"), "x", WriteOptions::OVERWRITE_ATOMIC)
+            .await
+            .unwrap();
+
+        let err = u.enqueue(report("a")).await.unwrap_err();
+
+        assert!(matches!(err, CalibrationsErr::FileSysErr(_)), "{err:?}");
+        assert_eq!(u.len(), 0);
+        assert!(!f.layout.reports().exists());
+    }
+
+    #[tokio::test]
+    async fn a_report_file_write_failure_queues_nothing() {
         let f = Fixture::new();
         // a regular file where the reports directory should be
         let blocker = File::new(f.layout.reports().path().clone());
         files::write_string(&blocker, "x", WriteOptions::OVERWRITE_ATOMIC)
             .await
             .unwrap();
-        let u = f.uploader().await;
+        let mut u = f.uploader().await;
 
-        u.prune_orphans().await;
+        let err = u.enqueue(report("a")).await.unwrap_err();
 
-        assert!(blocker.exists());
+        assert!(matches!(err, CalibrationsErr::FileSysErr(_)), "{err:?}");
+        assert_eq!(u.len(), 0);
     }
 
-    // ================================ ATTEMPTS =============================== //
+    // ============================= NEXT ATTEMPT ============================= //
+    #[tokio::test]
+    async fn a_deadline_past_the_longest_backoff_is_pulled_in() {
+        let f = Fixture::new();
+        let ids = preloaded(&f, &["a"]).await;
+        // a deadline a clock jump left far beyond the 1 h cap
+        let mut queue = Queue::from_snapshot(1000, f.snapshot_file().await, Persistence::Durable);
+        let far = received_at() + TimeDelta::days(30);
+        assert!(queue.retry(ids[0], 1, far).await);
+        let mut u = f.uploader().await;
+
+        assert_backoff(&mut u, 3600).await;
+    }
+
+    // =============================== ATTEMPT ================================ //
+    #[tokio::test]
+    async fn a_report_whose_file_is_missing_is_dropped() {
+        let f = Fixture::new();
+        let ids = preloaded(&f, &["a"]).await;
+        files::delete(&f.report_file(ids[0])).await.unwrap();
+        let mut u = f.uploader().await;
+
+        attempt_due(&mut u).await;
+
+        assert!(f.sent().is_empty());
+        assert_empty(&mut u).await;
+    }
+
+    #[tokio::test]
+    async fn an_unreadable_report_is_dropped_without_sending() {
+        let f = Fixture::new();
+        let ids = preloaded(&f, &["a"]).await;
+        files::write_bytes(
+            &f.report_file(ids[0]),
+            &[0xff, 0xfe],
+            WriteOptions::OVERWRITE_ATOMIC,
+        )
+        .await
+        .unwrap();
+        let mut u = f.uploader().await;
+
+        attempt_due(&mut u).await;
+
+        assert!(f.sent().is_empty());
+        assert_empty(&mut u).await;
+        assert!(!f.report_file(ids[0]).exists());
+    }
+
+    #[tokio::test]
+    async fn a_read_error_is_retried() {
+        let f = Fixture::new();
+        let ids = preloaded(&f, &["a"]).await;
+        // a directory where the report file should be cannot be read
+        files::delete(&f.report_file(ids[0])).await.unwrap();
+        let dir = f.layout.reports().subdir(ids[0].to_string());
+        dirs::create(&dir).await.unwrap();
+        let mut u = f.uploader().await;
+
+        attempt_due(&mut u).await;
+
+        assert!(f.sent().is_empty());
+        assert_backoff(&mut u, 10).await;
+    }
+
+    // ============================ FINISH ATTEMPT ============================ //
     #[tokio::test]
     async fn a_sent_report_is_dequeued_and_its_file_deleted() {
         let f = Fixture::new();
@@ -690,6 +755,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn network_errors_do_not_use_up_attempts() {
+        let f = Fixture::new();
+        for _ in 0..3 {
+            f.sender.push(Step::Network);
+        }
+        let options = UploaderOptions {
+            retry: RetryPolicy {
+                attempts: 1,
+                ..RetryPolicy::default()
+            },
+            ..UploaderOptions::default()
+        };
+        let mut u = f.uploader_with(options).await;
+        u.enqueue(report("a")).await.unwrap();
+
+        for _ in 0..3 {
+            attempt_due(&mut u).await;
+            f.advance_secs(10);
+        }
+        attempt_due(&mut u).await;
+
+        assert_eq!(f.sent(), strings(&["a"; 4]));
+    }
+
+    #[tokio::test]
     async fn each_report_backs_off_on_its_own() {
         let f = Fixture::new();
         f.sender.push(Step::Server);
@@ -709,6 +799,19 @@ mod tests {
         attempt_due(&mut u).await;
 
         assert_eq!(f.sent(), strings(&["a", "b", "a", "a"]));
+    }
+
+    #[tokio::test]
+    async fn terminal_rejection_is_dropped_not_retried() {
+        let f = Fixture::new();
+        f.sender.push(Step::Terminal);
+        let mut u = f.uploader().await;
+        let id = u.enqueue(report("a")).await.unwrap();
+
+        attempt_due(&mut u).await;
+
+        assert_empty(&mut u).await;
+        assert!(!f.report_file(id).exists());
     }
 
     #[tokio::test]
@@ -738,31 +841,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn network_errors_do_not_use_up_attempts() {
-        let f = Fixture::new();
-        for _ in 0..3 {
-            f.sender.push(Step::Network);
-        }
-        let options = UploaderOptions {
-            retry: RetryPolicy {
-                attempts: 1,
-                ..RetryPolicy::default()
-            },
-            ..UploaderOptions::default()
-        };
-        let mut u = f.uploader_with(options).await;
-        u.enqueue(report("a")).await.unwrap();
-
-        for _ in 0..3 {
-            attempt_due(&mut u).await;
-            f.advance_secs(10);
-        }
-        attempt_due(&mut u).await;
-
-        assert_eq!(f.sent(), strings(&["a"; 4]));
-    }
-
-    #[tokio::test]
     async fn a_report_unsent_past_the_age_backstop_is_dropped() {
         let f = Fixture::new();
         f.sender.push(Step::Network);
@@ -786,80 +864,5 @@ mod tests {
         attempt_due(&mut u).await;
 
         assert_empty(&mut u).await;
-    }
-
-    #[tokio::test]
-    async fn a_deadline_past_the_longest_backoff_is_pulled_in() {
-        let f = Fixture::new();
-        let ids = preloaded(&f, &["a"]).await;
-        // a deadline a clock jump left far beyond the 1 h cap
-        let mut queue = Queue::from_snapshot(1000, f.snapshot_file().await, Persistence::Durable);
-        let far = received_at() + TimeDelta::days(30);
-        assert!(queue.retry(ids[0], 1, far).await);
-        let mut u = f.uploader().await;
-
-        assert_backoff(&mut u, 3600).await;
-    }
-
-    #[tokio::test]
-    async fn terminal_rejection_is_dropped_not_retried() {
-        let f = Fixture::new();
-        f.sender.push(Step::Terminal);
-        let mut u = f.uploader().await;
-        let id = u.enqueue(report("a")).await.unwrap();
-
-        attempt_due(&mut u).await;
-
-        assert_empty(&mut u).await;
-        assert!(!f.report_file(id).exists());
-    }
-
-    #[tokio::test]
-    async fn an_unreadable_report_is_dropped_without_sending() {
-        let f = Fixture::new();
-        let ids = preloaded(&f, &["a"]).await;
-        files::write_bytes(
-            &f.report_file(ids[0]),
-            &[0xff, 0xfe],
-            WriteOptions::OVERWRITE_ATOMIC,
-        )
-        .await
-        .unwrap();
-        let mut u = f.uploader().await;
-
-        attempt_due(&mut u).await;
-
-        assert!(f.sent().is_empty());
-        assert_empty(&mut u).await;
-        assert!(!f.report_file(ids[0]).exists());
-    }
-
-    #[tokio::test]
-    async fn a_report_whose_file_is_missing_is_dropped() {
-        let f = Fixture::new();
-        let ids = preloaded(&f, &["a"]).await;
-        files::delete(&f.report_file(ids[0])).await.unwrap();
-        let mut u = f.uploader().await;
-
-        attempt_due(&mut u).await;
-
-        assert!(f.sent().is_empty());
-        assert_empty(&mut u).await;
-    }
-
-    #[tokio::test]
-    async fn a_read_error_is_retried() {
-        let f = Fixture::new();
-        let ids = preloaded(&f, &["a"]).await;
-        // a directory where the report file should be cannot be read
-        files::delete(&f.report_file(ids[0])).await.unwrap();
-        let dir = f.layout.reports().subdir(ids[0].to_string());
-        dirs::create(&dir).await.unwrap();
-        let mut u = f.uploader().await;
-
-        attempt_due(&mut u).await;
-
-        assert!(f.sent().is_empty());
-        assert_backoff(&mut u, 10).await;
     }
 }
