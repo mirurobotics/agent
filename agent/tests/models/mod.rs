@@ -6,4 +6,5 @@ pub mod device;
 pub mod file_rule;
 pub mod git_commit;
 pub mod instance_format;
+pub mod os;
 pub mod release;

@@ -10,6 +10,19 @@ Agent-specific conventions for AI coding agents. Read this before making changes
 - `agent/src/main.rs` — entry point (provision vs runtime).
 - `agent/src/lib.rs` — module listing (all 23 public modules).
 
+## Review questions
+
+Before a PR leaves draft, ask these of the full diff. Fix each finding, or answer it in the PR description.
+
+1. Do we need this? Would deleting it break a requirement of this PR?
+2. Why is this optional? Is it a parameter every caller passes, or a field that always exists?
+3. What does the closest sibling do? Match its layout, harness and tests.
+4. Is it in the right layer and file (`ARCHITECTURE.md`), or does a shared helper already exist?
+5. Does the name say exactly what it does, with one name per concept and no clash with an existing meaning?
+6. Is each comment short, and will it stay true?
+
+This copies the review questions from the `miru-internal` plugin's rules because cloud sessions don't load the plugin yet. Delete it once they do.
+
 ## Project conventions
 
 ### Import ordering
@@ -58,9 +71,13 @@ Pick the enum facility by what the enum needs to do:
   (a `BackendError(String)` variant and a one-way `as_str()`) are excluded.
 - **Internal/actor/config enum with no wire contract** → plain derives, no macro.
 
+Each `impl_status_enum!` enum also gets a hand-written `StatusEnumFixture` table
+and `status_enum_tests!` in its integration test file
+(`agent/tests/models/harnesses.rs`), so a slip in the macro's mapping fails a test.
+
 ## Testing
 
-AI agents may run the commands in this section and in Linting locally for fast feedback, preferring targeted runs (one test or module). CI stays final: a change is validated only when CI is green on the pushed head.
+AI agents: don't run the commands in this section or in Linting locally. Push the branch and let CI run them, then fix failures from the CI logs. They are documented here for humans and so you know what CI checks. One-off checks outside the regular suite, such as benchmarks or spikes, may run locally.
 
 Ordinary Cargo tests and the logging-suppressed wrapper are supported:
 
