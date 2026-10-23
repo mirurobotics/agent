@@ -44,15 +44,6 @@ impl Default for UploaderOptions {
     }
 }
 
-/// What [`UploaderImpl::finish`] needs from a queue entry whose upload is in
-/// flight, since the entry itself moved into the upload.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct Attempt {
-    id: Uuid,
-    attempts: u32,
-    reported_at: DateTime<Utc>,
-}
-
 /// What the queue holds for the worker to do next.
 pub(crate) type NextAttempt = queue::NextAttempt<ReportMetadata>;
 
@@ -127,7 +118,7 @@ where
 
     /// Queue `report` and return its id. The queue entry is written before
     /// the report file, so a crash between the two leaves an entry without a
-    /// file, which [`Self::upload`] fails for good. On error nothing is queued.
+    /// file, which [`Self::attempt`] fails for good. On error nothing is queued.
     pub(crate) async fn enqueue(&mut self, report: Report) -> Result<Uuid, CalibrationsErr> {
         let bytes = report.data.into_bytes();
         self.verify_size(bytes.len() as u64)?;
@@ -162,35 +153,29 @@ where
 
     /// Upload the report queued as `entry`: read its file, then send it. The
     /// future owns what it needs and borrows nothing from `self`, so the
-    /// worker can serve commands while it runs. The entry's metadata moves
-    /// into the request, so the returned [`Attempt`] keeps what
-    /// [`Self::finish`] needs afterwards.
-    pub(crate) fn upload(
+    /// worker can serve commands while it runs. The metadata is cloned into
+    /// the future, which is cheap: the data is read from disk inside it.
+    pub(crate) fn attempt(
         &self,
-        entry: QueueEntry,
-    ) -> (Attempt, impl Future<Output = Result<(), CalibrationsErr>>) {
-        let attempt = Attempt {
-            id: entry.id,
-            attempts: entry.attempts,
-            reported_at: entry.job.reported_at,
-        };
+        entry: &QueueEntry,
+    ) -> impl Future<Output = Result<(), CalibrationsErr>> {
         let sender = self.sender.clone();
         let file = self.report_file(entry.id);
-        let upload = async move {
+        let metadata = entry.job.clone();
+        async move {
             let data = read(&file).await?;
-            let report = Report {
-                metadata: entry.job,
-                data,
-            };
-            sender.send(report).await
-        };
-        (attempt, upload)
+            sender.send(Report { metadata, data }).await
+        }
     }
 
-    /// Settle `attempt` once its upload ended in `result`: remove the report
+    /// Settle `entry` once its attempt ended in `result`: remove the report
     /// when sent, otherwise retry or drop it as the retry policy says.
-    pub(crate) async fn finish(&mut self, attempt: Attempt, result: Result<(), CalibrationsErr>) {
-        let id = attempt.id;
+    pub(crate) async fn finish_attempt(
+        &mut self,
+        entry: QueueEntry,
+        result: Result<(), CalibrationsErr>,
+    ) {
+        let id = entry.id;
         let err = match result {
             Ok(()) => {
                 self.remove(id).await;
@@ -199,8 +184,8 @@ where
             }
             Err(err) => err,
         };
-        let age = (self.now_fn)() - attempt.reported_at;
-        match self.options.retry.on_failure(&err, attempt.attempts, age) {
+        let age = (self.now_fn)() - entry.job.reported_at;
+        match self.options.retry.on_failure(&err, entry.attempts, age) {
             Verdict::Retry {
                 attempts,
                 wait_secs,
