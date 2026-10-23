@@ -2,83 +2,53 @@
 use backend_api::models as backend_client;
 use miru_agent::models::InstanceFormat;
 
+// harness
+use crate::models::harnesses::{status_enum_tests, StatusCase, StatusEnumFixture};
+
 // external crates
 use serde_json::json;
 
-struct TestCase {
-    format: InstanceFormat,
-    wire: &'static str,
-    backend: backend_client::InstanceFormat,
-}
+impl StatusEnumFixture for InstanceFormat {
+    type Backend = backend_client::InstanceFormat;
+    type Agent = ();
 
-/// Every format with its wire string and backend twin, written out by hand so
-/// a slip in the `impl_status_enum!` mapping table fails here.
-fn cases() -> Vec<TestCase> {
-    vec![
-        TestCase {
-            format: InstanceFormat::Json,
-            wire: "json",
-            backend: backend_client::InstanceFormat::INSTANCE_FORMAT_JSON,
-        },
-        TestCase {
-            format: InstanceFormat::Yaml,
-            wire: "yaml",
-            backend: backend_client::InstanceFormat::INSTANCE_FORMAT_YAML,
-        },
-        TestCase {
-            format: InstanceFormat::Jsonc,
-            wire: "jsonc",
-            backend: backend_client::InstanceFormat::INSTANCE_FORMAT_JSONC,
-        },
-        TestCase {
-            format: InstanceFormat::Xml,
-            wire: "xml",
-            backend: backend_client::InstanceFormat::INSTANCE_FORMAT_XML,
-        },
-        TestCase {
-            format: InstanceFormat::Text,
-            wire: "text",
-            backend: backend_client::InstanceFormat::INSTANCE_FORMAT_TEXT,
-        },
-    ]
-}
-
-#[test]
-fn covers_every_variant() {
-    let tested: Vec<InstanceFormat> = cases().into_iter().map(|c| c.format).collect();
-
-    assert_eq!(tested, InstanceFormat::variants());
-}
-
-#[test]
-fn wire_strings() {
-    for case in cases() {
-        assert_eq!(json!(case.format), json!(case.wire), "{:?}", case.format);
-        let parsed: InstanceFormat = serde_json::from_value(json!(case.wire)).unwrap();
-        assert_eq!(parsed, case.format);
-        assert_eq!(case.format.as_str(), case.wire);
+    fn cases() -> Vec<StatusCase<Self>> {
+        vec![
+            StatusCase {
+                variant: InstanceFormat::Json,
+                wire: "json",
+                backend: backend_client::InstanceFormat::INSTANCE_FORMAT_JSON,
+                agent: (),
+            },
+            StatusCase {
+                variant: InstanceFormat::Yaml,
+                wire: "yaml",
+                backend: backend_client::InstanceFormat::INSTANCE_FORMAT_YAML,
+                agent: (),
+            },
+            StatusCase {
+                variant: InstanceFormat::Jsonc,
+                wire: "jsonc",
+                backend: backend_client::InstanceFormat::INSTANCE_FORMAT_JSONC,
+                agent: (),
+            },
+            StatusCase {
+                variant: InstanceFormat::Xml,
+                wire: "xml",
+                backend: backend_client::InstanceFormat::INSTANCE_FORMAT_XML,
+                agent: (),
+            },
+            StatusCase {
+                variant: InstanceFormat::Text,
+                wire: "text",
+                backend: backend_client::InstanceFormat::INSTANCE_FORMAT_TEXT,
+                agent: (),
+            },
+        ]
     }
 }
 
-#[test]
-fn backend_conversions() {
-    for case in cases() {
-        assert_eq!(InstanceFormat::from(&case.backend), case.format);
-        assert_eq!(
-            backend_client::InstanceFormat::from(&case.format),
-            case.backend
-        );
-    }
-}
-
-#[test]
-fn backend_wire_strings_match() {
-    // the agent's wire strings are the backend's, so a report's format
-    // reaches Miru unchanged
-    for case in cases() {
-        assert_eq!(json!(case.backend), json!(case.wire), "{:?}", case.format);
-    }
-}
+status_enum_tests!(InstanceFormat, backend);
 
 #[test]
 fn defaults_to_text() {
