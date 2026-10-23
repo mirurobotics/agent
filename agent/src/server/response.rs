@@ -66,6 +66,7 @@ impl From<&models::FileRuleUpload> for device_server::FileRuleUpload {
             bucket_id: upload.bucket_id.clone(),
             bucket_name: upload.bucket_name.clone(),
             path: upload.path.clone(),
+            bundle: upload.bundle.clone(),
         }
     }
 }

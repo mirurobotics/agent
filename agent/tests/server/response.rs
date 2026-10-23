@@ -303,6 +303,7 @@ pub mod file_rule_response {
             bucket_id: "bkt-1".into(),
             bucket_name: "fleet-logs".into(),
             path: "robots/".into(),
+            bundle: Some(vec!["robot".into()]),
         }
     }
 
@@ -351,6 +352,7 @@ pub mod file_rule_response {
                 bucket_id: "bkt-1".into(),
                 bucket_name: "fleet-logs".into(),
                 path: "robots/".into(),
+                bundle: Some(vec!["robot".into()]),
             })),
             retention: Some(Box::new(openapi::FileRuleRetention {
                 require_upload: Some(true),

@@ -22,6 +22,7 @@ fn rule(id: &str, digest: &str, retention: Option<FileRuleRetention>) -> FileRul
             bucket_id: "buck_1".to_string(),
             bucket_name: "my-bucket".to_string(),
             path: "{device_id}/logs".to_string(),
+            bundle: None,
         }),
         retention,
         created_at: DateTime::<Utc>::UNIX_EPOCH,
