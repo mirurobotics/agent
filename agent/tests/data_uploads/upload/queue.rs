@@ -13,7 +13,7 @@ use crate::queue::file::queue_suite;
 use crate::test_utils::filesys::{abs_path, dirs as test_dirs};
 use miru_agent::data_uploads::upload::{Job, Queue, QueueEntry, QueueSnapshot, QueueSnapshotFile};
 use miru_agent::filesys::{files, File, WriteOptions};
-use miru_agent::queue::QueueJob;
+use miru_agent::queue::{Persistence, QueueJob};
 
 // external crates
 use chrono::{DateTime, Utc};
@@ -37,12 +37,12 @@ fn upload_job(name: &str) -> Job {
 
 queue_suite!(upload_job, "upload-generic-queue-test");
 
-/// An upload job is due the moment it arrives: `due_at` is `MIN_UTC`, so
+/// An upload job is ready the moment it arrives: `ready_at` is `MIN_UTC`, so
 /// readiness is decided by `next_attempt_at` alone.
 #[test]
-fn due_at_is_min_utc() {
+fn ready_at_is_min_utc() {
     assert_eq!(
-        QueueJob::due_at(&upload_job("a.log")),
+        QueueJob::ready_at(&upload_job("a.log")),
         DateTime::<Utc>::MIN_UTC
     );
 }
@@ -106,7 +106,7 @@ mod wire {
             .await
             .unwrap();
 
-        let queue = Queue::from_snapshot(8, open(&path).await);
+        let queue = Queue::from_snapshot(8, open(&path).await, Persistence::BestEffort);
 
         assert_eq!(queue.len(), 1);
         let entry = queue.next_ready(Utc::now()).unwrap();
@@ -124,7 +124,7 @@ mod wire {
         let path = dir.to_dir().file("upload_queue.json");
 
         {
-            let mut queue = Queue::from_snapshot(8, open(&path).await);
+            let mut queue = Queue::from_snapshot(8, open(&path).await, Persistence::BestEffort);
             queue.enqueue(make_job("a.log")).await.unwrap();
         }
 
@@ -183,7 +183,7 @@ mod wire {
 
         // if deserialization failed, new_with_default would copy the file
         // aside and start empty, and the pop below would find nothing
-        let queue = Queue::from_snapshot(8, open(&path).await);
+        let queue = Queue::from_snapshot(8, open(&path).await, Persistence::BestEffort);
         let entry = queue.next_ready(Utc::now()).unwrap();
         assert_eq!(entry.attempts, 2);
         assert_eq!(entry.next_attempt_at, None);

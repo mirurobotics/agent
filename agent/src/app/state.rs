@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 // internal crates
 use crate::authn::{self, token_mngr::TokenFile, TokenManagerExt};
+use crate::calibrations;
 use crate::cooldown;
 use crate::data_uploads::{
     retention::{self, DeleterExt},
@@ -35,6 +36,7 @@ pub struct AppState {
     pub uploader: Arc<upload::Uploader>,
     pub token_mngr: Arc<authn::TokenManager>,
     pub event_hub: events::EventHub,
+    pub calibration_uploader: Arc<calibrations::Uploader>,
 }
 
 impl AppState {
@@ -45,7 +47,7 @@ impl AppState {
         dpl_retry_policy: fsm::RetryPolicy,
     ) -> Result<(Self, impl Future<Output = ()>), server::ServerErr> {
         // storage layout stuff
-        let (token_file, private_key_file, public_key_file) = setup_auth_files(layout).await?;
+        let auth_files = setup_auth_files(layout).await?;
 
         // get the device id
         let device_id = disk::resolve_device_id(layout).await?;
@@ -55,14 +57,8 @@ impl AppState {
         let storage = Arc::new(stor);
 
         // initialize the token manager
-        let (token_mngr, token_mngr_handle) = authn::TokenManager::spawn(
-            64,
-            http_client.clone(),
-            token_file,
-            private_key_file,
-            public_key_file,
-        )?;
-        let token_mngr = Arc::new(token_mngr);
+        let (token_mngr, token_mngr_handle) =
+            Self::init_token_mngr(http_client.clone(), auth_files)?;
 
         // initialize the event hub
         let (event_hub, event_hub_handle) =
@@ -81,13 +77,23 @@ impl AppState {
         let syncer = Arc::new(syncer);
 
         // initialize the data upload pipeline (deleter, uploader, scanner)
-        let (deleter, uploader, scanner, data_upload_handles) =
+        let (deleter, uploader, scanner, [scanner_handle, deleter_handle, uploader_handle]) =
             Self::init_data_uploads(layout, http_client.clone(), token_mngr.clone()).await?;
 
-        let shutdown_handle = async move {
-            let mut handles = vec![token_mngr_handle, syncer_handle, event_hub_handle];
-            handles.extend(data_upload_handles);
+        // initialize the calibration uploader
+        let (calibration_uploader, calibration_uploader_handle) =
+            Self::init_calibration_uploader(layout, http_client.clone(), token_mngr.clone()).await;
 
+        let shutdown_handle = async move {
+            let handles = [
+                token_mngr_handle,
+                syncer_handle,
+                event_hub_handle,
+                scanner_handle,
+                deleter_handle,
+                uploader_handle,
+                calibration_uploader_handle,
+            ];
             futures::future::join(futures::future::join_all(handles), storage_handle).await;
         };
 
@@ -101,9 +107,24 @@ impl AppState {
                 uploader,
                 token_mngr,
                 event_hub,
+                calibration_uploader,
             },
             shutdown_handle,
         ))
+    }
+
+    fn init_token_mngr(
+        http_client: Arc<http::Client>,
+        auth_files: AuthFiles,
+    ) -> Result<(Arc<authn::TokenManager>, tokio::task::JoinHandle<()>), server::ServerErr> {
+        let (token_mngr, handle) = authn::TokenManager::spawn(
+            64,
+            http_client,
+            auth_files.token,
+            auth_files.private_key,
+            auth_files.public_key,
+        )?;
+        Ok((Arc::new(token_mngr), handle))
     }
 
     /// The deleter and uploader are initialized before the scanner: the
@@ -237,10 +258,54 @@ impl AppState {
         Ok((Arc::new(uploader), handle))
     }
 
+    /// Spawn the calibration uploader, which sends reports to Miru with the
+    /// token manager's token. A queue-file error degrades to a queue kept in
+    /// memory (fail-open); the report files a previous boot queued are kept
+    /// for the next boot that opens the queue file.
+    async fn init_calibration_uploader(
+        layout: &disk::Layout,
+        http_client: Arc<http::Client>,
+        token_mngr: Arc<authn::TokenManager>,
+    ) -> (Arc<calibrations::Uploader>, tokio::task::JoinHandle<()>) {
+        let layout = layout.calibrations();
+        let snapshot_file = match calibrations::QueueSnapshotFile::new_with_default(
+            layout.queue(),
+            Default::default(),
+        )
+        .await
+        {
+            Ok(file) => Some(file),
+            Err(e) => {
+                tracing::error!(
+                    "failed to initialize calibration queue snapshot file; calibrations will run without persistence: {e}"
+                );
+                None
+            }
+        };
+
+        let args = calibrations::UploaderArgs {
+            snapshot_file,
+            reports: layout.reports(),
+            sender: Arc::new(calibrations::HttpSender::new(http_client, token_mngr)),
+            options: calibrations::UploaderOptions::default(),
+            sleep_fn: tokio::time::sleep,
+            now_fn: chrono::Utc::now,
+        };
+        let (uploader, handle) = calibrations::Uploader::spawn(64, args);
+        (Arc::new(uploader), handle)
+    }
+
     pub async fn shutdown(&self) -> Result<(), server::ServerErr> {
         let mut first_err: Option<server::ServerErr> = None;
 
-        // shutdown the uploader first: it depends on nothing else in the app. The
+        // shutdown the calibration uploader first: nothing else in the app
+        // depends on it
+        if let Err(e) = self.calibration_uploader.shutdown().await {
+            tracing::error!("failed to shutdown calibration uploader: {e}");
+            first_err.get_or_insert(e.into());
+        }
+
+        // shutdown the data uploader next: it depends on nothing else in the app. The
         // scanner's upload sink may still enqueue into the stopped uploader if a
         // scan tick races this shutdown; the sink logs a warn and the tick
         // completes, so ordering stays safe.
@@ -292,18 +357,27 @@ impl AppState {
     }
 }
 
-async fn setup_auth_files(
-    layout: &disk::Layout,
-) -> Result<(TokenFile, File, File), server::ServerErr> {
+/// The files the token manager signs and stores tokens with.
+struct AuthFiles {
+    token: TokenFile,
+    private_key: File,
+    public_key: File,
+}
+
+async fn setup_auth_files(layout: &disk::Layout) -> Result<AuthFiles, server::ServerErr> {
     let auth_dir = layout.auth();
-    let private_key_file = auth_dir.private_key();
-    private_key_file.assert_exists()?;
-    let public_key_file = auth_dir.public_key();
-    public_key_file.assert_exists()?;
+    let private_key = auth_dir.private_key();
+    private_key.assert_exists()?;
+    let public_key = auth_dir.public_key();
+    public_key.assert_exists()?;
 
-    let token_file = TokenFile::new_with_default(auth_dir.token(), authn::Token::default()).await?;
+    let token = TokenFile::new_with_default(auth_dir.token(), authn::Token::default()).await?;
 
-    Ok((token_file, private_key_file, public_key_file))
+    Ok(AuthFiles {
+        token,
+        private_key,
+        public_key,
+    })
 }
 
 fn build_syncer_args(

@@ -205,6 +205,13 @@ impl MockClient {
         *self.confirm_upload_fn.lock().unwrap() = Box::new(f);
     }
 
+    pub fn set_create_calibration<F>(&self, f: F)
+    where
+        F: Fn() -> Result<Calibration, HTTPErr> + Send + Sync + 'static,
+    {
+        *self.create_calibration_fn.lock().unwrap() = Box::new(f);
+    }
+
     pub fn call_count(&self, target: Call) -> usize {
         self.requests
             .lock()

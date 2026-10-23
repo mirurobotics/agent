@@ -9,6 +9,7 @@ use miru_agent::http::request::Params;
 use miru_agent::http::{self, ClientI, HTTPErr};
 
 // external crates
+use axum::http::header;
 use axum::routing::{get, post};
 use axum::Router;
 use serde::Deserialize;
@@ -22,6 +23,23 @@ fn router() -> Router {
         .route("/server-error", get(mock::internal_server_error))
         .route("/slow", get(mock::slow))
         .route("/bad-json", get(mock::bad_json))
+        .route("/fixed-date", get(fixed_date))
+        .route("/bad-date", get(bad_date))
+        .route("/cached-date", get(cached_date))
+}
+
+const FIXED_DATE: &str = "Tue, 20 Oct 2026 02:58:04 GMT";
+
+async fn fixed_date() -> ([(header::HeaderName, &'static str); 1], &'static str) {
+    ([(header::DATE, FIXED_DATE)], "ok")
+}
+
+async fn cached_date() -> ([(header::HeaderName, &'static str); 2], &'static str) {
+    ([(header::DATE, FIXED_DATE), (header::AGE, "600")], "ok")
+}
+
+async fn bad_date() -> ([(header::HeaderName, &'static str); 1], &'static str) {
+    ([(header::DATE, "not a date")], "ok")
 }
 
 pub mod send {
@@ -191,5 +209,89 @@ pub mod arc_delegation {
         let params = Params::get(&url);
         let (text, _) = client.execute(params).await.unwrap();
         assert_eq!(text, "ok");
+    }
+}
+
+pub mod clock {
+    use super::*;
+
+    // internal crates
+    use miru_agent::clock::Clock;
+
+    // external crates
+    use chrono::{TimeZone, Utc};
+
+    async fn get(client: &http::Client, base_url: &str, path: &str) {
+        let url = format!("{base_url}{path}");
+        let req = client.build_request(Params::get(&url)).unwrap();
+        let _ = client.send(req).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn server_time_is_unknown_before_any_response() {
+        let client = http::Client::new("http://127.0.0.1:1").unwrap();
+        assert_eq!(client.clock().server_now(), None);
+    }
+
+    #[tokio::test]
+    async fn a_response_records_the_server_date() {
+        let server = mock::run_server(router()).await;
+        let client = http::Client::new(&server.base_url).unwrap();
+        get(&client, &server.base_url, "/fixed-date").await;
+        let server_now = client.clock().server_now().unwrap();
+        let expected = Utc.with_ymd_and_hms(2026, 10, 20, 2, 58, 4).unwrap();
+        assert!(server_now >= expected && server_now - expected < chrono::TimeDelta::seconds(5));
+    }
+
+    #[tokio::test]
+    async fn an_error_response_still_records_the_server_date() {
+        let server = mock::run_server(router()).await;
+        let client = http::Client::new(&server.base_url).unwrap();
+        get(&client, &server.base_url, "/not-found").await;
+        assert!(client.clock().server_now().is_some());
+    }
+
+    #[tokio::test]
+    async fn an_unparseable_date_is_ignored() {
+        let server = mock::run_server(router()).await;
+        let client = http::Client::new(&server.base_url).unwrap();
+        get(&client, &server.base_url, "/bad-date").await;
+        assert_eq!(client.clock().server_now(), None);
+    }
+
+    #[tokio::test]
+    async fn a_cached_response_adds_its_age() {
+        let server = mock::run_server(router()).await;
+        let client = http::Client::new(&server.base_url).unwrap();
+        get(&client, &server.base_url, "/cached-date").await;
+        let server_now = client.clock().server_now().unwrap();
+        let expected = Utc.with_ymd_and_hms(2026, 10, 20, 3, 8, 4).unwrap();
+        assert!(server_now >= expected && server_now - expected < chrono::TimeDelta::seconds(5));
+    }
+
+    #[tokio::test]
+    async fn ignores_the_date_from_a_non_backend_host() {
+        let backend = mock::run_server(router()).await;
+        let other = mock::run_server(router()).await;
+        let client = http::Client::new(&backend.base_url).unwrap();
+        get(&client, &other.base_url, "/fixed-date").await;
+        assert_eq!(client.clock().server_now(), None);
+    }
+
+    #[tokio::test]
+    async fn ignores_the_date_when_the_base_url_does_not_parse() {
+        let server = mock::run_server(router()).await;
+        let client = http::Client::new("not a url").unwrap();
+        get(&client, &server.base_url, "/fixed-date").await;
+        assert_eq!(client.clock().server_now(), None);
+    }
+
+    #[tokio::test]
+    async fn with_clock_feeds_the_shared_clock() {
+        let server = mock::run_server(router()).await;
+        let shared = Clock::new();
+        let client = http::Client::with_clock(&server.base_url, shared.clone()).unwrap();
+        get(&client, &server.base_url, "/fixed-date").await;
+        assert!(shared.server_now().is_some());
     }
 }

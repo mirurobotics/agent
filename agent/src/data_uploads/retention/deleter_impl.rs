@@ -11,6 +11,7 @@ use crate::data_uploads::retention::{
     queue::{DeleteQueueSnapshotFile, Queue, QueueEntry},
 };
 use crate::filesys::{errors::FileSysErr, files};
+use crate::queue::Persistence;
 
 // external crates
 use chrono::{DateTime, TimeDelta, Utc};
@@ -65,7 +66,9 @@ enum SweepOutcome {
 impl DeleterImpl {
     pub fn new(args: DeleterArgs) -> Self {
         let queue = match args.snapshot_file {
-            Some(snapshot_file) => Queue::from_snapshot(args.queue_capacity, snapshot_file),
+            Some(snapshot_file) => {
+                Queue::from_snapshot(args.queue_capacity, snapshot_file, Persistence::BestEffort)
+            }
             None => Queue::new(args.queue_capacity),
         };
         Self {
@@ -81,7 +84,8 @@ impl DeleterImpl {
     }
 
     pub(crate) async fn enqueue(&mut self, job: Job) -> Result<(), DeleteErr> {
-        Ok(self.queue.enqueue(job).await?)
+        self.queue.enqueue(job).await?;
+        Ok(())
     }
 
     pub(crate) async fn sweep(&mut self) -> Result<(), DeleteErr> {
@@ -97,7 +101,7 @@ impl DeleterImpl {
             match Self::sweep_entry(&entry.job).await {
                 SweepOutcome::Failed => self.handle_counted_failure(entry, now).await,
                 SweepOutcome::Deleted | SweepOutcome::AlreadyGone | SweepOutcome::Changed => {
-                    self.queue.remove(entry.id).await;
+                    self.queue.ack(entry.id).await;
                 }
             }
         }
@@ -110,7 +114,7 @@ impl DeleterImpl {
         entry.attempts += 1;
         if entry.attempts >= self.attempts {
             Self::log_exhausted_drop(&entry);
-            self.queue.remove(entry.id).await;
+            self.queue.ack(entry.id).await;
             return;
         }
 
@@ -119,8 +123,10 @@ impl DeleterImpl {
             "delete: attempt {} of {} failed for {}; retrying in {wait}s",
             entry.attempts, self.attempts, entry.job.file
         );
-        entry.next_attempt_at = Some(now + TimeDelta::seconds(wait));
-        self.queue.requeue(entry).await;
+        let next_attempt_at = now + TimeDelta::seconds(wait);
+        self.queue
+            .retry(entry.id, entry.attempts, next_attempt_at)
+            .await;
     }
 
     /// Consider one selected job: delete only when the on-disk file still
@@ -343,7 +349,7 @@ mod tests {
 
     mod enqueue {
         use super::*;
-        use crate::data_uploads::retention::errors::DeleteErr;
+        use crate::data_uploads::retention::errors::{DeleteErr, EnqueueErr};
 
         #[tokio::test]
         async fn appends_the_job() {
@@ -396,7 +402,7 @@ mod tests {
                 .enqueue(make_job(tmp_b.file(), 1000, 0).await)
                 .await
                 .unwrap_err();
-            let DeleteErr::QueueFullErr(full) = err else {
+            let DeleteErr::EnqueueErr(EnqueueErr::QueueFullErr(full)) = err else {
                 panic!("expected QueueFullErr, got: {err:?}");
             };
             assert_eq!(full.capacity, 1);
@@ -478,21 +484,21 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn positive_delay_entry_waits_for_due_at() {
+        async fn positive_delay_entry_waits_for_ready_at() {
             let tmp = temp_file(b"aaaa").await;
             let clock = Clock::new(1000);
             let mut deleter = deleter(&clock);
             let record = make_job(tmp.file(), 1000, 500).await;
             deleter.enqueue(record.clone()).await.unwrap();
 
-            // not yet due: both 1000 and 1499 are before due_at (1500).
+            // not yet ready: both 1000 and 1499 are before ready_at (1500).
             deleter.sweep().await.unwrap();
             clock.advance(499);
             deleter.sweep().await.unwrap();
             assert_eq!(deleter.queue.entries(), [record]);
             assert!(tmp.file().exists());
 
-            // due exactly at due_at.
+            // ready exactly at ready_at.
             clock.advance(1);
             deleter.sweep().await.unwrap();
             assert!(deleter.queue.is_empty());
@@ -698,9 +704,9 @@ mod tests {
             deleter.sweep().await.unwrap();
             drop(deleter);
 
-            // the due job was removed-and-persisted (Queue::remove) before the
-            // waiting job was considered, so a rebuild sees only the waiting
-            // job.
+            // the due job was acked-and-persisted (FileQueue::ack)
+            // before the waiting job was considered, so a rebuild sees only
+            // the waiting job.
             let restored = DeleterImpl::new(DeleterArgs {
                 snapshot_file: Some(snapshot_file(&state_path).await),
                 ..DeleterArgs::default()
@@ -989,8 +995,8 @@ mod tests {
             deleter.sweep().await.unwrap();
             drop(deleter);
 
-            // no injected clock: the wedged job's due_at is in 1970, so the
-            // wall clock finds it due. The cap is tightened on the rebuild so
+            // no injected clock: the wedged job's ready_at is in 1970, so the
+            // wall clock finds it ready. The cap is tightened on the rebuild so
             // the restored entry's third attempt is its last.
             let mut restored = DeleterImpl::new(DeleterArgs {
                 attempts: 3,

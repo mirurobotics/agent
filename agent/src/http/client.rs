@@ -2,7 +2,9 @@
 use std::sync::Arc;
 
 // internal crates
+use crate::clock::Clock;
 use crate::http::{
+    date,
     errors::{reqwest_err_to_http_client_err, BuildReqwestErr, HTTPErr, TimeoutErr},
     request, response,
 };
@@ -11,12 +13,17 @@ use crate::trace;
 // external crates
 use serde::de::DeserializeOwned;
 use tokio::time::timeout;
+use tracing::debug;
 
 #[derive(Debug)]
 pub struct Client {
     client: reqwest::Client,
     base_url: String,
+    /// The URL whose responses may set the clock: `base_url`, parsed. Only a
+    /// response from this URL's origin has its `Date` header recorded.
+    clock_url: Option<reqwest::Url>,
     headers: request::Headers,
+    clock: Clock,
 }
 
 // Per the reqwest docs, we do not need to wrap the client in Rc or Arc to reuse it
@@ -69,6 +76,12 @@ impl<T: ClientI> ClientI for Arc<T> {
 
 impl Client {
     pub fn new(base_url: &str) -> Result<Self, HTTPErr> {
+        Self::with_clock(base_url, Clock::new())
+    }
+
+    /// A client that records the backend's time into `clock` from every
+    /// response that comes from `base_url`'s origin.
+    pub fn with_clock(base_url: &str, clock: Clock) -> Result<Self, HTTPErr> {
         let client = reqwest::Client::builder().build().map_err(|e| {
             HTTPErr::BuildReqwestErr(BuildReqwestErr {
                 source: e,
@@ -78,8 +91,15 @@ impl Client {
         Ok(Client {
             client,
             base_url: base_url.to_string(),
+            clock_url: reqwest::Url::parse(base_url).ok(),
             headers: request::Headers::default(),
+            clock,
         })
+    }
+
+    /// The clock this client feeds with the backend's time.
+    pub fn clock(&self) -> &Clock {
+        &self.clock
     }
 
     pub fn build_request(&self, params: request::Params) -> Result<request::Request, HTTPErr> {
@@ -94,11 +114,40 @@ impl Client {
                 trace: trace!(),
             })),
             Ok(Err(e)) => Err(reqwest_err_to_http_client_err(e, req.meta, trace!())),
-            Ok(Ok(response)) => Ok(response::Response {
-                reqwest: response,
-                meta: req.meta,
-            }),
+            Ok(Ok(response)) => {
+                self.observe_server_time(&response);
+                Ok(response::Response {
+                    reqwest: response,
+                    meta: req.meta,
+                })
+            }
         }
+    }
+
+    /// Records the response's `Date` header (and `Age`, if a cache served it),
+    /// error statuses included, but only when the response came from
+    /// `clock_url`'s origin. A request to any other host, or a redirect to one,
+    /// must not set the agent's time.
+    fn observe_server_time(&self, response: &reqwest::Response) {
+        if !self.is_clock_source(response.url()) {
+            return;
+        }
+        let headers = response.headers();
+        let header = |name| headers.get(name).and_then(|v| v.to_str().ok());
+        let Some(date) = header(reqwest::header::DATE) else {
+            return;
+        };
+        match date::server_time(date, header(reqwest::header::AGE)) {
+            Some(server_time) => self.clock.observe_server_time(server_time),
+            None => debug!("http: ignoring unparseable Date header {date:?}"),
+        }
+    }
+
+    /// Whether `url` has the same scheme, host and port as `clock_url`.
+    fn is_clock_source(&self, url: &reqwest::Url) -> bool {
+        self.clock_url
+            .as_ref()
+            .is_some_and(|clock_url| clock_url.origin() == url.origin())
     }
 }
 

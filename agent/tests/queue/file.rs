@@ -7,17 +7,23 @@
 //! emits one `mod` per group holding one `#[tokio::test]` per case, each named
 //! exactly after the case function — so a failing test path
 //! (`upload::queue::enqueue::persists`) greps straight to its body here. The
-//! suite therefore runs against `upload::Job` (always due on arrival) and
-//! `retention::Job` (due only once its TTL elapses), proving the `due_at` hook
+//! suite therefore runs against `upload::Job` (always ready on arrival) and
+//! `retention::Job` (ready only once its TTL elapses), proving the `ready_at` hook
 //! in both states.
 //!
 //! This file itself contains no tests: only the fixtures, the generic cases,
 //! and the macro.
 
+// standard crates
+use std::time::Duration;
+
 // internal crates
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::filesys::{dirs, files, Dir, File, PathExt, WriteOptions};
-use miru_agent::queue::{FileQueue, QueueEntry, QueueJob, QueueSnapshot, QueueSnapshotFile};
+use miru_agent::queue::{
+    EnqueueErr, FileQueue, NextAttempt, Persistence, QueueEntry, QueueJob, QueueSnapshot,
+    QueueSnapshotFile,
+};
 
 // external crates
 use chrono::{DateTime, TimeDelta, Utc};
@@ -39,18 +45,32 @@ async fn open<J: QueueJob>(path: &File) -> QueueSnapshotFile<J> {
         .unwrap()
 }
 
-/// `enqueue` without requiring the error to be `Debug`.
-pub async fn enqueue<J: QueueJob>(queue: &mut FileQueue<J>, job: J) {
-    assert!(queue.enqueue(job).await.is_ok(), "enqueue was rejected");
+/// `enqueue` without requiring the error to be `Debug`. Returns the new id.
+pub async fn enqueue<J: QueueJob>(queue: &mut FileQueue<J>, job: J) -> Uuid {
+    let Ok(id) = queue.enqueue(job).await else {
+        panic!("enqueue was rejected");
+    };
+    id
+}
+
+/// Enqueue `job` already retried: `attempts` spent, waiting for `next_attempt_at`.
+async fn enqueue_waiting<J: QueueJob>(
+    queue: &mut FileQueue<J>,
+    job: J,
+    attempts: u32,
+    next_attempt_at: DateTime<Utc>,
+) {
+    let id = enqueue(queue, job).await;
+    assert!(queue.retry(id, attempts, next_attempt_at).await);
 }
 
 /// The ready jobs, in selection order. `next_ready` leaves the entry in place,
-/// so draining without removing would return the same entry forever.
+/// so draining without acking would return the same entry forever.
 async fn drain<J: QueueJob>(queue: &mut FileQueue<J>) -> Vec<J> {
     let mut out = Vec::new();
     while let Some(entry) = queue.next_ready(now()) {
         out.push(entry.job);
-        queue.remove(entry.id).await;
+        queue.ack(entry.id).await;
     }
     out
 }
@@ -65,6 +85,11 @@ async fn on_disk<J: QueueJob>(path: &File) -> Vec<J> {
         .iter()
         .map(|entry| entry.job.clone())
         .collect()
+}
+
+/// The queued jobs in queue order, read through [`FileQueue::iter`].
+fn queued<J: QueueJob>(queue: &FileQueue<J>) -> Vec<J> {
+    queue.iter().map(|entry| entry.job.clone()).collect()
 }
 
 fn jobs<J: QueueJob>(make: fn(&str) -> J, stems: &[&str]) -> Vec<J> {
@@ -99,7 +124,8 @@ pub mod cases {
         pub async fn empty_loads_empty_queue<J: QueueJob>(tmp: &str, _make: fn(&str) -> J) {
             let (_dir, path) = temp_path(tmp);
 
-            let queue = FileQueue::<J>::from_snapshot(8, open::<J>(&path).await);
+            let queue =
+                FileQueue::<J>::from_snapshot(8, open::<J>(&path).await, Persistence::BestEffort);
 
             assert!(queue.is_empty());
             assert_eq!(queue.len(), 0);
@@ -109,14 +135,18 @@ pub mod cases {
             let (_dir, path) = temp_path(tmp);
 
             {
-                let mut queue =
-                    FileQueue::<J>::from_snapshot(DEFAULT_CAPACITY, open::<J>(&path).await);
+                let mut queue = FileQueue::<J>::from_snapshot(
+                    DEFAULT_CAPACITY,
+                    open::<J>(&path).await,
+                    Persistence::BestEffort,
+                );
                 for name in ["a.log", "b.log", "c.log"] {
                     enqueue(&mut queue, make(name)).await;
                 }
             }
 
-            let mut queue = FileQueue::<J>::from_snapshot(2, open::<J>(&path).await);
+            let mut queue =
+                FileQueue::<J>::from_snapshot(2, open::<J>(&path).await, Persistence::BestEffort);
             assert_eq!(queue.len(), 3);
             // the over-capacity backlog accepts nothing new until it drains
             assert!(queue.enqueue(make("d.log")).await.is_err());
@@ -148,13 +178,14 @@ pub mod cases {
                 .await
                 .unwrap();
 
-            let mut queue = FileQueue::<J>::from_snapshot(8, open::<J>(&path).await);
+            let mut queue =
+                FileQueue::<J>::from_snapshot(8, open::<J>(&path).await, Persistence::BestEffort);
             assert_eq!(queue.len(), 1);
             let entry = queue.next_ready(now()).unwrap();
             assert_eq!(entry.attempts, 0);
             assert_eq!(entry.next_attempt_at, None);
-            // the minted id is a working handle for removal
-            assert!(queue.remove(entry.id).await.is_some());
+            // the minted id is a working handle for ack
+            assert!(queue.ack(entry.id).await.is_some());
             assert!(queue.is_empty());
         }
     }
@@ -183,13 +214,20 @@ pub mod cases {
             let (_dir, path) = temp_path(tmp);
 
             {
-                let mut queue =
-                    FileQueue::<J>::from_snapshot(DEFAULT_CAPACITY, open::<J>(&path).await);
+                let mut queue = FileQueue::<J>::from_snapshot(
+                    DEFAULT_CAPACITY,
+                    open::<J>(&path).await,
+                    Persistence::BestEffort,
+                );
                 enqueue(&mut queue, make("a.log")).await;
                 enqueue(&mut queue, make("b.log")).await;
             }
 
-            let reloaded = FileQueue::<J>::from_snapshot(DEFAULT_CAPACITY, open::<J>(&path).await);
+            let reloaded = FileQueue::<J>::from_snapshot(
+                DEFAULT_CAPACITY,
+                open::<J>(&path).await,
+                Persistence::BestEffort,
+            );
             assert_eq!(reloaded.len(), 2);
             assert_eq!(on_disk::<J>(&path).await, jobs(make, &["a.log", "b.log"]));
         }
@@ -201,7 +239,7 @@ pub mod cases {
             enqueue(&mut queue, job).await;
 
             let first = queue.next_ready(now()).unwrap();
-            queue.remove(first.id).await.unwrap();
+            queue.ack(first.id).await.unwrap();
             let second = queue.next_ready(now()).unwrap();
             assert_eq!(first.job, second.job);
             assert_ne!(first.id, second.id);
@@ -231,7 +269,9 @@ pub mod cases {
 
             let rejected = make("b.log");
             let rejected_name = rejected.name();
-            let err = queue.enqueue(rejected).await.unwrap_err();
+            let EnqueueErr::QueueFullErr(err) = queue.enqueue(rejected).await.unwrap_err() else {
+                panic!("expected QueueFullErr");
+            };
             assert_eq!(err.label, J::LABEL);
             assert_eq!(err.capacity, 1);
             assert_eq!(err.name, rejected_name);
@@ -249,7 +289,11 @@ pub mod cases {
             let (_dir, path) = temp_path(tmp);
 
             {
-                let mut queue = FileQueue::<J>::from_snapshot(1, open::<J>(&path).await);
+                let mut queue = FileQueue::<J>::from_snapshot(
+                    1,
+                    open::<J>(&path).await,
+                    Persistence::BestEffort,
+                );
                 enqueue(&mut queue, make("a.log")).await;
                 assert!(queue.enqueue(make("b.log")).await.is_err());
                 assert_eq!(queue.len(), 1);
@@ -260,7 +304,11 @@ pub mod cases {
 
         pub async fn persist_failure_is_swallowed<J: QueueJob>(tmp: &str, make: fn(&str) -> J) {
             let (_dir, path) = temp_path(tmp);
-            let mut queue = FileQueue::<J>::from_snapshot(DEFAULT_CAPACITY, open::<J>(&path).await);
+            let mut queue = FileQueue::<J>::from_snapshot(
+                DEFAULT_CAPACITY,
+                open::<J>(&path).await,
+                Persistence::BestEffort,
+            );
 
             // make the snapshot path unwritable: a DIRECTORY now sits there.
             files::delete(&path).await.unwrap();
@@ -268,6 +316,69 @@ pub mod cases {
 
             enqueue(&mut queue, make("a.log")).await;
             assert_eq!(queue.len(), 1);
+        }
+    }
+
+    // ------------------------------ durable --------------------------------------- //
+
+    /// A durable queue's enqueue: the entry counts only once it is on disk.
+    pub mod durable {
+        use super::*;
+
+        pub async fn persists_under_the_returned_id<J: QueueJob>(tmp: &str, make: fn(&str) -> J) {
+            let (_dir, path) = temp_path(tmp);
+
+            let id = {
+                let mut queue = durable_queue::<J>(&path).await;
+                let id = queue.enqueue(make("a.log")).await.unwrap();
+                assert_eq!(queue.next_ready(now()).unwrap().id, id);
+                id
+            };
+
+            let reloaded = durable_queue::<J>(&path).await;
+            let entry = reloaded.next_ready(now()).unwrap();
+            assert_eq!(entry.id, id);
+            assert_eq!(entry.job, make("a.log"));
+        }
+
+        pub async fn persist_failure_rolls_back<J: QueueJob>(tmp: &str, make: fn(&str) -> J) {
+            let (_dir, path) = temp_path(tmp);
+            let mut queue = durable_queue::<J>(&path).await;
+            enqueue(&mut queue, make("a.log")).await;
+
+            // make the snapshot path unwritable: a DIRECTORY now sits there.
+            files::delete(&path).await.unwrap();
+            dirs::create(&Dir::new(path.path().clone())).await.unwrap();
+
+            let err = queue.enqueue(make("b.log")).await.unwrap_err();
+            assert!(matches!(err, EnqueueErr::FileSysErr(_)), "{err:?}");
+            assert_eq!(queued(&queue), jobs(make, &["a.log"]));
+        }
+
+        async fn durable_queue<J: QueueJob>(path: &File) -> FileQueue<J> {
+            FileQueue::<J>::from_snapshot(
+                DEFAULT_CAPACITY,
+                open::<J>(path).await,
+                Persistence::Durable,
+            )
+        }
+    }
+
+    // --------------------------------- iter -------------------------------------- //
+
+    pub mod iter {
+        use super::*;
+
+        pub async fn yields_entries_in_queue_order_without_mutating<J: QueueJob>(
+            make: fn(&str) -> J,
+        ) {
+            let mut queue = FileQueue::<J>::new(DEFAULT_CAPACITY);
+            for name in ["a.log", "b.log"] {
+                enqueue(&mut queue, make(name)).await;
+            }
+
+            assert_eq!(queued(&queue), jobs(make, &["a.log", "b.log"]));
+            assert_eq!(queue.len(), 2);
         }
     }
 
@@ -280,14 +391,7 @@ pub mod cases {
         pub async fn skips_waiting_entries<J: QueueJob>(make: fn(&str) -> J) {
             let mut queue = FileQueue::<J>::new(DEFAULT_CAPACITY);
             let deadline = now() + TimeDelta::hours(1);
-            queue
-                .requeue(QueueEntry {
-                    id: Uuid::new_v4(),
-                    job: make("waiting"),
-                    attempts: 1,
-                    next_attempt_at: Some(deadline),
-                })
-                .await;
+            enqueue_waiting(&mut queue, make("waiting"), 1, deadline).await;
             enqueue(&mut queue, make("ready_1")).await;
             enqueue(&mut queue, make("ready_2")).await;
 
@@ -304,34 +408,56 @@ pub mod cases {
             assert!(queue.next_ready(now()).is_none());
         }
 
-        pub async fn leaves_the_entry_on_disk_until_removed<J: QueueJob>(
+        pub async fn leaves_the_entry_on_disk_until_acked<J: QueueJob>(
             tmp: &str,
             make: fn(&str) -> J,
         ) {
             let (_dir, path) = temp_path(tmp);
-            let mut queue = FileQueue::<J>::from_snapshot(DEFAULT_CAPACITY, open::<J>(&path).await);
+            let mut queue = FileQueue::<J>::from_snapshot(
+                DEFAULT_CAPACITY,
+                open::<J>(&path).await,
+                Persistence::BestEffort,
+            );
             enqueue(&mut queue, make("a.log")).await;
             enqueue(&mut queue, make("b.log")).await;
 
             let entry = queue.next_ready(now()).unwrap();
             assert_eq!(on_disk::<J>(&path).await, jobs(make, &["a.log", "b.log"]));
 
-            let removed = queue.remove(entry.id).await.unwrap();
-            assert_eq!(removed.id, entry.id);
+            let acked = queue.ack(entry.id).await.unwrap();
+            assert_eq!(acked.id, entry.id);
             assert_eq!(on_disk::<J>(&path).await, jobs(make, &["b.log"]));
         }
     }
 
-    // --------------------------------- remove ------------------------------------ //
+    // ----------------------------------- ack ------------------------------------- //
 
-    pub mod remove {
+    pub mod ack {
         use super::*;
+
+        pub async fn persist_failure_still_acks<J: QueueJob>(tmp: &str, make: fn(&str) -> J) {
+            let (_dir, path) = temp_path(tmp);
+            let mut queue = FileQueue::<J>::from_snapshot(
+                DEFAULT_CAPACITY,
+                open::<J>(&path).await,
+                Persistence::Durable,
+            );
+            enqueue(&mut queue, make("a.log")).await;
+            let id = queue.next_ready(now()).unwrap().id;
+
+            // make the snapshot path unwritable: a DIRECTORY now sits there.
+            files::delete(&path).await.unwrap();
+            dirs::create(&Dir::new(path.path().clone())).await.unwrap();
+
+            assert!(queue.ack(id).await.is_some());
+            assert!(queue.is_empty());
+        }
 
         pub async fn unknown_id_is_ignored<J: QueueJob>(make: fn(&str) -> J) {
             let mut queue = FileQueue::<J>::new(DEFAULT_CAPACITY);
             enqueue(&mut queue, make("a.log")).await;
 
-            assert!(queue.remove(Uuid::new_v4()).await.is_none());
+            assert!(queue.ack(Uuid::new_v4()).await.is_none());
             assert_eq!(queue.len(), 1);
         }
 
@@ -342,16 +468,16 @@ pub mod cases {
             enqueue(&mut queue, job).await;
 
             let entry = queue.next_ready(now()).unwrap();
-            queue.remove(entry.id).await.unwrap();
+            queue.ack(entry.id).await.unwrap();
 
             assert_eq!(queue.len(), 1);
             assert_ne!(queue.next_ready(now()).unwrap().id, entry.id);
         }
     }
 
-    // -------------------------------- requeue ------------------------------------ //
+    // --------------------------------- retry ------------------------------------- //
 
-    pub mod requeue {
+    pub mod retry {
         use super::*;
 
         pub async fn rotates_to_the_tail<J: QueueJob>(make: fn(&str) -> J) {
@@ -360,34 +486,35 @@ pub mod cases {
             enqueue(&mut queue, make("b.log")).await;
 
             let entry = queue.next_ready(now()).unwrap();
-            queue.requeue(entry).await;
+            assert!(queue.retry(entry.id, entry.attempts, now()).await);
             assert_eq!(queue.len(), 2);
 
             assert_eq!(drain(&mut queue).await, jobs(make, &["b.log", "a.log"]));
         }
 
-        pub async fn at_capacity_admits_a_new_entry<J: QueueJob>(make: fn(&str) -> J) {
+        pub async fn is_not_capacity_gated<J: QueueJob>(make: fn(&str) -> J) {
             let mut queue = FileQueue::<J>::new(1);
             enqueue(&mut queue, make("a.log")).await;
 
-            queue
-                .requeue(QueueEntry {
-                    id: Uuid::new_v4(),
-                    job: make("b.log"),
-                    attempts: 2,
-                    next_attempt_at: None,
-                })
-                .await;
+            let entry = queue.next_ready(now()).unwrap();
+            assert!(queue.retry(entry.id, 2, now()).await);
 
-            assert_eq!(queue.len(), 2);
+            assert_eq!(queue.len(), 1);
+            let entry = queue.next_ready(now()).unwrap();
+            assert_eq!(entry.job, make("a.log"));
+            assert_eq!(entry.attempts, 2);
+        }
 
-            // the appended entry lands at the tail carrying its attempt count
-            let head = queue.next_ready(now()).unwrap();
-            assert_eq!(head.job, make("a.log"));
-            queue.remove(head.id).await.unwrap();
-            let tail = queue.next_ready(now()).unwrap();
-            assert_eq!(tail.job, make("b.log"));
-            assert_eq!(tail.attempts, 2);
+        pub async fn unknown_id_is_ignored<J: QueueJob>(make: fn(&str) -> J) {
+            let mut queue = FileQueue::<J>::new(DEFAULT_CAPACITY);
+            enqueue(&mut queue, make("a.log")).await;
+
+            assert!(!queue.retry(Uuid::new_v4(), 1, now()).await);
+
+            assert_eq!(queue.len(), 1);
+            let entry = queue.next_ready(now()).unwrap();
+            assert_eq!(entry.attempts, 0);
+            assert_eq!(entry.next_attempt_at, None);
         }
 
         pub async fn order_survives_a_reload<J: QueueJob>(tmp: &str, make: fn(&str) -> J) {
@@ -395,16 +522,23 @@ pub mod cases {
             let id;
 
             {
-                let mut queue =
-                    FileQueue::<J>::from_snapshot(DEFAULT_CAPACITY, open::<J>(&path).await);
+                let mut queue = FileQueue::<J>::from_snapshot(
+                    DEFAULT_CAPACITY,
+                    open::<J>(&path).await,
+                    Persistence::BestEffort,
+                );
                 enqueue(&mut queue, make("a.log")).await;
                 enqueue(&mut queue, make("b.log")).await;
                 let entry = queue.next_ready(now()).unwrap();
                 id = entry.id;
-                queue.requeue(entry).await;
+                assert!(queue.retry(entry.id, entry.attempts, now()).await);
             }
 
-            let reloaded = FileQueue::<J>::from_snapshot(DEFAULT_CAPACITY, open::<J>(&path).await);
+            let reloaded = FileQueue::<J>::from_snapshot(
+                DEFAULT_CAPACITY,
+                open::<J>(&path).await,
+                Persistence::BestEffort,
+            );
             assert_eq!(on_disk::<J>(&path).await, jobs(make, &["b.log", "a.log"]));
             assert_ne!(reloaded.next_ready(now()).unwrap().id, id);
         }
@@ -417,21 +551,22 @@ pub mod cases {
             let deadline = now() + TimeDelta::hours(1);
 
             {
-                let mut queue =
-                    FileQueue::<J>::from_snapshot(DEFAULT_CAPACITY, open::<J>(&path).await);
+                let mut queue = FileQueue::<J>::from_snapshot(
+                    DEFAULT_CAPACITY,
+                    open::<J>(&path).await,
+                    Persistence::BestEffort,
+                );
                 enqueue(&mut queue, make("a.log")).await;
                 let entry = queue.next_ready(now()).unwrap();
-                queue
-                    .requeue(QueueEntry {
-                        attempts: 5,
-                        next_attempt_at: Some(deadline),
-                        ..entry
-                    })
-                    .await;
+                assert!(queue.retry(entry.id, 5, deadline).await);
                 assert_eq!(queue.len(), 1);
             }
 
-            let reloaded = FileQueue::<J>::from_snapshot(DEFAULT_CAPACITY, open::<J>(&path).await);
+            let reloaded = FileQueue::<J>::from_snapshot(
+                DEFAULT_CAPACITY,
+                open::<J>(&path).await,
+                Persistence::BestEffort,
+            );
             assert!(reloaded.next_ready(now()).is_none());
             let entry = reloaded.next_ready(deadline).unwrap();
             assert_eq!(entry.attempts, 5);
@@ -450,14 +585,7 @@ pub mod cases {
 
             enqueue(&mut queue, make("a.log")).await;
             enqueue(&mut queue, make("b.log")).await;
-            queue
-                .requeue(QueueEntry {
-                    id: Uuid::new_v4(),
-                    job: make("waiting"),
-                    attempts: 1,
-                    next_attempt_at: Some(now() + TimeDelta::hours(1)),
-                })
-                .await;
+            enqueue_waiting(&mut queue, make("waiting"), 1, now() + TimeDelta::hours(1)).await;
 
             assert_eq!(queue.count_ready(now()), 2);
             assert_eq!(queue.len(), 3);
@@ -475,14 +603,7 @@ pub mod cases {
             let inside = horizon - TimeDelta::seconds(1);
             let beyond = horizon + TimeDelta::seconds(1);
             for (name, deadline) in [("a.log", inside), ("b.log", horizon), ("c.log", beyond)] {
-                queue
-                    .requeue(QueueEntry {
-                        id: Uuid::new_v4(),
-                        job: make(name),
-                        attempts: 1,
-                        next_attempt_at: Some(deadline),
-                    })
-                    .await;
+                enqueue_waiting(&mut queue, make(name), 1, deadline).await;
             }
 
             queue.reset_invalid_deadlines(horizon).await;
@@ -490,7 +611,7 @@ pub mod cases {
             let mut drained = Vec::new();
             while let Some(entry) = queue.next_ready(beyond) {
                 drained.push((entry.job, entry.next_attempt_at));
-                queue.remove(entry.id).await;
+                queue.ack(entry.id).await;
             }
             assert_eq!(
                 drained,
@@ -518,20 +639,20 @@ pub mod cases {
             let beyond = horizon + TimeDelta::seconds(1);
 
             {
-                let mut queue =
-                    FileQueue::<J>::from_snapshot(DEFAULT_CAPACITY, open::<J>(&path).await);
-                queue
-                    .requeue(QueueEntry {
-                        id: Uuid::new_v4(),
-                        job: make("a.log"),
-                        attempts: 1,
-                        next_attempt_at: Some(beyond),
-                    })
-                    .await;
+                let mut queue = FileQueue::<J>::from_snapshot(
+                    DEFAULT_CAPACITY,
+                    open::<J>(&path).await,
+                    Persistence::BestEffort,
+                );
+                enqueue_waiting(&mut queue, make("a.log"), 1, beyond).await;
                 queue.reset_invalid_deadlines(horizon).await;
             }
 
-            let reloaded = FileQueue::<J>::from_snapshot(DEFAULT_CAPACITY, open::<J>(&path).await);
+            let reloaded = FileQueue::<J>::from_snapshot(
+                DEFAULT_CAPACITY,
+                open::<J>(&path).await,
+                Persistence::BestEffort,
+            );
             let entry = reloaded.next_ready(horizon).unwrap();
             assert_eq!(entry.next_attempt_at, Some(horizon));
         }
@@ -549,14 +670,7 @@ pub mod cases {
             let t1 = now() + TimeDelta::hours(1);
             let t2 = now() + TimeDelta::hours(2);
             for (name, deadline) in [("a.log", t2), ("b.log", t1)] {
-                queue
-                    .requeue(QueueEntry {
-                        id: Uuid::new_v4(),
-                        job: make(name),
-                        attempts: 1,
-                        next_attempt_at: Some(deadline),
-                    })
-                    .await;
+                enqueue_waiting(&mut queue, make(name), 1, deadline).await;
             }
             assert_eq!(queue.earliest_next_attempt(), Some(t1));
 
@@ -569,6 +683,58 @@ pub mod cases {
         }
     }
 
+    // ------------------------------- next_attempt -------------------------------- //
+
+    pub mod next_attempt {
+        use super::*;
+
+        fn horizon() -> DateTime<Utc> {
+            now() + TimeDelta::hours(1)
+        }
+
+        pub async fn is_empty_when_empty<J: QueueJob>(_make: fn(&str) -> J) {
+            let mut queue = FileQueue::<J>::new(DEFAULT_CAPACITY);
+
+            let next = queue.next_attempt(now(), horizon()).await;
+
+            assert_eq!(next, NextAttempt::Empty);
+        }
+
+        pub async fn returns_the_ready_entry<J: QueueJob>(make: fn(&str) -> J) {
+            let mut queue = FileQueue::<J>::new(DEFAULT_CAPACITY);
+            enqueue_waiting(&mut queue, make("a.log"), 1, now() + TimeDelta::minutes(5)).await;
+            enqueue(&mut queue, make("b.log")).await;
+
+            let NextAttempt::Ready(entry) = queue.next_attempt(now(), horizon()).await else {
+                panic!("expected a ready entry");
+            };
+
+            assert_eq!(entry.job, make("b.log"));
+        }
+
+        pub async fn waits_for_the_earliest_deadline<J: QueueJob>(make: fn(&str) -> J) {
+            let mut queue = FileQueue::<J>::new(DEFAULT_CAPACITY);
+            for (name, minutes) in [("a.log", 20), ("b.log", 5)] {
+                let deadline = now() + TimeDelta::minutes(minutes);
+                enqueue_waiting(&mut queue, make(name), 1, deadline).await;
+            }
+
+            let next = queue.next_attempt(now(), horizon()).await;
+
+            assert_eq!(next, NextAttempt::Backoff(Duration::from_secs(5 * 60)));
+        }
+
+        pub async fn pulls_in_a_deadline_past_the_horizon<J: QueueJob>(make: fn(&str) -> J) {
+            let mut queue = FileQueue::<J>::new(DEFAULT_CAPACITY);
+            enqueue_waiting(&mut queue, make("a.log"), 1, now() + TimeDelta::days(2)).await;
+
+            let next = queue.next_attempt(now(), horizon()).await;
+
+            assert_eq!(next, NextAttempt::Backoff(Duration::from_secs(3600)));
+            assert_eq!(queue.earliest_next_attempt(), Some(horizon()));
+        }
+    }
+
     // -------------------------------- durability --------------------------------- //
 
     /// What the snapshot must still hold while a worker is mid-job.
@@ -577,7 +743,7 @@ pub mod cases {
 
         /// A persist landing between an entry's selection and its resolution
         /// must not write the selected entry out of the snapshot. Stronger than
-        /// [`super::next_ready::leaves_the_entry_on_disk_until_removed`], which
+        /// [`super::next_ready::leaves_the_entry_on_disk_until_acked`], which
         /// only pins that selection itself does not write: here an unrelated
         /// mutation does the writing while the entry is in flight.
         ///
@@ -592,7 +758,11 @@ pub mod cases {
             make: fn(&str) -> J,
         ) {
             let (_dir, path) = temp_path(tmp);
-            let mut queue = FileQueue::<J>::from_snapshot(DEFAULT_CAPACITY, open::<J>(&path).await);
+            let mut queue = FileQueue::<J>::from_snapshot(
+                DEFAULT_CAPACITY,
+                open::<J>(&path).await,
+                Persistence::BestEffort,
+            );
             enqueue(&mut queue, make("a.log")).await;
             enqueue(&mut queue, make("b.log")).await;
 
@@ -610,7 +780,7 @@ pub mod cases {
             );
 
             // `a` leaves disk only when the worker resolves it.
-            queue.remove(in_flight.id).await.unwrap();
+            queue.ack(in_flight.id).await.unwrap();
             assert_eq!(on_disk::<J>(&path).await, jobs(make, &["b.log", "c.log"]));
         }
     }
@@ -685,21 +855,42 @@ macro_rules! queue_suite {
                     full_queue_rejects_with_queue_full_err,
                 ],
             },
+            durable {
+                disk: [persists_under_the_returned_id, persist_failure_rolls_back],
+                mem: [],
+            },
+            iter {
+                disk: [],
+                mem: [yields_entries_in_queue_order_without_mutating],
+            },
             next_ready {
-                disk: [leaves_the_entry_on_disk_until_removed],
+                disk: [leaves_the_entry_on_disk_until_acked],
                 mem: [skips_waiting_entries, is_none_when_empty],
             },
-            remove {
-                disk: [],
+            ack {
+                disk: [persist_failure_still_acks],
                 mem: [unknown_id_is_ignored, one_duplicate_leaves_the_other],
             },
-            requeue {
+            retry {
                 disk: [order_survives_a_reload, attempts_and_deadline_survive_a_reload],
-                mem: [rotates_to_the_tail, at_capacity_admits_a_new_entry],
+                mem: [
+                    rotates_to_the_tail,
+                    is_not_capacity_gated,
+                    unknown_id_is_ignored,
+                ],
             },
             count_ready {
                 disk: [],
                 mem: [counts_only_ready_entries],
+            },
+            next_attempt {
+                disk: [],
+                mem: [
+                    is_empty_when_empty,
+                    returns_the_ready_entry,
+                    waits_for_the_earliest_deadline,
+                    pulls_in_a_deadline_past_the_horizon,
+                ],
             },
             reset_invalid_deadlines {
                 disk: [persists],

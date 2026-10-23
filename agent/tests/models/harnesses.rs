@@ -210,3 +210,155 @@ macro_rules! serde_tests {
 }
 
 pub(crate) use serde_tests;
+
+// ─── status enums ────────────────────────────────────────────────────────────
+
+/// One row of a status enum's table: a variant, its wire string, and its twins.
+pub struct StatusCase<T: StatusEnumFixture> {
+    pub variant: T,
+    pub wire: &'static str,
+    pub backend: T::Backend,
+    pub agent: T::Agent,
+}
+
+/// Implement for each `impl_status_enum!` enum to get a standard test suite via
+/// `status_enum_tests!`.
+///
+/// The table is written out by hand rather than taken from the enum's mapping,
+/// so a slip in that mapping fails here.
+pub trait StatusEnumFixture: Serialize + DeserializeOwned + PartialEq + Debug + Sized {
+    /// The `backend_api` twin, or `()` if there is none.
+    type Backend;
+    /// The `device_api` twin, or `()` if there is none.
+    type Agent;
+
+    /// One case per variant, in declaration order.
+    fn cases() -> Vec<StatusCase<Self>>;
+}
+
+/// The cases list exactly `variants`, in the same order.
+pub fn assert_covers_every_variant<T: StatusEnumFixture>(variants: Vec<T>) {
+    let tested: Vec<T> = T::cases().into_iter().map(|c| c.variant).collect();
+    assert_eq!(tested, variants);
+}
+
+/// Each variant serializes to its wire string, parses back from it, and
+/// `as_str` returns it.
+pub fn assert_wire_strings<T: StatusEnumFixture>(as_str: fn(&T) -> &'static str) {
+    for case in T::cases() {
+        let wire = serde_json::json!(case.wire);
+        assert_eq!(serde_json::to_value(&case.variant).unwrap(), wire);
+        let parsed: T = serde_json::from_value(wire).unwrap();
+        assert_eq!(parsed, case.variant);
+        assert_eq!(as_str(&case.variant), case.wire);
+    }
+}
+
+/// Each variant converts to its backend twin and back.
+pub fn assert_backend_conversions<T>()
+where
+    T: StatusEnumFixture,
+    T::Backend: PartialEq + Debug,
+    for<'a> T: From<&'a T::Backend>,
+    for<'a> T::Backend: From<&'a T>,
+{
+    for case in T::cases() {
+        assert_eq!(T::from(&case.backend), case.variant);
+        assert_eq!(T::Backend::from(&case.variant), case.backend);
+    }
+}
+
+/// Each backend twin serializes to the variant's wire string.
+pub fn assert_backend_wire_strings<T>()
+where
+    T: StatusEnumFixture,
+    T::Backend: Serialize,
+{
+    for case in T::cases() {
+        let backend = serde_json::to_value(&case.backend).unwrap();
+        assert_eq!(backend, serde_json::json!(case.wire), "{:?}", case.variant);
+    }
+}
+
+/// Each variant converts to its agent-server twin. The agent only sends these,
+/// so there is no reverse conversion.
+pub fn assert_agent_conversions<T>()
+where
+    T: StatusEnumFixture,
+    T::Agent: PartialEq + Debug,
+    for<'a> T::Agent: From<&'a T>,
+{
+    for case in T::cases() {
+        assert_eq!(T::Agent::from(&case.variant), case.agent);
+    }
+}
+
+/// Each agent-server twin serializes to the variant's wire string.
+pub fn assert_agent_wire_strings<T>()
+where
+    T: StatusEnumFixture,
+    T::Agent: Serialize,
+{
+    for case in T::cases() {
+        let agent = serde_json::to_value(&case.agent).unwrap();
+        assert_eq!(agent, serde_json::json!(case.wire), "{:?}", case.variant);
+    }
+}
+
+/// Generates the standard tests for a status enum that implements
+/// `StatusEnumFixture`. List the twins the enum has after its name.
+///
+/// Usage:
+/// ```ignore
+/// status_enum_tests!(DplTarget, backend, agent);
+/// status_enum_tests!(DeviceStatus, agent);
+/// status_enum_tests!(LogLevel);
+/// ```
+macro_rules! status_enum_tests {
+    ($type:ident $(, $twin:ident)* $(,)?) => {
+        pastey::paste! {
+            mod [<$type:snake _harness>] {
+                use super::*;
+                use crate::models::harnesses::*;
+
+                #[test]
+                fn covers_every_variant() {
+                    assert_covers_every_variant::<$type>($type::variants());
+                }
+
+                #[test]
+                fn wire_strings() {
+                    assert_wire_strings::<$type>($type::as_str);
+                }
+
+                $( status_enum_tests!(@$twin $type); )*
+            }
+        }
+    };
+
+    (@backend $type:ident) => {
+        #[test]
+        fn backend_conversions() {
+            assert_backend_conversions::<$type>();
+        }
+
+        #[test]
+        fn backend_wire_strings_match() {
+            assert_backend_wire_strings::<$type>();
+        }
+    };
+
+    (@agent $type:ident) => {
+        #[test]
+        fn agent_conversions() {
+            assert_agent_conversions::<$type>();
+        }
+
+        #[test]
+        fn agent_wire_strings_match() {
+            assert_agent_wire_strings::<$type>();
+        }
+    };
+}
+
+pub(crate) use status_enum_tests;

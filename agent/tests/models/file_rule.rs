@@ -117,7 +117,7 @@ fn backend_upload() -> backend_client::FileRuleUpload {
         bucket_name: "my-bucket".to_string(),
         path: "{device_id}/logs".to_string(),
         timezone: None,
-        bundle: None,
+        bundle: Some(vec!["camera".to_string()]),
     }
 }
 
@@ -174,6 +174,7 @@ fn from_backend() {
             bucket_id: "buck_123".to_string(),
             bucket_name: "my-bucket".to_string(),
             path: "{device_id}/logs".to_string(),
+            bundle: Some(vec!["camera".to_string()]),
         }),
         retention: Some(FileRuleRetention {
             require_upload: Some(true),

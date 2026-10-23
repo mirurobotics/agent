@@ -10,7 +10,7 @@ use crate::mocks::{
 };
 use crate::test_utils::{filesys::dirs as test_dirs, upload::make_job};
 use miru_agent::data_uploads::retention::Job as DeleteJob;
-use miru_agent::data_uploads::upload::errors::ExecutorErr;
+use miru_agent::data_uploads::upload::errors::{EnqueueErr, ExecutorErr};
 use miru_agent::data_uploads::upload::{
     Job, QueueEntry, QueueSnapshot, QueueSnapshotFile, UploadErr, Uploader, UploaderExt,
     UploaderOptions,
@@ -18,6 +18,7 @@ use miru_agent::data_uploads::upload::{
 use miru_agent::errors::Error;
 use miru_agent::filesys::File;
 use miru_agent::models::FileRuleRetention;
+use miru_agent::queue::RetryPolicy;
 
 // external crates
 use chrono::{DateTime, TimeDelta, Utc};
@@ -218,7 +219,10 @@ async fn attempt_cap_drops_job() {
     }
     mock.push_step(MockStep::Ok);
     let options = UploaderOptions {
-        attempts: 3,
+        retry: RetryPolicy {
+            attempts: 3,
+            ..RetryPolicy::default()
+        },
         ..UploaderOptions::default()
     };
     let (uploader, handle, _sleeps) = spawn_with_test_clock(mock.clone(), options);
@@ -275,11 +279,14 @@ async fn retry_backoff_follows_expected_sequence() {
     mock.push_step(MockStep::Ok);
     // pin the backoff so the assertion is independent of production defaults
     let options = UploaderOptions {
-        attempts: 5,
-        backoff: miru_agent::cooldown::Backoff {
-            base_secs: 1,
-            growth_factor: 2,
-            max_secs: 4,
+        retry: RetryPolicy {
+            attempts: 5,
+            backoff: miru_agent::cooldown::Backoff {
+                base_secs: 1,
+                growth_factor: 2,
+                max_secs: 4,
+            },
+            ..RetryPolicy::default()
         },
         ..UploaderOptions::default()
     };
@@ -316,10 +323,13 @@ async fn hung_attempt_times_out_and_is_retried() {
     let options = UploaderOptions {
         attempt_timeout_floor: Duration::from_secs(1),
         attempt_timeout_bytes_per_sec: 64 * 1024,
-        backoff: miru_agent::cooldown::Backoff {
-            base_secs: 1,
-            growth_factor: 2,
-            max_secs: 4,
+        retry: RetryPolicy {
+            backoff: miru_agent::cooldown::Backoff {
+                base_secs: 1,
+                growth_factor: 2,
+                max_secs: 4,
+            },
+            ..RetryPolicy::default()
         },
         ..UploaderOptions::default()
     };
@@ -356,7 +366,10 @@ async fn network_failures_never_drop_job() {
     mock.push_step(MockStep::Ok);
     // a budget the network failures would blow through if they counted
     let options = UploaderOptions {
-        attempts: 3,
+        retry: RetryPolicy {
+            attempts: 3,
+            ..RetryPolicy::default()
+        },
         ..UploaderOptions::default()
     };
     let (uploader, handle, _sleeps) = spawn_with_test_clock(mock.clone(), options);
@@ -381,10 +394,13 @@ async fn network_failure_uses_flat_cooldown() {
     mock.push_step(MockStep::Ok);
     // pin the backoff so the assertion is independent of production defaults
     let options = UploaderOptions {
-        backoff: miru_agent::cooldown::Backoff {
-            base_secs: 1,
-            growth_factor: 2,
-            max_secs: 30,
+        retry: RetryPolicy {
+            backoff: miru_agent::cooldown::Backoff {
+                base_secs: 1,
+                growth_factor: 2,
+                max_secs: 30,
+            },
+            ..RetryPolicy::default()
         },
         ..UploaderOptions::default()
     };
@@ -450,7 +466,10 @@ async fn network_failures_do_not_consume_attempt_budget() {
     }
     mock.push_step(MockStep::Ok);
     let options = UploaderOptions {
-        attempts: 3,
+        retry: RetryPolicy {
+            attempts: 3,
+            ..RetryPolicy::default()
+        },
         ..UploaderOptions::default()
     };
     let (uploader, handle, _sleeps) = spawn_with_test_clock(mock.clone(), options);
@@ -490,6 +509,31 @@ async fn network_failure_past_max_job_age_drops_job() {
     timed(started_rx.recv()).await.unwrap();
 
     // A was dropped on its single network failure, not requeued: B runs next
+    timed(uploader.enqueue(job_b.clone())).await.unwrap();
+    timed(started_rx.recv()).await.unwrap();
+    assert_eq!(timed(uploader.len()).await.unwrap(), 0);
+
+    timed(uploader.shutdown()).await.unwrap();
+    timed(handle).await.unwrap();
+    assert_eq!(mock.recorded_calls(), vec![job_a, job_b]);
+}
+
+#[tokio::test]
+async fn counted_failure_past_max_job_age_drops_job() {
+    let (mock, mut started_rx) = MockUploadExecutor::new();
+    mock.push_step(MockStep::Err);
+    mock.push_step(MockStep::Ok);
+    let (uploader, handle, _sleeps) =
+        spawn_with_test_clock(mock.clone(), UploaderOptions::default());
+    // the age cap applies to every failure, not only network ones
+    let mut job_a = make_job("a.log");
+    job_a.first_observed_at = Utc::now() - TimeDelta::days(8);
+    let job_b = make_job("b.log");
+
+    timed(uploader.enqueue(job_a.clone())).await.unwrap();
+    timed(started_rx.recv()).await.unwrap();
+
+    // A was dropped on its first counted failure, not requeued: B runs next
     timed(uploader.enqueue(job_b.clone())).await.unwrap();
     timed(started_rx.recv()).await.unwrap();
     assert_eq!(timed(uploader.len()).await.unwrap(), 0);
@@ -542,7 +586,7 @@ async fn in_flight_job_holds_its_capacity_slot() {
         .await
         .unwrap_err();
     assert!(
-        matches!(err, UploadErr::QueueFullErr(_)),
+        matches!(err, UploadErr::EnqueueErr(EnqueueErr::QueueFullErr(_))),
         "expected QueueFullErr, got: {err:?}"
     );
 
@@ -787,7 +831,7 @@ mod retention_producer {
         }
     }
 
-    /// Wait until the queue is empty: the job's `queue.remove` — which runs
+    /// Wait until the queue is empty: the job's `queue.ack` — which runs
     /// after the producer's enqueue — has happened.
     async fn await_drained(uploader: &Uploader) {
         timed(async {
@@ -838,10 +882,13 @@ mod retention_producer {
             mock.clone(),
             deleter.clone(),
             UploaderOptions {
-                backoff: miru_agent::cooldown::Backoff {
-                    base_secs: 1,
-                    growth_factor: 2,
-                    max_secs: 4,
+                retry: RetryPolicy {
+                    backoff: miru_agent::cooldown::Backoff {
+                        base_secs: 1,
+                        growth_factor: 2,
+                        max_secs: 4,
+                    },
+                    ..RetryPolicy::default()
                 },
                 ..UploaderOptions::default()
             },
@@ -1236,6 +1283,6 @@ mod durability {
 #[test]
 fn default_options_retry_for_hours() {
     let options = UploaderOptions::default();
-    assert_eq!(options.attempts, 30);
-    assert_eq!(options.backoff.max_secs, 3600);
+    assert_eq!(options.retry.attempts, 30);
+    assert_eq!(options.retry.backoff.max_secs, 3600);
 }

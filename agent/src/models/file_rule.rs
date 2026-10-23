@@ -34,6 +34,8 @@ pub struct FileRuleUpload {
     pub bucket_id: String,
     pub bucket_name: String,
     pub path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bundle: Option<Vec<String>>,
 }
 
 impl From<backend_client::FileRuleUpload> for FileRuleUpload {
@@ -44,6 +46,7 @@ impl From<backend_client::FileRuleUpload> for FileRuleUpload {
             bucket_id: upload.bucket_id,
             bucket_name: upload.bucket_name,
             path: upload.path,
+            bundle: upload.bundle,
         }
     }
 }
