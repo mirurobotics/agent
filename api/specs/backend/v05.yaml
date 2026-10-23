@@ -8,18 +8,16 @@ info:
     url: https://opensource.org/licenses/MIT
   x-release-version: v0.5.7-next
   x-git-commit:
-    sha: be9d8479ce8a4cef653830ffcc840c5deac74748
-    url: https://github.com/mirurobotics/openapi/commit/be9d8479ce8a4cef653830ffcc840c5deac74748
-    message: 'feat(file-rules): upload path timestamp source, time zone and {timezone}
+    sha: 80942a3f17c467e492fc26d74c80c7a9513e72b4
+    url: https://github.com/mirurobotics/openapi/commit/80942a3f17c467e492fc26d74c80c7a9513e72b4
+    message: 'feat(file-rules): always render upload path times from mtime
 
 
-      Add upload.timestamp (upload_time | mtime) and upload.timezone
+      Drop the upload.timestamp option and the create-upload utc_offset field.
 
-      (utc | device) to file rules, a {timezone} upload path variable, and a
+      Time variables now always come from the file''s mtime, which the agent
 
-      utc_offset field on the agent''s create-upload request. Document that
-
-      the agent sends source.mtime with the device''s local UTC offset.
+      sends with the device''s local offset, so utc_offset is no longer needed.
 
 
       Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
@@ -29,7 +27,7 @@ info:
     branch: feat/upload-path-time-zone
     dirty: false
   x-build:
-    built_at: '2026-10-21T21:21:10.962960+00:00'
+    built_at: '2026-10-23T19:24:35.668548+00:00'
 servers:
 - url: https://staging.api.mirurobotics.com/agent/v1
   description: Staging
@@ -592,7 +590,7 @@ components:
     APIGitCommit:
       type: string
       enum:
-      - be9d8479ce8a4cef653830ffcc840c5deac74748
+      - 80942a3f17c467e492fc26d74c80c7a9513e72b4
       x-enum-varnames:
       - API_GIT_COMMIT
       x-stainless-const: true
@@ -1080,27 +1078,6 @@ components:
       example:
         glob: /var/log/robot/*.log
         stability_window_secs: 60
-    FileRuleUploadTimestamp:
-      title: File Rule Upload Timestamp
-      type: string
-      description: 'The instant a file rule renders its upload path''s time variables
-
-        (`{year}`, `{month}`, `{day}`, `{hour}`, `{minute}` and `{timezone}`) from.
-
-        - `upload_time`: when the device requests the upload, read from the server
-        clock.
-
-        - `mtime`: the file''s last-modified time (mtime) on the device, read from
-        the device clock.
-
-        '
-      example: upload_time
-      enum:
-      - upload_time
-      - mtime
-      x-enum-varnames:
-      - FILE_RULE_UPLOAD_TIMESTAMP_UPLOAD_TIME
-      - FILE_RULE_UPLOAD_TIMESTAMP_MTIME
     FileRuleUploadTimezone:
       title: File Rule Upload Timezone
       type: string
@@ -1162,16 +1139,9 @@ components:
             segments. Variables: `{device_id}`, `{device_name}`, `{file_name}`, `{upload_id}`,
             `{bundle_id}`, `{year}`, `{month}`, `{day}`, `{hour}`, `{minute}`, `{timezone}`,
             plus any `source.glob` capture. `{bundle_id}` requires `bundle`. The time
-            variables are zero-padded and rendered from `timestamp` in `timezone`;
-            `{timezone}` is that instant''s UTC offset in ISO 8601 basic format (`+0000`,
-            `-0500`).'
-        timestamp:
-          allOf:
-          - $ref: '#/components/schemas/FileRuleUploadTimestamp'
-          description: 'The instant the time variables in `path` are rendered from:
-            `upload_time` (the server clock when the device requests the upload) or
-            `mtime` (the file''s last-modified time, from the device clock). `upload_time`
-            when absent.'
+            variables are zero-padded and rendered from the file''s mtime (its last-modified
+            time, from the device clock) in `timezone`; `{timezone}` is that instant''s
+            UTC offset in ISO 8601 basic format (`+0000`, `-0500`).'
         timezone:
           allOf:
           - $ref: '#/components/schemas/FileRuleUploadTimezone'
@@ -1646,8 +1616,8 @@ components:
           description: 'The file''s last-modified time (mtime) on the device, i.e.
             roughly when writing finished. In a create-upload request the agent sends
             it with the device''s local UTC offset at that instant (e.g. `2021-01-01T00:00:00-05:00`),
-            which a rule with `upload.timestamp: mtime` and `upload.timezone: device`
-            renders its path in; older agents send UTC. Responses return it in UTC.'
+            which a rule with `upload.timezone: device` renders its path''s time variables
+            in; older agents send UTC. Responses return it in UTC.'
         first_observed_at:
           type: string
           format: date-time
@@ -1706,15 +1676,6 @@ components:
           type: string
           example: dpl_123
           description: ID of the deployment the device is currently on.
-        utc_offset:
-          type: string
-          pattern: ^[+-][0-9]{2}:[0-9]{2}$
-          example: -05:00
-          description: 'The device''s current UTC offset in its local time zone, as
-            `+HH:MM` or `-HH:MM`. The agent resolves the zone from its `TZ` environment
-            variable or, when `TZ` is unset, the system time zone. A rule with `upload.timestamp:
-            upload_time` and `upload.timezone: device` renders its path in this offset.
-            When omitted, such a rule renders in UTC.'
     UploadDestination:
       title: Upload Destination
       type: object
