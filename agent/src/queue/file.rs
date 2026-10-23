@@ -89,6 +89,11 @@ impl<J: QueueJob> FileQueue<J> {
         entry.job.ready_at() <= now && entry.next_attempt_at.is_none_or(|at| at <= now)
     }
 
+    /// The queued entries, oldest enqueue first. Never mutates or persists.
+    pub fn iter(&self) -> impl Iterator<Item = &QueueEntry<J>> {
+        self.entries.iter()
+    }
+
     pub fn count_ready(&self, now: DateTime<Utc>) -> usize {
         self.entries
             .iter()
