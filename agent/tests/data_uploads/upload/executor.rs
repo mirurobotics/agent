@@ -287,13 +287,12 @@ fn create_request_maps_job_fields() {
         size: 42,
         incomplete: None,
         deployment_id: "dpl_1".to_string(),
-        utc_offset: Some("+00:00".to_string()),
     };
     assert_eq!(new_upl_request(&job, &Utc), expected);
 }
 
 #[test]
-fn new_upl_request_sends_device_local_offsets() {
+fn new_upl_request_sends_mtime_with_device_offset() {
     let file = File::new("/data/a.log");
     let job = Job {
         file,
@@ -313,5 +312,4 @@ fn new_upl_request_sends_device_local_offsets() {
 
     assert_eq!(req.source.mtime, "2026-01-14T20:30:00-05:00");
     assert_eq!(req.source.first_observed_at, "2026-01-15T01:31:00+00:00");
-    assert_eq!(req.utc_offset.as_deref(), Some("-05:00"));
 }

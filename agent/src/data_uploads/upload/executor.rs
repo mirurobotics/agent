@@ -13,7 +13,7 @@ use crate::http::{self, ClientI};
 use backend_api::models::{CreateUploadRequest, UploadSource, UploadWithCredentials};
 
 // external crates
-use chrono::{Local, TimeZone, Utc};
+use chrono::{Local, TimeZone};
 use tracing::info;
 
 /// The seam between the upload actor and the transfer mechanics.
@@ -117,8 +117,8 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> UploadExecutor for LiveE
 
 /// Builds the create-upload request. `tz` is the device's time zone (`Local` in
 /// production, which honors `TZ` and then the system zone): the mtime carries
-/// its offset at that instant and `utc_offset` its current offset, so the
-/// backend can render upload paths in the device's local time.
+/// its offset at that instant, so the backend can render upload paths in the
+/// device's local time.
 pub fn new_upl_request<Tz>(job: &Job, tz: &Tz) -> CreateUploadRequest
 where
     Tz: TimeZone,
@@ -136,7 +136,6 @@ where
         size: i64::try_from(job.size).unwrap_or(i64::MAX),
         incomplete: None,
         deployment_id: job.deployment_id.clone(),
-        utc_offset: Some(Utc::now().with_timezone(tz).format("%:z").to_string()),
     }
 }
 

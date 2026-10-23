@@ -261,7 +261,6 @@ pub mod get_release_fallback {
                 bucket_id: "bkt_1".to_string(),
                 bucket_name: "fleet-logs".to_string(),
                 path: "robots/".to_string(),
-                timestamp: None,
                 timezone: None,
                 bundle: None,
             })),
