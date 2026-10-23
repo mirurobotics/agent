@@ -5,6 +5,7 @@ use std::sync::Arc;
 // internal crates
 use crate::authn::{self, token_mngr::TokenFile, TokenManagerExt};
 use crate::calibrations;
+use crate::clock;
 use crate::cooldown;
 use crate::data_uploads::{
     retention::{self, DeleterExt},
@@ -37,6 +38,10 @@ pub struct AppState {
     pub token_mngr: Arc<authn::TokenManager>,
     pub event_hub: events::EventHub,
     pub calibration_uploader: Arc<calibrations::Uploader>,
+    /// How long the agent has run, across restarts. Clone it for any part
+    /// of the agent that needs it.
+    pub uptime: clock::Uptime,
+    uptime_saver: clock::UptimeSaverHandle,
 }
 
 impl AppState {
@@ -55,6 +60,10 @@ impl AppState {
         // initialize storage
         let (stor, storage_handle) = disk::Storage::init(layout, capacities, device_id).await?;
         let storage = Arc::new(stor);
+
+        // load the uptime and start saving it
+        let (uptime, uptime_saver, uptime_saver_handle) =
+            init_uptime(layout, http_client.clock().clone()).await;
 
         // initialize the token manager
         let (token_mngr, token_mngr_handle) =
@@ -93,6 +102,7 @@ impl AppState {
                 deleter_handle,
                 uploader_handle,
                 calibration_uploader_handle,
+                uptime_saver_handle,
             ];
             futures::future::join(futures::future::join_all(handles), storage_handle).await;
         };
@@ -108,6 +118,8 @@ impl AppState {
                 token_mngr,
                 event_hub,
                 calibration_uploader,
+                uptime,
+                uptime_saver,
             },
             shutdown_handle,
         ))
@@ -350,11 +362,41 @@ impl AppState {
             first_err.get_or_insert(e.into());
         }
 
+        // save the uptime last, after everything that reads it has stopped
+        self.uptime_saver.shutdown().await;
+
         match first_err {
             Some(e) => Err(e),
             None => Ok(()),
         }
     }
+}
+
+/// Load the saved uptime and spawn its saver. A file error degrades to
+/// counting uptime from zero on each start (fail-open): deadlines on it run
+/// late, never early.
+async fn init_uptime(
+    layout: &disk::Layout,
+    clock: clock::Clock,
+) -> (
+    clock::Uptime,
+    clock::UptimeSaverHandle,
+    tokio::task::JoinHandle<()>,
+) {
+    let file = match clock::UptimeFile::new_with_default(layout.uptime(), Default::default()).await
+    {
+        Ok(file) => Some(file),
+        Err(e) => {
+            tracing::error!(
+                "failed to initialize uptime file; uptime will count from zero after each restart: {e}"
+            );
+            None
+        }
+    };
+    let saver = clock::UptimeSaver::new(clock, file);
+    let uptime = saver.uptime();
+    let (handle, join) = saver.spawn();
+    (uptime, handle, join)
 }
 
 /// The files the token manager signs and stores tokens with.

@@ -18,10 +18,12 @@
 //!
 //! [`Uptime`] adds a fourth: **how long has the agent run, across restarts?**
 //! It is monotonic time summed over every run and saved to disk, for deadlines
-//! that must survive a restart without trusting any calendar date.
+//! that must survive a restart without trusting any calendar date. `AppState`
+//! loads it once and hands a clone to each part of the agent that needs it;
+//! one [`UptimeSaver`] task writes it to disk.
 
 pub mod shared;
 pub mod uptime;
 
 pub use self::shared::{Clock, SYNC_TOLERANCE};
-pub use self::uptime::{Uptime, UptimeFile, UptimeState};
+pub use self::uptime::{Uptime, UptimeFile, UptimeSaver, UptimeSaverHandle, UptimeState};
