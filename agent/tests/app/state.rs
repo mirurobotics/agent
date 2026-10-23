@@ -290,6 +290,40 @@ pub mod init {
         // nothing replaced the blocking directory with a snapshot file
         assert!(env.layout.delete_queue().path().is_dir());
     }
+
+    #[tokio::test]
+    async fn calibration_uploader_spawned() {
+        let env = TestEnv::valid().await;
+
+        let (state, state_handle) = env.init().await.unwrap();
+
+        // the actor is spawned and its queue snapshot file is seeded on disk
+        state.calibration_uploader.len().await.unwrap();
+        assert!(env.layout.calibrations().queue().exists());
+
+        state.shutdown().await.unwrap();
+        state_handle.await;
+    }
+
+    #[tokio::test]
+    async fn calibration_uploader_degrades_when_queue_path_unwritable() {
+        let env = TestEnv::valid().await;
+        // a directory at the queue FILE path makes
+        // QueueSnapshotFile::new_with_default fail on both read and create
+        let queue = env.layout.calibrations().queue();
+        dirs::create(&Dir::new(queue.path().clone())).await.unwrap();
+
+        let (state, state_handle) = env.init().await.unwrap();
+
+        // fail-open: the agent boots and the uploader runs without persistence
+        state.calibration_uploader.len().await.unwrap();
+
+        state.shutdown().await.unwrap();
+        state_handle.await;
+
+        // nothing replaced the blocking directory with a snapshot file
+        assert!(queue.path().is_dir());
+    }
 }
 
 pub mod shutdown {
@@ -356,6 +390,37 @@ pub mod shutdown {
 
         let err = state.shutdown().await.expect_err("scanner error surfaces");
         assert!(matches!(err, ServerErr::ScanErr(_)));
+        state_handle.await;
+
+        let device = files::read_json::<Device>(&env.layout.device())
+            .await
+            .unwrap();
+        assert_eq!(device.status, DeviceStatus::Offline);
+    }
+
+    #[tokio::test]
+    async fn calibration_uploader_shutdown_error_does_not_abort_teardown() {
+        let env = TestEnv::valid().await;
+        let (state, state_handle) = env.init().await.unwrap();
+
+        // set the device online so the offline assertion below proves teardown
+        // continued through storage after the calibration uploader error
+        state
+            .storage
+            .device
+            .patch(models::device::Updates::connected())
+            .await
+            .unwrap();
+
+        // stop the calibration uploader directly so AppState::shutdown errors
+        // on it (it is torn down first, so its error is the one surfaced)
+        state.calibration_uploader.shutdown().await.unwrap();
+
+        let err = state
+            .shutdown()
+            .await
+            .expect_err("calibration uploader error surfaces");
+        assert!(matches!(err, ServerErr::CalibrationsErr(_)));
         state_handle.await;
 
         let device = files::read_json::<Device>(&env.layout.device())

@@ -60,6 +60,9 @@ pub(crate) type NextAttempt = queue::NextAttempt<ReportMetadata>;
 pub struct UploaderImpl<S, N> {
     sender: Arc<S>,
     queue: Queue,
+    /// Whether the queue is saved to a file, so it names every report file
+    /// that is still queued.
+    persisted: bool,
     reports: Dir,
     options: UploaderOptions,
     now_fn: N,
@@ -79,6 +82,7 @@ where
         options: UploaderOptions,
         now_fn: N,
     ) -> Self {
+        let persisted = snapshot_file.is_some();
         let queue = match snapshot_file {
             Some(file) => Queue::from_snapshot(options.capacity, file, Persistence::Durable),
             None => Queue::new(options.capacity),
@@ -86,6 +90,7 @@ where
         Self {
             sender,
             queue,
+            persisted,
             reports,
             options,
             now_fn,
@@ -94,8 +99,12 @@ where
 
     /// Delete report files with no queue entry, left behind by a crash
     /// between dequeuing a report and deleting its file. Failures are logged
-    /// and retried on the next boot.
+    /// and retried on the next boot. An in-memory queue prunes nothing: the
+    /// queue file it couldn't open may still name these files.
     pub(crate) async fn prune_orphans(&self) {
+        if !self.persisted {
+            return;
+        }
         if !self.reports.exists() {
             return;
         }
@@ -475,6 +484,17 @@ mod tests {
     }
 
     // ============================ PRUNE ORPHANS ============================= //
+    #[tokio::test]
+    async fn an_in_memory_queue_prunes_no_report_files() {
+        let f = Fixture::new();
+        let ids = preloaded(&f, &["a"]).await;
+        let u = f.uploader_on(None, UploaderOptions::default());
+
+        u.prune_orphans().await;
+
+        assert!(f.report_file(ids[0]).exists());
+    }
+
     #[tokio::test]
     async fn a_missing_reports_directory_is_not_created() {
         let f = Fixture::new();
