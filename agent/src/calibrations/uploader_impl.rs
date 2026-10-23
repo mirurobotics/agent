@@ -416,9 +416,13 @@ mod tests {
         for slug in slugs {
             let report = report(slug);
             let id = queue.enqueue(report.metadata).await.unwrap();
-            files::write_string(&f.report_file(id), &report.data, WriteOptions::OVERWRITE_ATOMIC)
-                .await
-                .unwrap();
+            files::write_string(
+                &f.report_file(id),
+                &report.data,
+                WriteOptions::OVERWRITE_ATOMIC,
+            )
+            .await
+            .unwrap();
             ids.push(id);
         }
         ids
