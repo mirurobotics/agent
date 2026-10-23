@@ -307,3 +307,593 @@ fn invalid(reason: &str) -> CalibrationsErr {
         trace: trace!(),
     })
 }
+
+#[cfg(test)]
+mod tests {
+    // standard crates
+    use std::sync::{Arc, Mutex};
+
+    // internal crates
+    use super::{NextAttempt, UploaderImpl, UploaderOptions};
+    use crate::test_utils::calibration_sender::{MockCalibrationSender, Step};
+    use crate::test_utils::calibrations::{layout, received_at, report};
+    use crate::test_utils::filesys::dirs as test_dirs;
+    use miru_agent::calibrations::{CalibrationsErr, Queue, QueueSnapshotFile};
+    use miru_agent::disk::layout::CalibrationsLayout;
+    use miru_agent::errors::{Code, Error, HTTPCode};
+    use miru_agent::filesys::{dirs, files, File, PathExt, WriteOptions};
+    use miru_agent::queue::{Persistence, RetryPolicy};
+
+    // external crates
+    use chrono::{DateTime, TimeDelta, Utc};
+    use serde_json::json;
+    use uuid::Uuid;
+
+    type Clock = Box<dyn Fn() -> DateTime<Utc> + Send + Sync>;
+    type TestUploader = UploaderImpl<MockCalibrationSender, Clock>;
+
+    struct Fixture {
+        _dir: test_dirs::TempDir,
+        layout: CalibrationsLayout,
+        sender: Arc<MockCalibrationSender>,
+        /// The uploader's clock. It starts when the fixture reports were
+        /// received and moves only when a test advances it.
+        clock: Arc<Mutex<DateTime<Utc>>>,
+    }
+
+    impl Fixture {
+        fn new() -> Self {
+            let dir = test_dirs::temp("calibration_uploader_impl_test").unwrap();
+            let layout = layout(&dir);
+            let (sender, _) = MockCalibrationSender::new();
+            Self {
+                _dir: dir,
+                layout,
+                sender,
+                clock: Arc::new(Mutex::new(received_at())),
+            }
+        }
+
+        async fn snapshot_file(&self) -> QueueSnapshotFile {
+            QueueSnapshotFile::new_with_default(self.layout.queue(), Default::default())
+                .await
+                .unwrap()
+        }
+
+        /// The number of reports in the queue file, as the next boot would load it.
+        async fn queued_on_disk(&self) -> usize {
+            Queue::from_snapshot(1000, self.snapshot_file().await, Persistence::Durable).len()
+        }
+
+        async fn uploader(&self) -> TestUploader {
+            self.uploader_with(UploaderOptions::default()).await
+        }
+
+        async fn uploader_with(&self, options: UploaderOptions) -> TestUploader {
+            let snapshot_file = Some(self.snapshot_file().await);
+            self.uploader_on(snapshot_file, options)
+        }
+
+        fn uploader_on(
+            &self,
+            snapshot_file: Option<QueueSnapshotFile>,
+            options: UploaderOptions,
+        ) -> TestUploader {
+            let clock = self.clock.clone();
+            let now_fn: Clock = Box::new(move || *clock.lock().unwrap());
+            UploaderImpl::new(
+                self.sender.clone(),
+                snapshot_file,
+                self.layout.reports(),
+                options,
+                now_fn,
+            )
+        }
+
+        /// Move the uploader's clock forward by `by`.
+        fn advance(&self, by: TimeDelta) {
+            *self.clock.lock().unwrap() += by;
+        }
+
+        fn advance_secs(&self, secs: u64) {
+            self.advance(TimeDelta::seconds(secs as i64));
+        }
+
+        fn report_file(&self, id: Uuid) -> File {
+            self.layout.reports().file(&id.to_string())
+        }
+
+        fn sent(&self) -> Vec<String> {
+            self.sender.sent()
+        }
+    }
+
+    /// Queue a report per slug at `f`'s layout, oldest first, as a previous
+    /// run would have left them: metadata in `queue.json`, data in `reports/`.
+    async fn preloaded(f: &Fixture, slugs: &[&str]) -> Vec<Uuid> {
+        let mut queue = Queue::from_snapshot(1000, f.snapshot_file().await, Persistence::Durable);
+        let mut ids = Vec::with_capacity(slugs.len());
+        for slug in slugs {
+            let report = report(slug);
+            let id = queue.enqueue(report.metadata).await.unwrap();
+            files::write_string(&f.report_file(id), &report.data, WriteOptions::OVERWRITE_ATOMIC)
+                .await
+                .unwrap();
+            ids.push(id);
+        }
+        ids
+    }
+
+    /// Attempt the report due now and settle it.
+    async fn attempt_due(u: &mut TestUploader) {
+        let NextAttempt::Ready(entry) = u.next_attempt().await else {
+            panic!("no report is due");
+        };
+        let result = u.attempt(&entry).await;
+        u.finish_attempt(entry, result).await;
+    }
+
+    /// How long until the earliest report is due, in seconds.
+    async fn backoff_secs(u: &mut TestUploader) -> u64 {
+        let NextAttempt::Backoff(wait) = u.next_attempt().await else {
+            panic!("expected every report to be backing off");
+        };
+        wait.as_secs()
+    }
+
+    async fn is_empty(u: &mut TestUploader) -> bool {
+        matches!(u.next_attempt().await, NextAttempt::Empty)
+    }
+
+    fn strings(names: &[&str]) -> Vec<String> {
+        names.iter().map(|name| name.to_string()).collect()
+    }
+
+    // ================================ OPTIONS ================================ //
+    #[test]
+    fn default_options_are_1000_reports_of_1_mib() {
+        let options = UploaderOptions::default();
+        assert_eq!(options.capacity, 1000);
+        assert_eq!(options.max_report_bytes, 1024 * 1024);
+    }
+
+    // ================================ ENQUEUE ================================ //
+    #[tokio::test]
+    async fn stores_metadata_in_the_queue_and_data_in_a_report_file() {
+        let f = Fixture::new();
+        let mut u = f.uploader().await;
+
+        let id = u.enqueue(report("a")).await.unwrap();
+
+        let snapshot: serde_json::Value = files::read_json(&f.layout.queue()).await.unwrap();
+        assert_eq!(snapshot["entries"][0]["id"], json!(id.to_string()));
+        assert_eq!(snapshot["entries"][0]["job"]["component"], json!("a"));
+        assert_eq!(snapshot["entries"][0]["job"]["format"], json!("json"));
+        let data = files::read_string(&f.report_file(id)).await.unwrap();
+        assert_eq!(data, report("a").data);
+    }
+
+    #[tokio::test]
+    async fn a_full_queue_is_507_and_keeps_what_it_holds() {
+        let f = Fixture::new();
+        let options = UploaderOptions {
+            capacity: 1,
+            ..UploaderOptions::default()
+        };
+        let mut u = f.uploader_with(options).await;
+        u.enqueue(report("a")).await.unwrap();
+
+        let err = u.enqueue(report("b")).await.unwrap_err();
+
+        assert!(matches!(err, CalibrationsErr::QueueFullErr(_)), "{err:?}");
+        assert_eq!(err.code().as_str(), "calibration_buffer_full");
+        assert_eq!(err.http_status(), HTTPCode::INSUFFICIENT_STORAGE);
+        assert_eq!(err.params(), Some(json!({ "max_reports": 1 })));
+        assert_eq!(u.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn an_oversized_report_is_413_and_writes_nothing() {
+        let f = Fixture::new();
+        let options = UploaderOptions {
+            max_report_bytes: 100,
+            ..UploaderOptions::default()
+        };
+        let mut u = f.uploader_with(options).await;
+        let mut big = report("arm");
+        big.data = "x".repeat(200);
+
+        let err = u.enqueue(big).await.unwrap_err();
+
+        assert!(matches!(err, CalibrationsErr::TooLargeErr(_)), "{err:?}");
+        assert!(matches!(err.code(), Code::CalibrationTooLarge));
+        assert_eq!(err.code().as_str(), "calibration_too_large");
+        assert_eq!(err.http_status(), HTTPCode::PAYLOAD_TOO_LARGE);
+        assert_eq!(err.params(), Some(json!({ "max_bytes": 100 })));
+        assert_eq!(u.len(), 0);
+        assert!(!f.layout.reports().exists());
+    }
+
+    #[tokio::test]
+    async fn a_report_file_write_failure_queues_nothing() {
+        let f = Fixture::new();
+        // a regular file where the reports directory should be
+        let blocker = File::new(f.layout.reports().path().clone());
+        files::write_string(&blocker, "x", WriteOptions::OVERWRITE_ATOMIC)
+            .await
+            .unwrap();
+        let mut u = f.uploader().await;
+
+        let err = u.enqueue(report("a")).await.unwrap_err();
+
+        assert!(matches!(err, CalibrationsErr::FileSysErr(_)), "{err:?}");
+        assert!(matches!(err.code(), Code::InternalServerError), "{err}");
+        assert_eq!(u.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn a_queue_write_failure_queues_nothing() {
+        let f = Fixture::new();
+        let mut u = f.uploader().await;
+        // a non-empty directory where the queue file should be can't be replaced
+        files::delete(&f.layout.queue()).await.unwrap();
+        let blocker = f.layout.root.subdir("queue.json");
+        files::write_string(&blocker.file("x"), "x", WriteOptions::OVERWRITE_ATOMIC)
+            .await
+            .unwrap();
+
+        let err = u.enqueue(report("a")).await.unwrap_err();
+
+        assert!(matches!(err, CalibrationsErr::FileSysErr(_)), "{err:?}");
+        assert_eq!(u.len(), 0);
+        assert!(!f.layout.reports().exists());
+    }
+
+    #[tokio::test]
+    async fn without_a_queue_file_the_queue_lives_in_memory() {
+        let f = Fixture::new();
+        let mut u = f.uploader_on(None, UploaderOptions::default());
+
+        u.enqueue(report("a")).await.unwrap();
+        attempt_due(&mut u).await;
+
+        assert_eq!(f.sent(), strings(&["a"]));
+        assert_eq!(u.len(), 0);
+        assert!(!f.layout.queue().exists());
+    }
+
+    // ============================= PRUNE ORPHANS ============================= //
+    #[tokio::test]
+    async fn report_files_with_no_queue_entry_are_pruned() {
+        let f = Fixture::new();
+        let ids = preloaded(&f, &["a"]).await;
+        let stray = f.report_file(Uuid::new_v4());
+        let other = f.layout.reports().file("notes.txt");
+        for file in [&stray, &other] {
+            files::write_string(file, "{}", WriteOptions::OVERWRITE_ATOMIC)
+                .await
+                .unwrap();
+        }
+        let u = f.uploader().await;
+
+        u.prune_orphans().await;
+
+        let left = dirs::files(&f.layout.reports()).await.unwrap();
+        assert_eq!(left, vec![f.report_file(ids[0])]);
+    }
+
+    /// A file whose name isn't UTF-8 can't be a report file, so it is pruned too.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_file_with_a_non_utf8_name_is_pruned() {
+        use std::os::unix::ffi::OsStrExt;
+
+        let f = Fixture::new();
+        preloaded(&f, &["a"]).await;
+        let name = std::ffi::OsStr::from_bytes(b"\xff");
+        let odd = File::new(f.layout.reports().path().join(name));
+        files::write_string(&odd, "{}", WriteOptions::OVERWRITE_ATOMIC)
+            .await
+            .unwrap();
+        let u = f.uploader().await;
+
+        u.prune_orphans().await;
+
+        assert!(!odd.exists());
+    }
+
+    #[tokio::test]
+    async fn an_unlistable_reports_directory_is_left_alone() {
+        let f = Fixture::new();
+        // a regular file where the reports directory should be
+        let blocker = File::new(f.layout.reports().path().clone());
+        files::write_string(&blocker, "x", WriteOptions::OVERWRITE_ATOMIC)
+            .await
+            .unwrap();
+        let u = f.uploader().await;
+
+        u.prune_orphans().await;
+
+        assert!(blocker.exists());
+    }
+
+    // ================================ ATTEMPTS =============================== //
+    #[tokio::test]
+    async fn a_sent_report_is_dequeued_and_its_file_deleted() {
+        let f = Fixture::new();
+        let mut u = f.uploader().await;
+        let id = u.enqueue(report("a")).await.unwrap();
+
+        attempt_due(&mut u).await;
+
+        assert_eq!(f.sent(), strings(&["a"]));
+        assert!(is_empty(&mut u).await);
+        assert!(!f.report_file(id).exists());
+        assert_eq!(f.queued_on_disk().await, 0);
+    }
+
+    /// A report file that can't be deleted is left for `prune_orphans` on the
+    /// next boot; the report itself is still dequeued.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_report_file_that_cannot_be_deleted_still_dequeues_the_report() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let f = Fixture::new();
+        preloaded(&f, &["a"]).await;
+        let reports = f.layout.reports();
+        let mode = |m| std::fs::set_permissions(reports.path(), std::fs::Permissions::from_mode(m));
+        mode(0o555).unwrap();
+        let mut u = f.uploader().await;
+
+        attempt_due(&mut u).await;
+
+        mode(0o755).unwrap();
+        assert_eq!(f.sent(), strings(&["a"]));
+        assert_eq!(f.queued_on_disk().await, 0);
+    }
+
+    #[tokio::test]
+    async fn retryable_errors_back_off_within_bounds() {
+        let f = Fixture::new();
+        for _ in 0..11 {
+            f.sender.push(Step::Server);
+        }
+        let mut u = f.uploader().await;
+        u.enqueue(report("a")).await.unwrap();
+
+        for expected in [10, 20, 40, 80, 160, 320, 640, 1280, 2560, 3600, 3600] {
+            attempt_due(&mut u).await;
+            assert_eq!(backoff_secs(&mut u).await, expected);
+            f.advance_secs(expected);
+        }
+        attempt_due(&mut u).await;
+
+        assert_eq!(f.sent(), strings(&["a"; 12]));
+        assert!(is_empty(&mut u).await);
+    }
+
+    #[tokio::test]
+    async fn network_errors_wait_a_flat_base() {
+        let f = Fixture::new();
+        for _ in 0..3 {
+            f.sender.push(Step::Network);
+        }
+        let mut u = f.uploader().await;
+        u.enqueue(report("a")).await.unwrap();
+
+        for _ in 0..3 {
+            attempt_due(&mut u).await;
+            assert_eq!(backoff_secs(&mut u).await, 10);
+            f.advance_secs(10);
+        }
+        attempt_due(&mut u).await;
+
+        assert_eq!(f.sent(), strings(&["a"; 4]));
+        assert!(is_empty(&mut u).await);
+    }
+
+    #[tokio::test]
+    async fn each_report_backs_off_on_its_own() {
+        let f = Fixture::new();
+        f.sender.push(Step::Server);
+        f.sender.push(Step::Ok);
+        f.sender.push(Step::Server);
+        preloaded(&f, &["a", "b"]).await;
+        let mut u = f.uploader().await;
+
+        // `a` fails and waits at the tail while `b` is sent
+        attempt_due(&mut u).await;
+        attempt_due(&mut u).await;
+        assert_eq!(backoff_secs(&mut u).await, 10);
+        f.advance_secs(10);
+        attempt_due(&mut u).await;
+        assert_eq!(backoff_secs(&mut u).await, 20);
+        f.advance_secs(20);
+        attempt_due(&mut u).await;
+
+        assert_eq!(f.sent(), strings(&["a", "b", "a", "a"]));
+        assert!(is_empty(&mut u).await);
+    }
+
+    #[tokio::test]
+    async fn a_report_out_of_attempts_is_dropped() {
+        let f = Fixture::new();
+        for _ in 0..3 {
+            f.sender.push(Step::Server);
+        }
+        let options = UploaderOptions {
+            retry: RetryPolicy {
+                attempts: 3,
+                ..RetryPolicy::default()
+            },
+            ..UploaderOptions::default()
+        };
+        let mut u = f.uploader_with(options).await;
+        let id = u.enqueue(report("a")).await.unwrap();
+
+        for expected in [10, 20] {
+            attempt_due(&mut u).await;
+            assert_eq!(backoff_secs(&mut u).await, expected);
+            f.advance_secs(expected);
+        }
+        attempt_due(&mut u).await;
+
+        assert_eq!(f.sent(), strings(&["a"; 3]));
+        assert!(is_empty(&mut u).await);
+        assert!(!f.report_file(id).exists());
+    }
+
+    #[tokio::test]
+    async fn network_errors_do_not_use_up_attempts() {
+        let f = Fixture::new();
+        for _ in 0..3 {
+            f.sender.push(Step::Network);
+        }
+        let options = UploaderOptions {
+            retry: RetryPolicy {
+                attempts: 1,
+                ..RetryPolicy::default()
+            },
+            ..UploaderOptions::default()
+        };
+        let mut u = f.uploader_with(options).await;
+        u.enqueue(report("a")).await.unwrap();
+
+        for _ in 0..3 {
+            attempt_due(&mut u).await;
+            assert_eq!(backoff_secs(&mut u).await, 10);
+            f.advance_secs(10);
+        }
+        attempt_due(&mut u).await;
+
+        assert_eq!(f.sent(), strings(&["a"; 4]));
+        assert!(is_empty(&mut u).await);
+    }
+
+    #[tokio::test]
+    async fn a_report_unsent_past_the_age_backstop_is_dropped() {
+        let f = Fixture::new();
+        f.sender.push(Step::Network);
+        f.advance(TimeDelta::days(7));
+        let mut u = f.uploader().await;
+        let id = u.enqueue(report("a")).await.unwrap();
+
+        attempt_due(&mut u).await;
+
+        assert!(is_empty(&mut u).await);
+        assert!(!f.report_file(id).exists());
+    }
+
+    #[tokio::test]
+    async fn a_failing_report_past_the_age_cap_is_dropped() {
+        let f = Fixture::new();
+        f.sender.push(Step::Server);
+        f.advance(TimeDelta::days(7));
+        let mut u = f.uploader().await;
+        let id = u.enqueue(report("a")).await.unwrap();
+
+        attempt_due(&mut u).await;
+
+        assert!(is_empty(&mut u).await);
+        assert!(!f.report_file(id).exists());
+    }
+
+    #[tokio::test]
+    async fn a_deadline_past_the_longest_backoff_is_pulled_in() {
+        let f = Fixture::new();
+        let ids = preloaded(&f, &["a"]).await;
+        // a deadline a clock jump left far beyond the 1 h cap
+        let mut queue = Queue::from_snapshot(1000, f.snapshot_file().await, Persistence::Durable);
+        let far = received_at() + TimeDelta::days(30);
+        assert!(queue.retry(ids[0], 1, far).await);
+        let mut u = f.uploader().await;
+
+        assert_eq!(backoff_secs(&mut u).await, 3600);
+        f.advance_secs(3600);
+        attempt_due(&mut u).await;
+
+        assert_eq!(f.sent(), strings(&["a"]));
+        assert!(is_empty(&mut u).await);
+    }
+
+    #[tokio::test]
+    async fn terminal_rejection_is_dropped_not_retried() {
+        let f = Fixture::new();
+        f.sender.push(Step::Terminal);
+        let mut u = f.uploader().await;
+        let id = u.enqueue(report("a")).await.unwrap();
+
+        attempt_due(&mut u).await;
+
+        assert_eq!(f.sent(), strings(&["a"]));
+        assert!(is_empty(&mut u).await);
+        assert!(!f.report_file(id).exists());
+    }
+
+    #[tokio::test]
+    async fn an_unreadable_report_is_dropped_without_sending() {
+        let f = Fixture::new();
+        let ids = preloaded(&f, &["a", "b"]).await;
+        files::write_bytes(
+            &f.report_file(ids[0]),
+            &[0xff, 0xfe],
+            WriteOptions::OVERWRITE_ATOMIC,
+        )
+        .await
+        .unwrap();
+        let mut u = f.uploader().await;
+
+        attempt_due(&mut u).await;
+        attempt_due(&mut u).await;
+
+        assert_eq!(f.sent(), strings(&["b"]));
+        assert!(is_empty(&mut u).await);
+        assert!(!f.report_file(ids[0]).exists());
+    }
+
+    #[tokio::test]
+    async fn a_report_whose_file_is_missing_is_dropped() {
+        let f = Fixture::new();
+        let ids = preloaded(&f, &["a", "b"]).await;
+        files::delete(&f.report_file(ids[0])).await.unwrap();
+        let mut u = f.uploader().await;
+
+        attempt_due(&mut u).await;
+        attempt_due(&mut u).await;
+
+        assert_eq!(f.sent(), strings(&["b"]));
+        assert!(is_empty(&mut u).await);
+    }
+
+    #[tokio::test]
+    async fn a_read_error_is_retried() {
+        let f = Fixture::new();
+        let ids = preloaded(&f, &["a"]).await;
+        // a directory where the report file should be cannot be read
+        files::delete(&f.report_file(ids[0])).await.unwrap();
+        let dir = f.layout.reports().subdir(ids[0].to_string());
+        dirs::create(&dir).await.unwrap();
+        let mut u = f.uploader().await;
+
+        attempt_due(&mut u).await;
+
+        assert!(f.sent().is_empty());
+        assert_eq!(u.len(), 1);
+        assert_eq!(backoff_secs(&mut u).await, 10);
+
+        dirs::delete(&dir).await.unwrap();
+        files::write_string(
+            &f.report_file(ids[0]),
+            &report("a").data,
+            WriteOptions::OVERWRITE_ATOMIC,
+        )
+        .await
+        .unwrap();
+        f.advance_secs(10);
+        attempt_due(&mut u).await;
+
+        assert_eq!(f.sent(), strings(&["a"]));
+        assert!(is_empty(&mut u).await);
+    }
+}

@@ -2,7 +2,7 @@
 //! service tests.
 
 // internal crates
-use crate::test_utils::filesys::dirs::TempDir;
+use super::filesys::dirs::TempDir;
 use miru_agent::calibrations::{Report, ReportMetadata};
 use miru_agent::disk::layout::CalibrationsLayout;
 use miru_agent::models::InstanceFormat;
