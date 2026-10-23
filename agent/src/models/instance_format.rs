@@ -1,6 +1,7 @@
 // internal crates
 use crate::models::status::impl_status_enum;
 use backend_api::models as backend_client;
+use device_api::models as agent_server;
 
 // external crates
 use serde::Serialize;
@@ -34,3 +35,18 @@ impl_status_enum!(
         Text => "text" => backend_client::InstanceFormat::INSTANCE_FORMAT_TEXT,
     ]
 );
+
+impl InstanceFormat {
+    /// The format a Device API request names, or `None` for one this agent
+    /// doesn't know: a request with it is rejected, not defaulted to text.
+    pub fn from_device_api(format: agent_server::InstanceFormat) -> Option<Self> {
+        match format {
+            agent_server::InstanceFormat::INSTANCE_FORMAT_JSON => Some(Self::Json),
+            agent_server::InstanceFormat::INSTANCE_FORMAT_YAML => Some(Self::Yaml),
+            agent_server::InstanceFormat::INSTANCE_FORMAT_JSONC => Some(Self::Jsonc),
+            agent_server::InstanceFormat::INSTANCE_FORMAT_XML => Some(Self::Xml),
+            agent_server::InstanceFormat::INSTANCE_FORMAT_TEXT => Some(Self::Text),
+            agent_server::InstanceFormat::InstanceFormatUnknown => None,
+        }
+    }
+}

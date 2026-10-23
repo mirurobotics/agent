@@ -201,7 +201,7 @@ fn to_create_params(
 ) -> Result<calibration_svc::CreateParams, ServerErr> {
     let Json(request) = request.map_err(reject_body)?;
     let content = *request.content;
-    let Some(format) = to_instance_format(content.format) else {
+    let Some(format) = InstanceFormat::from_device_api(content.format) else {
         return Err(ServerErr::InvalidRequestErr(InvalidRequestErr {
             msg: "content.format is not a known format".to_string(),
             trace: trace!(),
@@ -229,18 +229,6 @@ fn reject_body(rejection: JsonRejection) -> ServerErr {
         msg: rejection.body_text(),
         trace: trace!(),
     })
-}
-
-/// `None` for a format this agent doesn't know.
-fn to_instance_format(format: device_server::InstanceFormat) -> Option<InstanceFormat> {
-    match format {
-        device_server::InstanceFormat::INSTANCE_FORMAT_JSON => Some(InstanceFormat::Json),
-        device_server::InstanceFormat::INSTANCE_FORMAT_YAML => Some(InstanceFormat::Yaml),
-        device_server::InstanceFormat::INSTANCE_FORMAT_JSONC => Some(InstanceFormat::Jsonc),
-        device_server::InstanceFormat::INSTANCE_FORMAT_XML => Some(InstanceFormat::Xml),
-        device_server::InstanceFormat::INSTANCE_FORMAT_TEXT => Some(InstanceFormat::Text),
-        device_server::InstanceFormat::InstanceFormatUnknown => None,
-    }
 }
 
 // ================================ UTILITIES ====================================== //
