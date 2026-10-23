@@ -1,7 +1,5 @@
-// standard crates
-use std::collections::HashSet;
-
 // internal crates
+use device_api::models as agent_server;
 use miru_agent::models::device::Updates;
 use miru_agent::models::Patch;
 use miru_agent::models::{Device, DeviceStatus};
@@ -11,7 +9,10 @@ use chrono::{DateTime, Duration, Utc};
 use serde_json::json;
 
 // harness
-use crate::models::harnesses::{serde_tests, ModelFixture, OptionalField, RequiredField};
+use crate::models::harnesses::{
+    serde_tests, status_enum_tests, ModelFixture, OptionalField, RequiredField, StatusCase,
+    StatusEnumFixture,
+};
 
 // ─── fixture ─────────────────────────────────────────────────────────────────
 
@@ -92,34 +93,29 @@ fn status_default() {
     assert_eq!(status, DeviceStatus::Offline);
 }
 
-#[test]
-fn status_sdk_conversion() {
-    struct TestCase {
-        storage: DeviceStatus,
-        sdk: device_api::models::DeviceStatus,
+impl StatusEnumFixture for DeviceStatus {
+    type Backend = ();
+    type Agent = agent_server::DeviceStatus;
+
+    fn cases() -> Vec<StatusCase<Self>> {
+        vec![
+            StatusCase {
+                variant: DeviceStatus::Online,
+                wire: "online",
+                backend: (),
+                agent: agent_server::DeviceStatus::DEVICE_STATUS_ONLINE,
+            },
+            StatusCase {
+                variant: DeviceStatus::Offline,
+                wire: "offline",
+                backend: (),
+                agent: agent_server::DeviceStatus::DEVICE_STATUS_OFFLINE,
+            },
+        ]
     }
-
-    let test_cases = vec![
-        TestCase {
-            storage: DeviceStatus::Online,
-            sdk: device_api::models::DeviceStatus::DEVICE_STATUS_ONLINE,
-        },
-        TestCase {
-            storage: DeviceStatus::Offline,
-            sdk: device_api::models::DeviceStatus::DEVICE_STATUS_OFFLINE,
-        },
-    ];
-
-    let mut variants = DeviceStatus::variants().into_iter().collect::<HashSet<_>>();
-
-    for test_case in test_cases {
-        variants.remove(&test_case.storage);
-        let actual: device_api::models::DeviceStatus = (&test_case.storage).into();
-        assert_eq!(test_case.sdk, actual);
-    }
-
-    assert!(variants.is_empty(), "variants: {variants:?}");
 }
+
+status_enum_tests!(DeviceStatus, agent);
 
 // ─── merge tests ──────────────────────────────────────────────────────────────
 
