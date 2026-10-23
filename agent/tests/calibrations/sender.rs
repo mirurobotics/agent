@@ -49,23 +49,19 @@ pub mod new_request {
     fn maps_the_metadata() {
         let request = new_request(full_report());
 
-        assert_eq!(request.component, "arm");
-        assert_eq!(
-            (request.role, request.aspect),
-            (Some("left".to_string()), Some("pose".to_string()))
-        );
-        assert_eq!(
-            (request.serial_number, request.deployment_id),
-            (Some("SN-1".to_string()), Some("dpl_1".to_string()))
-        );
-        assert_eq!(request.reported_at, received_at().to_rfc3339());
-        assert_eq!(
-            *request.content,
-            InstanceContent {
+        let expected = CreateCalibrationRequest {
+            deployment_id: Some("dpl_1".to_string()),
+            component: "arm".to_string(),
+            role: Some("left".to_string()),
+            serial_number: Some("SN-1".to_string()),
+            aspect: Some("pose".to_string()),
+            content: Box::new(InstanceContent {
                 format: BackendFormat::INSTANCE_FORMAT_JSON,
                 data: r#"{"offset":[1,2,3]}"#.to_string(),
-            }
-        );
+            }),
+            reported_at: received_at().to_rfc3339(),
+        };
+        assert_eq!(request, expected);
     }
 
     #[test]
