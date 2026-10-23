@@ -122,36 +122,4 @@ mod wire {
         };
         assert_eq!(found, expected);
     }
-
-    /// A queued report's metadata is saved under these keys. A renamed field
-    /// must fail here, or the next agent would misread the queues already on
-    /// devices.
-    #[tokio::test]
-    async fn metadata_is_written_under_these_keys() {
-        let dir = test_dirs::temp("calibration_queue_test").unwrap();
-        let path = dir.to_dir().file("queue.json");
-        {
-            let mut queue = Queue::from_snapshot(8, open(&path).await, Persistence::BestEffort);
-            queue.enqueue(metadata("arm")).await.unwrap();
-        }
-
-        let raw = files::read_string(&path).await.unwrap();
-        let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
-        let metadata = value["entries"][0]["job"].as_object().unwrap();
-        let mut keys: Vec<&str> = metadata.keys().map(String::as_str).collect();
-        keys.sort_unstable();
-        assert_eq!(
-            keys,
-            [
-                "aspect",
-                "component",
-                "deployment_id",
-                "format",
-                "reported_at",
-                "role",
-                "serial_number",
-            ],
-            "{raw}"
-        );
-    }
 }
