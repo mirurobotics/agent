@@ -60,8 +60,6 @@ pub mod file_rule_source;
 pub use self::file_rule_source::FileRuleSource;
 pub mod file_rule_upload;
 pub use self::file_rule_upload::FileRuleUpload;
-pub mod file_rule_upload_timestamp;
-pub use self::file_rule_upload_timestamp::FileRuleUploadTimestamp;
 pub mod file_rule_upload_timezone;
 pub use self::file_rule_upload_timezone::FileRuleUploadTimezone;
 pub mod gcs_upload_credentials;
