@@ -3,8 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 // internal crates
-use crate::mocks::calibration_sender::MockCalibrationSender;
-use crate::mocks::http_client::MockClient;
+use crate::mocks::{calibration_sender::MockCalibrationSender, http_client::MockClient};
 use crate::test_utils::{
     calibrations::uploader,
     filesys::dirs as test_dirs,
