@@ -52,7 +52,11 @@ impl Fixture {
             syncer,
             Arc::new(token_mngr),
             event_hub,
-            Arc::new(uploader(&dir, MockCalibrationSender::new().0, UploaderOptions::default())),
+            Arc::new(uploader(
+                &dir,
+                MockCalibrationSender::new().0,
+                UploaderOptions::default(),
+            )),
             shutdown_tx.clone(),
         ));
         Self {

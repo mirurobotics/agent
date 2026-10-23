@@ -110,8 +110,9 @@ fn table(state: Arc<State>) -> Router {
         // ============================= CALIBRATIONS ============================== //
         .route(
             format!("/{api_version}/calibrations").as_str(),
-            post(handlers::create_calibration)
-                .layer(DefaultBodyLimit::max(handlers::MAX_CALIBRATION_REQUEST_BYTES)),
+            post(handlers::create_calibration).layer(DefaultBodyLimit::max(
+                handlers::MAX_CALIBRATION_REQUEST_BYTES,
+            )),
         )
         // ============================== EVENTS =================================== //
         .route(

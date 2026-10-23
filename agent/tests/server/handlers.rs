@@ -610,7 +610,10 @@ pub mod routes {
             let actual: openapi::CreateCalibrationResponse =
                 serde_json::from_slice(&bytes).unwrap();
             let uploaded = f.uploaded_calibration().await;
-            assert_eq!(actual.reported_at, uploaded.metadata.reported_at.to_rfc3339());
+            assert_eq!(
+                actual.reported_at,
+                uploaded.metadata.reported_at.to_rfc3339()
+            );
             let expected = Report {
                 metadata: ReportMetadata {
                     component: "arm".to_string(),

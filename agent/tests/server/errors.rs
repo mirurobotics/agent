@@ -176,7 +176,10 @@ mod request_errors {
             trace: miru_agent::trace!(),
         };
 
-        assert_error(&err, Expected::new(Code::InvalidRequest, HTTPCode::UNPROCESSABLE_ENTITY));
+        assert_error(
+            &err,
+            Expected::new(Code::InvalidRequest, HTTPCode::UNPROCESSABLE_ENTITY),
+        );
     }
 
     #[test]
