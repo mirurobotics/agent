@@ -83,7 +83,7 @@ impl AppState {
         let syncer = Arc::new(syncer);
 
         // initialize the data upload pipeline (deleter, uploader, scanner)
-        let (deleter, uploader, scanner, data_upload_handles) =
+        let (deleter, uploader, scanner, [scanner_handle, deleter_handle, uploader_handle]) =
             Self::init_data_uploads(layout, http_client.clone(), token_mngr.clone()).await?;
 
         // initialize the calibration uploader
@@ -91,10 +91,15 @@ impl AppState {
             Self::init_calibration_uploader(layout, http_client.clone(), token_mngr.clone()).await;
 
         let shutdown_handle = async move {
-            let mut handles = vec![token_mngr_handle, syncer_handle, event_hub_handle];
-            handles.extend(data_upload_handles);
-            handles.push(calibration_uploader_handle);
-
+            let handles = [
+                token_mngr_handle,
+                syncer_handle,
+                event_hub_handle,
+                scanner_handle,
+                deleter_handle,
+                uploader_handle,
+                calibration_uploader_handle,
+            ];
             futures::future::join(futures::future::join_all(handles), storage_handle).await;
         };
 
