@@ -34,8 +34,6 @@ pub struct FileRuleUpload {
     pub bucket_id: String,
     pub bucket_name: String,
     pub path: String,
-    /// The `source.glob` captures that group uploads into bundles; `None`
-    /// when the rule does not bundle.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bundle: Option<Vec<String>>,
 }
