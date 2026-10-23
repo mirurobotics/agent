@@ -429,8 +429,9 @@ mod tests {
         ids
     }
 
-    /// Attempt the report due now and settle it.
-    async fn attempt_due(u: &mut TestUploader) {
+    /// Upload the report that `next_attempt` says is due, then settle it, as
+    /// the worker's `run_attempt` does. Panics if no report is due.
+    async fn run_next_attempt(u: &mut TestUploader) {
         let next = u.next_attempt().await;
         let NextAttempt::Ready(entry) = next else {
             panic!("no report is due: {next:?}");
@@ -647,7 +648,7 @@ mod tests {
         files::delete(&f.report_file(ids[0])).await.unwrap();
         let mut u = f.uploader().await;
 
-        attempt_due(&mut u).await;
+        run_next_attempt(&mut u).await;
 
         assert!(f.sent().is_empty());
         assert_empty(&mut u).await;
@@ -666,7 +667,7 @@ mod tests {
         .unwrap();
         let mut u = f.uploader().await;
 
-        attempt_due(&mut u).await;
+        run_next_attempt(&mut u).await;
 
         assert!(f.sent().is_empty());
         assert_empty(&mut u).await;
@@ -683,7 +684,7 @@ mod tests {
         dirs::create(&dir).await.unwrap();
         let mut u = f.uploader().await;
 
-        attempt_due(&mut u).await;
+        run_next_attempt(&mut u).await;
 
         assert!(f.sent().is_empty());
         assert_backoff(&mut u, 10).await;
@@ -696,7 +697,7 @@ mod tests {
         let mut u = f.uploader().await;
         let id = u.enqueue(report("a")).await.unwrap();
 
-        attempt_due(&mut u).await;
+        run_next_attempt(&mut u).await;
 
         assert!(f.queued_on_disk().await.is_empty());
         assert!(!f.report_file(id).exists());
@@ -716,7 +717,7 @@ mod tests {
         mode(0o555).unwrap();
         let mut u = f.uploader().await;
 
-        attempt_due(&mut u).await;
+        run_next_attempt(&mut u).await;
 
         mode(0o755).unwrap();
         assert!(f.queued_on_disk().await.is_empty());
@@ -732,7 +733,7 @@ mod tests {
         u.enqueue(report("a")).await.unwrap();
 
         for expected in [10, 20, 40, 80, 160, 320, 640, 1280, 2560, 3600, 3600] {
-            attempt_due(&mut u).await;
+            run_next_attempt(&mut u).await;
             assert_backoff(&mut u, expected).await;
             f.advance_secs(expected);
         }
@@ -748,7 +749,7 @@ mod tests {
         u.enqueue(report("a")).await.unwrap();
 
         for _ in 0..3 {
-            attempt_due(&mut u).await;
+            run_next_attempt(&mut u).await;
             assert_backoff(&mut u, 10).await;
             f.advance_secs(10);
         }
@@ -771,10 +772,10 @@ mod tests {
         u.enqueue(report("a")).await.unwrap();
 
         for _ in 0..3 {
-            attempt_due(&mut u).await;
+            run_next_attempt(&mut u).await;
             f.advance_secs(10);
         }
-        attempt_due(&mut u).await;
+        run_next_attempt(&mut u).await;
 
         assert_eq!(f.sent(), strings(&["a"; 4]));
     }
@@ -789,14 +790,14 @@ mod tests {
         let mut u = f.uploader().await;
 
         // `a` fails and waits at the tail while `b` is sent
-        attempt_due(&mut u).await;
-        attempt_due(&mut u).await;
+        run_next_attempt(&mut u).await;
+        run_next_attempt(&mut u).await;
         assert_backoff(&mut u, 10).await;
         f.advance_secs(10);
-        attempt_due(&mut u).await;
+        run_next_attempt(&mut u).await;
         assert_backoff(&mut u, 20).await;
         f.advance_secs(20);
-        attempt_due(&mut u).await;
+        run_next_attempt(&mut u).await;
 
         assert_eq!(f.sent(), strings(&["a", "b", "a", "a"]));
     }
@@ -808,7 +809,7 @@ mod tests {
         let mut u = f.uploader().await;
         let id = u.enqueue(report("a")).await.unwrap();
 
-        attempt_due(&mut u).await;
+        run_next_attempt(&mut u).await;
 
         assert_empty(&mut u).await;
         assert!(!f.report_file(id).exists());
@@ -831,10 +832,10 @@ mod tests {
         u.enqueue(report("a")).await.unwrap();
 
         for wait in [10, 20] {
-            attempt_due(&mut u).await;
+            run_next_attempt(&mut u).await;
             f.advance_secs(wait);
         }
-        attempt_due(&mut u).await;
+        run_next_attempt(&mut u).await;
 
         assert_eq!(f.sent(), strings(&["a"; 3]));
         assert_empty(&mut u).await;
@@ -848,7 +849,7 @@ mod tests {
         let mut u = f.uploader().await;
         u.enqueue(report("a")).await.unwrap();
 
-        attempt_due(&mut u).await;
+        run_next_attempt(&mut u).await;
 
         assert_empty(&mut u).await;
     }
@@ -861,7 +862,7 @@ mod tests {
         let mut u = f.uploader().await;
         u.enqueue(report("a")).await.unwrap();
 
-        attempt_due(&mut u).await;
+        run_next_attempt(&mut u).await;
 
         assert_empty(&mut u).await;
     }
