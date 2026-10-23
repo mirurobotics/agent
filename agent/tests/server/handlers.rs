@@ -488,6 +488,7 @@ pub mod routes {
                     bucket_id: "bkt-1".into(),
                     bucket_name: "fleet-logs".into(),
                     path: "robots/".into(),
+                    bundle: None,
                 }),
                 retention: Some(FileRuleRetention {
                     require_upload: Some(true),
