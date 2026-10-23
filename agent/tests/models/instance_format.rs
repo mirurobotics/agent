@@ -68,14 +68,33 @@ fn unknown_falls_back_to_text() {
 #[test]
 fn from_device_api_maps_each_known_format() {
     let cases = [
-        (agent_server::InstanceFormat::INSTANCE_FORMAT_JSON, InstanceFormat::Json),
-        (agent_server::InstanceFormat::INSTANCE_FORMAT_YAML, InstanceFormat::Yaml),
-        (agent_server::InstanceFormat::INSTANCE_FORMAT_JSONC, InstanceFormat::Jsonc),
-        (agent_server::InstanceFormat::INSTANCE_FORMAT_XML, InstanceFormat::Xml),
-        (agent_server::InstanceFormat::INSTANCE_FORMAT_TEXT, InstanceFormat::Text),
+        (
+            agent_server::InstanceFormat::INSTANCE_FORMAT_JSON,
+            InstanceFormat::Json,
+        ),
+        (
+            agent_server::InstanceFormat::INSTANCE_FORMAT_YAML,
+            InstanceFormat::Yaml,
+        ),
+        (
+            agent_server::InstanceFormat::INSTANCE_FORMAT_JSONC,
+            InstanceFormat::Jsonc,
+        ),
+        (
+            agent_server::InstanceFormat::INSTANCE_FORMAT_XML,
+            InstanceFormat::Xml,
+        ),
+        (
+            agent_server::InstanceFormat::INSTANCE_FORMAT_TEXT,
+            InstanceFormat::Text,
+        ),
     ];
     for (format, want) in cases {
-        assert_eq!(InstanceFormat::from_device_api(format), Some(want), "{format:?}");
+        assert_eq!(
+            InstanceFormat::from_device_api(format),
+            Some(want),
+            "{format:?}"
+        );
     }
 }
 
