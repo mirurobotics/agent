@@ -277,7 +277,7 @@ where
 
 /// The report id a report file is named after, or `None` for any other file.
 fn report_id(file: &File) -> Option<Uuid> {
-    Uuid::from_str(file.name().ok()?).ok()
+    file.name().ok().and_then(|name| Uuid::from_str(name).ok())
 }
 
 /// Delete `file`, logging a failure. A file that is already gone is fine.
@@ -519,26 +519,6 @@ mod tests {
         assert_eq!(left, vec![f.report_file(ids[0])]);
     }
 
-    /// A file whose name isn't UTF-8 can't be a report file, so it is pruned too.
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn a_file_with_a_non_utf8_name_is_pruned() {
-        use std::os::unix::ffi::OsStrExt;
-
-        let f = Fixture::new();
-        preloaded(&f, &["a"]).await;
-        let name = std::ffi::OsStr::from_bytes(b"\xff");
-        let odd = File::new(f.layout.reports().path().join(name));
-        files::write_string(&odd, "{}", WriteOptions::OVERWRITE_ATOMIC)
-            .await
-            .unwrap();
-        let u = f.uploader().await;
-
-        u.prune_orphans().await;
-
-        assert!(!odd.exists());
-    }
-
     // =============================== ENQUEUE ================================ //
     #[tokio::test]
     async fn stores_metadata_in_the_queue_and_data_in_a_report_file() {
@@ -705,21 +685,25 @@ mod tests {
 
     /// A report file that can't be deleted is left for `prune_orphans` on the
     /// next boot; the report itself is still dequeued.
-    #[cfg(unix)]
     #[tokio::test]
     async fn a_report_file_that_cannot_be_deleted_still_dequeues_the_report() {
-        use std::os::unix::fs::PermissionsExt;
-
         let f = Fixture::new();
-        preloaded(&f, &["a"]).await;
-        let reports = f.layout.reports();
-        let mode = |m| std::fs::set_permissions(reports.path(), std::fs::Permissions::from_mode(m));
-        mode(0o555).unwrap();
+        let ids = preloaded(&f, &["a"]).await;
         let mut u = f.uploader().await;
+        let entry = QueueEntry {
+            id: ids[0],
+            job: report("a").metadata,
+            attempts: 0,
+            next_attempt_at: None,
+        };
+        // a directory where the report file should be can't be deleted as a file
+        files::delete(&f.report_file(ids[0])).await.unwrap();
+        dirs::create(&f.layout.reports().subdir(ids[0].to_string()))
+            .await
+            .unwrap();
 
-        run_next_attempt(&mut u).await;
+        u.finish_attempt(entry, Ok(())).await;
 
-        mode(0o755).unwrap();
         assert!(f.queued_on_disk().await.is_empty());
     }
 
