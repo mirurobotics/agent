@@ -16,7 +16,7 @@ use miru_agent::calibrations::{
     CalibrationsErr, Queue, QueueSnapshotFile, Uploader, UploaderArgs, UploaderOptions,
 };
 use miru_agent::disk::layout::CalibrationsLayout;
-use miru_agent::filesys::{dirs, files, File, WriteOptions};
+use miru_agent::filesys::{dirs, files, File, PathExt, WriteOptions};
 use miru_agent::queue::Persistence;
 
 // external crates
@@ -194,6 +194,25 @@ where
 
 fn strings(names: &[&str]) -> Vec<String> {
     names.iter().map(|name| name.to_string()).collect()
+}
+
+#[tokio::test]
+async fn startup_prunes_orphaned_report_files() {
+    let mut h = Harness::new();
+    let ids = preloaded(&h, &["a"]).await;
+    let orphan = h.report_file(Uuid::new_v4());
+    files::write_string(&orphan, "{}", WriteOptions::OVERWRITE_ATOMIC)
+        .await
+        .unwrap();
+    let (_hold, hang) = oneshot::channel();
+    h.sender.push(Step::Hang(hang));
+
+    h.spawn().await;
+
+    // the worker prunes before it starts the first upload
+    h.await_started().await;
+    assert!(!orphan.exists());
+    assert!(h.report_file(ids[0]).exists());
 }
 
 #[tokio::test]
