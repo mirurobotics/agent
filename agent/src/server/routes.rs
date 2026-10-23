@@ -6,7 +6,7 @@ use crate::server::{handlers, state::State};
 
 // external crates
 use axum::{
-    extract::Request,
+    extract::{DefaultBodyLimit, Request},
     http::header::{Entry, AUTHORIZATION},
     middleware::{from_fn, Next},
     response::Response,
@@ -105,6 +105,12 @@ fn table(state: Arc<State>) -> Router {
         .route(
             format!("/{api_version}/file_rules/{{file_rule_id}}").as_str(),
             get(handlers::get_file_rule),
+        )
+        // ============================= CALIBRATIONS ============================== //
+        .route(
+            format!("/{api_version}/calibrations").as_str(),
+            post(handlers::create_calibration)
+                .layer(DefaultBodyLimit::max(handlers::MAX_CALIBRATION_REQUEST_BYTES)),
         )
         // ============================== EVENTS =================================== //
         .route(

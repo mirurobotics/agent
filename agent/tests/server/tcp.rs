@@ -5,12 +5,15 @@ use std::time::Duration;
 
 // internal crates
 use crate::logs::CapturingWriter;
+use crate::mocks::calibration_sender::MockCalibrationSender;
 use crate::mocks::http_client::MockClient;
 use crate::test_utils::{
+    calibrations::uploader,
     filesys::dirs as test_dirs,
     sync::{create_storage, create_token_manager},
 };
 use device_api::models::ApiVersion;
+use miru_agent::calibrations::UploaderOptions;
 use miru_agent::events::hub::{EventHub, SpawnOptions};
 use miru_agent::server::{auth::BearerToken, routes, tcp, ServerErr, State};
 use miru_agent::sync::Syncer;
@@ -50,6 +53,7 @@ impl Fixture {
             syncer,
             Arc::new(token_mngr),
             event_hub,
+            Arc::new(uploader(&dir, MockCalibrationSender::new().0, UploaderOptions::default())),
             shutdown_tx.clone(),
         ));
         Self {

@@ -4,21 +4,24 @@ use std::sync::Arc;
 
 // internal crates
 use crate::errors::Error;
+use crate::models::InstanceFormat;
 use crate::server::{errors::*, state::State};
 use crate::services::{
-    deployment as dpl_svc, device as dvc_svc, file_rule as file_rule_svc,
-    git_commit as git_cmt_svc, release as rls_svc, HttpBackend,
+    calibration as calibration_svc, deployment as dpl_svc, device as dvc_svc,
+    file_rule as file_rule_svc, git_commit as git_cmt_svc, release as rls_svc, HttpBackend,
 };
+use crate::trace;
 use crate::version;
 use device_api::models as device_server;
 
 // external crates
 use axum::{
-    extract::{Path, State as AxumState},
+    extract::{rejection::JsonRejection, Path, State as AxumState},
     http::StatusCode,
     response::IntoResponse,
     Json,
 };
+use chrono::Utc;
 use serde::Serialize;
 use serde_json::{json, Value};
 use tracing::error;
@@ -168,6 +171,80 @@ pub async fn get_file_rule(
         "Error getting file rule",
     )
     .await
+}
+
+// =============================== CALIBRATIONS ==================================== //
+/// The largest calibration request body: 1 MiB of content doubled by JSON
+/// escaping (newlines, quotes), plus room for the other fields.
+pub const MAX_CALIBRATION_REQUEST_BYTES: usize = 2 * 1024 * 1024 + 64 * 1024;
+
+pub async fn create_calibration(
+    AxumState(state): AxumState<Arc<State>>,
+    request: Result<Json<device_server::CreateCalibrationRequest>, JsonRejection>,
+) -> impl IntoResponse {
+    handle(
+        async {
+            let params = to_create_params(request)?;
+            let created = calibration_svc::create(
+                &state.calibration_uploader,
+                &state.storage.deployments,
+                params,
+                Utc::now(),
+            )
+            .await?;
+            Ok::<_, ServerErr>(device_server::CreateCalibrationResponse::from(&created))
+        },
+        "Error creating calibration",
+    )
+    .await
+}
+
+/// Checks the request's shape only; Miru judges the rest.
+fn to_create_params(
+    request: Result<Json<device_server::CreateCalibrationRequest>, JsonRejection>,
+) -> Result<calibration_svc::CreateParams, ServerErr> {
+    let Json(request) = request.map_err(reject_body)?;
+    let content = *request.content;
+    let Some(format) = to_instance_format(content.format) else {
+        return Err(ServerErr::InvalidRequestErr(InvalidRequestErr {
+            msg: "content.format is not a known format".to_string(),
+            trace: trace!(),
+        }));
+    };
+    Ok(calibration_svc::CreateParams {
+        component: request.component_slug,
+        role: request.role,
+        aspect: request.aspect,
+        serial_number: request.serial_number,
+        format,
+        data: content.data,
+    })
+}
+
+/// A body over the route's limit is 413; any other unreadable body is 422.
+fn reject_body(rejection: JsonRejection) -> ServerErr {
+    if rejection.status() == StatusCode::PAYLOAD_TOO_LARGE {
+        return ServerErr::CalibrationRequestTooLargeErr(CalibrationRequestTooLargeErr {
+            max_request_bytes: MAX_CALIBRATION_REQUEST_BYTES,
+            trace: trace!(),
+        });
+    }
+    ServerErr::InvalidRequestErr(InvalidRequestErr {
+        msg: rejection.body_text(),
+        trace: trace!(),
+    })
+}
+
+/// `None` for a format this agent doesn't know.
+fn to_instance_format(format: device_server::InstanceFormat) -> Option<InstanceFormat> {
+    match format {
+        device_server::InstanceFormat::INSTANCE_FORMAT_JSON => Some(InstanceFormat::Json),
+        device_server::InstanceFormat::INSTANCE_FORMAT_YAML => Some(InstanceFormat::Yaml),
+        device_server::InstanceFormat::INSTANCE_FORMAT_JSONC => Some(InstanceFormat::Jsonc),
+        device_server::InstanceFormat::INSTANCE_FORMAT_XML => Some(InstanceFormat::Xml),
+        device_server::InstanceFormat::INSTANCE_FORMAT_TEXT => Some(InstanceFormat::Text),
+        device_server::InstanceFormat::InstanceFormatUnknown => None,
+    }
 }
 
 // ================================ UTILITIES ====================================== //

@@ -1,9 +1,14 @@
-//! Calibration reports and layouts shared by the calibration, worker and
-//! service tests.
+//! Calibration reports, layouts and uploaders shared by the calibration,
+//! worker, service and server tests.
+
+// standard crates
+use std::sync::Arc;
 
 // internal crates
 use super::filesys::dirs::TempDir;
-use miru_agent::calibrations::{Report, ReportMetadata};
+use miru_agent::calibrations::{
+    Report, ReportMetadata, Sender, Uploader, UploaderArgs, UploaderOptions,
+};
 use miru_agent::disk::layout::CalibrationsLayout;
 use miru_agent::models::InstanceFormat;
 
@@ -34,4 +39,22 @@ pub fn report(slug: &str) -> Report {
 /// The calibrations layout under `dir`.
 pub fn layout(dir: &TempDir) -> CalibrationsLayout {
     CalibrationsLayout::new(dir.to_dir().subdir("calibrations"))
+}
+
+/// An uploader under `dir` that keeps its queue in memory and uploads through
+/// `sender`.
+pub fn uploader<S: Sender + 'static>(
+    dir: &TempDir,
+    sender: Arc<S>,
+    options: UploaderOptions,
+) -> Uploader {
+    let args = UploaderArgs {
+        snapshot_file: None,
+        reports: layout(dir).reports(),
+        sender,
+        options,
+        sleep_fn: tokio::time::sleep,
+        now_fn: Utc::now,
+    };
+    Uploader::spawn(64, args).0
 }
