@@ -115,14 +115,14 @@ impl AppState {
 
     fn init_token_mngr(
         http_client: Arc<http::Client>,
-        (token_file, private_key_file, public_key_file): (TokenFile, File, File),
+        auth_files: AuthFiles,
     ) -> Result<(Arc<authn::TokenManager>, tokio::task::JoinHandle<()>), server::ServerErr> {
         let (token_mngr, handle) = authn::TokenManager::spawn(
             64,
             http_client,
-            token_file,
-            private_key_file,
-            public_key_file,
+            auth_files.token,
+            auth_files.private_key,
+            auth_files.public_key,
         )?;
         Ok((Arc::new(token_mngr), handle))
     }
@@ -356,18 +356,27 @@ impl AppState {
     }
 }
 
-async fn setup_auth_files(
-    layout: &disk::Layout,
-) -> Result<(TokenFile, File, File), server::ServerErr> {
+/// The files the token manager signs and stores tokens with.
+struct AuthFiles {
+    token: TokenFile,
+    private_key: File,
+    public_key: File,
+}
+
+async fn setup_auth_files(layout: &disk::Layout) -> Result<AuthFiles, server::ServerErr> {
     let auth_dir = layout.auth();
-    let private_key_file = auth_dir.private_key();
-    private_key_file.assert_exists()?;
-    let public_key_file = auth_dir.public_key();
-    public_key_file.assert_exists()?;
+    let private_key = auth_dir.private_key();
+    private_key.assert_exists()?;
+    let public_key = auth_dir.public_key();
+    public_key.assert_exists()?;
 
-    let token_file = TokenFile::new_with_default(auth_dir.token(), authn::Token::default()).await?;
+    let token = TokenFile::new_with_default(auth_dir.token(), authn::Token::default()).await?;
 
-    Ok((token_file, private_key_file, public_key_file))
+    Ok(AuthFiles {
+        token,
+        private_key,
+        public_key,
+    })
 }
 
 fn build_syncer_args(
