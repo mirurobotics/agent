@@ -4,7 +4,6 @@ use std::sync::Arc;
 
 // internal crates
 use crate::errors::Error;
-use crate::models::InstanceFormat;
 use crate::server::{errors::*, routes, state::State};
 use crate::services::{
     calibration as calibration_svc, deployment as dpl_svc, device as dvc_svc,
@@ -180,7 +179,9 @@ pub async fn create_calibration(
 ) -> impl IntoResponse {
     handle(
         async {
-            let params = to_create_params(request)?;
+            let Json(request) = request.map_err(reject_body)?;
+            let params = calibration_svc::CreateParams::try_from(request)
+                .map_err(ServerErr::InvalidRequestErr)?;
             let created = calibration_svc::create(
                 &state.calibration_uploader,
                 &state.storage.deployments,
@@ -193,28 +194,6 @@ pub async fn create_calibration(
         "Error creating calibration",
     )
     .await
-}
-
-/// Checks the request's shape only; Miru judges the rest.
-fn to_create_params(
-    request: Result<Json<device_server::CreateCalibrationRequest>, JsonRejection>,
-) -> Result<calibration_svc::CreateParams, ServerErr> {
-    let Json(request) = request.map_err(reject_body)?;
-    let content = *request.content;
-    let Some(format) = InstanceFormat::from_device_api(content.format) else {
-        return Err(ServerErr::InvalidRequestErr(InvalidRequestErr {
-            msg: "content.format is not a known format".to_string(),
-            trace: trace!(),
-        }));
-    };
-    Ok(calibration_svc::CreateParams {
-        component: request.component_slug,
-        role: request.role,
-        aspect: request.aspect,
-        serial_number: request.serial_number,
-        format,
-        data: content.data,
-    })
 }
 
 /// A body over the limit is 413; any other unreadable body is 422.
