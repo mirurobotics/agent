@@ -120,11 +120,16 @@ async fn the_spawned_saver_saves_every_interval() {
     tokio::time::sleep(uptime::SAVE_INTERVAL - Duration::from_secs(1)).await;
     assert_eq!(saved_secs(&path).await, 0);
 
-    let mut waited = 0;
+    // The write runs on the blocking pool and can be slow (or, on Windows,
+    // collide with this read and be retried a tick later), while paused time
+    // keeps jumping ahead. So bound the wait in real time, not in ticks.
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
     while saved_secs(&path).await != 42 {
-        assert!(waited < 100, "the saver never wrote the uptime");
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the saver never wrote the uptime"
+        );
         tokio::time::sleep(Duration::from_secs(1)).await;
-        waited += 1;
     }
 
     handle.shutdown().await;
