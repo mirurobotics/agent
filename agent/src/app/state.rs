@@ -47,7 +47,7 @@ impl AppState {
         dpl_retry_policy: fsm::RetryPolicy,
     ) -> Result<(Self, impl Future<Output = ()>), server::ServerErr> {
         // storage layout stuff
-        let (token_file, private_key_file, public_key_file) = setup_auth_files(layout).await?;
+        let auth_files = setup_auth_files(layout).await?;
 
         // get the device id
         let device_id = disk::resolve_device_id(layout).await?;
@@ -57,14 +57,8 @@ impl AppState {
         let storage = Arc::new(stor);
 
         // initialize the token manager
-        let (token_mngr, token_mngr_handle) = authn::TokenManager::spawn(
-            64,
-            http_client.clone(),
-            token_file,
-            private_key_file,
-            public_key_file,
-        )?;
-        let token_mngr = Arc::new(token_mngr);
+        let (token_mngr, token_mngr_handle) =
+            Self::init_token_mngr(http_client.clone(), auth_files)?;
 
         // initialize the event hub
         let (event_hub, event_hub_handle) =
@@ -117,6 +111,20 @@ impl AppState {
             },
             shutdown_handle,
         ))
+    }
+
+    fn init_token_mngr(
+        http_client: Arc<http::Client>,
+        (token_file, private_key_file, public_key_file): (TokenFile, File, File),
+    ) -> Result<(Arc<authn::TokenManager>, tokio::task::JoinHandle<()>), server::ServerErr> {
+        let (token_mngr, handle) = authn::TokenManager::spawn(
+            64,
+            http_client,
+            token_file,
+            private_key_file,
+            public_key_file,
+        )?;
+        Ok((Arc::new(token_mngr), handle))
     }
 
     /// The deleter and uploader are initialized before the scanner: the
