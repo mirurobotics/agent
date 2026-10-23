@@ -611,6 +611,16 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_missing_reports_directory_is_not_created() {
+        let f = Fixture::new();
+        let u = f.uploader().await;
+
+        u.prune_orphans().await;
+
+        assert!(!f.layout.reports().exists());
+    }
+
+    #[tokio::test]
     async fn an_unlistable_reports_directory_is_left_alone() {
         let f = Fixture::new();
         // a regular file where the reports directory should be
