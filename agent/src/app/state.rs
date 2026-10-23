@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 // internal crates
 use crate::authn::{self, token_mngr::TokenFile, TokenManagerExt};
+use crate::calibrations;
 use crate::cooldown;
 use crate::data_uploads::{
     retention::{self, DeleterExt},
@@ -35,6 +36,7 @@ pub struct AppState {
     pub uploader: Arc<upload::Uploader>,
     pub token_mngr: Arc<authn::TokenManager>,
     pub event_hub: events::EventHub,
+    pub calibration_uploader: Arc<calibrations::Uploader>,
 }
 
 impl AppState {
@@ -84,9 +86,15 @@ impl AppState {
         let (deleter, uploader, scanner, data_upload_handles) =
             Self::init_data_uploads(layout, http_client.clone(), token_mngr.clone()).await?;
 
+        // initialize the calibration uploader
+        let (calibration_uploader, calibration_uploader_handle) =
+            Self::init_calibration_uploader(layout, http_client.clone(), token_mngr.clone())
+                .await;
+
         let shutdown_handle = async move {
             let mut handles = vec![token_mngr_handle, syncer_handle, event_hub_handle];
             handles.extend(data_upload_handles);
+            handles.push(calibration_uploader_handle);
 
             futures::future::join(futures::future::join_all(handles), storage_handle).await;
         };
@@ -101,6 +109,7 @@ impl AppState {
                 uploader,
                 token_mngr,
                 event_hub,
+                calibration_uploader,
             },
             shutdown_handle,
         ))
@@ -237,10 +246,53 @@ impl AppState {
         Ok((Arc::new(uploader), handle))
     }
 
+    /// Spawn the calibration uploader, which sends reports to Miru with the
+    /// token manager's token. A queue-file error degrades to a queue kept in
+    /// memory (fail-open), so reports still queued at a restart are lost.
+    async fn init_calibration_uploader(
+        layout: &disk::Layout,
+        http_client: Arc<http::Client>,
+        token_mngr: Arc<authn::TokenManager>,
+    ) -> (Arc<calibrations::Uploader>, tokio::task::JoinHandle<()>) {
+        let layout = layout.calibrations();
+        let snapshot_file = match calibrations::QueueSnapshotFile::new_with_default(
+            layout.queue(),
+            Default::default(),
+        )
+        .await
+        {
+            Ok(file) => Some(file),
+            Err(e) => {
+                tracing::error!(
+                    "failed to initialize calibration queue snapshot file; calibrations will run without persistence: {e}"
+                );
+                None
+            }
+        };
+
+        let args = calibrations::UploaderArgs {
+            snapshot_file,
+            reports: layout.reports(),
+            sender: Arc::new(calibrations::HttpSender::new(http_client, token_mngr)),
+            options: calibrations::UploaderOptions::default(),
+            sleep_fn: tokio::time::sleep,
+            now_fn: chrono::Utc::now,
+        };
+        let (uploader, handle) = calibrations::Uploader::spawn(64, args);
+        (Arc::new(uploader), handle)
+    }
+
     pub async fn shutdown(&self) -> Result<(), server::ServerErr> {
         let mut first_err: Option<server::ServerErr> = None;
 
-        // shutdown the uploader first: it depends on nothing else in the app. The
+        // shutdown the calibration uploader first: nothing else in the app
+        // depends on it
+        if let Err(e) = self.calibration_uploader.shutdown().await {
+            tracing::error!("failed to shutdown calibration uploader: {e}");
+            first_err.get_or_insert(e.into());
+        }
+
+        // shutdown the data uploader next: it depends on nothing else in the app. The
         // scanner's upload sink may still enqueue into the stopped uploader if a
         // scan tick races this shutdown; the sink logs a warn and the tick
         // completes, so ordering stays safe.

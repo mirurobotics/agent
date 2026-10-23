@@ -3,6 +3,7 @@ use miru_agent::authn::errors::MockError as AuthnMockError;
 use miru_agent::authn::AuthnErr;
 use miru_agent::cache::errors::CacheElementNotFound;
 use miru_agent::cache::CacheErr;
+use miru_agent::calibrations::{CalibrationTooLargeErr, CalibrationsErr};
 use miru_agent::crypt::errors::InvalidJWTErr;
 use miru_agent::crypt::CryptErr;
 use miru_agent::data_uploads::scan::errors::InternalError as ScanInternalError;
@@ -28,6 +29,14 @@ fn authn_err() -> AuthnErr {
 fn cache_err() -> CacheErr {
     CacheErr::CacheElementNotFound(CacheElementNotFound {
         msg: "cache miss".to_string(),
+        trace: miru_agent::trace!(),
+    })
+}
+
+fn calibrations_err() -> CalibrationsErr {
+    CalibrationsErr::TooLargeErr(CalibrationTooLargeErr {
+        report_bytes: 200,
+        max_bytes: 100,
         trace: miru_agent::trace!(),
     })
 }
@@ -94,6 +103,12 @@ mod from_conversions {
     fn cache_err_maps_to_server_cache_err() {
         let err: ServerErr = cache_err().into();
         assert!(matches!(err, ServerErr::CacheErr(_)));
+    }
+
+    #[test]
+    fn calibrations_err_maps_to_server_calibrations_err() {
+        let err: ServerErr = calibrations_err().into();
+        assert!(matches!(err, ServerErr::CalibrationsErr(_)));
     }
 
     #[test]
