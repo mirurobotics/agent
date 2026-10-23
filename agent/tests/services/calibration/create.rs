@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 // internal crates
-use crate::mocks::calibration_sender::MockCalibrationSender;
+use crate::mocks::calibration_sender::{MockCalibrationSender, Step};
 use crate::test_utils::calibrations::{layout, received_at};
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::calibrations::{
@@ -19,7 +19,7 @@ use miru_agent::services::ServiceErr;
 
 // external crates
 use chrono::Utc;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 
 struct Fixture {
     _dir: test_dirs::TempDir,
@@ -154,6 +154,9 @@ async fn stamps_no_deployment_when_none_is_deployed() {
 #[tokio::test]
 async fn a_deployments_cache_error_queues_nothing() {
     let f = Fixture::new().await;
+    // a report queued by mistake would stay in flight, so `len` would count it
+    let (_hold, hang) = oneshot::channel();
+    f.sender.push(Step::Hang(hang));
     f.deployments.shutdown().await.unwrap();
 
     let err = f.create(params()).await.unwrap_err();
