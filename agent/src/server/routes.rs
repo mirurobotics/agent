@@ -55,6 +55,7 @@ async fn redact_authorization(mut req: Request, next: Next) -> Response {
     next.run(req).await
 }
 
+// lint:allow(funclen) — route table; one entry per Device API route
 fn table(state: Arc<State>) -> Router {
     let api_version = device_api::models::ApiVersion::API_VERSION.to_string();
     Router::new()
