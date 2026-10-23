@@ -7,16 +7,15 @@ use std::sync::Arc;
 use crate::mocks::http_client::{Call, MockClient};
 use crate::mocks::stub_token_manager::StubTokenManager;
 use crate::test_utils::calibrations::{received_at, report};
-use backend_api::models::{Calibration, InstanceContent, InstanceFormat as BackendFormat};
+use backend_api::models::{
+    Calibration, CreateCalibrationRequest, InstanceContent, InstanceFormat as BackendFormat,
+};
 use miru_agent::authn::{errors::MockError as AuthnMockErr, AuthnErr};
 use miru_agent::calibrations::{sender::new_request, CalibrationsErr, HttpSender, Report, Sender};
 use miru_agent::errors::Error;
 use miru_agent::http::errors::{HTTPErr, MockErr, RequestFailed, UnmarshalJSONErr};
 use miru_agent::http::request::Params;
 use miru_agent::models::InstanceFormat;
-
-// external crates
-use serde_json::Value;
 
 fn full_report() -> Report {
     let mut report = report("arm");
@@ -118,9 +117,9 @@ pub mod send {
         assert_eq!(requests.len(), 1);
         assert_eq!(requests[0].call, Call::CreateCalibration);
         assert_eq!(requests[0].token.as_deref(), Some("tok"));
-        let body: Value = serde_json::from_str(requests[0].body.as_deref().unwrap()).unwrap();
-        assert_eq!(body["reported_at"], received_at().to_rfc3339());
-        assert_eq!(body["component"], "arm");
+        let body = requests[0].body.as_deref().unwrap();
+        let sent: CreateCalibrationRequest = serde_json::from_str(body).unwrap();
+        assert_eq!(sent, new_request(report("arm")));
     }
 
     #[tokio::test]

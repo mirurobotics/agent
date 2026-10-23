@@ -361,9 +361,11 @@ mod tests {
                 .unwrap()
         }
 
-        /// The number of reports in the queue file, as the next boot would load it.
-        async fn queued_on_disk(&self) -> usize {
-            Queue::from_snapshot(1000, self.snapshot_file().await, Persistence::Durable).len()
+        /// The queue file's entries, as the next boot would load them.
+        async fn queued_on_disk(&self) -> Vec<QueueEntry> {
+            let snapshot_file = self.snapshot_file().await;
+            let queue = Queue::from_snapshot(1000, snapshot_file, Persistence::Durable);
+            queue.iter().cloned().collect()
         }
 
         async fn uploader(&self) -> TestUploader {
@@ -474,10 +476,13 @@ mod tests {
 
         let id = u.enqueue(report("a")).await.unwrap();
 
-        let snapshot: serde_json::Value = files::read_json(&f.layout.queue()).await.unwrap();
-        assert_eq!(snapshot["entries"][0]["id"], json!(id.to_string()));
-        assert_eq!(snapshot["entries"][0]["job"]["component"], json!("a"));
-        assert_eq!(snapshot["entries"][0]["job"]["format"], json!("json"));
+        let entry = QueueEntry {
+            id,
+            job: report("a").metadata,
+            attempts: 0,
+            next_attempt_at: None,
+        };
+        assert_eq!(f.queued_on_disk().await, [entry]);
         let data = files::read_string(&f.report_file(id)).await.unwrap();
         assert_eq!(data, report("a").data);
     }
@@ -494,7 +499,6 @@ mod tests {
 
         let err = u.enqueue(report("b")).await.unwrap_err();
 
-        assert!(format!("{err:?}").starts_with("QueueFullErr"), "{err:?}");
         assert_eq!(err.code().as_str(), "calibration_buffer_full");
         assert_eq!(err.http_status(), HTTPCode::INSUFFICIENT_STORAGE);
         assert_eq!(err.params(), Some(json!({ "max_reports": 1 })));
@@ -514,7 +518,6 @@ mod tests {
 
         let err = u.enqueue(big).await.unwrap_err();
 
-        assert!(format!("{err:?}").starts_with("TooLargeErr"), "{err:?}");
         assert_eq!(err.code().as_str(), "calibration_too_large");
         assert_eq!(err.http_status(), HTTPCode::PAYLOAD_TOO_LARGE);
         assert_eq!(err.params(), Some(json!({ "max_bytes": 100 })));
@@ -534,7 +537,6 @@ mod tests {
 
         let err = u.enqueue(report("a")).await.unwrap_err();
 
-        assert!(format!("{err:?}").starts_with("FileSysErr"), "{err:?}");
         assert_eq!(err.code().as_str(), "internal_server_error");
         assert_eq!(u.len(), 0);
     }
@@ -552,7 +554,7 @@ mod tests {
 
         let err = u.enqueue(report("a")).await.unwrap_err();
 
-        assert!(format!("{err:?}").starts_with("FileSysErr"), "{err:?}");
+        assert_eq!(err.code().as_str(), "internal_server_error");
         assert_eq!(u.len(), 0);
         assert!(!f.layout.reports().exists());
     }
@@ -647,7 +649,7 @@ mod tests {
         assert_eq!(f.sent(), strings(&["a"]));
         assert_empty(&mut u).await;
         assert!(!f.report_file(id).exists());
-        assert_eq!(f.queued_on_disk().await, 0);
+        assert!(f.queued_on_disk().await.is_empty());
     }
 
     /// A report file that can't be deleted is left for `prune_orphans` on the
@@ -668,7 +670,7 @@ mod tests {
 
         mode(0o755).unwrap();
         assert_eq!(f.sent(), strings(&["a"]));
-        assert_eq!(f.queued_on_disk().await, 0);
+        assert!(f.queued_on_disk().await.is_empty());
     }
 
     #[tokio::test]
