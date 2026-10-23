@@ -105,4 +105,3 @@ crate::impl_error!(ServiceErr {
     FileRulesNotExpanded,
     CalibrationsErr,
 });
-
