@@ -123,8 +123,11 @@ mod wire {
         assert_eq!(found, expected);
     }
 
+    /// A queued report's metadata is saved under these keys. A renamed field
+    /// must fail here, or the next agent would misread the queues already on
+    /// devices.
     #[tokio::test]
-    async fn enqueue_writes_the_pinned_metadata_keys() {
+    async fn metadata_is_written_under_these_keys() {
         let dir = test_dirs::temp("calibration_queue_test").unwrap();
         let path = dir.to_dir().file("queue.json");
         {
