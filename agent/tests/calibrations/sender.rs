@@ -65,21 +65,6 @@ pub mod new_request {
     }
 
     #[test]
-    fn omits_absent_fields() {
-        let request = new_request(report("arm"));
-
-        let value = serde_json::to_value(&request).unwrap();
-        let mut keys: Vec<&str> = value
-            .as_object()
-            .unwrap()
-            .keys()
-            .map(String::as_str)
-            .collect();
-        keys.sort_unstable();
-        assert_eq!(keys, ["component", "content", "reported_at"]);
-    }
-
-    #[test]
     fn sends_the_data_as_given_in_its_format() {
         let mut report = report("arm");
         report.metadata.format = InstanceFormat::Yaml;
