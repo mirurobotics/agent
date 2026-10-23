@@ -260,7 +260,8 @@ impl AppState {
 
     /// Spawn the calibration uploader, which sends reports to Miru with the
     /// token manager's token. A queue-file error degrades to a queue kept in
-    /// memory (fail-open), so reports still queued at a restart are lost.
+    /// memory (fail-open); the report files a previous boot queued are kept
+    /// for the next boot that opens the queue file.
     async fn init_calibration_uploader(
         layout: &disk::Layout,
         http_client: Arc<http::Client>,
