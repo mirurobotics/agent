@@ -88,8 +88,7 @@ impl AppState {
 
         // initialize the calibration uploader
         let (calibration_uploader, calibration_uploader_handle) =
-            Self::init_calibration_uploader(layout, http_client.clone(), token_mngr.clone())
-                .await;
+            Self::init_calibration_uploader(layout, http_client.clone(), token_mngr.clone()).await;
 
         let shutdown_handle = async move {
             let mut handles = vec![token_mngr_handle, syncer_handle, event_hub_handle];
