@@ -1,4 +1,5 @@
 pub mod aws;
+mod body;
 pub mod errors;
 pub mod gcs;
 pub mod multipart;
