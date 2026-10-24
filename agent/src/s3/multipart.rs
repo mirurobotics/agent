@@ -1,5 +1,10 @@
 // internal crates
-use crate::s3::{errors, errors::NoSuchUploadErr, Object, S3Err, Source, Store, PART_SIZE};
+use crate::s3::{
+    errors,
+    errors::NoSuchUploadErr,
+    store::PART_SIZE,
+    Object, S3Err, Source, Store,
+};
 
 // external crates
 use aws_sdk_s3::operation::list_parts::ListPartsOutput;
@@ -296,7 +301,7 @@ mod tests {
 
     // internal crates
     use super::*;
-    use crate::s3::tests::{
+    use crate::s3::store::tests::{
         access_denied_resp, actual_shapes, obj, req, resp, resp_xml, shape, store_expecting,
         store_with, temp_file_with, uri,
     };
