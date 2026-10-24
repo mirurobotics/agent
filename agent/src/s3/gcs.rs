@@ -580,7 +580,10 @@ mod tests {
                 .await
                 .unwrap_err();
 
-            assert!(matches!(err, S3Err::ExpiredCredentialsErr(_)), "got: {err:?}");
+            assert!(
+                matches!(err, S3Err::ExpiredCredentialsErr(_)),
+                "got: {err:?}"
+            );
         }
 
         #[tokio::test]
