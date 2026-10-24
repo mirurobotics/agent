@@ -130,7 +130,8 @@ impl SdkTransfer {
 
     /// Builds the S3 store with this transfer's transport settings.
     fn s3_store(&self, cfg: s3::Config) -> s3::Store {
-        s3::Store::build(cfg, self.s3_http_client.clone(), self.s3_force_path_style)
+        let config = s3::aws::config(cfg, self.s3_http_client.clone(), self.s3_force_path_style);
+        s3::Store::new(config)
     }
 
     /// Builds the GCS store with this transfer's endpoint settings.
