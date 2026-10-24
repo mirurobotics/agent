@@ -8,7 +8,6 @@ use crate::s3::{errors, errors::ObjectNotFoundErr, S3Err};
 use crate::trace;
 
 // external crates
-use aws_sdk_s3::config::{BehaviorVersion, Credentials as AwsCredentials, Region};
 use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::Client;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
@@ -17,17 +16,6 @@ use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 /// below it go through a single `PutObject`. S3's own multipart part-size
 /// floor is 5 MiB; 8 MiB gives headroom while keeping part counts small.
 pub(crate) const PART_SIZE: u64 = 8 * 1024 * 1024; // 8 MiB
-
-pub struct Config {
-    pub creds: Credentials,
-    pub region: String,
-}
-
-pub struct Credentials {
-    pub access_key_id: String,
-    pub secret_access_key: String,
-    pub session_token: String,
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Object {
@@ -102,51 +90,13 @@ pub struct Store {
 }
 
 impl Store {
-    /// Builds a client from caller-supplied temporary credentials. No network
-    /// I/O happens here; the first request is made lazily on the first call.
-    pub fn new(cfg: Config) -> Self {
-        Self::build(cfg, None, false)
-    }
-
-    pub(crate) fn build(
-        cfg: Config,
-        http_client: Option<aws_sdk_s3::config::SharedHttpClient>,
-        force_path_style: bool,
-    ) -> Self {
-        let s3creds = AwsCredentials::new(
-            cfg.creds.access_key_id,
-            cfg.creds.secret_access_key,
-            Some(cfg.creds.session_token),
-            None,
-            "miru-agent",
-        );
-        let mut builder = aws_sdk_s3::config::Config::builder()
-            .behavior_version(BehaviorVersion::latest())
-            .region(Region::new(cfg.region))
-            .credentials_provider(s3creds)
-            .force_path_style(force_path_style);
-        if let Some(http_client) = http_client {
-            builder = builder.http_client(http_client);
-        }
+    /// Builds a store on an SDK config from
+    /// [`aws::config`](crate::s3::aws::config). No network I/O happens here; the
+    /// first request is made lazily on the first call.
+    pub fn new(config: aws_sdk_s3::Config) -> Self {
         Self {
-            client: Client::from_conf(builder.build()),
+            client: Client::from_conf(config),
         }
-    }
-
-    /// Test-only constructor that injects a caller-provided HTTP client (e.g. a
-    /// `StaticReplayClient`) in place of the default HTTPS connector, so tests
-    /// serve canned responses without touching the network. Requests use the
-    /// supplied credentials and path-style URLs for deterministic replay paths.
-    #[cfg(test)]
-    pub(crate) fn from_http_client(
-        http_client: impl aws_sdk_s3::config::HttpClient + 'static,
-        cfg: Config,
-    ) -> Self {
-        Self::build(
-            cfg,
-            Some(aws_sdk_s3::config::IntoShared::into_shared(http_client)),
-            true,
-        )
     }
 
     /// Creates or overwrites an object from a local file, opened once as a
@@ -296,9 +246,10 @@ pub(super) mod tests {
     use miru_agent::filesys::file::File;
     use miru_agent::filesys::path::PathExt;
     use miru_agent::filesys::{files, FileSysErr, WriteOptions};
-    use miru_agent::s3::{Config, Credentials, Object, S3Err, Source, Store};
+    use miru_agent::s3::{aws, Config, Credentials, Object, S3Err, Source, Store};
 
     // external crates
+    use aws_sdk_s3::config::SharedHttpClient;
     use aws_smithy_http_client::test_util::{ReplayEvent, StaticReplayClient};
     use aws_smithy_types::body::SdkBody;
 
@@ -352,7 +303,9 @@ pub(super) mod tests {
             region: REGION.to_string(),
             creds: test_credentials(),
         };
-        let store = Store::from_http_client(replay.clone(), cfg);
+        let http_client = Some(SharedHttpClient::new(replay.clone()));
+        // Path-style URLs, so request URIs match `uri()`.
+        let store = Store::new(aws::config(cfg, http_client, true));
         (store, replay)
     }
 
@@ -442,7 +395,7 @@ pub(super) mod tests {
                 region: "us-west-2".to_string(),
             };
             // Constructing must not panic or touch the network.
-            let _store = Store::new(cfg);
+            let _store = Store::new(aws::config(cfg, None, false));
         }
     }
 
