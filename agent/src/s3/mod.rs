@@ -1,4 +1,5 @@
 pub mod errors;
+pub mod gcs;
 pub mod multipart;
 pub mod store;
 

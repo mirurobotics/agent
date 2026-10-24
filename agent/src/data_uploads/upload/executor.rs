@@ -189,7 +189,7 @@ mod tests {
         let executor = LiveExecutor::new(
             client.clone(),
             token_manager(),
-            SdkTransfer::with_s3_http_client(replay.clone()),
+            SdkTransfer::with_http_client(replay.clone()),
         );
 
         executor.upload(&job).await.unwrap();

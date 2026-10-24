@@ -3,12 +3,16 @@ use std::collections::HashMap;
 use std::io::SeekFrom;
 
 // internal crates
+use crate::errors::HTTPCode;
 use crate::filesys::{errors::PathDoesNotExistErr, file::File, path::PathExt, FileSysErr};
-use crate::s3::{errors, errors::ObjectNotFoundErr, S3Err};
+use crate::s3::{errors, errors::ObjectNotFoundErr, gcs, S3Err};
 use crate::trace;
 
 // external crates
-use aws_sdk_s3::config::{BehaviorVersion, Credentials as AwsCredentials, Region};
+use aws_sdk_s3::config::{
+    BehaviorVersion, Credentials as AwsCredentials, Region, SharedHttpClient,
+};
+use aws_sdk_s3::error::SdkError;
 use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::Client;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
@@ -17,6 +21,14 @@ use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 /// below it go through a single `PutObject`. S3's own multipart part-size
 /// floor is 5 MiB; 8 MiB gives headroom while keeping part counts small.
 pub(crate) const PART_SIZE: u64 = 8 * 1024 * 1024; // 8 MiB
+
+/// How a successful object write ended.
+#[derive(Debug)]
+pub(super) enum WriteOutcome {
+    Created,
+    /// An earlier attempt already stored the object (GCS create-only).
+    AlreadyExists,
+}
 
 pub struct Config {
     pub creds: Credentials,
@@ -99,18 +111,25 @@ impl Source {
 
 pub struct Store {
     pub(super) client: Client,
+    /// Set for GCS (see [`gcs`]). Bodies then carry a `Content-MD5` the store
+    /// computes, since the GCS client turns the SDK's own request checksums
+    /// off, and object writes are create-only.
+    gcs: bool,
 }
 
 impl Store {
     /// Builds a client from caller-supplied temporary credentials. No network
     /// I/O happens here; the first request is made lazily on the first call.
     pub fn new(cfg: Config) -> Self {
-        Self::build(cfg, None, false)
+        Self::build_aws(cfg, None, false)
     }
 
-    pub(crate) fn build(
+    /// Builds a store that uploads to AWS S3 with temporary SigV4 credentials.
+    /// `http_client` replaces the default HTTPS client when given. No network
+    /// I/O happens here.
+    pub(crate) fn build_aws(
         cfg: Config,
-        http_client: Option<aws_sdk_s3::config::SharedHttpClient>,
+        http_client: Option<SharedHttpClient>,
         force_path_style: bool,
     ) -> Self {
         let s3creds = AwsCredentials::new(
@@ -130,7 +149,46 @@ impl Store {
         }
         Self {
             client: Client::from_conf(builder.build()),
+            gcs: false,
         }
+    }
+
+    /// Builds a store that uploads to GCS through its XML API with a bearer
+    /// token (see [`gcs`]). `http_client` replaces the default HTTPS client
+    /// when given. No network I/O happens here.
+    pub(crate) fn build_gcs(token: gcs::Token, http_client: Option<SharedHttpClient>) -> Self {
+        Self {
+            client: Client::from_conf(gcs::config(token, http_client)),
+            gcs: true,
+        }
+    }
+
+    /// Finishes an object write (PutObject or CompleteMultipartUpload). On GCS
+    /// the client sends writes create-only (see [`gcs`]), so a 412 means an
+    /// earlier attempt already stored the object at this key, which counts as
+    /// done.
+    pub(super) fn finish_write<E>(
+        &self,
+        operation: &str,
+        dst: &Object,
+        result: Result<(), SdkError<E>>,
+    ) -> Result<WriteOutcome, S3Err>
+    where
+        E: std::error::Error + 'static,
+    {
+        match result {
+            Ok(()) => Ok(WriteOutcome::Created),
+            Err(e) if self.gcs && errors::status(&e) == Some(HTTPCode::PRECONDITION_FAILED) => {
+                tracing::info!("upload: {dst} already exists, so an earlier {operation} landed");
+                Ok(WriteOutcome::AlreadyExists)
+            }
+            Err(e) => Err(errors::map_sdk_err(operation, dst, e)),
+        }
+    }
+
+    /// `Content-MD5` for a body, when this store sends one.
+    pub(super) fn content_md5(&self, bytes: &[u8]) -> Option<String> {
+        self.gcs.then(|| gcs::content_md5(bytes))
     }
 
     /// Test-only constructor that injects a caller-provided HTTP client (e.g. a
@@ -142,7 +200,7 @@ impl Store {
         http_client: impl aws_sdk_s3::config::HttpClient + 'static,
         cfg: Config,
     ) -> Self {
-        Self::build(
+        Self::build_aws(
             cfg,
             Some(aws_sdk_s3::config::IntoShared::into_shared(http_client)),
             true,
@@ -150,7 +208,8 @@ impl Store {
     }
 
     /// Creates or overwrites an object from a local file, opened once as a
-    /// [`Source`].
+    /// [`Source`]. GCS never overwrites: an existing object counts as written
+    /// (see [`gcs`]).
     ///
     /// Files at or below [`PART_SIZE`] go through one `PutObject`
     /// ([`Self::put_singlepart`]); larger files go part-by-part through a
@@ -179,17 +238,20 @@ impl Store {
         metadata: &HashMap<String, String>,
     ) -> Result<(), S3Err> {
         let size = src.size;
-        let body = ByteStream::from(src.read("put_object", dst, 0, size).await?);
-        self.client
+        let bytes = src.read("put_object", dst, 0, size).await?;
+        let content_md5 = self.content_md5(&bytes);
+        let result = self
+            .client
             .put_object()
             .bucket(&dst.bucket)
             .key(&dst.key)
-            .body(body)
+            .body(ByteStream::from(bytes))
+            .set_content_md5(content_md5)
             .set_metadata((!metadata.is_empty()).then(|| metadata.clone()))
             .send()
             .await
-            .map_err(|e| errors::map_sdk_err("put_object", dst, e))?;
-        Ok(())
+            .map(|_| ());
+        self.finish_write("put_object", dst, result).map(|_| ())
     }
 
     /// Streams an object's body to a destination file. A missing object maps to
