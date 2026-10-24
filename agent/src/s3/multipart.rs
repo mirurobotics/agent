@@ -47,22 +47,28 @@ impl Store {
     }
 
     /// Resumes an existing multipart upload: lists the parts that already landed
-    /// in S3, uploads only the missing parts, and completes. Never aborts, so a
-    /// resume is safe to retry.
+    /// in S3, uploads only the missing parts, and completes. Never aborts on
+    /// failure, so a resume is safe to retry. If GCS already holds the object
+    /// from an earlier attempt, this upload is aborted as in
+    /// [`Self::put_multipart`].
     ///
     /// `NoSuchUploadErr` if S3 no longer knows the upload. The caller must resume
-    /// against the same file bytes the upload was started for.
+    /// against the same file bytes and part size the upload was started for.
     pub async fn resume_multipart_upload(
         &self,
-        mut src: Source,
+        src: &mut Source,
         dst: &Object,
         upload_id: &str,
     ) -> Result<(), S3Err> {
         let landed = self.list_parts(dst, upload_id).await?;
-        let parts = self.upload_parts(&mut src, dst, upload_id, &landed).await?;
-        self.complete_multipart_upload(dst, upload_id, &parts)
-            .await
-            .map(|_| ())
+        let parts = self.upload_parts(src, dst, upload_id, &landed).await?;
+        let written = self
+            .complete_multipart_upload(dst, upload_id, &parts)
+            .await?;
+        if matches!(written, WriteOutcome::AlreadyExists) {
+            let _ = self.abort_multipart_upload(dst, upload_id).await;
+        }
+        Ok(())
     }
 
     /// Walks [`Self::part_plan`] in order. For each part number present in
@@ -191,7 +197,7 @@ impl Store {
     }
 
     /// Starts a multipart upload and returns its `upload_id`.
-    async fn create_multipart_upload(
+    pub async fn create_multipart_upload(
         &self,
         dst: &Object,
         metadata: &std::collections::HashMap<String, String>,
@@ -875,7 +881,7 @@ mod tests {
         #[tokio::test]
         async fn resume_skips_landed_parts() {
             let tf = two_part_file().await;
-            let src = source_of(&tf).await;
+            let mut src = source_of(&tf).await;
 
             let (store, replay) = store_with(vec![
                 ReplayEvent::new(
@@ -887,7 +893,7 @@ mod tests {
             ]);
 
             store
-                .resume_multipart_upload(src, &obj("big.bin"), UPLOAD_ID)
+                .resume_multipart_upload(&mut src, &obj("big.bin"), UPLOAD_ID)
                 .await
                 .unwrap();
 
@@ -904,7 +910,7 @@ mod tests {
         #[tokio::test]
         async fn resume_expired_upload_maps_to_no_such_upload() {
             let tf = two_part_file().await;
-            let src = source_of(&tf).await;
+            let mut src = source_of(&tf).await;
 
             let (store, replay) = store_with(vec![ReplayEvent::new(
                 list_parts_req(),
@@ -912,7 +918,7 @@ mod tests {
             )]);
 
             let err = store
-                .resume_multipart_upload(src, &obj("big.bin"), UPLOAD_ID)
+                .resume_multipart_upload(&mut src, &obj("big.bin"), UPLOAD_ID)
                 .await
                 .unwrap_err();
 
@@ -927,7 +933,7 @@ mod tests {
         #[tokio::test]
         async fn resume_merges_paginated_list_parts() {
             let tf = two_part_file().await;
-            let src = source_of(&tf).await;
+            let mut src = source_of(&tf).await;
 
             let page2_req = req("GET", &list_parts_page2_query());
 
@@ -944,7 +950,7 @@ mod tests {
             ]);
 
             store
-                .resume_multipart_upload(src, &obj("big.bin"), UPLOAD_ID)
+                .resume_multipart_upload(&mut src, &obj("big.bin"), UPLOAD_ID)
                 .await
                 .unwrap();
 
@@ -972,7 +978,7 @@ mod tests {
             // no abort (or complete) event is queued, so an abort would panic the
             // replay client on an unexpected request.
             let tf = two_part_file().await;
-            let src = source_of(&tf).await;
+            let mut src = source_of(&tf).await;
 
             let (store, replay) = store_with(vec![
                 ReplayEvent::new(
@@ -983,7 +989,7 @@ mod tests {
             ]);
 
             let err = store
-                .resume_multipart_upload(src, &obj("big.bin"), UPLOAD_ID)
+                .resume_multipart_upload(&mut src, &obj("big.bin"), UPLOAD_ID)
                 .await
                 .unwrap_err();
             assert!(matches!(err, S3Err::RequestFailedErr(_)));
@@ -1000,7 +1006,7 @@ mod tests {
             // A valid upload with zero landed parts (empty listing) is NOT a missing
             // upload: every part is uploaded, then complete.
             let tf = two_part_file().await;
-            let src = source_of(&tf).await;
+            let mut src = source_of(&tf).await;
 
             let (store, replay) = store_with(vec![
                 ReplayEvent::new(list_parts_req(), list_parts_resp(&[], None)),
@@ -1010,7 +1016,7 @@ mod tests {
             ]);
 
             store
-                .resume_multipart_upload(src, &obj("big.bin"), UPLOAD_ID)
+                .resume_multipart_upload(&mut src, &obj("big.bin"), UPLOAD_ID)
                 .await
                 .unwrap();
 
@@ -1030,7 +1036,7 @@ mod tests {
             // Both parts already landed (single page): nothing is re-uploaded, and
             // the complete manifest carries both landed etags in ascending order.
             let tf = two_part_file().await;
-            let src = source_of(&tf).await;
+            let mut src = source_of(&tf).await;
 
             let (store, replay) = store_with(vec![
                 ReplayEvent::new(
@@ -1047,7 +1053,7 @@ mod tests {
             ]);
 
             store
-                .resume_multipart_upload(src, &obj("big.bin"), UPLOAD_ID)
+                .resume_multipart_upload(&mut src, &obj("big.bin"), UPLOAD_ID)
                 .await
                 .unwrap();
 

@@ -8,8 +8,8 @@ use crate::data_uploads::{
     retention::DeleterExt,
     upload::{
         errors::*,
-        executor::UploadExecutor,
-        job::Job,
+        executor::{Checkpointer, UploadExecutor},
+        job::{Job, UploadRef},
         queue::{QueueEntry, QueueSnapshotFile},
         uploader_impl::{UploaderImpl, UploaderOptions},
     },
@@ -52,7 +52,7 @@ pub trait UploaderExt: Send + Sync {
 // ================================== WORKER ======================================= //
 pub(crate) enum Command {
     Enqueue {
-        job: Job,
+        job: Box<Job>,
         respond_to: oneshot::Sender<Result<(), UploadErr>>,
     },
     Len {
@@ -61,6 +61,24 @@ pub(crate) enum Command {
     Shutdown {
         respond_to: oneshot::Sender<Result<(), UploadErr>>,
     },
+}
+
+/// An upload an attempt saves, and the sender the worker acks once it is on
+/// disk.
+type SaveRequest = (UploadRef, oneshot::Sender<()>);
+
+/// Hands an attempt's saves to the worker, which owns the queue file, and waits
+/// for each to reach disk.
+pub(crate) struct ChannelCheckpointer(Sender<SaveRequest>);
+
+impl Checkpointer for ChannelCheckpointer {
+    async fn save(&self, upload: &UploadRef) {
+        let (ack_tx, ack_rx) = oneshot::channel();
+        // A failed send means the worker dropped the attempt; it drops the ack
+        // sender too, so the wait returns at once.
+        let _ = self.0.send((upload.clone(), ack_tx)).await;
+        let _ = ack_rx.await;
+    }
 }
 
 /// Whether the run loop should keep going after handling a command or job.
@@ -125,8 +143,9 @@ where
     /// Drive one executor attempt on `entry` to completion while staying
     /// responsive to commands, then resolve the entry with its result.
     async fn run_attempt(&mut self, entry: QueueEntry) -> Flow {
-        let attempt = self.uploader.attempt(&entry);
-        match self.run_until_shutdown(attempt).await {
+        let (save_tx, save_rx) = mpsc::channel(1);
+        let attempt = self.uploader.attempt(&entry, ChannelCheckpointer(save_tx));
+        match self.run_until_shutdown(attempt, &entry, save_rx).await {
             // the attempt was cancelled -> leave the entry in the queue so the next
             // boot picks it up rather than losing it
             None => Flow::Shutdown,
@@ -155,14 +174,25 @@ where
         }
     }
 
-    /// Run `fut` to completion while continuing to serve commands. Returns
-    /// `None` when a shutdown arrived (or all senders dropped), in which case
-    /// `fut` is dropped — cancelling an in-flight upload.
-    async fn run_until_shutdown<T>(&mut self, fut: impl Future<Output = T>) -> Option<T> {
+    /// Run `fut`, an attempt on `entry`, to completion while saving its uploads
+    /// and continuing to serve commands. Returns `None` when a shutdown arrived
+    /// (or all senders dropped), in which case `fut` is dropped — cancelling an
+    /// in-flight upload, whose saved upload stays on the queued entry.
+    async fn run_until_shutdown<T>(
+        &mut self,
+        fut: impl Future<Output = T>,
+        entry: &QueueEntry,
+        mut saves: Receiver<SaveRequest>,
+    ) -> Option<T> {
         tokio::pin!(fut);
         loop {
             tokio::select! {
                 result = &mut fut => return Some(result),
+                // disabled once the attempt drops its checkpointer
+                Some((upload, ack)) = saves.recv() => {
+                    self.uploader.save_upload(entry, upload).await;
+                    let _ = ack.send(());
+                }
                 // recv is cancel-safe: losing the race never drops a command
                 cmd = self.receiver.recv() => match cmd {
                     None => return None,
@@ -186,7 +216,7 @@ where
             }
             Command::Enqueue { job, respond_to } => {
                 dispatch!(
-                    self.uploader.enqueue(job).await,
+                    self.uploader.enqueue(*job).await,
                     respond_to,
                     "Actor failed to send enqueue response"
                 );
@@ -263,7 +293,7 @@ impl Uploader {
 impl UploaderExt for Uploader {
     async fn enqueue(&self, job: Job) -> Result<(), UploadErr> {
         self.send_command("enqueue", |tx| Command::Enqueue {
-            job,
+            job: Box::new(job),
             respond_to: tx,
         })
         .await?

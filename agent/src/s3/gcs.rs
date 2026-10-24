@@ -188,7 +188,7 @@ mod tests {
     use super::*;
     use crate::s3::store::tests::{resp, resp_xml, temp_file_with};
     use crate::s3::store::PART_SIZE;
-    use crate::s3::{Object, Options, S3Err, Store};
+    use crate::s3::{Object, Options, S3Err, Source, Store};
 
     // external crates
     use aws_smithy_http_client::test_util::{ReplayEvent, StaticReplayClient};
@@ -539,6 +539,37 @@ mod tests {
                 .map(|r| r.method().to_string())
                 .collect();
             assert_eq!(methods, ["PUT", "POST", "PUT", "PUT", "POST", "DELETE"]);
+        }
+
+        #[tokio::test]
+        async fn resumed_upload_of_an_existing_object_is_aborted() {
+            // Both parts landed and an earlier attempt already stored the
+            // object, so completing gets 412: the file counts as uploaded and
+            // this upload's parts are aborted.
+            let listed = format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<ListPartsResult><Bucket>{BUCKET}</Bucket><Key>big.bin</Key><UploadId>{UPLOAD_ID}</UploadId><IsTruncated>false</IsTruncated><Part><PartNumber>1</PartNumber><ETag>"e1"</ETag></Part><Part><PartNumber>2</PartNumber><ETag>"e2"</ETag></Part></ListPartsResult>"#
+            );
+            let replay = StaticReplayClient::new(vec![
+                ReplayEvent::new(req("GET", "big.bin"), resp_xml(200, &listed)),
+                ReplayEvent::new(req("POST", "big.bin"), error_xml(412, "PreconditionFailed")),
+                ReplayEvent::new(req("DELETE", "big.bin"), resp(204, &[])),
+            ]);
+            let big = temp_file_with(&vec![3u8; PART_SIZE as usize + 1]).await;
+            let mut src = Source::open(big.file().clone(), &obj("big.bin"))
+                .await
+                .unwrap();
+
+            gcs_store(&replay)
+                .resume_multipart_upload(&mut src, &obj("big.bin"), UPLOAD_ID)
+                .await
+                .unwrap();
+
+            let methods: Vec<_> = replay
+                .actual_requests()
+                .map(|r| r.method().to_string())
+                .collect();
+            assert_eq!(methods, ["GET", "POST", "DELETE"]);
         }
 
         #[tokio::test]
