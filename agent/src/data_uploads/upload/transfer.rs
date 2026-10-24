@@ -12,6 +12,7 @@ use backend_api::models::upload_credentials::Scheme;
 use backend_api::models::{S3UploadCredentials, UploadCredentials, UploadDestination};
 
 // external crates
+use aws_sdk_s3::config::SharedHttpClient;
 use tracing::info;
 
 /// The seam between the upload executor and the concrete cloud-storage SDKs.
@@ -39,10 +40,20 @@ pub trait ObjectTransfer: Send + Sync {
 /// API with the vended OAuth2 bearer token (see [`s3::gcs`]). Both go through
 /// [`s3::Store::put`]: single-part or multipart by size. Tests can replace the
 /// HTTP client of both stores.
-#[derive(Default)]
 pub struct SdkTransfer {
-    http_client: Option<aws_sdk_s3::config::SharedHttpClient>,
+    http_client: SharedHttpClient,
     s3_force_path_style: bool,
+}
+
+/// Every upload through this transfer shares one HTTPS client and its
+/// connection pool.
+impl Default for SdkTransfer {
+    fn default() -> Self {
+        Self {
+            http_client: s3::sdk::http_client(),
+            s3_force_path_style: false,
+        }
+    }
 }
 
 impl SdkTransfer {
@@ -54,7 +65,7 @@ impl SdkTransfer {
         http_client: impl aws_sdk_s3::config::HttpClient + 'static,
     ) -> Self {
         Self {
-            http_client: Some(aws_sdk_s3::config::IntoShared::into_shared(http_client)),
+            http_client: SharedHttpClient::new(http_client),
             s3_force_path_style: true,
         }
     }
