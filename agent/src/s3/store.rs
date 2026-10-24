@@ -5,8 +5,13 @@ use std::io::SeekFrom;
 // internal crates
 use crate::errors::HTTPCode;
 use crate::filesys::{errors::PathDoesNotExistErr, file::File, path::PathExt, FileSysErr};
-use crate::s3::sdk::{attempt_override, body_attempt_timeout};
-use crate::s3::{body, errors, errors::ObjectNotFoundErr, gcs, S3Err};
+use crate::s3::{
+    body, errors,
+    errors::ObjectNotFoundErr,
+    gcs,
+    sdk::{attempt_override, body_attempt_timeout},
+    S3Err,
+};
 use crate::trace;
 
 // external crates
