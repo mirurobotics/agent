@@ -82,9 +82,7 @@ mod tests {
 
     // internal crates
     use super::*;
-    use crate::s3::store::PART_SIZE;
     use crate::s3::{aws, gcs, Config, Credentials};
-    use miru_agent::data_uploads::upload::UploaderOptions;
 
     // external crates
     use aws_smithy_runtime_api::client::http::{HttpClient, HttpConnectorSettings};
@@ -138,20 +136,6 @@ mod tests {
                     .expect("stall protection configured");
                 assert!(ssp.upload_enabled(), "{name}");
                 assert_eq!(ssp.grace_period(), Duration::from_secs(60), "{name}");
-            }
-        }
-    }
-
-    mod upload_timeout {
-        use super::*;
-
-        #[test]
-        fn ends_before_uploader_backstop() {
-            let backstop = |len| UploaderOptions::default().attempt_deadline(len);
-            // Leaves up to 30 s for the backend create call before the upload.
-            for len in [0, 1024 * 1024, PART_SIZE] {
-                let end = upload_timeout(len) + Duration::from_secs(30);
-                assert!(end <= backstop(len), "len {len}");
             }
         }
     }

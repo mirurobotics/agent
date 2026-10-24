@@ -135,39 +135,6 @@ fn spawn_frozen(
     .unwrap()
 }
 
-#[test]
-fn attempt_deadline_formula() {
-    // pin the inputs so the assertions are independent of production defaults
-    let options = UploaderOptions {
-        attempt_timeout_floor: Duration::from_secs(10),
-        attempt_timeout_bytes_per_sec: 100,
-        ..UploaderOptions::default()
-    };
-
-    // size 0 pays the floor only
-    assert_eq!(options.attempt_deadline(0), Duration::from_secs(10));
-    // a partial second of transfer time rounds up
-    assert_eq!(options.attempt_deadline(1), Duration::from_secs(11));
-    // an exact multiple adds size / bytes-per-second seconds
-    assert_eq!(options.attempt_deadline(500), Duration::from_secs(15));
-
-    // production defaults: 120s floor plus one second per 64 KiB
-    let defaults = UploaderOptions::default();
-    assert_eq!(defaults.attempt_deadline(0), Duration::from_secs(120));
-    assert_eq!(
-        defaults.attempt_deadline(64 * 1024),
-        Duration::from_secs(121)
-    );
-
-    // a zero throughput assumption clamps to 1 byte/sec instead of panicking
-    let zero_bps = UploaderOptions {
-        attempt_timeout_floor: Duration::from_secs(10),
-        attempt_timeout_bytes_per_sec: 0,
-        ..UploaderOptions::default()
-    };
-    assert_eq!(zero_bps.attempt_deadline(1_000), Duration::from_secs(1_010));
-}
-
 #[tokio::test]
 async fn processes_enqueued_job() {
     let (mock, mut started_rx) = MockUploadExecutor::new();
@@ -307,54 +274,6 @@ async fn retry_backoff_follows_expected_sequence() {
         Duration::from_secs(4),
     ];
     assert_eq!(*sleeps.lock().unwrap(), expected);
-}
-
-#[tokio::test(start_paused = true)]
-async fn hung_attempt_times_out_and_is_retried() {
-    let (mock, mut started_rx) = MockUploadExecutor::new();
-    let (release_tx, release_rx) = oneshot::channel();
-
-    // the hang is never released: only the attempt deadline can end it
-    mock.push_step(MockStep::Hang(release_rx));
-    mock.push_step(MockStep::Ok);
-
-    // pin the deadline inputs: make_job's 42 bytes yield a 2s deadline,
-    // safely under timed()'s 5s guard
-    let options = UploaderOptions {
-        attempt_timeout_floor: Duration::from_secs(1),
-        attempt_timeout_bytes_per_sec: 64 * 1024,
-        retry: RetryPolicy {
-            backoff: miru_agent::cooldown::Backoff {
-                base_secs: 1,
-                growth_factor: 2,
-                max_secs: 4,
-            },
-            ..RetryPolicy::default()
-        },
-        ..UploaderOptions::default()
-    };
-    // the test clock's instant sleeps leave the attempt deadline as the only
-    // pending timer, so the paused tokio clock auto-advances straight to it;
-    // the chrono test clock then advances past the backoff stamp so the
-    // requeued job becomes eligible deterministically
-    let (uploader, handle, sleeps) = spawn_with_test_clock(mock.clone(), options);
-    let job = make_job("a.log");
-
-    timed(uploader.enqueue(job.clone())).await.unwrap();
-    // first attempt starts and hangs on the never-released oneshot
-    timed(started_rx.recv()).await.unwrap();
-    // the deadline fires in virtual time; the job is stamped with a backoff
-    // deadline, requeued, and retried once the test clock reaches the stamp
-    timed(started_rx.recv()).await.unwrap();
-
-    // the same job was attempted twice: the timeout was treated as a
-    // retryable failure, taking the normal backoff/requeue path
-    assert_eq!(mock.recorded_calls(), vec![job.clone(), job]);
-    assert_eq!(*sleeps.lock().unwrap(), vec![Duration::from_secs(1)]);
-
-    timed(uploader.shutdown()).await.unwrap();
-    timed(handle).await.unwrap();
-    drop(release_tx);
 }
 
 #[tokio::test]

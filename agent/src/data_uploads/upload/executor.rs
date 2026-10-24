@@ -24,12 +24,12 @@ use tracing::info;
 ///
 /// # Cancel safety
 ///
-/// The actor drops an in-progress `upload` future on shutdown or when the attempt
-/// deadline expires, so implementations must tolerate being cancelled at any await
-/// point. An interrupted transfer is re-driven from the persisted queue, which keeps
-/// the entry until the upload is confirmed; duplicate transfers are absorbed by
-/// backend digest dedup. Scanner re-observation does NOT re-drive it — the scanner
-/// ledger records that a file was reported, not that it was uploaded.
+/// The actor drops an in-progress `upload` future on shutdown, so implementations
+/// must tolerate being cancelled at any await point. An interrupted transfer is
+/// re-driven from the persisted queue, which keeps the entry until the upload is
+/// confirmed; duplicate transfers are absorbed by backend digest dedup. Scanner
+/// re-observation does NOT re-drive it — the scanner ledger records that a file
+/// was reported, not that it was uploaded.
 pub trait UploadExecutor: Send + Sync {
     fn upload(&self, job: &Job) -> impl std::future::Future<Output = Result<(), UploadErr>> + Send;
 }
