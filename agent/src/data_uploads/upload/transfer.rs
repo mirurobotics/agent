@@ -202,8 +202,7 @@ mod tests {
     use aws_smithy_types::body::SdkBody;
     use serde_json::{json, Value};
 
-    /// Extracts the transfer layer's typed precondition failure from the single
-    /// `ExecutorErr` surface the actor sees.
+    /// Extracts the transfer layer's typed precondition failure from its `ExecutorErr`.
     fn transfer_err(err: &UploadErr) -> &TransferErr {
         let UploadErr::ExecutorErr(e) = err else {
             panic!("expected ExecutorErr, got: {err:?}");

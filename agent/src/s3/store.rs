@@ -425,8 +425,8 @@ pub(super) mod tests {
     const ACCESS_DENIED_XML: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 <Error><Code>AccessDenied</Code><Message>Access Denied</Message><RequestId>REQ403</RequestId></Error>"#;
 
-    /// Canned 403 AccessDenied response. S3 returns non-404 failures as a modeled
-    /// service error, which the common mapper turns into `RequestFailedErr`.
+    /// Canned 403 AccessDenied response, a modeled service error that the common
+    /// mapper turns into `RequestFailedErr`.
     pub(crate) fn access_denied_resp() -> http::Response<SdkBody> {
         resp_xml(403, ACCESS_DENIED_XML)
     }
