@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 // internal crates
 use backend_api::models::{UploadCredentials, UploadDestination};
 use miru_agent::data_uploads::upload::errors::ExecutorErr;
-use miru_agent::data_uploads::upload::{ObjectTransfer, UploadErr};
+use miru_agent::data_uploads::upload::{ObjectTransfer, UploadCredentialSource, UploadErr};
 use miru_agent::filesys::File;
 
 /// One recorded `transfer` call's arguments.
@@ -52,13 +52,13 @@ impl MockObjectTransfer {
 impl ObjectTransfer for MockObjectTransfer {
     async fn transfer(
         &self,
-        credentials: &UploadCredentials,
+        credentials: &UploadCredentialSource,
         destination: &UploadDestination,
         file: &File,
         metadata: &HashMap<String, String>,
     ) -> Result<(), UploadErr> {
         self.calls.lock().unwrap().push((
-            credentials.clone(),
+            credentials.current(),
             destination.clone(),
             file.clone(),
             metadata.clone(),

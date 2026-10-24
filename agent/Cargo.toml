@@ -12,6 +12,7 @@ many_single_char_names = "warn"
 
 [dependencies]
 atomicwrites = { workspace = true }
+aws-credential-types = { workspace = true }
 aws-sdk-s3 = { workspace = true }
 aws-smithy-http-client = { workspace = true, features = ["rustls-aws-lc"] }
 aws-smithy-runtime-api = { workspace = true, features = ["client"] }

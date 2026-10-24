@@ -1,0 +1,439 @@
+//! Upload credentials kept valid for the whole transfer.
+//!
+//! The backend's upload credentials expire, and a large upload can outlast
+//! them. [`UploadCredentialSource`] re-vends them in the background
+//! (`POST /uploads/{id}/credentials`) [`REFRESH_WINDOW`] before they expire,
+//! and the S3 and GCS stores read the current ones on every request.
+
+// standard crates
+use std::fmt;
+use std::sync::Arc;
+use std::time::Duration;
+
+// internal crates
+use crate::authn::TokenManagerExt;
+use crate::data_uploads::upload::errors::{classified_executor_err, UploadErr};
+use crate::http::{self, ClientI};
+use crate::s3;
+use backend_api::models::upload_credentials::Scheme;
+use backend_api::models::UploadCredentials;
+
+// external crates
+use aws_credential_types::provider::{error::CredentialsError, future, ProvideCredentials};
+use aws_credential_types::Credentials as AwsCredentials;
+use chrono::{DateTime, Utc};
+use tokio::sync::watch;
+use tracing::{info, warn};
+
+/// How long before the credentials expire they are re-vended.
+const REFRESH_WINDOW: Duration = Duration::from_secs(5 * 60);
+
+/// The wait before retrying a refresh that failed, or that returned
+/// credentials already due for one.
+const RETRY_DELAY: Duration = Duration::from_secs(30);
+
+/// One upload's current credentials. Clones share them, and the refresh task
+/// stops once every clone is dropped.
+#[derive(Clone)]
+pub struct UploadCredentialSource {
+    current: watch::Receiver<UploadCredentials>,
+}
+
+impl UploadCredentialSource {
+    /// Starts from `creds` and spawns the task that re-vends them for
+    /// `upload_id` before they expire.
+    pub fn spawn<C: ClientI + 'static, T: TokenManagerExt + 'static>(
+        http_client: Arc<C>,
+        token_mngr: Arc<T>,
+        upload_id: String,
+        creds: UploadCredentials,
+    ) -> Self {
+        let (tx, current) = watch::channel(creds);
+        tokio::spawn(refresh(http_client, token_mngr, upload_id, tx));
+        Self { current }
+    }
+
+    /// Credentials that are never refreshed.
+    #[cfg(test)]
+    pub(crate) fn fixed(creds: UploadCredentials) -> Self {
+        Self {
+            current: watch::channel(creds).1,
+        }
+    }
+
+    /// The credentials to use now.
+    pub fn current(&self) -> UploadCredentials {
+        self.current.borrow().clone()
+    }
+}
+
+/// Leaves the credentials out, so they can't reach logs.
+impl fmt::Debug for UploadCredentialSource {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("UploadCredentialSource")
+    }
+}
+
+/// S3 stores sign every request with the current credentials.
+impl ProvideCredentials for UploadCredentialSource {
+    fn provide_credentials<'a>(&'a self) -> future::ProvideCredentials<'a>
+    where
+        Self: 'a,
+    {
+        let creds = self.current.borrow();
+        let provided = match creds.s3_credentials.as_deref() {
+            Some(s3) => Ok(AwsCredentials::new(
+                &s3.access_key_id,
+                &s3.secret_access_key,
+                Some(s3.session_token.clone()),
+                None,
+                "miru-agent",
+            )),
+            None => Err(CredentialsError::not_loaded("no S3 upload credentials")),
+        };
+        future::ProvideCredentials::ready(provided)
+    }
+}
+
+/// GCS stores send the current token on every request.
+impl s3::gcs::TokenSource for UploadCredentialSource {
+    fn token(&self) -> Option<s3::gcs::Token> {
+        gcs_token(&self.current.borrow())
+    }
+}
+
+/// Re-vends the credentials in `tx` before they expire, until every source
+/// reading them is dropped. A failed refresh keeps the current credentials and
+/// is retried after [`RETRY_DELAY`].
+async fn refresh<C: ClientI, T: TokenManagerExt>(
+    http_client: Arc<C>,
+    token_mngr: Arc<T>,
+    upload_id: String,
+    tx: watch::Sender<UploadCredentials>,
+) {
+    let (scheme, mut wait) = {
+        let creds = tx.borrow();
+        (creds.scheme, until_refresh(&creds))
+    };
+    loop {
+        tokio::select! {
+            biased;
+            _ = tx.closed() => return,
+            _ = tokio::time::sleep(wait) => {}
+        }
+        wait = match vend(http_client.as_ref(), token_mngr.as_ref(), &upload_id).await {
+            Ok(creds) if usable_for(&creds, scheme) => {
+                info!("upload: refreshed the credentials of upload {upload_id}");
+                let wait = until_refresh(&creds);
+                tx.send_replace(creds);
+                wait.max(RETRY_DELAY)
+            }
+            Ok(_) => {
+                warn!("upload: new credentials don't fit upload {upload_id} ({scheme:?})");
+                RETRY_DELAY
+            }
+            Err(e) => {
+                warn!("upload: refreshing the credentials of upload {upload_id} failed: {e}");
+                RETRY_DELAY
+            }
+        };
+    }
+}
+
+/// Vends new credentials for `upload_id`.
+async fn vend<C: ClientI, T: TokenManagerExt>(
+    http_client: &C,
+    token_mngr: &T,
+    upload_id: &str,
+) -> Result<UploadCredentials, UploadErr> {
+    let token = token_mngr
+        .get_token()
+        .await
+        .map_err(classified_executor_err)?;
+    let params = http::uploads::VendCredentialsParams {
+        id: upload_id,
+        token: &token.token,
+    };
+    http::uploads::vend_credentials(http_client, params)
+        .await
+        .map_err(classified_executor_err)
+}
+
+/// How long until `creds` are due for a refresh, [`REFRESH_WINDOW`] before
+/// they expire. Zero once that has passed or if the expiry can't be read.
+fn until_refresh(creds: &UploadCredentials) -> Duration {
+    DateTime::parse_from_rfc3339(&creds.expires_at)
+        .ok()
+        .and_then(|expires_at| expires_at.signed_duration_since(Utc::now()).to_std().ok())
+        .map_or(Duration::ZERO, |left| left.saturating_sub(REFRESH_WINDOW))
+}
+
+/// Whether `creds` can replace credentials of `scheme`: the same scheme, with
+/// credentials its store can send.
+fn usable_for(creds: &UploadCredentials, scheme: Scheme) -> bool {
+    let sendable = match scheme {
+        Scheme::S3 => creds.s3_credentials.is_some(),
+        Scheme::Gcs => gcs_token(creds).is_some(),
+        Scheme::SchemeUnknown => false,
+    };
+    creds.scheme == scheme && sendable
+}
+
+/// The GCS token in `creds`, if there is one that can be sent.
+fn gcs_token(creds: &UploadCredentials) -> Option<s3::gcs::Token> {
+    s3::gcs::Token::new(creds.gcs_credentials.as_deref()?.access_token.clone())
+}
+
+#[cfg(test)]
+mod tests {
+    // standard crates
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    // internal crates
+    use super::*;
+    use crate::s3::gcs::TokenSource;
+    use crate::test_utils::{
+        http_client::{Call, MockClient},
+        upload::token_manager,
+    };
+    use miru_agent::http::errors::{HTTPErr, MockErr};
+
+    // external crates
+    use aws_sdk_s3::config::SharedHttpClient;
+    use aws_smithy_http_client::test_util::{ReplayEvent, StaticReplayClient};
+    use aws_smithy_types::body::SdkBody;
+    use serde_json::json;
+
+    fn s3_creds(access_key_id: &str, expires_at: &str) -> UploadCredentials {
+        serde_json::from_value(json!({
+            "scheme": "s3",
+            "s3_credentials": {
+                "scheme": "s3",
+                "access_key_id": access_key_id,
+                "secret_access_key": "secret",
+                "session_token": "session",
+                "region": "us-east-1",
+                "expires_at": expires_at
+            },
+            "gcs_credentials": null,
+            "expires_at": expires_at
+        }))
+        .unwrap()
+    }
+
+    fn gcs_creds(access_token: &str, expires_at: &str) -> UploadCredentials {
+        serde_json::from_value(json!({
+            "scheme": "gcs",
+            "s3_credentials": null,
+            "gcs_credentials": {
+                "scheme": "gcs",
+                "access_token": access_token,
+                "expires_at": expires_at
+            },
+            "expires_at": expires_at
+        }))
+        .unwrap()
+    }
+
+    fn in_an_hour() -> String {
+        (Utc::now() + chrono::Duration::hours(1)).to_rfc3339()
+    }
+
+    fn access_key_id(source: &UploadCredentialSource) -> String {
+        source.current().s3_credentials.unwrap().access_key_id
+    }
+
+    fn spawn_source(client: &Arc<MockClient>, creds: UploadCredentials) -> UploadCredentialSource {
+        UploadCredentialSource::spawn(client.clone(), token_manager(), "upl_1".into(), creds)
+    }
+
+    fn vends(client: &MockClient) -> usize {
+        client.call_count(Call::VendUploadCredentials)
+    }
+
+    mod refresh {
+        use super::*;
+
+        #[tokio::test(start_paused = true)]
+        async fn refreshes_before_expiry() {
+            let client = Arc::new(MockClient::default());
+            client.set_vend_upload_credentials(|| Ok(s3_creds("NEW", &in_an_hour())));
+            let source = spawn_source(&client, s3_creds("OLD", &in_an_hour()));
+
+            tokio::time::sleep(Duration::from_secs(54 * 60)).await;
+            assert_eq!(access_key_id(&source), "OLD");
+            assert_eq!(vends(&client), 0);
+
+            tokio::time::sleep(Duration::from_secs(2 * 60)).await;
+            assert_eq!(access_key_id(&source), "NEW");
+            let requests = client.requests();
+            assert_eq!(requests.len(), 1);
+            assert_eq!(requests[0].path, "/uploads/upl_1/credentials");
+        }
+
+        #[tokio::test(start_paused = true)]
+        async fn keeps_the_current_credentials_until_a_refresh_succeeds() {
+            // A failed vend, then credentials for the wrong scheme, then good ones.
+            let client = Arc::new(MockClient::default());
+            let attempts = AtomicUsize::new(0);
+            client.set_vend_upload_credentials(move || {
+                let attempt = attempts.fetch_add(1, Ordering::SeqCst);
+                match attempt {
+                    0 => Err(HTTPErr::MockErr(MockErr {
+                        is_network_conn_err: true,
+                    })),
+                    1 => Ok(gcs_creds("gcs-token", &in_an_hour())),
+                    _ => Ok(s3_creds("NEW", &in_an_hour())),
+                }
+            });
+            // Already expired, so the first refresh is due at once.
+            let source = spawn_source(&client, s3_creds("OLD", "2021-01-01T00:00:00Z"));
+
+            let start = tokio::time::Instant::now();
+            for (secs, vended, key) in [(1, 1, "OLD"), (31, 2, "OLD"), (61, 3, "NEW")] {
+                tokio::time::sleep_until(start + Duration::from_secs(secs)).await;
+                assert_eq!(vends(&client), vended, "after {secs}s");
+                assert_eq!(access_key_id(&source), key, "after {secs}s");
+            }
+        }
+
+        #[tokio::test(start_paused = true)]
+        async fn stops_once_every_source_is_dropped() {
+            let client = Arc::new(MockClient::default());
+            client.set_vend_upload_credentials(|| Ok(s3_creds("NEW", &in_an_hour())));
+            let source = spawn_source(&client, s3_creds("OLD", &in_an_hour()));
+            let clone = source.clone();
+            drop(source);
+
+            // The clone keeps the refresh going.
+            tokio::time::sleep(Duration::from_secs(60 * 60)).await;
+            assert_eq!(vends(&client), 1);
+
+            drop(clone);
+            tokio::time::sleep(Duration::from_secs(2 * 60 * 60)).await;
+            assert_eq!(vends(&client), 1);
+        }
+
+        #[test]
+        fn refresh_is_due_before_expiry() {
+            let due = until_refresh(&s3_creds("OLD", &in_an_hour())).as_secs();
+            assert!((54 * 60..=55 * 60).contains(&due), "{due}");
+
+            for expires_at in ["2021-01-01T00:00:00Z", "not a time"] {
+                let due = until_refresh(&s3_creds("OLD", expires_at));
+                assert_eq!(due, Duration::ZERO, "{expires_at}");
+            }
+        }
+
+        #[test]
+        fn only_credentials_the_store_can_send_replace_the_current_ones() {
+            let s3 = s3_creds("NEW", "2099-01-01T00:00:00Z");
+            let gcs = gcs_creds("new", "2099-01-01T00:00:00Z");
+            let unsendable = gcs_creds("bad\ntoken", "2099-01-01T00:00:00Z");
+            let empty = UploadCredentials::default();
+            let unknown = UploadCredentials {
+                scheme: Scheme::SchemeUnknown,
+                ..Default::default()
+            };
+
+            assert!(usable_for(&s3, Scheme::S3));
+            assert!(usable_for(&gcs, Scheme::Gcs));
+            // Another scheme, no credentials, or a token that can't be sent.
+            assert!(!usable_for(&gcs, Scheme::S3));
+            assert!(!usable_for(&empty, Scheme::S3));
+            assert!(!usable_for(&unsendable, Scheme::Gcs));
+            assert!(!usable_for(&unknown, Scheme::SchemeUnknown));
+        }
+    }
+
+    // The stores read the current credentials on every request, so a refresh
+    // is used from the next request on.
+    mod stores {
+        use super::*;
+
+        fn object() -> s3::Object {
+            s3::Object {
+                bucket: "my-bucket".to_string(),
+                key: "logs/a.log".to_string(),
+            }
+        }
+
+        /// A 200 with no body. The request it answers isn't checked.
+        fn ok() -> ReplayEvent {
+            let request = ::http::Request::builder().body(SdkBody::empty()).unwrap();
+            let response = ::http::Response::builder()
+                .status(200)
+                .header("content-length", "0")
+                .body(SdkBody::empty())
+                .unwrap();
+            ReplayEvent::new(request, response)
+        }
+
+        /// Checks `object()` exists twice, with `new` credentials swapped in
+        /// between, and returns each request's `authorization` header.
+        async fn auth_before_and_after(
+            store_for: impl FnOnce(UploadCredentialSource, SharedHttpClient) -> s3::Store,
+            old: UploadCredentials,
+            new: UploadCredentials,
+        ) -> Vec<String> {
+            let (tx, current) = watch::channel(old);
+            let replay = StaticReplayClient::new(vec![ok(), ok()]);
+            let store = store_for(
+                UploadCredentialSource { current },
+                SharedHttpClient::new(replay.clone()),
+            );
+            store.exists(&object()).await.unwrap();
+            tx.send_replace(new);
+            store.exists(&object()).await.unwrap();
+            replay
+                .actual_requests()
+                .map(|r| r.headers().get("authorization").unwrap().to_string())
+                .collect()
+        }
+
+        #[tokio::test]
+        async fn s3_signs_with_the_current_credentials() {
+            let auth = auth_before_and_after(
+                |source, http_client| {
+                    let config = s3::aws::config(source, "us-east-1".into(), http_client, true);
+                    s3::Store::new(s3::Options { config, gcs: false })
+                },
+                s3_creds("OLD", &in_an_hour()),
+                s3_creds("NEW", &in_an_hour()),
+            )
+            .await;
+
+            assert!(auth[0].contains("Credential=OLD/"), "{}", auth[0]);
+            assert!(auth[1].contains("Credential=NEW/"), "{}", auth[1]);
+        }
+
+        #[tokio::test]
+        async fn gcs_sends_the_current_token() {
+            let auth = auth_before_and_after(
+                |source, http_client| {
+                    let config = s3::gcs::config(source, http_client);
+                    s3::Store::new(s3::Options { config, gcs: true })
+                },
+                gcs_creds("old-token", &in_an_hour()),
+                gcs_creds("new-token", &in_an_hour()),
+            )
+            .await;
+
+            assert_eq!(auth, ["Bearer old-token", "Bearer new-token"]);
+        }
+
+        #[tokio::test]
+        async fn each_store_finds_nothing_in_the_other_schemes_credentials() {
+            let gcs = UploadCredentialSource::fixed(gcs_creds("token", &in_an_hour()));
+            assert!(gcs.provide_credentials().await.is_err());
+            let s3 = UploadCredentialSource::fixed(s3_creds("OLD", &in_an_hour()));
+            assert!(s3.token().is_none());
+        }
+
+        #[test]
+        fn debug_leaves_the_credentials_out() {
+            let source = UploadCredentialSource::fixed(s3_creds("AKIA_SECRET", &in_an_hour()));
+            assert_eq!(format!("{source:?}"), "UploadCredentialSource");
+        }
+    }
+}
