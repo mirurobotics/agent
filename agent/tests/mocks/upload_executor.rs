@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 
 // internal crates
 use miru_agent::data_uploads::upload::errors::ExecutorErr;
-use miru_agent::data_uploads::upload::{Job, UploadErr, UploadExecutor};
+use miru_agent::data_uploads::upload::{Checkpoint, Checkpointer, Job, UploadErr, UploadExecutor};
 
 // external crates
 use tokio::sync::{mpsc, oneshot};
@@ -21,6 +21,10 @@ pub enum MockStep {
     /// sender was dropped). The test holds the sender, so it controls when —
     /// and how — the in-flight upload finishes.
     Hang(oneshot::Receiver<Result<(), UploadErr>>),
+    /// Save the checkpoints (each persisted before the next), notify the
+    /// started receiver again once they are all saved, then run the inner
+    /// step.
+    SaveThen(Vec<Checkpoint>, Box<MockStep>),
 }
 
 pub struct MockUploadExecutor {
@@ -55,12 +59,19 @@ impl MockUploadExecutor {
 }
 
 impl UploadExecutor for MockUploadExecutor {
-    async fn upload(&self, job: &Job) -> Result<(), UploadErr> {
+    async fn upload<K: Checkpointer>(&self, job: &Job, checkpointer: &K) -> Result<(), UploadErr> {
         self.calls.lock().unwrap().push(job.clone());
-        let step = self.script.lock().unwrap().pop_front();
+        let mut step = self.script.lock().unwrap().pop_front();
         // both mutex guards above are already dropped: never hold a
         // std::sync::Mutex guard across an await or the future is not Send
         let _ = self.started_tx.send(());
+        while let Some(MockStep::SaveThen(checkpoints, inner)) = step {
+            for checkpoint in checkpoints {
+                checkpointer.save(checkpoint).await;
+            }
+            let _ = self.started_tx.send(());
+            step = Some(*inner);
+        }
         match step {
             None | Some(MockStep::Ok) => Ok(()),
             Some(MockStep::Err) => Err(UploadErr::ExecutorErr(ExecutorErr {
@@ -82,6 +93,7 @@ impl UploadExecutor for MockUploadExecutor {
                 trace: miru_agent::trace!(),
             })),
             Some(MockStep::Hang(rx)) => rx.await.unwrap_or(Ok(())),
+            Some(MockStep::SaveThen(..)) => unreachable!("unwrapped above"),
         }
     }
 }

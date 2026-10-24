@@ -198,6 +198,13 @@ impl MockClient {
         *self.create_upload_fn.lock().unwrap() = Box::new(f);
     }
 
+    pub fn set_vend_upload_credentials<F>(&self, f: F)
+    where
+        F: Fn() -> Result<UploadCredentials, HTTPErr> + Send + Sync + 'static,
+    {
+        *self.vend_upload_credentials_fn.lock().unwrap() = Box::new(f);
+    }
+
     pub fn set_confirm_upload<F>(&self, f: F)
     where
         F: Fn() -> Result<Upload, HTTPErr> + Send + Sync + 'static,

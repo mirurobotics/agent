@@ -12,8 +12,8 @@ use crate::test_utils::{filesys::dirs as test_dirs, upload::make_job};
 use miru_agent::data_uploads::retention::Job as DeleteJob;
 use miru_agent::data_uploads::upload::errors::{EnqueueErr, ExecutorErr};
 use miru_agent::data_uploads::upload::{
-    Job, QueueEntry, QueueSnapshot, QueueSnapshotFile, UploadErr, Uploader, UploaderExt,
-    UploaderOptions,
+    Checkpoint, Job, MultipartState, QueueEntry, QueueSnapshot, QueueSnapshotFile, TransferState,
+    UploadErr, UploadRef, Uploader, UploaderExt, UploaderOptions,
 };
 use miru_agent::errors::Error;
 use miru_agent::filesys::File;
@@ -1112,7 +1112,7 @@ mod durability {
     }
 
     /// Wait until the queue is empty. Releasing a hung attempt and shutting
-    /// down immediately is a race — `run_until_shutdown`'s select is not
+    /// down immediately is a race — `run_attempt`'s select is not
     /// biased, so it may take the shutdown before the completed upload —
     /// and this makes the completion the thing we wait on.
     async fn await_drained(uploader: &Uploader) {
@@ -1210,6 +1210,109 @@ mod durability {
 
         timed(uploader2.shutdown()).await.unwrap();
         timed(handle2).await.unwrap();
+    }
+
+    fn upload_ref() -> UploadRef {
+        UploadRef {
+            id: "upl_1".to_string(),
+            bucket_id: "bkt_1".to_string(),
+            bucket_name: "my-bucket".to_string(),
+            object_key: "logs/a.log".to_string(),
+            metadata: Default::default(),
+            transferred: false,
+        }
+    }
+
+    fn multipart() -> TransferState {
+        TransferState::Multipart(MultipartState {
+            multipart_upload_id: "mpu_1".to_string(),
+            part_size: 8 * 1024 * 1024,
+            size: 42,
+            mtime: DateTime::from_timestamp(1_700_000_000, 0).unwrap(),
+        })
+    }
+
+    /// The jobs currently on disk, read through a fresh handle.
+    async fn jobs_on_disk(path: &File) -> Vec<Job> {
+        open(path)
+            .await
+            .read()
+            .entries
+            .iter()
+            .map(|entry| entry.job.clone())
+            .collect()
+    }
+
+    /// An attempt's checkpoints reach disk while it is still running, so a
+    /// crash mid-transfer keeps the upload and multipart ids, and the next
+    /// process hands them back to the executor.
+    #[tokio::test]
+    async fn checkpoints_reach_disk_mid_attempt_and_survive_a_restart() {
+        let dir = test_dirs::temp("uploader_durability").unwrap();
+        let path = dir.to_dir().file("upload_queue.json");
+        let job = make_job("a.log");
+
+        let (mock, mut started_rx) = MockUploadExecutor::new();
+        let (_release_tx, release_rx) = oneshot::channel();
+        mock.push_step(MockStep::SaveThen(
+            vec![
+                Checkpoint::Created(upload_ref()),
+                Checkpoint::TransferStarted(multipart()),
+            ],
+            Box::new(MockStep::Hang(release_rx)),
+        ));
+        let (uploader, handle) = spawn_persisted(mock.clone(), open(&path).await);
+        timed(uploader.enqueue(job.clone())).await.unwrap();
+
+        let mut expected = job.clone();
+        expected.upload = Some(upload_ref());
+        expected.transfer = Some(multipart());
+        // once when the attempt starts, again once its checkpoints are saved
+        timed(started_rx.recv()).await.unwrap();
+        timed(started_rx.recv()).await.unwrap();
+        assert_eq!(jobs_on_disk(&path).await, vec![expected.clone()]);
+        timed(uploader.shutdown()).await.unwrap();
+        timed(handle).await.unwrap();
+
+        let (mock2, mut started2_rx) = MockUploadExecutor::new();
+        mock2.push_step(MockStep::Ok);
+        let (uploader2, handle2) = spawn_persisted(mock2.clone(), open(&path).await);
+        timed(started2_rx.recv()).await.unwrap();
+        await_drained(&uploader2).await;
+
+        assert_eq!(mock2.recorded_calls(), vec![expected]);
+        assert!(on_disk(&path).await.is_empty());
+
+        timed(uploader2.shutdown()).await.unwrap();
+        timed(handle2).await.unwrap();
+    }
+
+    /// A failed attempt's requeue keeps its checkpoints rather than writing
+    /// back the job as it was before the attempt.
+    #[tokio::test]
+    async fn failed_attempt_requeues_with_its_checkpoints() {
+        let dir = test_dirs::temp("uploader_durability").unwrap();
+        let path = dir.to_dir().file("upload_queue.json");
+        let job = make_job("a.log");
+        let (mock, _started_rx) = MockUploadExecutor::new();
+        mock.push_step(MockStep::SaveThen(
+            vec![Checkpoint::Created(upload_ref())],
+            Box::new(MockStep::Err),
+        ));
+        mock.push_step(MockStep::NetworkErr);
+        mock.push_step(MockStep::Ok);
+        let (uploader, handle, _sleeps) =
+            spawn_persisted_with_test_clock(mock.clone(), open(&path).await);
+
+        timed(uploader.enqueue(job.clone())).await.unwrap();
+        await_drained(&uploader).await;
+
+        let mut expected = job.clone();
+        expected.upload = Some(upload_ref());
+        assert_eq!(mock.recorded_calls(), vec![job, expected.clone(), expected]);
+
+        timed(uploader.shutdown()).await.unwrap();
+        timed(handle).await.unwrap();
     }
 
     #[tokio::test]

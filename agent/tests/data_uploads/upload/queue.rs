@@ -32,6 +32,8 @@ fn upload_job(name: &str) -> Job {
         file_rule_id: "rule_1".to_string(),
         deployment_id: "dpl_1".to_string(),
         retention: None,
+        upload: None,
+        transfer: None,
     }
 }
 
@@ -58,6 +60,8 @@ fn make_job(name: &str) -> Job {
         file_rule_id: "rule_1".to_string(),
         deployment_id: "dpl_1".to_string(),
         retention: None,
+        upload: None,
+        transfer: None,
     }
 }
 

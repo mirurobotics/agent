@@ -1,3 +1,4 @@
+pub mod checkpoint;
 pub mod errors;
 pub mod executor;
 pub mod job;
@@ -7,9 +8,10 @@ pub mod transfer;
 pub mod uploader;
 mod uploader_impl;
 
+pub use self::checkpoint::{ChannelCheckpointer, Checkpointer, NoopCheckpointer};
 pub use self::errors::UploadErr;
 pub use self::executor::{LiveExecutor, UploadExecutor};
-pub use self::job::Job;
+pub use self::job::{Checkpoint, Job, MultipartState, TransferState, UploadRef};
 pub use self::queue::{Queue, QueueEntry, QueueSnapshot, QueueSnapshotFile};
 pub use self::sink::UploadStableFileSink;
 pub use self::transfer::{ObjectTransfer, SdkTransfer};

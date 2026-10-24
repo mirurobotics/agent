@@ -1,5 +1,6 @@
 pub mod backend;
 pub mod calibration_sender;
+pub mod checkpointer;
 pub mod deleter;
 pub mod error;
 pub mod http_client;

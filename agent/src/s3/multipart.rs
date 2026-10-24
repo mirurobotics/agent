@@ -46,23 +46,66 @@ impl Store {
         written.map(|_| ())
     }
 
+    /// Uploads every part of a multipart upload just created with
+    /// [`Self::create_multipart_upload`], then completes it. Never aborts on
+    /// failure, so [`Self::resume_multipart_upload`] can pick the upload up.
+    /// `part_size` must pass [`Self::is_valid_part_size`].
+    pub async fn upload_multipart(
+        &self,
+        src: &mut Source,
+        dst: &Object,
+        upload_id: &str,
+        part_size: u64,
+    ) -> Result<(), S3Err> {
+        let parts = self
+            .upload_parts(
+                src,
+                dst,
+                upload_id,
+                part_size,
+                &std::collections::HashMap::new(),
+            )
+            .await?;
+        self.complete_resumable(dst, upload_id, &parts).await
+    }
+
     /// Resumes an existing multipart upload: lists the parts that already landed
-    /// in S3, uploads only the missing parts, and completes. Never aborts, so a
-    /// resume is safe to retry.
+    /// in S3, uploads only the missing parts, and completes. Never aborts on
+    /// failure, so a resume is safe to retry. `part_size` must be the one the
+    /// upload was started with.
     ///
     /// `NoSuchUploadErr` if S3 no longer knows the upload. The caller must resume
     /// against the same file bytes the upload was started for.
     pub async fn resume_multipart_upload(
         &self,
-        mut src: Source,
+        src: &mut Source,
         dst: &Object,
         upload_id: &str,
+        part_size: u64,
     ) -> Result<(), S3Err> {
         let landed = self.list_parts(dst, upload_id).await?;
-        let parts = self.upload_parts(&mut src, dst, upload_id, &landed).await?;
-        self.complete_multipart_upload(dst, upload_id, &parts)
-            .await
-            .map(|_| ())
+        let parts = self
+            .upload_parts(src, dst, upload_id, part_size, &landed)
+            .await?;
+        self.complete_resumable(dst, upload_id, &parts).await
+    }
+
+    /// Completes a resumable upload. If GCS already holds the object from an
+    /// earlier attempt, this upload was never completed and its parts are
+    /// aborted, as in [`Self::put_multipart`].
+    async fn complete_resumable(
+        &self,
+        dst: &Object,
+        upload_id: &str,
+        parts: &[CompletedPart],
+    ) -> Result<(), S3Err> {
+        let written = self
+            .complete_multipart_upload(dst, upload_id, parts)
+            .await?;
+        if matches!(written, WriteOutcome::AlreadyExists) {
+            let _ = self.abort_multipart_upload(dst, upload_id).await;
+        }
+        Ok(())
     }
 
     /// Walks [`Self::part_plan`] in order. For each part number present in
@@ -73,10 +116,11 @@ impl Store {
         src: &mut Source,
         dst: &Object,
         upload_id: &str,
+        part_size: u64,
         landed: &std::collections::HashMap<i32, CompletedPart>,
     ) -> Result<Vec<CompletedPart>, S3Err> {
         let mut parts: Vec<CompletedPart> = Vec::new();
-        for (part_number, offset, len) in Self::part_plan(src.size) {
+        for (part_number, offset, len) in Self::part_plan(src.size, part_size) {
             let part = match landed.get(&part_number) {
                 Some(existing) => existing.clone(),
                 None => {
@@ -170,12 +214,17 @@ impl Store {
         }
     }
 
+    /// Whether `part_size` can split an object of `size` bytes into a valid
+    /// multipart upload: at least S3's 5 MiB minimum and at most 10,000 parts.
+    /// Guards part sizes read back from disk.
+    pub fn is_valid_part_size(size: u64, part_size: u64) -> bool {
+        part_size >= MIN_PART_SIZE && size.div_ceil(part_size) <= MAX_PARTS
+    }
+
     /// The `(1-based part number, byte offset, byte length)` of each part for an
-    /// object of `size` bytes. Every byte is covered exactly once; the final part
-    /// carries the remainder. Uses [`Self::part_size_for`] to pick the part size,
-    /// so the plan always fits within S3's 10,000-part limit.
-    fn part_plan(size: u64) -> Vec<(i32, u64, u64)> {
-        let part_size = Self::part_size_for(size);
+    /// object of `size` bytes split into `part_size` parts. Every byte is
+    /// covered exactly once; the final part carries the remainder.
+    fn part_plan(size: u64, part_size: u64) -> Vec<(i32, u64, u64)> {
         let mut plan = Vec::new();
         let mut offset: u64 = 0;
         let mut part_number: i32 = 1; // S3 part numbers are 1-based.
@@ -191,7 +240,7 @@ impl Store {
     }
 
     /// Starts a multipart upload and returns its `upload_id`.
-    async fn create_multipart_upload(
+    pub async fn create_multipart_upload(
         &self,
         dst: &Object,
         metadata: &std::collections::HashMap<String, String>,
@@ -224,8 +273,15 @@ impl Store {
         dst: &Object,
         upload_id: &str,
     ) -> Result<WriteOutcome, S3Err> {
+        let part_size = Self::part_size_for(src.size);
         let parts = self
-            .upload_parts(src, dst, upload_id, &std::collections::HashMap::new())
+            .upload_parts(
+                src,
+                dst,
+                upload_id,
+                part_size,
+                &std::collections::HashMap::new(),
+            )
             .await?;
         self.complete_multipart_upload(dst, upload_id, &parts).await
     }
@@ -355,7 +411,7 @@ mod tests {
     fn part_plan_final_part_carries_the_remainder() {
         // A full part plus a small tail: two parts, the last carrying the leftover.
         assert_eq!(
-            Store::part_plan(PART_SIZE + 1024),
+            Store::part_plan(PART_SIZE + 1024, PART_SIZE),
             vec![(1, 0, PART_SIZE), (2, PART_SIZE, 1024)]
         );
     }
@@ -364,7 +420,7 @@ mod tests {
     fn part_plan_exact_multiple_has_no_trailing_zero_part() {
         // An exact multiple of the part size splits evenly with no zero-length tail.
         assert_eq!(
-            Store::part_plan(3 * PART_SIZE),
+            Store::part_plan(3 * PART_SIZE, PART_SIZE),
             vec![
                 (1, 0, PART_SIZE),
                 (2, PART_SIZE, PART_SIZE),
@@ -376,7 +432,10 @@ mod tests {
     #[test]
     fn part_plan_single_full_part() {
         // Exactly one part size yields a single full part.
-        assert_eq!(Store::part_plan(PART_SIZE), vec![(1, 0, PART_SIZE)]);
+        assert_eq!(
+            Store::part_plan(PART_SIZE, PART_SIZE),
+            vec![(1, 0, PART_SIZE)]
+        );
     }
 
     #[test]
@@ -385,7 +444,7 @@ mod tests {
         // must stay within the part limit, be contiguous with ascending 1-based
         // part numbers, and cover every byte exactly once (no gap/overlap).
         let size = PART_SIZE * MAX_PARTS + 1;
-        let plan = Store::part_plan(size);
+        let plan = Store::part_plan(size, Store::part_size_for(size));
 
         assert!(plan.len() as u64 <= MAX_PARTS);
 
@@ -875,7 +934,7 @@ mod tests {
         #[tokio::test]
         async fn resume_skips_landed_parts() {
             let tf = two_part_file().await;
-            let src = source_of(&tf).await;
+            let mut src = source_of(&tf).await;
 
             let (store, replay) = store_with(vec![
                 ReplayEvent::new(
@@ -887,7 +946,7 @@ mod tests {
             ]);
 
             store
-                .resume_multipart_upload(src, &obj("big.bin"), UPLOAD_ID)
+                .resume_multipart_upload(&mut src, &obj("big.bin"), UPLOAD_ID, PART_SIZE)
                 .await
                 .unwrap();
 
@@ -904,7 +963,7 @@ mod tests {
         #[tokio::test]
         async fn resume_expired_upload_maps_to_no_such_upload() {
             let tf = two_part_file().await;
-            let src = source_of(&tf).await;
+            let mut src = source_of(&tf).await;
 
             let (store, replay) = store_with(vec![ReplayEvent::new(
                 list_parts_req(),
@@ -912,7 +971,7 @@ mod tests {
             )]);
 
             let err = store
-                .resume_multipart_upload(src, &obj("big.bin"), UPLOAD_ID)
+                .resume_multipart_upload(&mut src, &obj("big.bin"), UPLOAD_ID, PART_SIZE)
                 .await
                 .unwrap_err();
 
@@ -927,7 +986,7 @@ mod tests {
         #[tokio::test]
         async fn resume_merges_paginated_list_parts() {
             let tf = two_part_file().await;
-            let src = source_of(&tf).await;
+            let mut src = source_of(&tf).await;
 
             let page2_req = req("GET", &list_parts_page2_query());
 
@@ -944,7 +1003,7 @@ mod tests {
             ]);
 
             store
-                .resume_multipart_upload(src, &obj("big.bin"), UPLOAD_ID)
+                .resume_multipart_upload(&mut src, &obj("big.bin"), UPLOAD_ID, PART_SIZE)
                 .await
                 .unwrap();
 
@@ -972,7 +1031,7 @@ mod tests {
             // no abort (or complete) event is queued, so an abort would panic the
             // replay client on an unexpected request.
             let tf = two_part_file().await;
-            let src = source_of(&tf).await;
+            let mut src = source_of(&tf).await;
 
             let (store, replay) = store_with(vec![
                 ReplayEvent::new(
@@ -983,7 +1042,7 @@ mod tests {
             ]);
 
             let err = store
-                .resume_multipart_upload(src, &obj("big.bin"), UPLOAD_ID)
+                .resume_multipart_upload(&mut src, &obj("big.bin"), UPLOAD_ID, PART_SIZE)
                 .await
                 .unwrap_err();
             assert!(matches!(err, S3Err::RequestFailedErr(_)));
@@ -1000,7 +1059,7 @@ mod tests {
             // A valid upload with zero landed parts (empty listing) is NOT a missing
             // upload: every part is uploaded, then complete.
             let tf = two_part_file().await;
-            let src = source_of(&tf).await;
+            let mut src = source_of(&tf).await;
 
             let (store, replay) = store_with(vec![
                 ReplayEvent::new(list_parts_req(), list_parts_resp(&[], None)),
@@ -1010,7 +1069,7 @@ mod tests {
             ]);
 
             store
-                .resume_multipart_upload(src, &obj("big.bin"), UPLOAD_ID)
+                .resume_multipart_upload(&mut src, &obj("big.bin"), UPLOAD_ID, PART_SIZE)
                 .await
                 .unwrap();
 
@@ -1030,7 +1089,7 @@ mod tests {
             // Both parts already landed (single page): nothing is re-uploaded, and
             // the complete manifest carries both landed etags in ascending order.
             let tf = two_part_file().await;
-            let src = source_of(&tf).await;
+            let mut src = source_of(&tf).await;
 
             let (store, replay) = store_with(vec![
                 ReplayEvent::new(
@@ -1047,7 +1106,7 @@ mod tests {
             ]);
 
             store
-                .resume_multipart_upload(src, &obj("big.bin"), UPLOAD_ID)
+                .resume_multipart_upload(&mut src, &obj("big.bin"), UPLOAD_ID, PART_SIZE)
                 .await
                 .unwrap();
 

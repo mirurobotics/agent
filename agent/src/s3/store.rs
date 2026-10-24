@@ -46,6 +46,7 @@ pub struct Source {
     file: File,
     handle: tokio::fs::File,
     pub(super) size: u64,
+    mtime: Option<std::time::SystemTime>,
 }
 
 impl Source {
@@ -63,12 +64,26 @@ impl Source {
                 errors::map_body_io_err("open_source", dst, &file, e)
             }
         })?;
-        let size = handle
+        let meta = handle
             .metadata()
             .await
-            .map_err(|e| errors::map_body_io_err("open_source", dst, &file, e))?
-            .len();
-        Ok(Self { file, handle, size })
+            .map_err(|e| errors::map_body_io_err("open_source", dst, &file, e))?;
+        Ok(Self {
+            file,
+            handle,
+            size: meta.len(),
+            mtime: meta.modified().ok(),
+        })
+    }
+
+    /// The opened file's size in bytes.
+    pub fn size(&self) -> u64 {
+        self.size
+    }
+
+    /// The opened file's modification time, if the platform reports one.
+    pub fn mtime(&self) -> Option<std::time::SystemTime> {
+        self.mtime
     }
 
     /// Reads `[offset..offset+length]` into memory, mapping any seek/read failure

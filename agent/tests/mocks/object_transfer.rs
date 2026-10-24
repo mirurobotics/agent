@@ -5,7 +5,9 @@ use std::sync::{Arc, Mutex};
 // internal crates
 use backend_api::models::{UploadCredentials, UploadDestination};
 use miru_agent::data_uploads::upload::errors::ExecutorErr;
-use miru_agent::data_uploads::upload::{ObjectTransfer, UploadErr};
+use miru_agent::data_uploads::upload::{
+    Checkpoint, Checkpointer, ObjectTransfer, TransferState, UploadErr,
+};
 use miru_agent::filesys::File;
 
 /// One recorded `transfer` call's arguments.
@@ -25,6 +27,8 @@ pub type TransferCall = (
 pub struct MockObjectTransfer {
     script: Arc<Mutex<VecDeque<Result<(), UploadErr>>>>,
     calls: Arc<Mutex<Vec<TransferCall>>>,
+    states: Arc<Mutex<Vec<Option<TransferState>>>>,
+    checkpoints: Arc<Mutex<VecDeque<Vec<Checkpoint>>>>,
 }
 
 impl MockObjectTransfer {
@@ -44,18 +48,31 @@ impl MockObjectTransfer {
             })));
     }
 
+    /// Script the checkpoints the next `transfer` call saves before it
+    /// returns its scripted result.
+    pub fn push_checkpoints(&self, checkpoints: Vec<Checkpoint>) {
+        self.checkpoints.lock().unwrap().push_back(checkpoints);
+    }
+
     pub fn recorded_calls(&self) -> Vec<TransferCall> {
         self.calls.lock().unwrap().clone()
+    }
+
+    /// The `state` each `transfer` call received, in call order.
+    pub fn recorded_states(&self) -> Vec<Option<TransferState>> {
+        self.states.lock().unwrap().clone()
     }
 }
 
 impl ObjectTransfer for MockObjectTransfer {
-    async fn transfer(
+    async fn transfer<K: Checkpointer>(
         &self,
         credentials: &UploadCredentials,
         destination: &UploadDestination,
         file: &File,
         metadata: &HashMap<String, String>,
+        state: Option<&TransferState>,
+        checkpointer: &K,
     ) -> Result<(), UploadErr> {
         self.calls.lock().unwrap().push((
             credentials.clone(),
@@ -63,6 +80,11 @@ impl ObjectTransfer for MockObjectTransfer {
             file.clone(),
             metadata.clone(),
         ));
+        self.states.lock().unwrap().push(state.cloned());
+        let checkpoints = self.checkpoints.lock().unwrap().pop_front();
+        for checkpoint in checkpoints.unwrap_or_default() {
+            checkpointer.save(checkpoint).await;
+        }
         let step = self.script.lock().unwrap().pop_front();
         step.unwrap_or(Ok(()))
     }
