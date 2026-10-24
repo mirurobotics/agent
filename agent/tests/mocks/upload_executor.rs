@@ -5,7 +5,9 @@ use std::sync::{Arc, Mutex};
 // internal crates
 use backend_api::models::UploadCredentials;
 use miru_agent::data_uploads::upload::errors::ExecutorErr;
-use miru_agent::data_uploads::upload::{Job, Prepared, UploadCheckpoint, UploadErr, UploadExecutor};
+use miru_agent::data_uploads::upload::{
+    Job, Prepared, UploadCheckpoint, UploadErr, UploadExecutor,
+};
 
 // external crates
 use tokio::sync::{mpsc, oneshot};
