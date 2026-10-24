@@ -1,7 +1,9 @@
+pub mod aws;
 pub mod errors;
 pub mod gcs;
 pub mod multipart;
 pub mod store;
 
+pub use self::aws::{Config, Credentials};
 pub use self::errors::S3Err;
-pub use self::store::{Config, Credentials, Object, Source, Store};
+pub use self::store::{Object, Source, Store};
