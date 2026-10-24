@@ -161,6 +161,7 @@ mod display {
     fn syncer_in_cooldown_err_display() {
         let err = SyncerInCooldownErr {
             err_streak: 3,
+            remaining_cooldown: std::time::Duration::from_secs(60),
             cooldown_ends_at: chrono::Utc::now() + chrono::TimeDelta::seconds(60),
             trace: miru_agent::trace!(),
         };
