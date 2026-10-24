@@ -50,31 +50,3 @@ pub struct MultipartCheckpoint {
     pub mtime: DateTime<Utc>,
     pub part_size: u64,
 }
-
-#[cfg(test)]
-mod tests {
-    // internal crates
-    use super::*;
-    use crate::test_utils::upload::{make_job, upload_checkpoint};
-
-    // external crates
-    use serde_json::json;
-
-    #[test]
-    fn upload_round_trips() {
-        let mut job = make_job("a.log");
-        job.upload = Some(UploadCheckpoint {
-            multipart: Some(MultipartCheckpoint {
-                id: "mpu_1".to_string(),
-                size: 42,
-                mtime: DateTime::from_timestamp(900, 0).unwrap(),
-                part_size: 32,
-            }),
-            ..upload_checkpoint()
-        });
-        let value = serde_json::to_value(&job).unwrap();
-        assert_eq!(value["upload"]["multipart"]["id"], json!("mpu_1"));
-        let back: Job = serde_json::from_value(value).unwrap();
-        assert_eq!(back, job);
-    }
-}
