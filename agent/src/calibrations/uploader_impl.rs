@@ -217,7 +217,9 @@ where
     /// Move report `id` to the tail, due again in `wait_secs`.
     async fn retry_after(&mut self, id: Uuid, attempts: u32, wait_secs: i64) {
         let next_attempt_at = (self.now_fn)() + TimeDelta::seconds(wait_secs.max(0));
-        self.queue.retry(id, attempts, next_attempt_at).await;
+        // The wait tally is only read by the data uploader; leave it at zero
+        // so the calibration queue's saved format doesn't change.
+        self.queue.retry(id, attempts, next_attempt_at, 0).await;
     }
 
     /// Dequeue report `id`, then delete its file. The entry goes first, so a
@@ -552,6 +554,7 @@ mod tests {
             job: report("a").metadata,
             attempts: 0,
             next_attempt_at: None,
+            waited_secs: 0,
         };
         assert_eq!(f.queued_on_disk().await, [entry]);
         let data = files::read_string(&f.report_file(id)).await.unwrap();
@@ -634,7 +637,7 @@ mod tests {
         // a deadline a clock jump left far beyond the 1 h cap
         let mut queue = Queue::from_snapshot(1000, f.snapshot_file().await, Persistence::Durable);
         let far = received_at() + TimeDelta::days(30);
-        assert!(queue.retry(ids[0], 1, far).await);
+        assert!(queue.retry(ids[0], 1, far, 0).await);
         let mut u = f.uploader().await;
 
         assert_backoff(&mut u, 3600).await;
@@ -715,6 +718,7 @@ mod tests {
             job: report("a").metadata,
             attempts: 0,
             next_attempt_at: None,
+            waited_secs: 0,
         };
         // a directory where the report file should be can't be deleted as a file
         files::delete(&f.report_file(ids[0])).await.unwrap();
