@@ -17,8 +17,8 @@
 //!   `BadDigest`).
 //!
 //! These rely on how GCS treats aws-sdk-s3's requests, which Google doesn't
-//! document. The tests below pin the requests we send, and an aws-sdk-s3 bump
-//! needs checking against real GCS before it ships (ENG-1672).
+//! document. The tests below pin the requests we send, and CI checks real GCS
+//! with `agent/tests/s3/gcs.rs`.
 
 // internal crates
 use crate::errors::HTTPCode;
@@ -63,8 +63,9 @@ impl Token {
     }
 }
 
-/// The SDK config for a GCS [`Store`](crate::s3::Store).
-pub(crate) fn config(token: Token, http_client: SharedHttpClient) -> aws_sdk_s3::Config {
+/// The SDK config for a GCS [`Store`](crate::s3::Store). Public so the
+/// real-GCS test (`agent/tests/s3/gcs.rs`) uses this exact config.
+pub fn config(token: Token, http_client: SharedHttpClient) -> aws_sdk_s3::Config {
     sdk::base_config(http_client)
         .endpoint_url(ENDPOINT)
         .region(Region::new("auto"))
@@ -80,7 +81,7 @@ pub(crate) fn config(token: Token, http_client: SharedHttpClient) -> aws_sdk_s3:
 }
 
 /// Base64 MD5 of `bytes`, for the `Content-MD5` header.
-pub(crate) fn content_md5(bytes: &[u8]) -> String {
+pub fn content_md5(bytes: &[u8]) -> String {
     base64::engine::general_purpose::STANDARD.encode(Md5::digest(bytes))
 }
 

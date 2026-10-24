@@ -47,6 +47,12 @@ jobs:
   ci:
     needs: check-main
     if: needs.check-main.outputs.on_main == 'true'
+    # A called workflow gets at most these. ci.yml's test job needs id-token
+    # for its real-GCS tests.
+    permissions:
+      contents: read
+      pull-requests: read
+      id-token: write
     uses: ./.github/workflows/ci.yml
 
   # Build the Windows release binary natively and hand it, unsigned, to windows-sign.
