@@ -35,16 +35,11 @@ pub(super) fn upload_timeout(len: u64) -> Duration {
     CALL_TIMEOUT + Duration::from_secs(len.div_ceil(MIN_UPLOAD_BYTES_PER_SEC))
 }
 
-/// Config override that sets one call's time limit.
+/// Config override that sets one call's time limit. The SDK lays it over the
+/// client's config, so all other settings, the connect timeout included, stay.
 pub(super) fn timeout(limit: Duration) -> aws_sdk_s3::config::Builder {
-    aws_sdk_s3::Config::builder().timeout_config(timeout_config(limit))
-}
-
-fn timeout_config(limit: Duration) -> TimeoutConfig {
-    TimeoutConfig::builder()
-        .connect_timeout(CONNECT_TIMEOUT)
-        .operation_timeout(limit)
-        .build()
+    let timeouts = TimeoutConfig::builder().operation_timeout(limit).build();
+    aws_sdk_s3::Config::builder().timeout_config(timeouts)
 }
 
 /// One HTTPS client for every store built from it, so uploads reuse pooled
@@ -65,10 +60,14 @@ pub fn http_client() -> SharedHttpClient {
 
 /// The SDK config builder every store starts from.
 pub(super) fn base_config(http_client: SharedHttpClient) -> aws_sdk_s3::config::Builder {
+    let timeouts = TimeoutConfig::builder()
+        .connect_timeout(CONNECT_TIMEOUT)
+        .operation_timeout(CALL_TIMEOUT)
+        .build();
     aws_sdk_s3::Config::builder()
         .behavior_version(BehaviorVersion::latest())
         .http_client(http_client)
-        .timeout_config(timeout_config(CALL_TIMEOUT))
+        .timeout_config(timeouts)
         .stalled_stream_protection(
             StalledStreamProtectionConfig::enabled()
                 .grace_period(STALL_GRACE)
