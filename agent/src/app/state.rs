@@ -5,6 +5,7 @@ use std::sync::Arc;
 // internal crates
 use crate::authn::{self, token_mngr::TokenFile, TokenManagerExt};
 use crate::calibrations;
+use crate::clock;
 use crate::cooldown;
 use crate::data_uploads::{
     retention::{self, DeleterExt},
@@ -37,6 +38,10 @@ pub struct AppState {
     pub token_mngr: Arc<authn::TokenManager>,
     pub event_hub: events::EventHub,
     pub calibration_uploader: Arc<calibrations::Uploader>,
+    /// How long the agent has run, across restarts. Clone it for any part
+    /// of the agent that needs it.
+    pub uptime: clock::Uptime,
+    uptime_saver: clock::UptimeSaverHandle,
 }
 
 impl AppState {
@@ -49,12 +54,13 @@ impl AppState {
         // storage layout stuff
         let auth_files = setup_auth_files(layout).await?;
 
-        // get the device id
-        let device_id = disk::resolve_device_id(layout).await?;
-
         // initialize storage
+        let device_id = disk::resolve_device_id(layout).await?;
         let (stor, storage_handle) = disk::Storage::init(layout, capacities, device_id).await?;
         let storage = Arc::new(stor);
+
+        // load the uptime and start saving it
+        let (uptime, uptime_saver, uptime_handle) = init_uptime(layout, http_client.clock()).await;
 
         // initialize the token manager
         let (token_mngr, token_mngr_handle) =
@@ -65,16 +71,14 @@ impl AppState {
             events::EventHub::spawn(layout.events_log_file(), Default::default()).await?;
 
         // initialize the syncer
-        let syncer_args = build_syncer_args(
+        let (syncer, syncer_handle) = Self::init_syncer(build_syncer_args(
             storage.clone(),
             http_client.clone(),
             token_mngr.clone(),
             dpl_retry_policy,
             event_hub.clone(),
             layout.system_metadata(),
-        );
-        let (syncer, syncer_handle) = sync::Syncer::spawn(64, syncer_args)?;
-        let syncer = Arc::new(syncer);
+        ))?;
 
         // initialize the data upload pipeline (deleter, uploader, scanner)
         let (deleter, uploader, scanner, [scanner_handle, deleter_handle, uploader_handle]) =
@@ -93,6 +97,7 @@ impl AppState {
                 deleter_handle,
                 uploader_handle,
                 calibration_uploader_handle,
+                uptime_handle,
             ];
             futures::future::join(futures::future::join_all(handles), storage_handle).await;
         };
@@ -108,6 +113,8 @@ impl AppState {
                 token_mngr,
                 event_hub,
                 calibration_uploader,
+                uptime,
+                uptime_saver,
             },
             shutdown_handle,
         ))
@@ -125,6 +132,13 @@ impl AppState {
             auth_files.public_key,
         )?;
         Ok((Arc::new(token_mngr), handle))
+    }
+
+    fn init_syncer(
+        args: SyncerArgs<http::Client, authn::TokenManager>,
+    ) -> Result<(Arc<sync::Syncer>, tokio::task::JoinHandle<()>), server::ServerErr> {
+        let (syncer, handle) = sync::Syncer::spawn(64, args)?;
+        Ok((Arc::new(syncer), handle))
     }
 
     /// The deleter and uploader are initialized before the scanner: the
@@ -350,11 +364,41 @@ impl AppState {
             first_err.get_or_insert(e.into());
         }
 
+        // save the uptime last, after everything that reads it has stopped
+        self.uptime_saver.shutdown().await;
+
         match first_err {
             Some(e) => Err(e),
             None => Ok(()),
         }
     }
+}
+
+/// Load the saved uptime and spawn its saver. A file error degrades to
+/// counting uptime from zero on each start (fail-open): deadlines on it run
+/// late, never early.
+async fn init_uptime(
+    layout: &disk::Layout,
+    clock: &clock::Clock,
+) -> (
+    clock::Uptime,
+    clock::UptimeSaverHandle,
+    tokio::task::JoinHandle<()>,
+) {
+    let file = match clock::UptimeFile::new_with_default(layout.uptime(), Default::default()).await
+    {
+        Ok(file) => Some(file),
+        Err(e) => {
+            tracing::error!(
+                "failed to initialize uptime file; uptime will count from zero after each restart: {e}"
+            );
+            None
+        }
+    };
+    let saver = clock::UptimeSaver::new(clock.clone(), file);
+    let uptime = saver.uptime();
+    let (handle, join) = saver.spawn();
+    (uptime, handle, join)
 }
 
 /// The files the token manager signs and stores tokens with.
