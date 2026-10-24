@@ -1,6 +1,10 @@
 // internal crates
-use crate::s3::store::{WriteOutcome, PART_SIZE};
-use crate::s3::{errors, errors::NoSuchUploadErr, Object, S3Err, Source, Store};
+use crate::s3::{
+    errors,
+    errors::NoSuchUploadErr,
+    store::{WriteOutcome, PART_SIZE},
+    Object, S3Err, Source, Store,
+};
 
 // external crates
 use aws_sdk_s3::operation::list_parts::ListPartsOutput;
