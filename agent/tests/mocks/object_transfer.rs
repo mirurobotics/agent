@@ -1,34 +1,26 @@
 // standard crates
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 // internal crates
-use backend_api::models::{UploadCredentials, UploadDestination};
+use backend_api::models::UploadCredentials;
 use miru_agent::data_uploads::upload::errors::ExecutorErr;
-use miru_agent::data_uploads::upload::{
-    Checkpoint, Checkpointer, ObjectTransfer, TransferState, UploadErr,
-};
+use miru_agent::data_uploads::upload::{Checkpointer, ObjectTransfer, UploadErr, UploadRef};
 use miru_agent::filesys::File;
 
 /// One recorded `transfer` call's arguments.
-pub type TransferCall = (
-    UploadCredentials,
-    UploadDestination,
-    File,
-    HashMap<String, String>,
-);
+pub type TransferCall = (UploadCredentials, UploadRef, File);
 
-/// Scripted [`ObjectTransfer`] test double. Each `transfer` call pops the next
-/// scripted result (an empty script defaults to `Ok`) and records the call's
-/// arguments. Clones share the script and the recorded calls, so a test keeps
-/// one clone for assertions after moving the other into a `LiveExecutor`
-/// (which owns its transfer).
+/// Scripted [`ObjectTransfer`] test double. Each `transfer` call saves the next
+/// scripted upload, if any, pops the next scripted result (an empty script
+/// defaults to `Ok`) and records the call's arguments. Clones share the scripts
+/// and the recorded calls, so a test keeps one clone for assertions after
+/// moving the other into a `LiveExecutor` (which owns its transfer).
 #[derive(Clone, Default)]
 pub struct MockObjectTransfer {
     script: Arc<Mutex<VecDeque<Result<(), UploadErr>>>>,
+    saves: Arc<Mutex<VecDeque<UploadRef>>>,
     calls: Arc<Mutex<Vec<TransferCall>>>,
-    states: Arc<Mutex<Vec<Option<TransferState>>>>,
-    checkpoints: Arc<Mutex<VecDeque<Vec<Checkpoint>>>>,
 }
 
 impl MockObjectTransfer {
@@ -48,19 +40,14 @@ impl MockObjectTransfer {
             })));
     }
 
-    /// Script the checkpoints the next `transfer` call saves before it
-    /// returns its scripted result.
-    pub fn push_checkpoints(&self, checkpoints: Vec<Checkpoint>) {
-        self.checkpoints.lock().unwrap().push_back(checkpoints);
+    /// Script an upload for the next `transfer` call to save, as a transfer
+    /// that starts a multipart upload does.
+    pub fn push_save(&self, upload: UploadRef) {
+        self.saves.lock().unwrap().push_back(upload);
     }
 
     pub fn recorded_calls(&self) -> Vec<TransferCall> {
         self.calls.lock().unwrap().clone()
-    }
-
-    /// The `state` each `transfer` call received, in call order.
-    pub fn recorded_states(&self) -> Vec<Option<TransferState>> {
-        self.states.lock().unwrap().clone()
     }
 }
 
@@ -68,22 +55,17 @@ impl ObjectTransfer for MockObjectTransfer {
     async fn transfer<K: Checkpointer>(
         &self,
         credentials: &UploadCredentials,
-        destination: &UploadDestination,
+        upload: &UploadRef,
         file: &File,
-        metadata: &HashMap<String, String>,
-        state: Option<&TransferState>,
         checkpointer: &K,
     ) -> Result<(), UploadErr> {
-        self.calls.lock().unwrap().push((
-            credentials.clone(),
-            destination.clone(),
-            file.clone(),
-            metadata.clone(),
-        ));
-        self.states.lock().unwrap().push(state.cloned());
-        let checkpoints = self.checkpoints.lock().unwrap().pop_front();
-        for checkpoint in checkpoints.unwrap_or_default() {
-            checkpointer.save(checkpoint).await;
+        self.calls
+            .lock()
+            .unwrap()
+            .push((credentials.clone(), upload.clone(), file.clone()));
+        let save = self.saves.lock().unwrap().pop_front();
+        if let Some(save) = save {
+            checkpointer.save(&save).await;
         }
         let step = self.script.lock().unwrap().pop_front();
         step.unwrap_or(Ok(()))

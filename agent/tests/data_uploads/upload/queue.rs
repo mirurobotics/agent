@@ -33,7 +33,6 @@ fn upload_job(name: &str) -> Job {
         deployment_id: "dpl_1".to_string(),
         retention: None,
         upload: None,
-        transfer: None,
     }
 }
 
@@ -61,7 +60,6 @@ fn make_job(name: &str) -> Job {
         deployment_id: "dpl_1".to_string(),
         retention: None,
         upload: None,
-        transfer: None,
     }
 }
 

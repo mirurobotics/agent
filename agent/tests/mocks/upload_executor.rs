@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 
 // internal crates
 use miru_agent::data_uploads::upload::errors::ExecutorErr;
-use miru_agent::data_uploads::upload::{Checkpoint, Checkpointer, Job, UploadErr, UploadExecutor};
+use miru_agent::data_uploads::upload::{Checkpointer, Job, UploadErr, UploadExecutor, UploadRef};
 
 // external crates
 use tokio::sync::{mpsc, oneshot};
@@ -21,10 +21,9 @@ pub enum MockStep {
     /// sender was dropped). The test holds the sender, so it controls when —
     /// and how — the in-flight upload finishes.
     Hang(oneshot::Receiver<Result<(), UploadErr>>),
-    /// Save the checkpoints (each persisted before the next), notify the
-    /// started receiver again once they are all saved, then run the inner
-    /// step.
-    SaveThen(Vec<Checkpoint>, Box<MockStep>),
+    /// Save the upload, notify the started receiver again once it is saved,
+    /// then run the inner step.
+    SaveThen(UploadRef, Box<MockStep>),
 }
 
 pub struct MockUploadExecutor {
@@ -65,10 +64,8 @@ impl UploadExecutor for MockUploadExecutor {
         // both mutex guards above are already dropped: never hold a
         // std::sync::Mutex guard across an await or the future is not Send
         let _ = self.started_tx.send(());
-        while let Some(MockStep::SaveThen(checkpoints, inner)) = step {
-            for checkpoint in checkpoints {
-                checkpointer.save(checkpoint).await;
-            }
+        while let Some(MockStep::SaveThen(upload, inner)) = step {
+            checkpointer.save(&upload).await;
             let _ = self.started_tx.send(());
             step = Some(*inner);
         }

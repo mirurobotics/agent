@@ -7,10 +7,9 @@ use std::time::Duration;
 use crate::data_uploads::{
     retention::{DeleterExt, Job as DeleteJob},
     upload::{
-        checkpoint::Checkpointer,
         errors::*,
-        executor::UploadExecutor,
-        job::{Checkpoint, Job},
+        executor::{Checkpointer, UploadExecutor},
+        job::{Job, UploadRef},
         queue::{Queue, QueueEntry, QueueSnapshotFile},
     },
 };
@@ -125,8 +124,8 @@ where
     /// Build one executor attempt on `entry`, bounded by its size-scaled
     /// deadline. The future is built from clones so it borrows nothing from
     /// `self`, leaving the worker free to serve commands while it runs. The
-    /// attempt reports its checkpoints through `checkpointer`; the worker
-    /// hands them to [`Self::save_checkpoint`].
+    /// attempt saves its upload through `checkpointer`; the worker hands each
+    /// save to [`Self::save_upload`].
     pub(crate) fn attempt<K: Checkpointer + 'static>(
         &self,
         entry: &QueueEntry,
@@ -149,12 +148,12 @@ where
         }
     }
 
-    /// Apply an in-flight attempt's `checkpoint` to its queued job and
-    /// persist it, so the next attempt (or process) continues from it.
-    pub(crate) async fn save_checkpoint(&mut self, entry: &QueueEntry, checkpoint: Checkpoint) {
-        debug!("upload: checkpoint for {}: {checkpoint:?}", entry.job.file);
+    /// Save an in-flight attempt's `upload` on its queued job, so the next
+    /// attempt (or process) continues from it.
+    pub(crate) async fn save_upload(&mut self, entry: &QueueEntry, upload: UploadRef) {
+        debug!("upload: saving upload for {}: {upload:?}", entry.job.file);
         self.queue
-            .update_job(entry.id, |job| job.apply(checkpoint))
+            .update_job(entry.id, |job| job.upload = Some(upload))
             .await;
     }
 

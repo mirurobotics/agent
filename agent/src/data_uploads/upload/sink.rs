@@ -52,7 +52,6 @@ impl StableFileSink for UploadStableFileSink {
                 deployment_id: file.deployment_id,
                 retention: rule.retention.clone(),
                 upload: None,
-                transfer: None,
             };
 
             if let Err(e) = self.uploader.enqueue(job).await {

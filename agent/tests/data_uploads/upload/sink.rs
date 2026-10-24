@@ -140,7 +140,6 @@ async fn stable_file_becomes_upload_job() {
         deployment_id: stable.deployment_id,
         retention: rule.retention,
         upload: None,
-        transfer: None,
     };
     assert_eq!(expected, jobs[0]);
 

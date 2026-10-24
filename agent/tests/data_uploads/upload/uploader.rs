@@ -8,12 +8,15 @@ use crate::mocks::{
     deleter::{MockDeleter, MockStep as DeleterStep},
     upload_executor::{MockStep, MockUploadExecutor},
 };
-use crate::test_utils::{filesys::dirs as test_dirs, upload::make_job};
+use crate::test_utils::{
+    filesys::dirs as test_dirs,
+    upload::{make_job, upload_ref},
+};
 use miru_agent::data_uploads::retention::Job as DeleteJob;
 use miru_agent::data_uploads::upload::errors::{EnqueueErr, ExecutorErr};
 use miru_agent::data_uploads::upload::{
-    Checkpoint, Job, MultipartState, QueueEntry, QueueSnapshot, QueueSnapshotFile, TransferState,
-    UploadErr, UploadRef, Uploader, UploaderExt, UploaderOptions,
+    Job, QueueEntry, QueueSnapshot, QueueSnapshotFile, TransferState, UploadErr, UploadRef,
+    Uploader, UploaderExt, UploaderOptions,
 };
 use miru_agent::errors::Error;
 use miru_agent::filesys::File;
@@ -1112,7 +1115,7 @@ mod durability {
     }
 
     /// Wait until the queue is empty. Releasing a hung attempt and shutting
-    /// down immediately is a race — `run_attempt`'s select is not
+    /// down immediately is a race — `run_until_shutdown`'s select is not
     /// biased, so it may take the shutdown before the completed upload —
     /// and this makes the completion the thing we wait on.
     async fn await_drained(uploader: &Uploader) {
@@ -1212,24 +1215,17 @@ mod durability {
         timed(handle2).await.unwrap();
     }
 
-    fn upload_ref() -> UploadRef {
+    /// The upload an attempt saves mid-transfer.
+    fn upload_mid_transfer() -> UploadRef {
         UploadRef {
-            id: "upl_1".to_string(),
-            bucket_id: "bkt_1".to_string(),
-            bucket_name: "my-bucket".to_string(),
-            object_key: "logs/a.log".to_string(),
-            metadata: Default::default(),
-            transferred: false,
+            transfer: Some(TransferState {
+                multipart_upload_id: "mpu_1".to_string(),
+                part_size: 8 * 1024 * 1024,
+                size: 42,
+                mtime: DateTime::from_timestamp(1_700_000_000, 0).unwrap(),
+            }),
+            ..upload_ref()
         }
-    }
-
-    fn multipart() -> TransferState {
-        TransferState::Multipart(MultipartState {
-            multipart_upload_id: "mpu_1".to_string(),
-            part_size: 8 * 1024 * 1024,
-            size: 42,
-            mtime: DateTime::from_timestamp(1_700_000_000, 0).unwrap(),
-        })
     }
 
     /// The jobs currently on disk, read through a fresh handle.
@@ -1243,11 +1239,11 @@ mod durability {
             .collect()
     }
 
-    /// An attempt's checkpoints reach disk while it is still running, so a
-    /// crash mid-transfer keeps the upload and multipart ids, and the next
-    /// process hands them back to the executor.
+    /// An attempt's saved upload reaches disk while the attempt is still
+    /// running, so a crash mid-transfer keeps the upload and multipart ids, and
+    /// the next process hands them back to the executor.
     #[tokio::test]
-    async fn checkpoints_reach_disk_mid_attempt_and_survive_a_restart() {
+    async fn saved_upload_reaches_disk_mid_attempt_and_survives_a_restart() {
         let dir = test_dirs::temp("uploader_durability").unwrap();
         let path = dir.to_dir().file("upload_queue.json");
         let job = make_job("a.log");
@@ -1255,19 +1251,15 @@ mod durability {
         let (mock, mut started_rx) = MockUploadExecutor::new();
         let (_release_tx, release_rx) = oneshot::channel();
         mock.push_step(MockStep::SaveThen(
-            vec![
-                Checkpoint::Created(upload_ref()),
-                Checkpoint::TransferStarted(multipart()),
-            ],
+            upload_mid_transfer(),
             Box::new(MockStep::Hang(release_rx)),
         ));
         let (uploader, handle) = spawn_persisted(mock.clone(), open(&path).await);
         timed(uploader.enqueue(job.clone())).await.unwrap();
 
         let mut expected = job.clone();
-        expected.upload = Some(upload_ref());
-        expected.transfer = Some(multipart());
-        // once when the attempt starts, again once its checkpoints are saved
+        expected.upload = Some(upload_mid_transfer());
+        // once when the attempt starts, again once its upload is saved
         timed(started_rx.recv()).await.unwrap();
         timed(started_rx.recv()).await.unwrap();
         assert_eq!(jobs_on_disk(&path).await, vec![expected.clone()]);
@@ -1287,18 +1279,15 @@ mod durability {
         timed(handle2).await.unwrap();
     }
 
-    /// A failed attempt's requeue keeps its checkpoints rather than writing
+    /// A failed attempt's requeue keeps its saved upload rather than writing
     /// back the job as it was before the attempt.
     #[tokio::test]
-    async fn failed_attempt_requeues_with_its_checkpoints() {
+    async fn failed_attempt_requeues_with_its_saved_upload() {
         let dir = test_dirs::temp("uploader_durability").unwrap();
         let path = dir.to_dir().file("upload_queue.json");
         let job = make_job("a.log");
         let (mock, _started_rx) = MockUploadExecutor::new();
-        mock.push_step(MockStep::SaveThen(
-            vec![Checkpoint::Created(upload_ref())],
-            Box::new(MockStep::Err),
-        ));
+        mock.push_step(MockStep::SaveThen(upload_ref(), Box::new(MockStep::Err)));
         mock.push_step(MockStep::NetworkErr);
         mock.push_step(MockStep::Ok);
         let (uploader, handle, _sleeps) =
