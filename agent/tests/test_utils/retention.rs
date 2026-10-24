@@ -26,5 +26,6 @@ pub async fn undeletable_dir_job(dir: &Dir, observed_at: DateTime<Utc>) -> Job {
         file_rule_id: "rule_1".to_string(),
         deployment_id: "dpl_1".to_string(),
         uptime_due_secs: None,
+        server_due_at: None,
     }
 }

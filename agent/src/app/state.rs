@@ -149,7 +149,8 @@ impl AppState {
         token_mngr: &Arc<authn::TokenManager>,
         uptime: &clock::Uptime,
     ) -> Result<DataUploadActors, server::ServerErr> {
-        let (deleter, deleter_handle) = Self::init_deleter(layout, uptime.clone()).await?;
+        let (deleter, deleter_handle) =
+            Self::init_deleter(layout, http_client.clock().clone(), uptime.clone()).await?;
         let (uploader, uploader_handle) =
             Self::init_uploader(layout, http_client, token_mngr.clone(), deleter.clone()).await?;
 
@@ -205,6 +206,7 @@ impl AppState {
     /// (`Deleter::spawn` cannot fail today).
     async fn init_deleter(
         layout: &disk::Layout,
+        clock: clock::Clock,
         uptime: clock::Uptime,
     ) -> Result<(Arc<retention::Deleter>, tokio::task::JoinHandle<()>), server::ServerErr> {
         let snapshot_file = match retention::DeleteQueueSnapshotFile::new_with_default(
@@ -223,6 +225,7 @@ impl AppState {
         };
 
         let args = retention::DeleterArgs {
+            clock,
             uptime,
             snapshot_file,
             ..retention::DeleterArgs::default()

@@ -34,6 +34,7 @@ fn make_job(name: &str, observed_secs: i64, ttl_secs: u64) -> Job {
         // the queue compares deadlines as given, so the test's "uptime" here
         // is the observed time plus the TTL
         uptime_due_secs: Some(observed_secs as u64 + ttl_secs),
+        server_due_at: None,
     }
 }
 
@@ -137,12 +138,16 @@ mod wire {
         );
     }
 
-    /// The uptime deadline rides as a plain optional key, omitted when unset.
+    /// Both deadlines ride as plain optional keys, omitted when unset.
     #[test]
-    fn uptime_deadline_round_trips_and_is_omitted_when_unset() {
-        let job = make_job("a.log", 1000, 500);
+    fn deadlines_round_trip_and_are_omitted_when_unset() {
+        let job = Job {
+            server_due_at: Some(DateTime::from_timestamp(1500, 0).unwrap()),
+            ..make_job("a.log", 1000, 500)
+        };
         let value = serde_json::to_value(&job).unwrap();
         assert_eq!(value["uptime_due_secs"], 1500);
+        assert_eq!(value["server_due_at"], "1970-01-01T00:25:00Z");
         assert_eq!(serde_json::from_value::<Job>(value).unwrap(), job);
 
         let unset = Job {
@@ -151,5 +156,6 @@ mod wire {
         };
         let value = serde_json::to_value(unset).unwrap();
         assert!(value.get("uptime_due_secs").is_none());
+        assert!(value.get("server_due_at").is_none());
     }
 }

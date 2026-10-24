@@ -21,6 +21,8 @@ const DEFAULT_QUEUE_CAPACITY: usize = 4096;
 const DEFAULT_ATTEMPTS: u32 = 10;
 
 pub struct DeleterArgs {
+    /// Gives each job a deadline in server time when the agent knows it.
+    pub clock: Clock,
     /// The agent's uptime, on which every TTL runs. `AppState` saves it, so
     /// uptime deadlines survive a restart.
     pub uptime: Uptime,
@@ -32,8 +34,10 @@ pub struct DeleterArgs {
 
 impl Default for DeleterArgs {
     fn default() -> Self {
+        let clock = Clock::new();
         Self {
-            uptime: Uptime::new(Clock::new(), Duration::ZERO),
+            uptime: Uptime::new(clock.clone(), Duration::ZERO),
+            clock,
             queue_capacity: DEFAULT_QUEUE_CAPACITY,
             snapshot_file: None,
             attempts: DEFAULT_ATTEMPTS,
@@ -46,12 +50,14 @@ impl Default for DeleterArgs {
     }
 }
 
-/// Deletes each queued file once its TTL has run out on the agent's
-/// [`Uptime`]. Uptime never runs ahead of real time, so a file is never
-/// deleted early, whatever the robot's system clock says. Retry backoff is
-/// counted on uptime too.
+/// Deletes each queued file once its TTL has run out. Every job has a
+/// deadline on the agent's [`Uptime`], and one in server time if the agent
+/// knew server time at enqueue. The file is deleted when either has passed:
+/// neither is reached before the TTL has really run out, and the robot's
+/// system clock decides neither. Retry backoff is counted on uptime.
 pub struct DeleterImpl {
     queue: Queue,
+    clock: Clock,
     uptime: Uptime,
     attempts: u32,
     backoff: cooldown::Backoff,
@@ -79,6 +85,7 @@ impl DeleterImpl {
         };
         Self {
             queue,
+            clock: args.clock,
             uptime: args.uptime,
             attempts: args.attempts,
             backoff: args.backoff,
@@ -93,12 +100,13 @@ impl DeleterImpl {
     /// producer set.
     pub(crate) async fn enqueue(&mut self, mut job: Job) -> Result<(), DeleteErr> {
         job.uptime_due_secs = Some(job.uptime_due_from(self.uptime.now()));
+        job.server_due_at = self.clock.server_now().map(|now| job.server_due_from(now));
         self.queue.enqueue(job).await?;
         Ok(())
     }
 
     pub(crate) async fn sweep(&mut self) -> Result<(), DeleteErr> {
-        self.start_unset_deadlines().await;
+        self.pull_in_deadlines().await;
         let now = self.uptime.now_as_datetime();
         // Retry deadlines saved before they were counted in uptime hold
         // calendar dates, decades ahead of any uptime; pull them back.
@@ -123,24 +131,33 @@ impl DeleterImpl {
         Ok(())
     }
 
-    /// Make sure every uptime deadline is at most a full TTL from now, which
-    /// no deadline can honestly exceed.
+    /// Keep every uptime deadline at most a full TTL from now, and bring it
+    /// forward to now once the job's server deadline has passed, so the
+    /// queue sees it as due.
     /// - A job saved before deadlines existed has none. Its only stamp came
     ///   from the system clock, which cannot be trusted, so its TTL starts
     ///   over from now.
-    /// - A deadline further out means the saved uptime was lost (a corrupt
-    ///   or missing `uptime.json`) and the count restarted from zero. Pulling
-    ///   it in to a full TTL from now still never deletes early.
-    async fn start_unset_deadlines(&mut self) {
+    /// - A deadline more than a full TTL away means the saved uptime was lost
+    ///   (a corrupt or missing `uptime.json`) and the count restarted from
+    ///   zero. Pulling it in to a full TTL from now still never deletes early.
+    async fn pull_in_deadlines(&mut self) {
+        let server_now = self.clock.server_now();
         let uptime_now = self.uptime.now();
+        let now_secs = uptime_now.as_secs();
         self.queue
             .update_jobs(|job| {
                 let latest = job.uptime_due_from(uptime_now);
-                if job.uptime_due_secs.is_some_and(|due| due <= latest) {
-                    return false;
+                let server_passed = matches!(
+                    (job.server_due_at, server_now),
+                    (Some(due), Some(now)) if due <= now
+                );
+                let mut due = job.uptime_due_secs.map_or(latest, |due| due.min(latest));
+                if server_passed {
+                    due = due.min(now_secs);
                 }
-                job.uptime_due_secs = Some(latest);
-                true
+                let changed = job.uptime_due_secs != Some(due);
+                job.uptime_due_secs = Some(due);
+                changed
             })
             .await;
     }
@@ -302,6 +319,7 @@ mod tests {
             file_rule_id: "file_rule_1".to_string(),
             deployment_id: "dpl_1".to_string(),
             uptime_due_secs: None,
+            server_due_at: None,
         }
     }
 
@@ -326,6 +344,7 @@ mod tests {
     /// and no backoff.
     fn deleter(clock: &Clock) -> DeleterImpl {
         DeleterImpl::new(DeleterArgs {
+            clock: clock.clock(),
             uptime: clock.uptime(),
             backoff: NO_BACKOFF,
             ..DeleterArgs::default()
@@ -361,6 +380,7 @@ mod tests {
             file_rule_id: "rule_1".to_string(),
             deployment_id: "dpl_1".to_string(),
             uptime_due_secs: None,
+            server_due_at: None,
         }
     }
 
@@ -387,6 +407,7 @@ mod tests {
             let tmp = temp_file(b"aaaa").await;
             let clock = Clock::new(1000);
             let mut deleter = DeleterImpl::new(DeleterArgs {
+                clock: clock.clock(),
                 uptime: clock.uptime(),
                 snapshot_file: Some(snapshot_file(&state_path).await),
                 ..DeleterArgs::default()
@@ -408,6 +429,7 @@ mod tests {
             let tmp_b = temp_file(b"bbbb").await;
             let clock = Clock::new(1000);
             let mut deleter = DeleterImpl::new(DeleterArgs {
+                clock: clock.clock(),
                 uptime: clock.uptime(),
                 queue_capacity: 1,
                 ..DeleterArgs::default()
@@ -433,6 +455,7 @@ mod tests {
             let tmp = temp_file(b"aaaa").await;
             let clock = Clock::new(1000);
             let mut deleter = DeleterImpl::new(DeleterArgs {
+                clock: clock.clock(),
                 uptime: clock.uptime(),
                 snapshot_file: Some(snapshot_file(&state_path).await),
                 ..DeleterArgs::default()
@@ -707,6 +730,7 @@ mod tests {
             let waiting = temp_file(b"bbbb").await;
             let clock = Clock::new(1000);
             let mut deleter = DeleterImpl::new(DeleterArgs {
+                clock: clock.clock(),
                 uptime: clock.uptime(),
                 snapshot_file: Some(snapshot_file(&state_path).await),
                 ..DeleterArgs::default()
@@ -745,6 +769,7 @@ mod tests {
             let due = temp_file(b"cccc").await;
             let clock = Clock::new(1000);
             let mut deleter = DeleterImpl::new(DeleterArgs {
+                clock: clock.clock(),
                 uptime: clock.uptime(),
                 snapshot_file: Some(snapshot_file(&state_path).await),
                 ..DeleterArgs::default()
@@ -799,6 +824,7 @@ mod tests {
             let dir = test_dirs::temp("delete-attempts-cap").unwrap();
             let clock = Clock::new(1000);
             let mut deleter = DeleterImpl::new(DeleterArgs {
+                clock: clock.clock(),
                 uptime: clock.uptime(),
                 attempts: 3,
                 backoff: NO_BACKOFF,
@@ -843,6 +869,7 @@ mod tests {
             let tmp = temp_file(b"aaaa").await;
             let clock = Clock::new(1000);
             let mut deleter = DeleterImpl::new(DeleterArgs {
+                clock: clock.clock(),
                 uptime: clock.uptime(),
                 snapshot_file: Some(snapshot_file(&state_path).await),
                 ..DeleterArgs::default()
@@ -885,6 +912,7 @@ mod tests {
                 None => None,
             };
             DeleterImpl::new(DeleterArgs {
+                clock: clock.clock(),
                 uptime: clock.uptime(),
                 backoff: BACKOFF,
                 snapshot_file,
@@ -990,7 +1018,9 @@ mod tests {
         }
     }
 
-    /// Each TTL is counted on the agent's uptime, never on the system clock.
+    /// Each TTL is counted on the agent's uptime and, when the agent knew
+    /// server time at enqueue, in server time too. Either passing deletes;
+    /// the system clock never does.
     mod deadlines {
         use super::*;
         use crate::clock::{UptimeFile, UptimeSaver};
@@ -1009,6 +1039,7 @@ mod tests {
                     .unwrap();
             let saver = UptimeSaver::new(clock.clock(), Some(uptime_file));
             let deleter = DeleterImpl::new(DeleterArgs {
+                clock: clock.clock(),
                 uptime: saver.uptime(),
                 backoff: NO_BACKOFF,
                 snapshot_file: Some(snapshot_file(&dir.file("delete_queue.json")).await),
@@ -1022,21 +1053,24 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn enqueue_sets_the_uptime_deadline() {
+        async fn enqueue_sets_both_deadlines_when_server_time_is_known() {
             let tmp = temp_file(b"aaaa").await;
             let clock = Clock::new(1000);
             let mut deleter = deleter(&clock);
             clock.advance(50);
+            clock.observe_server(REAL_DATE);
 
             deleter
                 .enqueue(make_job(tmp.file(), 1000, 500).await)
                 .await
                 .unwrap();
 
-            assert_eq!(only_job(&deleter).uptime_due_secs, Some(550));
+            let job = only_job(&deleter);
+            assert_eq!(job.uptime_due_secs, Some(550));
+            assert_eq!(job.server_due_at, Some(at(REAL_DATE + 500)));
         }
 
-        // A producer's deadline is never trusted: the TTL starts at enqueue.
+        // A producer's deadlines are never trusted: the TTL starts at enqueue.
         #[tokio::test]
         async fn enqueue_replaces_producer_deadlines() {
             let tmp = temp_file(b"aaaa").await;
@@ -1044,6 +1078,7 @@ mod tests {
             let mut deleter = deleter(&clock);
             let job = Job {
                 uptime_due_secs: Some(0),
+                server_due_at: Some(at(0)),
                 ..make_job(tmp.file(), 1000, 500).await
             };
 
@@ -1052,6 +1087,7 @@ mod tests {
 
             assert!(tmp.file().exists());
             assert_eq!(only_job(&deleter).uptime_due_secs, Some(500));
+            assert_eq!(only_job(&deleter).server_due_at, None);
         }
 
         // The pre-NTP case: a file observed while the system clock read 1970
@@ -1103,6 +1139,58 @@ mod tests {
 
             clock.advance(1);
             restored.sweep().await.unwrap();
+            assert!(!tmp.file().exists());
+        }
+
+        // Restarted after the server deadline passed: time the robot was off
+        // counts once server time is known again.
+        #[tokio::test]
+        async fn a_passed_server_deadline_deletes_after_a_restart() {
+            let dir = test_dirs::temp("delete-deadlines-restart-online").unwrap();
+            let tmp = temp_file(b"aaaa").await;
+            let clock = Clock::new(REAL_DATE);
+            clock.observe_server(REAL_DATE);
+            let (mut deleter, _saver) = persisted(&clock, &dir).await;
+            deleter
+                .enqueue(make_job(tmp.file(), REAL_DATE, 3600).await)
+                .await
+                .unwrap();
+            drop(deleter);
+
+            // the robot was off for an hour and booted at 1970
+            let clock = clock.restart();
+            clock.set_system(1);
+            let (mut restored, _saver) = persisted(&clock, &dir).await;
+            restored.sweep().await.unwrap();
+            assert!(
+                tmp.file().exists(),
+                "deleted before hearing from the server"
+            );
+
+            clock.observe_server(REAL_DATE + 3600);
+            restored.sweep().await.unwrap();
+            assert!(!tmp.file().exists());
+        }
+
+        // A system clock ahead of the server's time does not shorten the TTL.
+        #[tokio::test]
+        async fn a_server_deadline_ignores_the_system_clock() {
+            let tmp = temp_file(b"aaaa").await;
+            let clock = Clock::new(REAL_DATE);
+            clock.observe_server(REAL_DATE);
+            let mut deleter = deleter(&clock);
+            deleter
+                .enqueue(make_job(tmp.file(), REAL_DATE, 500).await)
+                .await
+                .unwrap();
+
+            clock.set_system(REAL_DATE + 10_000);
+            clock.advance(499);
+            deleter.sweep().await.unwrap();
+            assert!(tmp.file().exists());
+
+            clock.advance(1);
+            deleter.sweep().await.unwrap();
             assert!(!tmp.file().exists());
         }
 
@@ -1179,6 +1267,7 @@ mod tests {
             let state_path = dir.file("delete_queue.json");
             let clock = Clock::new(1000);
             let mut deleter = DeleterImpl::new(DeleterArgs {
+                clock: clock.clock(),
                 uptime: clock.uptime(),
                 backoff: NO_BACKOFF,
                 snapshot_file: Some(snapshot_file(&state_path).await),
@@ -1212,6 +1301,7 @@ mod tests {
             let state_path = dir.file("delete_queue.json");
             let clock = Clock::new(1000);
             let mut deleter = DeleterImpl::new(DeleterArgs {
+                clock: clock.clock(),
                 uptime: clock.uptime(),
                 attempts: 1,
                 snapshot_file: Some(snapshot_file(&state_path).await),
