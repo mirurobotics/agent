@@ -4,11 +4,10 @@ use std::io::SeekFrom;
 
 // internal crates
 use crate::filesys::{errors::PathDoesNotExistErr, file::File, path::PathExt, FileSysErr};
-use crate::s3::{errors, errors::ObjectNotFoundErr, S3Err};
+use crate::s3::{aws, errors, errors::ObjectNotFoundErr, Config, S3Err};
 use crate::trace;
 
 // external crates
-use aws_sdk_s3::config::{BehaviorVersion, Credentials as AwsCredentials, Region};
 use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::Client;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
@@ -17,17 +16,6 @@ use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 /// below it go through a single `PutObject`. S3's own multipart part-size
 /// floor is 5 MiB; 8 MiB gives headroom while keeping part counts small.
 pub(crate) const PART_SIZE: u64 = 8 * 1024 * 1024; // 8 MiB
-
-pub struct Config {
-    pub creds: Credentials,
-    pub region: String,
-}
-
-pub struct Credentials {
-    pub access_key_id: String,
-    pub secret_access_key: String,
-    pub session_token: String,
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Object {
@@ -113,23 +101,8 @@ impl Store {
         http_client: Option<aws_sdk_s3::config::SharedHttpClient>,
         force_path_style: bool,
     ) -> Self {
-        let s3creds = AwsCredentials::new(
-            cfg.creds.access_key_id,
-            cfg.creds.secret_access_key,
-            Some(cfg.creds.session_token),
-            None,
-            "miru-agent",
-        );
-        let mut builder = aws_sdk_s3::config::Config::builder()
-            .behavior_version(BehaviorVersion::latest())
-            .region(Region::new(cfg.region))
-            .credentials_provider(s3creds)
-            .force_path_style(force_path_style);
-        if let Some(http_client) = http_client {
-            builder = builder.http_client(http_client);
-        }
         Self {
-            client: Client::from_conf(builder.build()),
+            client: Client::from_conf(aws::config(cfg, http_client, force_path_style)),
         }
     }
 
