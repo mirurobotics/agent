@@ -6,105 +6,92 @@ info:
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
-  x-release-version: v0.5.9
+  x-release-version: v0.5.10
   x-git-commit:
-    sha: 8a3d9168ee89351f659cd603beb4f1efbcbdfaff
-    url: https://github.com/mirurobotics/openapi/commit/8a3d9168ee89351f659cd603beb4f1efbcbdfaff
-    message: 'feat(file-rules): upload path timestamp source, time zone and {timezone}
-      (#335)
+    sha: cab5fad2f93a2c430bc3a83481b135ff108588bb
+    url: https://github.com/mirurobotics/openapi/commit/cab5fad2f93a2c430bc3a83481b135ff108588bb
+    message: 'feat(file-rules): require upload.timezone in file rule responses (#347)
 
 
       <!-- claude-projects-attribution: {"github_login":"miru-agents"} -->
 
       _Requested by **bens-agent** · [project
 
-      thread](https://claude.ai/code/project/chan_01CAhx68ku57XYPMZ3ERH4TZ?thread=cmsg_01CAhx68ku57XYPMZ3ERH4TZGkkHc4V3iih2RynerMnhWZ)_
+      thread](https://claude.ai/code/project/chan_01CAhx68ku57XYPMZ3ERH4TZ?thread=cmsg_01CAhx68ku57XYPMZ3ERH4TZ4stcGgoUh3kFiuqm2YhAuy)_
 
 
-      Before: upload path time variables (`{year}` … `{minute}`) always render
+      Before: `FileRuleUpload.timezone` was optional in responses, documented
 
-      the upload time from the server clock, in UTC. For ATI, anything
-
-      uploaded after 7 pm EST lands in the next day''s folder.
+      as "`utc` when absent", so clients had to apply the default themselves.
 
 
-      After: a file rule can pick both the instant and the time zone, and put
+      After: responses always carry the resolved zone (`utc` or `device`).
 
-      the UTC offset in the path.
+      Create and update requests (`CreateFileRuleUpload`) are unchanged: still
+
+      optional, defaulting to `utc`.
+
+
+      Asked for in mirurobotics/backend#999 ([review
+
+      comment](https://github.com/mirurobotics/backend/pull/999#discussion_r4364668817));
+
+      that PR already always fills the value.
 
 
       ## Summary
 
-      - `upload.timestamp`: `upload_time` (default, today''s behavior) or
+      - `FileRuleUpload`: add `timezone` to `required`, reword its
 
-      `mtime` (the file''s last-modified time from the device).
+      description, add it to the example.
 
-      - `upload.timezone`: `utc` (default) or `device` (the device''s local
+      - Regenerated bundles for `frontend`, `cli`, `agent` and `device`, the
 
-      zone, from the agent''s `TZ` env var, else the system zone).
-
-      - New `{timezone}` path variable: the rendered instant''s UTC offset in
-
-      ISO 8601 basic format (`+0000`, `-0500`). It follows DST.
-
-      - Agent API: `CreateUploadRequest.utc_offset` (the device''s current
-
-      offset, used for `upload_time` + `device`), and `source.mtime` is
-
-      documented as sent with the device''s local offset (used for `mtime` +
-
-      `device`). Older agents send neither, so those rules fall back to UTC.
+      four audiences that share the schema.
 
 
       ## Points for review
 
-      - **Defaults keep existing paths:** both fields are optional and default
+      - **Device API is included.** `FileRuleUpload` is a shared schema, so
 
-      to today''s behavior. The backend leaves defaults out of the rule digest,
+      the agent''s Device API also now promises the field. The agent gets it
 
-      so existing rules keep their digests.
+      from the backend agent API (now always present) and passes it through,
 
-      - **Device zone:** the agent resolves the offset itself, so the backend
+      so it only needs to default to `utc` for a rule cached from an older
 
-      needs no tz database and POSIX `TZ` strings work. An IANA zone name was
+      backend. Splitting the schema just to keep it optional on the device
 
-      rejected for that reason.
+      seemed worse; say if you''d rather.
 
-      - **Pending naming decision:** the variable name (`{timezone}` vs
+      - **Not breaking for clients:** a response field going from optional to
 
-      `{tz}`) and the offset format (basic `-0500` vs extended `-05:00`) are
+      required only adds a guarantee, so this edits the current versions in
 
-      waiting on Ben. Basic avoids colons, which get URL-encoded in object
-
-      keys and break on Windows. This PR uses `{timezone}` + basic; it stays
-
-      draft until that''s settled.
-
-      - **Device API:** `BaseFileRule.upload` picks up the two optional
-
-      fields; the agent will pass them through.
+      place.
 
 
       ## Plan (`$api-change`)
 
-      1. This PR → release `agent`, `cli`, `frontend`, `device`.
+      1. This PR, then release `frontend`, `cli`, `agent` and `device`.
 
-      2. backend: store the fields, render from mtime / device offset, add
+      2. backend: vendor the new specs into #999.
 
-      `{timezone}`.
+      3. agent / cli: pick up on their next vendor.
 
-      3. agent: send mtime with local offset and `utc_offset`; pass the fields
 
-      through the Device API.
+      ## Precedent
 
-      4. cli-sdk / cli and docs (builds on mirurobotics/docs#267).
+      Mirrors the other always-present fields in `FileRuleUpload.required`
+
+      (`path`, `bucket_id`, ...).
 
 
       ---
 
       _Generated by [Claude
 
-      Code](https://claude.ai/code/session_01Wxu7TtSTH5GBUwQvBCa8uH)_
+      Code](https://claude.ai/code/session_01BJ9QuwWzspBkDa7fnQduNq)_
 
 
       <!-- codesmith:footer -->
@@ -113,7 +100,7 @@ info:
 
       <a
 
-      href="https://app.blacksmith.sh/mirurobotics/codesmith/openapi/pr/335?autoLogin=true&ref=codesmith_pr_footer"><picture><source
+      href="https://app.blacksmith.sh/mirurobotics/codesmith/openapi/pr/347?autoLogin=true&ref=codesmith_pr_footer"><picture><source
 
       media="(prefers-color-scheme: dark)"
 
@@ -129,7 +116,7 @@ info:
 
       width="162" height="28"></picture></a> <a
 
-      href="https://backend.blacksmith.sh/track/enable-autofix?expires=1795209615&installation_model_id=425273&pr_number=335&ref=codesmith_pr_footer&repository=mirurobotics%2Fopenapi&return_to=https%3A%2F%2Fgithub.com%2Fmirurobotics%2Fopenapi%2Fpull%2F335&signature=336b31c78bed0fca298b63c31e9ac53f5f092c13f7a53e219cd8addc54540ef0"><picture><source
+      href="https://backend.blacksmith.sh/track/enable-autofix?expires=1795385953&installation_model_id=425273&pr_number=347&ref=codesmith_pr_footer&repository=mirurobotics%2Fopenapi&return_to=https%3A%2F%2Fgithub.com%2Fmirurobotics%2Fopenapi%2Fpull%2F347&signature=caf03188e7a4be99647ee0e7007b26909b9119d99c83a393f7cac65b1da9f7f7"><picture><source
 
       media="(prefers-color-scheme: dark)"
 
@@ -158,14 +145,12 @@ info:
       ---------
 
 
-      Co-authored-by: Claude <noreply@anthropic.com>
-
-      Co-authored-by: Ben <ben@mirurobotics.com>'
+      Co-authored-by: Claude <noreply@anthropic.com>'
     author: Ben's Agent
     branch: HEAD
     dirty: false
   x-build:
-    built_at: '2026-10-23T19:55:03.664171+00:00'
+    built_at: '2026-10-24T02:53:29.325120+00:00'
 servers:
 - url: https://staging.api.mirurobotics.com/agent/v1
   description: Staging
@@ -721,14 +706,14 @@ components:
     ReleaseVersion:
       type: string
       enum:
-      - v0.5.9
+      - v0.5.10
       x-enum-varnames:
       - RELEASE_VERSION
       x-stainless-const: true
     APIGitCommit:
       type: string
       enum:
-      - 8a3d9168ee89351f659cd603beb4f1efbcbdfaff
+      - cab5fad2f93a2c430bc3a83481b135ff108588bb
       x-enum-varnames:
       - API_GIT_COMMIT
       x-stainless-const: true
@@ -1248,6 +1233,7 @@ components:
       - bucket_id
       - bucket_name
       - path
+      - timezone
       properties:
         upload_collection_id:
           type: string
@@ -1284,7 +1270,8 @@ components:
           allOf:
           - $ref: '#/components/schemas/FileRuleUploadTimezone'
           description: 'The time zone the time variables in `path` are rendered in:
-            `utc`, or `device` for the device''s local time zone. `utc` when absent.'
+            `utc`, or `device` for the device''s local time zone. `utc` for a rule
+            created without one.'
         bundle:
           type: array
           minItems: 1
@@ -1308,6 +1295,7 @@ components:
         bucket_id: bkt_123
         bucket_name: my-uploads-bucket
         path: '{device_id}/{year}-{month}-{day}/{upload_id}/{file_name}'
+        timezone: utc
     FileRuleRetention:
       title: File Rule Retention
       type: object
@@ -1464,6 +1452,7 @@ components:
           bucket_id: bkt_123
           bucket_name: my-uploads-bucket
           path: '{device_id}/{year}-{month}-{day}/{upload_id}/{file_name}'
+          timezone: utc
         retention:
           require_upload: true
           ttl_secs: 604800
@@ -1501,6 +1490,7 @@ components:
                 bucket_id: bkt_123
                 bucket_name: my-uploads-bucket
                 path: '{device_id}/{year}-{month}-{day}/{upload_id}/{file_name}'
+                timezone: utc
               retention:
                 require_upload: true
                 ttl_secs: 604800
