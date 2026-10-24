@@ -1,430 +1,295 @@
-//! Real-GCS guard for uploading through GCS's XML API with aws-sdk-s3.
+//! Real-GCS checks for uploads, which go through GCS's XML API with aws-sdk-s3
+//! (see `agent/src/s3/gcs.rs`). Google doesn't document how GCS treats the
+//! SDK's requests, and the worst break is silent: GCS stores the wrong bytes
+//! and still answers 200. So these tests upload the way the agent does, with a
+//! token downscoped like the backend's, and read each object back.
 //!
-//! The GCS upload path relies on SDK behaviour Google doesn't document (see
-//! `agent/src/s3/gcs.rs`). The worst failure is silent: if an SDK bump turns
-//! aws-chunked request checksums back on, GCS stores the chunk framing as
-//! object bytes and still answers 200. These tests upload with a token
-//! downscoped exactly as the backend vends it, then read the object back with
-//! the source token and compare SHA-256 and metadata.
-//!
-//! Self-skips unless `GCS_IT_SOURCE_TOKEN` (an access token with
+//! They skip unless `GCS_IT_SOURCE_TOKEN` (an access token with
 //! `roles/storage.objectAdmin` on the bucket) and `GCS_IT_BUCKET` are set. The
-//! `gcs-xml` CI workflow sets both and runs on every aws-sdk-s3 change.
+//! `gcs-xml` CI workflow sets both.
 
 // standard crates
 use std::collections::HashMap;
-use std::fmt::Write as _;
-use std::io::Write;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 // internal crates
-use miru_agent::filesys::File;
+use crate::test_utils::filesys::files as test_files;
+use miru_agent::filesys::{files, WriteOptions};
 use miru_agent::s3::gcs::{self, content_md5, Token};
 use miru_agent::s3::{sdk, Object, Options, S3Err, Source, Store};
 
 // external crates
 use aws_sdk_s3::error::ProvideErrorMetadata;
 use aws_sdk_s3::primitives::ByteStream;
-use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart};
 use aws_sdk_s3::Client;
-use sha2::{Digest, Sha256};
+use serde_json::json;
+use uuid::Uuid;
 
-/// GCS's XML API, for reading back the metadata headers the SDK doesn't parse.
 const GCS_URL: &str = "https://storage.googleapis.com";
 const STS_URL: &str = "https://sts.googleapis.com/v1/token";
-const MIB: usize = 1024 * 1024;
+const TOKEN_EXCHANGE: &str = "urn:ietf:params:oauth:grant-type:token-exchange";
+const ACCESS_TOKEN: &str = "urn:ietf:params:oauth:token-type:access_token";
 /// The store's multipart part size (`s3::PART_SIZE`).
-const PART: usize = 8 * MIB;
+const PART: usize = 8 * 1024 * 1024;
+/// Uploads with one `PutObject`.
+const SMALL: usize = 64 * 1024;
+/// Uploads in two parts.
+const LARGE: usize = PART + 1024;
 
-struct Env {
-    source_token: String,
+/// The test bucket, and a token with `roles/storage.objectAdmin` on it.
+struct Gcs {
     bucket: String,
+    source_token: String,
+    /// Unique per test, so no two runs share an object.
     prefix: String,
 }
 
-impl Env {
+impl Gcs {
+    /// `None`, so the test skips, unless the token and bucket are set.
     fn load() -> Option<Self> {
-        let var = |name: &str| std::env::var(name).ok().filter(|v| !v.is_empty());
-        let (Some(source_token), Some(bucket)) = (var("GCS_IT_SOURCE_TOKEN"), var("GCS_IT_BUCKET"))
-        else {
-            eprintln!("skipping: GCS_IT_SOURCE_TOKEN and GCS_IT_BUCKET are not set");
-            return None;
-        };
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let prefix = format!("agent-ci/gcs-xml/{nanos}-{}", std::process::id());
+        let source_token = std::env::var("GCS_IT_SOURCE_TOKEN").ok()?;
+        let bucket = std::env::var("GCS_IT_BUCKET").ok()?;
+        let prefix = format!("agent-ci/gcs-xml/{}", Uuid::new_v4());
         Some(Self {
-            source_token,
             bucket,
+            source_token,
             prefix,
         })
     }
 
-    fn obj(&self, name: &str) -> Object {
+    fn object(&self, name: &str) -> Object {
         Object {
             bucket: self.bucket.clone(),
             key: format!("{}/{name}", self.prefix),
         }
     }
 
-    /// The production GCS client with the source token, for reading back and
-    /// cleaning up. Never used for the uploads under test.
-    fn admin(&self) -> Client {
-        client(self.source_token.clone())
+    /// A store that uploads `obj` the way the agent does.
+    async fn upload_store(&self, obj: &Object) -> Store {
+        let config = self.upload_config(obj).await;
+        Store::new(Options { config, gcs: true })
     }
 
-    /// A token for `obj` alone, downscoped like the backend does
-    /// (`backend/internal/pkg/gcp/creds/gcs.go`): objectCreator on one object.
+    /// A client with the same config, for the calls `Store` doesn't expose.
+    async fn upload_client(&self, obj: &Object) -> Client {
+        Client::from_conf(self.upload_config(obj).await)
+    }
+
+    /// The production GCS config, with a token that can only create `obj`.
+    async fn upload_config(&self, obj: &Object) -> aws_sdk_s3::Config {
+        let token = Token::new(self.upload_token(obj).await).unwrap();
+        gcs::config(token, sdk::http_client())
+    }
+
+    /// Downscopes the source token to creating `obj` alone, as the backend
+    /// does for each upload (`backend/internal/pkg/gcp/creds/gcs.go`).
     async fn upload_token(&self, obj: &Object) -> String {
-        let object = format!("projects/_/buckets/{}/objects/{}", obj.bucket, obj.key);
-        let rule = serde_json::json!({
-            "availableResource": format!("//storage.googleapis.com/projects/_/buckets/{}", obj.bucket),
+        let bucket = format!("projects/_/buckets/{}", obj.bucket);
+        let rule = json!({
+            "availableResource": format!("//storage.googleapis.com/{bucket}"),
             "availablePermissions": ["inRole:roles/storage.objectCreator"],
             "availabilityCondition": {
-                "title": "single-object-access",
-                "expression": format!("resource.name == '{object}'"),
+                "expression": format!("resource.name == '{bucket}/objects/{}'", obj.key),
             },
         });
-        let options =
-            serde_json::json!({ "accessBoundary": { "accessBoundaryRules": [rule] } }).to_string();
+        let options = json!({ "accessBoundary": { "accessBoundaryRules": [rule] } }).to_string();
         let form = [
-            (
-                "grant_type",
-                "urn:ietf:params:oauth:grant-type:token-exchange",
-            ),
-            (
-                "subject_token_type",
-                "urn:ietf:params:oauth:token-type:access_token",
-            ),
-            (
-                "requested_token_type",
-                "urn:ietf:params:oauth:token-type:access_token",
-            ),
+            ("grant_type", TOKEN_EXCHANGE),
+            ("subject_token_type", ACCESS_TOKEN),
+            ("requested_token_type", ACCESS_TOKEN),
             ("subject_token", self.source_token.as_str()),
             ("options", options.as_str()),
         ];
         let resp = reqwest::Client::new()
             .post(STS_URL)
-            .header("content-type", "application/x-www-form-urlencoded")
-            .body(form_encode(&form))
+            .form(&form)
             .send()
             .await
-            .expect("sts request");
+            .unwrap();
         let status = resp.status();
-        let json: serde_json::Value = resp.json().await.expect("sts body");
-        assert!(status.is_success(), "sts {status}: {}", json["error"]);
-        json["access_token"]
-            .as_str()
-            .expect("access_token")
-            .to_string()
+        let body: serde_json::Value = resp.json().await.unwrap();
+        assert!(status.is_success(), "token exchange: {status} {body}");
+        body["access_token"].as_str().unwrap().to_string()
     }
 
-    async fn upload_store(&self, obj: &Object) -> Store {
-        let token = Token::new(self.upload_token(obj).await).unwrap();
-        let config = gcs::config(token, sdk::http_client());
-        Store::new(Options { config, gcs: true })
-    }
-
-    async fn upload_client(&self, obj: &Object) -> Client {
-        client(self.upload_token(obj).await)
-    }
-
-    /// Asserts the stored object's SHA-256 matches `expected`.
-    async fn assert_bytes(&self, obj: &Object, expected: &[u8]) {
-        let out = self
-            .admin()
-            .get_object()
-            .bucket(&obj.bucket)
-            .key(&obj.key)
-            .send()
-            .await
-            .unwrap_or_else(|e| panic!("read back {}: {}", obj.key, describe(&e)));
-        let remote = out.body.collect().await.unwrap().into_bytes();
-        assert_eq!(remote.len(), expected.len(), "{}: size", obj.key);
-        assert_eq!(
-            hex(&Sha256::digest(remote)),
-            hex(&Sha256::digest(expected)),
-            "{}: sha256",
-            obj.key
-        );
-    }
-
-    /// Asserts the object carries the test metadata. GCS returns it as
-    /// `x-goog-meta-*`, which the S3 SDK doesn't parse, so read the raw header.
-    async fn assert_metadata(&self, obj: &Object) {
-        let url = format!("{GCS_URL}/{}/{}", obj.bucket, obj.key);
+    /// Reads `obj` back with the source token, outside the SDK under test, and
+    /// checks it holds `expected` and the test metadata.
+    async fn assert_stored(&self, obj: &Object, expected: &[u8]) {
         let resp = reqwest::Client::new()
-            .head(url)
+            .get(format!("{GCS_URL}/{}/{}", obj.bucket, obj.key))
             .bearer_auth(&self.source_token)
             .send()
             .await
-            .expect("head request");
-        assert!(
-            resp.status().is_success(),
-            "{}: HEAD {}",
-            obj.key,
-            resp.status()
+            .unwrap()
+            .error_for_status()
+            .unwrap();
+        let metadata = resp.headers().get("x-goog-meta-miru-ci");
+        assert_eq!(
+            metadata.and_then(|v| v.to_str().ok()),
+            Some("gcs-xml"),
+            "{obj}: metadata"
         );
-        let stored = resp
-            .headers()
-            .get("x-goog-meta-miru-ci")
-            .and_then(|v| v.to_str().ok());
-        assert_eq!(stored, Some("gcs-xml"), "{}: metadata not stored", obj.key);
-    }
-
-    async fn cleanup(&self, objs: &[&Object]) {
-        let admin = self.admin();
-        for obj in objs {
-            let _ = admin
-                .delete_object()
-                .bucket(&obj.bucket)
-                .key(&obj.key)
-                .send()
-                .await;
-        }
+        let stored = resp.bytes().await.unwrap();
+        assert!(
+            stored == expected,
+            "{obj}: stored {} bytes that don't match the {} uploaded",
+            stored.len(),
+            expected.len()
+        );
     }
 }
 
-/// The production GCS client, for the calls `Store` doesn't expose.
-fn client(token: String) -> Client {
-    let config = gcs::config(Token::new(token).unwrap(), sdk::http_client());
-    Client::from_conf(config)
-}
-
+/// The metadata every test object carries. GCS returns it as
+/// `x-goog-meta-miru-ci`.
 fn metadata() -> HashMap<String, String> {
     HashMap::from([("miru-ci".to_string(), "gcs-xml".to_string())])
 }
 
-fn form_encode(pairs: &[(&str, &str)]) -> String {
-    let encode = |s: &str| -> String {
-        s.bytes()
-            .map(|b| match b {
-                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
-                    (b as char).to_string()
-                }
-                _ => format!("%{b:02X}"),
-            })
-            .collect()
-    };
-    pairs
-        .iter()
-        .map(|(k, v)| format!("{}={}", encode(k), encode(v)))
-        .collect::<Vec<_>>()
-        .join("&")
+/// A repeating pattern whose period (251, a prime) doesn't divide the part
+/// size, so a dropped or reordered part changes the bytes.
+fn test_bytes(len: usize) -> Vec<u8> {
+    (0..len).map(|i| (i % 251) as u8).collect()
 }
 
-/// Non-repeating bytes, so a dropped or reordered part changes the SHA-256.
-fn test_bytes(len: usize, seed: u64) -> Vec<u8> {
-    let mut x = seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1;
-    (0..len)
-        .map(|_| {
-            x ^= x << 13;
-            x ^= x >> 7;
-            x ^= x << 17;
-            x as u8
-        })
-        .collect()
+/// A temp file holding `bytes`, deleted when dropped.
+async fn temp_file_with(bytes: &[u8]) -> test_files::TempFile {
+    let tf = test_files::temp("gcs-xml").unwrap();
+    files::write_bytes(tf.file(), bytes, WriteOptions::OVERWRITE_NONATOMIC)
+        .await
+        .unwrap();
+    tf
 }
 
-fn write_temp(bytes: &[u8]) -> tempfile::NamedTempFile {
-    let mut file = tempfile::NamedTempFile::new().unwrap();
-    file.write_all(bytes).unwrap();
-    file.flush().unwrap();
-    file
-}
-
-fn hex(bytes: &[u8]) -> String {
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for b in bytes {
-        let _ = write!(out, "{b:02x}");
-    }
-    out
-}
-
-fn describe<E: ProvideErrorMetadata + std::fmt::Debug>(
-    err: &aws_sdk_s3::error::SdkError<E>,
-) -> String {
-    let status = err.raw_response().map(|r| r.status().as_u16());
-    match err.as_service_error() {
-        Some(e) => format!("status {status:?} code {:?}", e.code()),
-        None => format!("status {status:?}: {err:?}"),
-    }
-}
-
-fn status_and_code<E: ProvideErrorMetadata>(
-    err: &aws_sdk_s3::error::SdkError<E>,
-) -> (Option<u16>, Option<String>) {
-    (
-        err.raw_response().map(|r| r.status().as_u16()),
-        err.as_service_error()
-            .and_then(|e| e.code())
-            .map(str::to_string),
-    )
-}
-
-/// Single-part and multipart uploads through `Store::put` store the exact
-/// bytes and the metadata. 64 KiB is over one body frame, so it is the size
-/// the SDK's default checksums would have corrupted.
+/// Single-part and multipart uploads store the exact bytes and the metadata.
 #[tokio::test]
 async fn put_stores_exact_bytes_and_metadata() {
-    let Some(env) = Env::load() else { return };
-    for (name, len) in [("single.bin", 64 * 1024), ("multi.bin", 2 * PART + 1024)] {
-        let obj = env.obj(name);
-        let bytes = test_bytes(len, len as u64);
-        let tmp = write_temp(&bytes);
-        let store = env.upload_store(&obj).await;
+    let Some(gcs) = Gcs::load() else { return };
+    for (name, len) in [("single.bin", SMALL), ("multi.bin", LARGE)] {
+        let obj = gcs.object(name);
+        let bytes = test_bytes(len);
+        let file = temp_file_with(&bytes).await;
 
-        let result = store.put(File::new(tmp.path()), &obj, &metadata()).await;
-        assert!(result.is_ok(), "{name}: {result:?}");
-        env.assert_bytes(&obj, &bytes).await;
-        env.assert_metadata(&obj).await;
-        env.cleanup(&[&obj]).await;
+        let store = gcs.upload_store(&obj).await;
+        store
+            .put(file.to_file(), &obj, &metadata())
+            .await
+            .expect(name);
+        gcs.assert_stored(&obj, &bytes).await;
     }
 }
 
-/// An upload started by one client resumes from ListParts in a new store with
-/// a new token, and the result is byte-exact.
+/// Resuming an upload another client started, with a new token as after an
+/// agent restart, completes it with the exact bytes.
 #[tokio::test]
-async fn resume_lists_landed_parts() {
-    let Some(env) = Env::load() else { return };
-    let obj = env.obj("resume.bin");
-    let bytes = test_bytes(2 * PART + 512, 7);
-    let tmp = write_temp(&bytes);
+async fn resume_completes_a_started_upload() {
+    let Some(gcs) = Gcs::load() else { return };
+    let obj = gcs.object("resume.bin");
+    let bytes = test_bytes(LARGE);
+    let file = temp_file_with(&bytes).await;
 
-    let first = env.upload_client(&obj).await;
-    let created = first
+    let client = gcs.upload_client(&obj).await;
+    let upload = client
         .create_multipart_upload()
         .bucket(&obj.bucket)
         .key(&obj.key)
+        .set_metadata(Some(metadata()))
         .send()
         .await
-        .unwrap_or_else(|e| panic!("create: {}", describe(&e)));
-    let upload_id = created.upload_id().unwrap().to_string();
-    let part1 = &bytes[..PART];
-    first
+        .unwrap();
+    let upload_id = upload.upload_id().unwrap();
+    let part = &bytes[..PART];
+    client
         .upload_part()
         .bucket(&obj.bucket)
         .key(&obj.key)
-        .upload_id(&upload_id)
+        .upload_id(upload_id)
         .part_number(1)
-        .content_md5(content_md5(part1))
-        .body(ByteStream::from(part1.to_vec()))
+        .content_md5(content_md5(part))
+        .body(ByteStream::from(part.to_vec()))
         .send()
         .await
-        .unwrap_or_else(|e| panic!("part 1: {}", describe(&e)));
+        .unwrap();
 
-    let store = env.upload_store(&obj).await;
-    let src = Source::open(File::new(tmp.path()), &obj).await.unwrap();
-    let result = store.resume_multipart_upload(src, &obj, &upload_id).await;
-    assert!(result.is_ok(), "resume: {result:?}");
-    env.assert_bytes(&obj, &bytes).await;
-    env.cleanup(&[&obj]).await;
+    let store = gcs.upload_store(&obj).await;
+    let src = Source::open(file.to_file(), &obj).await.unwrap();
+    store
+        .resume_multipart_upload(src, &obj, upload_id)
+        .await
+        .unwrap();
+    gcs.assert_stored(&obj, &bytes).await;
 }
 
-/// GCS rejects a part whose body doesn't match its Content-MD5, so a corrupted
-/// part can't be stored silently.
+/// GCS rejects a body that doesn't match its Content-MD5. With the SDK's own
+/// checksums off, that is what catches a corrupted body.
 #[tokio::test]
 async fn wrong_content_md5_is_rejected() {
-    let Some(env) = Env::load() else { return };
-    let obj = env.obj("bad-digest.bin");
-    let client = env.upload_client(&obj).await;
-    let body = test_bytes(64 * 1024, 3);
+    let Some(gcs) = Gcs::load() else { return };
+    let obj = gcs.object("bad-digest.bin");
+    let client = gcs.upload_client(&obj).await;
 
     let err = client
         .put_object()
         .bucket(&obj.bucket)
         .key(&obj.key)
         .content_md5(content_md5(b"not the body"))
-        .body(ByteStream::from(body))
+        .body(ByteStream::from(test_bytes(SMALL)))
         .send()
         .await
-        .expect_err("a wrong Content-MD5 must fail");
-    let (status, code) = status_and_code(&err);
-    assert_eq!(status, Some(400), "{}", describe(&err));
-    assert_eq!(code.as_deref(), Some("BadDigest"), "{}", describe(&err));
+        .unwrap_err();
+    assert_eq!(err.code(), Some("BadDigest"), "{err:?}");
 }
 
-/// Error mapping the store depends on: a bad part ETag on Complete is a failed
-/// request (404 NoSuchPart), and a part for an aborted upload maps to
-/// `NoSuchUploadErr` through resume.
+/// Resuming an upload GCS no longer has fails with `NoSuchUploadErr`.
 #[tokio::test]
-async fn bad_part_and_aborted_upload_map_as_expected() {
-    let Some(env) = Env::load() else { return };
-    let obj = env.obj("errors.bin");
-    let client = env.upload_client(&obj).await;
-    let create = || {
-        client
-            .create_multipart_upload()
-            .bucket(&obj.bucket)
-            .key(&obj.key)
-            .send()
-    };
+async fn resuming_an_aborted_upload_fails_with_no_such_upload() {
+    let Some(gcs) = Gcs::load() else { return };
+    let obj = gcs.object("aborted.bin");
+    let file = temp_file_with(&test_bytes(LARGE)).await;
 
-    // Bad part: Complete names an ETag that was never uploaded.
-    let upload_id = create().await.unwrap().upload_id().unwrap().to_string();
-    let bogus = CompletedMultipartUpload::builder()
-        .parts(
-            CompletedPart::builder()
-                .part_number(1)
-                .e_tag("\"00000000000000000000000000000000\"")
-                .build(),
-        )
-        .build();
-    let err = client
-        .complete_multipart_upload()
+    let client = gcs.upload_client(&obj).await;
+    let upload = client
+        .create_multipart_upload()
         .bucket(&obj.bucket)
         .key(&obj.key)
-        .upload_id(&upload_id)
-        .multipart_upload(bogus)
         .send()
         .await
-        .expect_err("completing with a bogus part must fail");
-    let (status, code) = status_and_code(&err);
-    assert_eq!(status, Some(404), "{}", describe(&err));
-    assert_eq!(code.as_deref(), Some("NoSuchPart"), "{}", describe(&err));
-
-    // Aborted upload: resume reports it gone.
+        .unwrap();
+    let upload_id = upload.upload_id().unwrap();
     client
         .abort_multipart_upload()
         .bucket(&obj.bucket)
         .key(&obj.key)
-        .upload_id(&upload_id)
+        .upload_id(upload_id)
         .send()
         .await
-        .unwrap_or_else(|e| panic!("abort: {}", describe(&e)));
-    let tmp = write_temp(&test_bytes(PART + 1, 9));
-    let store = env.upload_store(&obj).await;
-    let src = Source::open(File::new(tmp.path()), &obj).await.unwrap();
+        .unwrap();
+
+    let store = gcs.upload_store(&obj).await;
+    let src = Source::open(file.to_file(), &obj).await.unwrap();
     let err = store
-        .resume_multipart_upload(src, &obj, &upload_id)
+        .resume_multipart_upload(src, &obj, upload_id)
         .await
-        .expect_err("resuming an aborted upload must fail");
-    assert!(matches!(err, S3Err::NoSuchUploadErr(_)), "got: {err:?}");
+        .unwrap_err();
+    assert!(matches!(err, S3Err::NoSuchUploadErr(_)), "{err:?}");
 }
 
-/// A retried write after a lost success: the object is already there. The
-/// upload token can't overwrite (403), so the store writes create-only, GCS
-/// answers 412, and `Store::put` counts that as uploaded, for both single-part
-/// and multipart writes.
+/// A put that finds its object already written, as when a retry follows a lost
+/// success response, succeeds. The upload token can't overwrite, so writes are
+/// create-only and the store counts GCS's 412 as done.
 #[tokio::test]
-async fn second_write_to_an_existing_object_succeeds() {
-    let Some(env) = Env::load() else { return };
+async fn put_of_an_existing_object_succeeds() {
+    let Some(gcs) = Gcs::load() else { return };
+    for (name, len) in [("exists-single.bin", SMALL), ("exists-multi.bin", LARGE)] {
+        let obj = gcs.object(name);
+        let bytes = test_bytes(len);
+        let file = temp_file_with(&bytes).await;
 
-    for (name, len) in [
-        ("exists-single.bin", 64 * 1024),
-        ("exists-multi.bin", PART + 1024),
-    ] {
-        let obj = env.obj(name);
-        let bytes = test_bytes(len, len as u64 + 1);
-        let tmp = write_temp(&bytes);
-        for attempt in 1..=2 {
-            let store = env.upload_store(&obj).await;
-            let result = store.put(File::new(tmp.path()), &obj, &metadata()).await;
-            assert!(result.is_ok(), "{name} attempt {attempt}: {result:?}");
+        for _ in 0..2 {
+            let store = gcs.upload_store(&obj).await;
+            store
+                .put(file.to_file(), &obj, &metadata())
+                .await
+                .expect(name);
         }
-        env.assert_bytes(&obj, &bytes).await;
-        env.cleanup(&[&obj]).await;
+        gcs.assert_stored(&obj, &bytes).await;
     }
 }

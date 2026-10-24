@@ -1,19 +1,17 @@
-# Real-GCS guard for GCS uploads through aws-sdk-s3 (agent/tests/s3/gcs.rs).
+# Runs the real-GCS upload tests (agent/tests/s3/gcs.rs). GCS uploads rely on
+# aws-sdk-s3 behaviour Google doesn't document, and the worst break is silent,
+# so changes to the SDK or the upload code are checked against real GCS.
 #
-# GCS uploads rely on SDK behaviour Google doesn't document, and the worst
-# break is silent (aws-chunked checksums stored as object bytes with a 200).
-# This job uploads to a real bucket with a single-object downscoped token and
-# reads the bytes and metadata back.
+# Authenticates with workload identity, set up by these repo variables:
+#   GCS_IT_WIF_PROVIDER     the workload identity provider
+#   GCS_IT_SERVICE_ACCOUNT  a service account with roles/storage.objectAdmin
+#                           on the bucket
+#   GCS_IT_BUCKET           the test bucket. The tests don't delete what they
+#                           write, so give it a lifecycle rule that does.
 #
-# Credentials (repo variables; the bucket may also be a secret):
-#   GCS_IT_WIF_PROVIDER     workload identity provider
-#   GCS_IT_SERVICE_ACCOUNT  SA with roles/storage.objectAdmin on the bucket
-#   GCS_IT_BUCKET           test bucket
-# or the GCS_IT_SOURCE_TOKEN secret (a short-lived access token) instead of
-# the WIF pair. Without credentials the job skips, except when the PR changes
-# an aws-* crate in Cargo.lock: then it fails, because that is the change it
-# guards. Dependabot PRs get no secrets, so for an SDK bump run this workflow
-# by hand on the Dependabot branch (Actions > GCS XML > Run workflow).
+# A run that can't authenticate, such as a fork PR's, skips the tests, unless
+# the PR changes an aws-* crate: then it fails, and the workflow should be run
+# by hand on that branch (Actions > GCS XML > Run workflow).
 name: GCS XML
 
 on:
@@ -48,43 +46,35 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Secrets can't gate a job, so this step decides whether the rest runs.
+      # GitHub sets ACTIONS_ID_TOKEN_REQUEST_URL only when the run can get the
+      # OIDC token that workload identity needs.
       - name: Check for credentials
         id: creds
         env:
-          HAVE_WIF: ${{ vars.GCS_IT_WIF_PROVIDER != '' && vars.GCS_IT_SERVICE_ACCOUNT != '' }}
-          HAVE_TOKEN: ${{ secrets.GCS_IT_SOURCE_TOKEN != '' }}
-          HAVE_BUCKET: ${{ vars.GCS_IT_BUCKET != '' || secrets.GCS_IT_BUCKET != '' }}
+          CONFIGURED: ${{ vars.GCS_IT_WIF_PROVIDER != '' && vars.GCS_IT_SERVICE_ACCOUNT != '' && vars.GCS_IT_BUCKET != '' }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          if { [ "$HAVE_WIF" = true ] || [ "$HAVE_TOKEN" = true ]; } && [ "$HAVE_BUCKET" = true ]; then
-            echo "any=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          sdk_versions() {
-            awk '/^name = "aws-/ { name = $3; getline; print name, $3 }'
-          }
-          if [ -n "$BASE_SHA" ] && ! diff -q \
-            <(git show "$BASE_SHA:Cargo.lock" | sdk_versions) \
-            <(sdk_versions < Cargo.lock) > /dev/null; then
-            echo "::error::This PR changes aws-* crates but the GCS guard has no credentials. Run the GCS XML workflow by hand on this branch before merging."
+          aws_crates() { grep -A1 '^name = "aws-'; }
+          if [ "$CONFIGURED" = true ] && [ -n "$ACTIONS_ID_TOKEN_REQUEST_URL" ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          elif [ -n "$BASE_SHA" ] && [ "$(git show "$BASE_SHA:Cargo.lock" | aws_crates)" != "$(aws_crates < Cargo.lock)" ]; then
+            echo "::error::This PR changes aws-* crates but this run can't reach GCS. Run the GCS XML workflow by hand on this branch before merging."
             exit 1
+          else
+            echo "::notice::No GCS credentials in this run; skipping the real-GCS tests"
           fi
-          echo "::notice::No GCS credentials configured; skipping the real-GCS run"
 
       - name: Install Rust Toolchain
-        if: steps.creds.outputs.any == 'true'
+        if: steps.creds.outputs.ok == 'true'
         uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
 
       - name: Cache Rust dependencies
-        if: steps.creds.outputs.any == 'true'
+        if: steps.creds.outputs.ok == 'true'
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
-      # The SA's own token only feeds the STS exchange (downscoping) and the
-      # read-back checks; every upload uses a single-object downscoped token.
       - name: Authenticate to Google Cloud
         id: auth
-        if: steps.creds.outputs.any == 'true' && vars.GCS_IT_WIF_PROVIDER != '' && vars.GCS_IT_SERVICE_ACCOUNT != ''
+        if: steps.creds.outputs.ok == 'true'
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
         with:
           workload_identity_provider: ${{ vars.GCS_IT_WIF_PROVIDER }}
@@ -92,13 +82,9 @@ jobs:
           token_format: access_token
           create_credentials_file: false
 
-      - name: Build
-        if: steps.creds.outputs.any == 'true'
-        run: cargo test --package miru-agent --locked --test mod --no-run
-
-      - name: Upload to GCS and verify
-        if: steps.creds.outputs.any == 'true'
+      - name: Run the real-GCS tests
+        if: steps.creds.outputs.ok == 'true'
         env:
-          GCS_IT_SOURCE_TOKEN: ${{ steps.auth.outputs.access_token || secrets.GCS_IT_SOURCE_TOKEN }}
-          GCS_IT_BUCKET: ${{ vars.GCS_IT_BUCKET || secrets.GCS_IT_BUCKET }}
-        run: cargo test --package miru-agent --locked --test mod s3::gcs -- --nocapture
+          GCS_IT_SOURCE_TOKEN: ${{ steps.auth.outputs.access_token }}
+          GCS_IT_BUCKET: ${{ vars.GCS_IT_BUCKET }}
+        run: cargo test --package miru-agent --locked --test mod s3::gcs

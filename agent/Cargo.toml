@@ -68,7 +68,7 @@ http = { workspace = true }
 http-body-util = "0.1"
 mockall = "0.14"
 pastey = "0.2"
-reqwest = { workspace = true, features = ["json"] }
+reqwest = { workspace = true, features = ["form", "json"] }
 rumqttd = { workspace = true }
 serial_test = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
