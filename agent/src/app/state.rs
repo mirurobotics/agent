@@ -54,16 +54,13 @@ impl AppState {
         // storage layout stuff
         let auth_files = setup_auth_files(layout).await?;
 
-        // get the device id
-        let device_id = disk::resolve_device_id(layout).await?;
-
         // initialize storage
+        let device_id = disk::resolve_device_id(layout).await?;
         let (stor, storage_handle) = disk::Storage::init(layout, capacities, device_id).await?;
         let storage = Arc::new(stor);
 
         // load the uptime and start saving it
-        let (uptime, uptime_saver, uptime_saver_handle) =
-            init_uptime(layout, http_client.clock().clone()).await;
+        let (uptime, uptime_saver, uptime_handle) = init_uptime(layout, http_client.clock()).await;
 
         // initialize the token manager
         let (token_mngr, token_mngr_handle) =
@@ -74,16 +71,14 @@ impl AppState {
             events::EventHub::spawn(layout.events_log_file(), Default::default()).await?;
 
         // initialize the syncer
-        let syncer_args = build_syncer_args(
+        let (syncer, syncer_handle) = Self::init_syncer(build_syncer_args(
             storage.clone(),
             http_client.clone(),
             token_mngr.clone(),
             dpl_retry_policy,
             event_hub.clone(),
             layout.system_metadata(),
-        );
-        let (syncer, syncer_handle) = sync::Syncer::spawn(64, syncer_args)?;
-        let syncer = Arc::new(syncer);
+        ))?;
 
         // initialize the data upload pipeline (deleter, uploader, scanner)
         let (deleter, uploader, scanner, [scanner_handle, deleter_handle, uploader_handle]) =
@@ -102,7 +97,7 @@ impl AppState {
                 deleter_handle,
                 uploader_handle,
                 calibration_uploader_handle,
-                uptime_saver_handle,
+                uptime_handle,
             ];
             futures::future::join(futures::future::join_all(handles), storage_handle).await;
         };
@@ -137,6 +132,13 @@ impl AppState {
             auth_files.public_key,
         )?;
         Ok((Arc::new(token_mngr), handle))
+    }
+
+    fn init_syncer(
+        args: SyncerArgs<http::Client, authn::TokenManager>,
+    ) -> Result<(Arc<sync::Syncer>, tokio::task::JoinHandle<()>), server::ServerErr> {
+        let (syncer, handle) = sync::Syncer::spawn(64, args)?;
+        Ok((Arc::new(syncer), handle))
     }
 
     /// The deleter and uploader are initialized before the scanner: the
@@ -377,7 +379,7 @@ impl AppState {
 /// late, never early.
 async fn init_uptime(
     layout: &disk::Layout,
-    clock: clock::Clock,
+    clock: &clock::Clock,
 ) -> (
     clock::Uptime,
     clock::UptimeSaverHandle,
@@ -393,7 +395,7 @@ async fn init_uptime(
             None
         }
     };
-    let saver = clock::UptimeSaver::new(clock, file);
+    let saver = clock::UptimeSaver::new(clock.clone(), file);
     let uptime = saver.uptime();
     let (handle, join) = saver.spawn();
     (uptime, handle, join)
