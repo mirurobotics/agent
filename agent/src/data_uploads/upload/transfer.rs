@@ -98,13 +98,13 @@ impl SdkTransfer {
     /// Builds the S3 store with this transfer's transport settings.
     fn s3_store(&self, cfg: s3::Config) -> s3::Store {
         let config = s3::aws::config(cfg, self.http_client.clone(), self.s3_force_path_style);
-        s3::Store::new(config)
+        s3::Store::new(s3::Options { config, gcs: false })
     }
 
     /// Builds the GCS store with this transfer's transport settings.
     fn gcs_store(&self, token: s3::gcs::Token) -> s3::Store {
         let config = s3::gcs::config(token, self.http_client.clone());
-        s3::Store::new_gcs(config)
+        s3::Store::new(s3::Options { config, gcs: true })
     }
 }
 

@@ -62,8 +62,8 @@ impl Token {
     }
 }
 
-/// The SDK config for [`Store::new_gcs`](crate::s3::Store::new_gcs).
-/// `http_client` replaces the default HTTPS client when given.
+/// The SDK config for a GCS [`Store`](crate::s3::Store). `http_client`
+/// replaces the default HTTPS client when given.
 pub(crate) fn config(token: Token, http_client: Option<SharedHttpClient>) -> aws_sdk_s3::Config {
     let mut builder = aws_sdk_s3::Config::builder()
         .behavior_version(BehaviorVersion::latest())
@@ -192,7 +192,7 @@ mod tests {
     use super::*;
     use crate::s3::store::tests::{resp, resp_xml, temp_file_with};
     use crate::s3::store::PART_SIZE;
-    use crate::s3::{Object, S3Err, Store};
+    use crate::s3::{Object, Options, S3Err, Store};
 
     // external crates
     use aws_smithy_http_client::test_util::{ReplayEvent, StaticReplayClient};
@@ -223,7 +223,10 @@ mod tests {
     fn gcs_store(replay: &StaticReplayClient) -> Store {
         let token = Token::new("gcs-token").unwrap();
         let http_client = Some(SharedHttpClient::new(replay.clone()));
-        Store::new_gcs(config(token, http_client))
+        Store::new(Options {
+            config: config(token, http_client),
+            gcs: true,
+        })
     }
 
     fn metadata() -> HashMap<String, String> {
@@ -456,7 +459,10 @@ mod tests {
             let replay = StaticReplayClient::new(vec![]);
             let token = Token(SecretString::from("bad\ntoken"));
             let http_client = Some(SharedHttpClient::new(replay.clone()));
-            let store = Store::new_gcs(config(token, http_client));
+            let store = Store::new(Options {
+                config: config(token, http_client),
+                gcs: true,
+            });
             let src = temp_file_with(b"hello world").await;
 
             let err = store

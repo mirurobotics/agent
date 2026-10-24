@@ -95,32 +95,30 @@ impl Source {
     }
 }
 
-pub struct Store {
-    pub(super) client: Client,
-    /// Set for GCS (see [`gcs`]). Bodies then carry a `Content-MD5` the store
+/// What a [`Store`] is built from.
+pub struct Options {
+    /// The SDK config, from [`aws::config`](crate::s3::aws::config) or
+    /// [`gcs::config`].
+    pub config: aws_sdk_s3::Config,
+    /// Set for a [`gcs::config`]. Bodies then carry a `Content-MD5` the store
     /// computes, since the GCS client turns the SDK's own request checksums
     /// off, and object writes are create-only.
+    pub gcs: bool,
+}
+
+pub struct Store {
+    pub(super) client: Client,
+    /// See [`Options::gcs`].
     gcs: bool,
 }
 
 impl Store {
-    /// Builds a store on an SDK config from
-    /// [`aws::config`](crate::s3::aws::config). No network I/O happens here; the
-    /// first request is made lazily on the first call.
-    pub fn new(config: aws_sdk_s3::Config) -> Self {
+    /// Builds a store from `opts`. No network I/O happens here; the first
+    /// request is made lazily on the first call.
+    pub fn new(opts: Options) -> Self {
         Self {
-            client: Client::from_conf(config),
-            gcs: false,
-        }
-    }
-
-    /// Builds a GCS store on an SDK config from [`gcs::config`]: bodies carry a
-    /// `Content-MD5`, and an object that already exists counts as written (see
-    /// [`gcs`]). No network I/O happens here.
-    pub fn new_gcs(config: aws_sdk_s3::Config) -> Self {
-        Self {
-            client: Client::from_conf(config),
-            gcs: true,
+            client: Client::from_conf(opts.config),
+            gcs: opts.gcs,
         }
     }
 
@@ -303,7 +301,7 @@ pub(super) mod tests {
     use miru_agent::filesys::file::File;
     use miru_agent::filesys::path::PathExt;
     use miru_agent::filesys::{files, FileSysErr, WriteOptions};
-    use miru_agent::s3::{aws, Config, Credentials, Object, S3Err, Source, Store};
+    use miru_agent::s3::{aws, Config, Credentials, Object, Options, S3Err, Source, Store};
 
     // external crates
     use aws_sdk_s3::config::SharedHttpClient;
@@ -362,7 +360,8 @@ pub(super) mod tests {
         };
         let http_client = Some(SharedHttpClient::new(replay.clone()));
         // Path-style URLs, so request URIs match `uri()`.
-        let store = Store::new(aws::config(cfg, http_client, true));
+        let config = aws::config(cfg, http_client, true);
+        let store = Store::new(Options { config, gcs: false });
         (store, replay)
     }
 
@@ -452,7 +451,8 @@ pub(super) mod tests {
                 region: "us-west-2".to_string(),
             };
             // Constructing must not panic or touch the network.
-            let _store = Store::new(aws::config(cfg, None, false));
+            let config = aws::config(cfg, None, false);
+            let _store = Store::new(Options { config, gcs: false });
         }
     }
 
