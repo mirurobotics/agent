@@ -17,8 +17,8 @@
 //!   `BadDigest`).
 //!
 //! These rely on how GCS treats aws-sdk-s3's requests, which Google doesn't
-//! document. The tests below pin the requests we send, and the gated `gcs-xml`
-//! CI job (`agent/tests/s3/gcs.rs`) checks real GCS on every aws-sdk-s3 bump.
+//! document. The tests below pin the requests we send, and CI checks real GCS
+//! with `agent/tests/s3/gcs.rs`.
 
 // internal crates
 use crate::errors::HTTPCode;

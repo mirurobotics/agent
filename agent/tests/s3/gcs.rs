@@ -5,8 +5,9 @@
 //! token downscoped like the backend's, and read each object back.
 //!
 //! They skip unless `GCS_IT_SOURCE_TOKEN` (an access token with
-//! `roles/storage.objectAdmin` on the bucket) and `GCS_IT_BUCKET` are set. The
-//! `gcs-xml` CI workflow sets both.
+//! `roles/storage.objectAdmin` on the bucket) and `GCS_IT_BUCKET` are set.
+//! CI's `test` job sets both whenever it can authenticate. The tests don't
+//! delete what they write; the bucket's lifecycle rule does.
 
 // standard crates
 use std::collections::HashMap;
@@ -44,10 +45,12 @@ struct Gcs {
 }
 
 impl Gcs {
-    /// `None`, so the test skips, unless the token and bucket are set.
+    /// `None`, so the test skips, unless the token and bucket are set. CI sets
+    /// the token to an empty string when it can't authenticate.
     fn load() -> Option<Self> {
-        let source_token = std::env::var("GCS_IT_SOURCE_TOKEN").ok()?;
-        let bucket = std::env::var("GCS_IT_BUCKET").ok()?;
+        let var = |name: &str| std::env::var(name).ok().filter(|v| !v.is_empty());
+        let source_token = var("GCS_IT_SOURCE_TOKEN")?;
+        let bucket = var("GCS_IT_BUCKET")?;
         let prefix = format!("agent-ci/gcs-xml/{}", Uuid::new_v4());
         Some(Self {
             bucket,
