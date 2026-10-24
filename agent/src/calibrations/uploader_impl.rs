@@ -117,7 +117,7 @@ where
         };
         let queued: HashSet<Uuid> = self.queue.iter().map(|entry| entry.id).collect();
         for file in listing {
-            if report_id(&file).is_some_and(|id| queued.contains(&id)) {
+            if entry_id(&file).is_some_and(|id| queued.contains(&id)) {
                 continue;
             }
             warn!("calibrations: deleting report file {file}, which is not queued");
@@ -285,8 +285,9 @@ where
     }
 }
 
-/// The report id a report file is named after, or `None` for any other file.
-fn report_id(file: &File) -> Option<Uuid> {
+/// The queue entry id a report file is named after, or `None` for any other
+/// file.
+fn entry_id(file: &File) -> Option<Uuid> {
     file.name().ok().and_then(|name| Uuid::from_str(name).ok())
 }
 
