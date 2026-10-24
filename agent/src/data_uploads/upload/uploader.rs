@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 // internal crates
+use crate::clock::Clock;
 use crate::data_uploads::{
     retention::DeleterExt,
     upload::{
@@ -18,7 +19,6 @@ use crate::queue::NextAttempt;
 use crate::trace;
 
 // external crates
-use chrono::{DateTime, Utc};
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
@@ -69,26 +69,24 @@ enum Flow {
     Shutdown,
 }
 
-pub(crate) struct Worker<ExecutorT, D, F, Fut, N>
+pub(crate) struct Worker<ExecutorT, D, F, Fut>
 where
     ExecutorT: UploadExecutor,
     D: DeleterExt + 'static,
     F: Fn(Duration) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = ()> + Send + 'static,
-    N: Fn() -> DateTime<Utc> + Send + Sync + 'static,
 {
     receiver: Receiver<Command>,
-    uploader: UploaderImpl<ExecutorT, D, N>,
+    uploader: UploaderImpl<ExecutorT, D>,
     sleep_fn: F,
 }
 
-impl<ExecutorT, D, F, Fut, N> Worker<ExecutorT, D, F, Fut, N>
+impl<ExecutorT, D, F, Fut> Worker<ExecutorT, D, F, Fut>
 where
     ExecutorT: UploadExecutor,
     D: DeleterExt + 'static,
     F: Fn(Duration) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = ()> + Send + 'static,
-    N: Fn() -> DateTime<Utc> + Send + Sync + 'static,
 {
     pub(crate) async fn run(mut self) {
         loop {
@@ -211,26 +209,25 @@ pub struct Uploader {
 }
 
 impl Uploader {
-    pub fn spawn<ExecutorT, D, F, Fut, N>(
+    pub fn spawn<ExecutorT, D, F, Fut>(
         buffer_size: usize,
         executor: Arc<ExecutorT>,
         deleter: Arc<D>,
         options: UploaderOptions,
         snapshot_file: Option<QueueSnapshotFile>,
         sleep_fn: F,
-        now_fn: N,
+        clock: Clock,
     ) -> Result<(Self, JoinHandle<()>), UploadErr>
     where
         ExecutorT: UploadExecutor + 'static,
         D: DeleterExt + 'static,
         F: Fn(Duration) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = ()> + Send + 'static,
-        N: Fn() -> DateTime<Utc> + Send + Sync + 'static,
     {
         let (sender, receiver) = mpsc::channel(buffer_size);
         let worker = Worker {
             receiver,
-            uploader: UploaderImpl::new(executor, deleter, options, snapshot_file, now_fn),
+            uploader: UploaderImpl::new(executor, deleter, options, snapshot_file, clock),
             sleep_fn,
         };
         let worker_handle = tokio::spawn(worker.run());
