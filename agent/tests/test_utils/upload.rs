@@ -91,7 +91,7 @@ pub fn upload_ref() -> UploadRef {
         bucket_name: "my-bucket".to_string(),
         object_key: "logs/a.log".to_string(),
         metadata: response_metadata(),
-        transfer: None,
+        multipart: None,
     }
 }
 

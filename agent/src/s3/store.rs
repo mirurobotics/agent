@@ -45,8 +45,9 @@ impl std::fmt::Display for Object {
 pub struct Source {
     file: File,
     handle: tokio::fs::File,
-    pub(super) size: u64,
-    mtime: Option<std::time::SystemTime>,
+    pub(crate) size: u64,
+    /// `None` if the platform doesn't report one.
+    pub(crate) mtime: Option<std::time::SystemTime>,
 }
 
 impl Source {
@@ -74,16 +75,6 @@ impl Source {
             size: meta.len(),
             mtime: meta.modified().ok(),
         })
-    }
-
-    /// The opened file's size in bytes.
-    pub fn size(&self) -> u64 {
-        self.size
-    }
-
-    /// The opened file's modification time, if the platform reports one.
-    pub fn mtime(&self) -> Option<std::time::SystemTime> {
-        self.mtime
     }
 
     /// Reads `[offset..offset+length]` into memory, mapping any seek/read failure

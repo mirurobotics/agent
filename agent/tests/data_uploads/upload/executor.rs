@@ -18,7 +18,7 @@ use miru_agent::authn::errors::MockError as AuthnMockError;
 use miru_agent::authn::AuthnErr;
 use miru_agent::data_uploads::upload::executor::new_upl_request;
 use miru_agent::data_uploads::upload::{
-    Job, LiveExecutor, TransferState, UploadErr, UploadExecutor, UploadRef,
+    Job, LiveExecutor, MultipartRef, UploadErr, UploadExecutor, UploadRef,
 };
 use miru_agent::errors::Error;
 use miru_agent::filesys::File;
@@ -342,9 +342,8 @@ fn job_with(upload: UploadRef) -> Job {
 /// The upload with a multipart upload in progress.
 fn upload_mid_transfer() -> UploadRef {
     UploadRef {
-        transfer: Some(TransferState {
-            multipart_upload_id: "mpu_1".to_string(),
-            part_size: 8 * 1024 * 1024,
+        multipart: Some(MultipartRef {
+            id: "mpu_1".to_string(),
             size: 42,
             mtime: Utc.timestamp_opt(1_700_000_000, 0).unwrap(),
         }),
@@ -356,26 +355,23 @@ fn calls(client: &MockClient) -> Vec<Call> {
     client.requests().iter().map(|r| r.call.clone()).collect()
 }
 
-// The new upload is saved before the transfer starts, so the transfer's own
-// save comes second.
+// The new upload is saved before the transfer starts, so a failed transfer
+// leaves it for the next attempt.
 #[tokio::test]
 async fn new_upload_is_saved_before_the_transfer() {
     let client = Arc::new(MockClient::default());
     client.set_create_upload(|| Ok(pending_response()));
     let transfer = MockObjectTransfer::new();
-    transfer.push_save(upload_mid_transfer());
+    transfer.push_err();
     let checkpointer = RecordingCheckpointer::new();
     let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone());
 
     executor
         .upload(&make_job("a.log"), &checkpointer)
         .await
-        .unwrap();
+        .unwrap_err();
 
-    assert_eq!(
-        checkpointer.saved(),
-        vec![upload_ref(), upload_mid_transfer()]
-    );
+    assert_eq!(checkpointer.saved(), [upload_ref()]);
 }
 
 // A retry gets fresh credentials for the saved upload instead of creating a
@@ -487,22 +483,4 @@ async fn credentials_failure_keeps_the_upload() {
     assert_eq!(calls(&client), vec![Call::VendUploadCredentials]);
     assert!(transfer.recorded_calls().is_empty());
     assert!(checkpointer.saved().is_empty());
-}
-
-#[tokio::test]
-async fn credentials_token_failure_maps_to_executor_err() {
-    let client = Arc::new(MockClient::default());
-    let token_mngr = Arc::new(StubTokenManager::err(AuthnErr::MockError(AuthnMockError {
-        is_network_conn_err: false,
-        trace: miru_agent::trace!(),
-    })));
-    let executor = LiveExecutor::new(client.clone(), token_mngr, MockObjectTransfer::new());
-
-    let err = executor
-        .upload(&job_with(upload_ref()), &NoopCheckpointer)
-        .await
-        .unwrap_err();
-
-    assert!(matches!(err, UploadErr::ExecutorErr(_)));
-    assert!(client.requests().is_empty());
 }

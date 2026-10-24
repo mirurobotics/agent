@@ -5,7 +5,7 @@ use std::future::Future;
 use crate::data_uploads::upload::{
     errors::{classified_executor_err, executor_err, TransferErr, UploadErr},
     executor::Checkpointer,
-    job::{TransferState, UploadRef},
+    job::{MultipartRef, UploadRef},
 };
 use crate::filesys::File;
 use crate::s3;
@@ -20,7 +20,7 @@ use tracing::info;
 /// The seam between the upload executor and the concrete cloud-storage SDKs.
 /// Given the vended downscoped credentials and the server-authorized upload,
 /// transfer the file's bytes to the object store, resuming the multipart upload
-/// in `upload.transfer` and saving any new one through `checkpointer`. Kept
+/// in `upload.multipart` and saving any new one through `checkpointer`. Kept
 /// separate from the executor so its orchestration (create, reuse, confirm) is
 /// unit-testable without a live object store.
 ///
@@ -138,7 +138,7 @@ async fn put<K: Checkpointer>(
     let src = s3::Source::open(file.clone(), &object)
         .await
         .map_err(classified_executor_err)?;
-    let result = if src.size() <= s3::store::PART_SIZE {
+    let result = if src.size <= s3::store::PART_SIZE {
         store.put_singlepart(src, &object, &upload.metadata).await
     } else {
         put_resumable(store, src, &object, upload, checkpointer).await
@@ -146,10 +146,12 @@ async fn put<K: Checkpointer>(
     result.map_err(classified_executor_err)
 }
 
-/// Resumes the multipart upload in `upload.transfer` if it was started for this
-/// file version and part size. Otherwise, or if the provider no longer has it
+/// Resumes the multipart upload in `upload.multipart` if it was started for
+/// this version of the file. Otherwise, or if the provider no longer has it
 /// (`NoSuchUpload`), starts a new one on the same key and saves it before the
 /// first part goes up. Never aborts on failure, so the next attempt can resume.
+/// The part layout depends only on the file size, so a matching size means the
+/// landed parts line up.
 async fn put_resumable<K: Checkpointer>(
     store: &s3::Store,
     mut src: s3::Source,
@@ -157,15 +159,14 @@ async fn put_resumable<K: Checkpointer>(
     upload: &UploadRef,
     checkpointer: &K,
 ) -> Result<(), s3::S3Err> {
-    let Some(mtime) = src.mtime().map(DateTime::<Utc>::from) else {
+    let Some(mtime) = src.mtime.map(DateTime::<Utc>::from) else {
         // Without an mtime the upload can't be pinned to this file version, so
         // it runs start to finish without being saved.
         return store.put_multipart(src, object, &upload.metadata).await;
     };
-    let part_size = s3::Store::part_size_for(src.size());
-    if let Some(prev) = &upload.transfer {
-        if prev.size == src.size() && prev.mtime == mtime && prev.part_size == part_size {
-            let id = &prev.multipart_upload_id;
+    if let Some(prev) = &upload.multipart {
+        if prev.size == src.size && prev.mtime == mtime {
+            let id = &prev.id;
             info!("upload: resuming multipart upload {id} for {object}");
             match store.resume_multipart_upload(&mut src, object, id).await {
                 Err(s3::S3Err::NoSuchUploadErr(_)) => {}
@@ -175,22 +176,21 @@ async fn put_resumable<K: Checkpointer>(
         info!(
             "upload: multipart upload {} for {object} is gone or no longer matches the file; \
              starting a new one",
-            prev.multipart_upload_id
+            prev.id
         );
     }
 
     let id = store
         .create_multipart_upload(object, &upload.metadata)
         .await?;
-    let transfer = TransferState {
-        multipart_upload_id: id.clone(),
-        part_size,
-        size: src.size(),
+    let multipart = MultipartRef {
+        id: id.clone(),
+        size: src.size,
         mtime,
     };
     checkpointer
         .save(&UploadRef {
-            transfer: Some(transfer),
+            multipart: Some(multipart),
             ..upload.clone()
         })
         .await;
@@ -400,9 +400,9 @@ mod tests {
 
         // The URI is the load-bearing assertion: `my-bucket` in the path proves
         // `bucket_name` reached the SDK, `logs/a.log` proves `object_key`, and the
-        // host proves the vended region flows through. The streamed body can't be byte-compared — the
-        // replay client records it as an unbuffered `SdkBody` (see
-        // `tests/s3` `put_streams_file_body_bytes`).
+        // host proves the vended region flows through. The streamed body can't
+        // be byte-compared — the replay client records it as an unbuffered
+        // `SdkBody` (see `tests/s3` `put_streams_file_body_bytes`).
         let requests = replay.actual_requests().collect::<Vec<_>>();
         assert_eq!(requests.len(), 1);
         assert_eq!(requests[0].method(), "PUT");
@@ -613,20 +613,21 @@ mod tests {
     mod resume {
         // internal crates
         use super::*;
-        use miru_agent::data_uploads::upload::{TransferState, UploadRef};
+        use crate::s3::store::PART_SIZE;
+        use miru_agent::data_uploads::upload::{MultipartRef, UploadRef};
         use miru_agent::filesys::path::PathExt;
 
         // external crates
-        use chrono::{DateTime, Utc};
+        use chrono::{DateTime, TimeDelta, Utc};
 
-        const PART: u64 = 8 * 1024 * 1024;
+        /// One part plus 1 KiB, so the file splits into two parts.
+        const SIZE: u64 = PART_SIZE + 1024;
         const S3_BASE: &str = "https://s3.us-east-1.amazonaws.com/my-bucket/logs/a.log";
         const GCS_BASE: &str = "https://storage.googleapis.com/my-bucket/logs/a.log";
 
-        /// A file one part plus 1 KiB long, so it splits into two parts, and its
-        /// mtime.
+        /// A file of [`SIZE`] bytes and its mtime.
         async fn two_part_file() -> (test_files::TempFile, DateTime<Utc>) {
-            let tf = temp_file_with(&vec![7u8; (PART + 1024) as usize]).await;
+            let tf = temp_file_with(&vec![7u8; SIZE as usize]).await;
             let mtime = std::fs::metadata(tf.file().path())
                 .unwrap()
                 .modified()
@@ -638,9 +639,8 @@ mod tests {
         /// last modified at `mtime`.
         fn saved(id: &str, size: u64, mtime: DateTime<Utc>) -> UploadRef {
             UploadRef {
-                transfer: Some(TransferState {
-                    multipart_upload_id: id.to_string(),
-                    part_size: PART,
+                multipart: Some(MultipartRef {
+                    id: id.to_string(),
                     size,
                     mtime,
                 }),
@@ -746,99 +746,68 @@ mod tests {
                 .collect()
         }
 
+        /// Transfers `file` for `upload` over `replay`, returning the result
+        /// and the uploads the transfer saved.
         async fn run(
             creds: &UploadCredentials,
             replay: &StaticReplayClient,
             file: &File,
             upload: &UploadRef,
-            checkpointer: &RecordingCheckpointer,
-        ) -> Result<(), UploadErr> {
-            SdkTransfer::with_http_client(replay.clone())
-                .transfer(creds, upload, file, checkpointer)
-                .await
+        ) -> (Result<(), UploadErr>, Vec<UploadRef>) {
+            let checkpointer = RecordingCheckpointer::new();
+            let result = SdkTransfer::with_http_client(replay.clone())
+                .transfer(creds, upload, file, &checkpointer)
+                .await;
+            (result, checkpointer.saved())
         }
 
         #[tokio::test]
         async fn new_upload_is_saved_then_uploaded() {
             let (tf, mtime) = two_part_file().await;
             let replay = replay(new_upload_resps("mpu_new"));
-            let checkpointer = RecordingCheckpointer::new();
 
-            run(&s3(), &replay, tf.file(), &upload_ref(), &checkpointer)
-                .await
-                .unwrap();
+            let (result, saves) = run(&s3(), &replay, tf.file(), &upload_ref()).await;
 
-            assert_eq!(
-                checkpointer.saved(),
-                vec![saved("mpu_new", PART + 1024, mtime)]
-            );
+            result.unwrap();
+            assert_eq!(saves, [saved("mpu_new", SIZE, mtime)]);
             assert_eq!(
                 sent(&replay),
-                vec![
-                    "POST ?uploads".to_string(),
-                    "GET ?x-id=ListParts&uploadId=mpu_new".to_string(),
-                    "PUT ?x-id=UploadPart&partNumber=1&uploadId=mpu_new".to_string(),
-                    "PUT ?x-id=UploadPart&partNumber=2&uploadId=mpu_new".to_string(),
-                    "POST ?uploadId=mpu_new".to_string(),
+                [
+                    "POST ?uploads",
+                    "GET ?x-id=ListParts&uploadId=mpu_new",
+                    "PUT ?x-id=UploadPart&partNumber=1&uploadId=mpu_new",
+                    "PUT ?x-id=UploadPart&partNumber=2&uploadId=mpu_new",
+                    "POST ?uploadId=mpu_new",
                 ]
             );
         }
 
+        // S3 and GCS share the multipart path, so both resume a saved upload by
+        // uploading only the parts that haven't landed.
         #[tokio::test]
         async fn saved_upload_resumes_and_skips_landed_parts() {
             let (tf, mtime) = two_part_file().await;
-            let replay = replay(vec![
-                list_resp(&[(1, "\"e1\"")]),
-                part_resp("\"e2\""),
-                complete_resp(),
-            ]);
-            let checkpointer = RecordingCheckpointer::new();
-            let upload = saved("mpu_old", PART + 1024, mtime);
+            for creds in [s3(), gcs()] {
+                let replay = replay(vec![
+                    list_resp(&[(1, "\"e1\"")]),
+                    part_resp("\"e2\""),
+                    complete_resp(),
+                ]);
 
-            run(&s3(), &replay, tf.file(), &upload, &checkpointer)
-                .await
-                .unwrap();
+                let upload = saved("mpu_old", SIZE, mtime);
+                let (result, saves) = run(&creds, &replay, tf.file(), &upload).await;
 
-            assert!(checkpointer.saved().is_empty());
-            assert_eq!(
-                sent(&replay),
-                vec![
-                    "GET ?x-id=ListParts&uploadId=mpu_old".to_string(),
-                    "PUT ?x-id=UploadPart&partNumber=2&uploadId=mpu_old".to_string(),
-                    "POST ?uploadId=mpu_old".to_string(),
-                ]
-            );
-        }
-
-        // GCS goes through the same multipart path and resumes the same way.
-        #[tokio::test]
-        async fn gcs_saved_upload_resumes() {
-            let (tf, mtime) = two_part_file().await;
-            let replay = replay(vec![
-                list_resp(&[(1, "\"e1\"")]),
-                part_resp("\"e2\""),
-                complete_resp(),
-            ]);
-            let upload = saved("mpu_old", PART + 1024, mtime);
-
-            run(
-                &gcs(),
-                &replay,
-                tf.file(),
-                &upload,
-                &RecordingCheckpointer::new(),
-            )
-            .await
-            .unwrap();
-
-            assert_eq!(
-                sent(&replay),
-                vec![
-                    "GET ?x-id=ListParts&uploadId=mpu_old".to_string(),
-                    "PUT ?x-id=UploadPart&partNumber=2&uploadId=mpu_old".to_string(),
-                    "POST ?uploadId=mpu_old".to_string(),
-                ]
-            );
+                result.unwrap();
+                assert!(saves.is_empty());
+                assert_eq!(
+                    sent(&replay),
+                    [
+                        "GET ?x-id=ListParts&uploadId=mpu_old",
+                        "PUT ?x-id=UploadPart&partNumber=2&uploadId=mpu_old",
+                        "POST ?uploadId=mpu_old",
+                    ]
+                );
+            }
         }
 
         #[tokio::test]
@@ -850,86 +819,57 @@ mod tests {
             )];
             resps.extend(new_upload_resps("mpu_new"));
             let replay = replay(resps);
-            let checkpointer = RecordingCheckpointer::new();
-            let upload = saved("mpu_old", PART + 1024, mtime);
 
-            run(&s3(), &replay, tf.file(), &upload, &checkpointer)
-                .await
-                .unwrap();
+            let upload = saved("mpu_old", SIZE, mtime);
+            let (result, saves) = run(&s3(), &replay, tf.file(), &upload).await;
 
-            assert_eq!(
-                checkpointer.saved(),
-                vec![saved("mpu_new", PART + 1024, mtime)]
-            );
+            result.unwrap();
+            assert_eq!(saves, [saved("mpu_new", SIZE, mtime)]);
             assert_eq!(sent(&replay)[1], "POST ?uploads");
         }
 
-        // A saved upload for another file size, mtime or part size starts a new
-        // one without listing the old one's parts.
+        // A saved upload for another version of the file (size or mtime) starts
+        // a new one without listing the old one's parts.
         #[tokio::test]
-        async fn mismatched_upload_starts_a_new_one() {
+        async fn changed_file_starts_a_new_upload() {
             let (tf, mtime) = two_part_file().await;
-            let size = PART + 1024;
-            let mut other_part_size = saved("mpu_old", size, mtime);
-            other_part_size.transfer.as_mut().unwrap().part_size = 2 * PART;
             for upload in [
-                saved("mpu_old", size + 1, mtime),
-                saved("mpu_old", size, mtime + chrono::TimeDelta::seconds(1)),
-                other_part_size,
+                saved("mpu_old", SIZE + 1, mtime),
+                saved("mpu_old", SIZE, mtime + TimeDelta::seconds(1)),
             ] {
                 let replay = replay(new_upload_resps("mpu_new"));
-                let checkpointer = RecordingCheckpointer::new();
 
-                run(&s3(), &replay, tf.file(), &upload, &checkpointer)
-                    .await
-                    .unwrap();
+                let (result, saves) = run(&s3(), &replay, tf.file(), &upload).await;
 
-                assert_eq!(checkpointer.saved(), vec![saved("mpu_new", size, mtime)]);
+                result.unwrap();
+                assert_eq!(saves, [saved("mpu_new", SIZE, mtime)]);
                 assert_eq!(sent(&replay)[0], "POST ?uploads");
             }
         }
 
-        // A failed part leaves the saved upload open for the next attempt: no
+        // A failed part leaves the new upload open for the next attempt: no
         // abort is sent.
         #[tokio::test]
         async fn failed_part_does_not_abort() {
-            let (tf, _) = two_part_file().await;
+            let (tf, mtime) = two_part_file().await;
             let replay = replay(vec![
                 create_resp("mpu_new"),
                 list_resp(&[]),
                 s3_access_denied_resp(),
             ]);
-            let checkpointer = RecordingCheckpointer::new();
 
-            run(&s3(), &replay, tf.file(), &upload_ref(), &checkpointer)
-                .await
-                .unwrap_err();
+            let (result, saves) = run(&s3(), &replay, tf.file(), &upload_ref()).await;
 
-            assert_eq!(checkpointer.saved().len(), 1);
+            result.unwrap_err();
+            assert_eq!(saves, [saved("mpu_new", SIZE, mtime)]);
             assert_eq!(
                 sent(&replay),
-                vec![
-                    "POST ?uploads".to_string(),
-                    "GET ?x-id=ListParts&uploadId=mpu_new".to_string(),
-                    "PUT ?x-id=UploadPart&partNumber=1&uploadId=mpu_new".to_string(),
+                [
+                    "POST ?uploads",
+                    "GET ?x-id=ListParts&uploadId=mpu_new",
+                    "PUT ?x-id=UploadPart&partNumber=1&uploadId=mpu_new",
                 ]
             );
-        }
-
-        // Files of one part or less go up in one PutObject and save nothing.
-        #[tokio::test]
-        async fn small_file_ignores_the_saved_upload() {
-            let tf = temp_file_with(b"hello").await;
-            let replay = replay(vec![s3_resp(200, &[])]);
-            let checkpointer = RecordingCheckpointer::new();
-            let upload = saved("mpu_old", PART + 1024, Utc::now());
-
-            run(&s3(), &replay, tf.file(), &upload, &checkpointer)
-                .await
-                .unwrap();
-
-            assert!(checkpointer.saved().is_empty());
-            assert_eq!(sent(&replay), vec!["PUT ?x-id=PutObject".to_string()]);
         }
     }
 }

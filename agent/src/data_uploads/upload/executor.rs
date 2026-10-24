@@ -99,7 +99,7 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> LiveExecutor<C, T, X> {
             bucket_name: resp.upload.destination.bucket_name,
             object_key: resp.upload.destination.object_key,
             metadata: resp.metadata,
-            transfer: None,
+            multipart: None,
         };
         checkpointer.save(&upload).await;
         Ok((upload, *resp.credentials))

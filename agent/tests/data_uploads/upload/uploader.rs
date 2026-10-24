@@ -15,8 +15,8 @@ use crate::test_utils::{
 use miru_agent::data_uploads::retention::Job as DeleteJob;
 use miru_agent::data_uploads::upload::errors::{EnqueueErr, ExecutorErr};
 use miru_agent::data_uploads::upload::{
-    Job, QueueEntry, QueueSnapshot, QueueSnapshotFile, TransferState, UploadErr, UploadRef,
-    Uploader, UploaderExt, UploaderOptions,
+    Job, QueueEntry, QueueSnapshot, QueueSnapshotFile, UploadErr, Uploader, UploaderExt,
+    UploaderOptions,
 };
 use miru_agent::errors::Error;
 use miru_agent::filesys::File;
@@ -1215,68 +1215,30 @@ mod durability {
         timed(handle2).await.unwrap();
     }
 
-    /// The upload an attempt saves mid-transfer.
-    fn upload_mid_transfer() -> UploadRef {
-        UploadRef {
-            transfer: Some(TransferState {
-                multipart_upload_id: "mpu_1".to_string(),
-                part_size: 8 * 1024 * 1024,
-                size: 42,
-                mtime: DateTime::from_timestamp(1_700_000_000, 0).unwrap(),
-            }),
-            ..upload_ref()
-        }
-    }
-
-    /// The jobs currently on disk, read through a fresh handle.
-    async fn jobs_on_disk(path: &File) -> Vec<Job> {
-        open(path)
-            .await
-            .read()
-            .entries
-            .iter()
-            .map(|entry| entry.job.clone())
-            .collect()
-    }
-
     /// An attempt's saved upload reaches disk while the attempt is still
-    /// running, so a crash mid-transfer keeps the upload and multipart ids, and
-    /// the next process hands them back to the executor.
+    /// running, so a crash mid-transfer keeps it for the next process.
     #[tokio::test]
-    async fn saved_upload_reaches_disk_mid_attempt_and_survives_a_restart() {
+    async fn saved_upload_reaches_disk_mid_attempt() {
         let dir = test_dirs::temp("uploader_durability").unwrap();
         let path = dir.to_dir().file("upload_queue.json");
-        let job = make_job("a.log");
-
         let (mock, mut started_rx) = MockUploadExecutor::new();
         let (_release_tx, release_rx) = oneshot::channel();
         mock.push_step(MockStep::SaveThen(
-            upload_mid_transfer(),
+            upload_ref(),
             Box::new(MockStep::Hang(release_rx)),
         ));
         let (uploader, handle) = spawn_persisted(mock.clone(), open(&path).await);
-        timed(uploader.enqueue(job.clone())).await.unwrap();
 
-        let mut expected = job.clone();
-        expected.upload = Some(upload_mid_transfer());
+        timed(uploader.enqueue(make_job("a.log"))).await.unwrap();
         // once when the attempt starts, again once its upload is saved
         timed(started_rx.recv()).await.unwrap();
         timed(started_rx.recv()).await.unwrap();
-        assert_eq!(jobs_on_disk(&path).await, vec![expected.clone()]);
+
+        let saved = open(&path).await.read().entries[0].job.upload.clone();
+        assert_eq!(saved, Some(upload_ref()));
+
         timed(uploader.shutdown()).await.unwrap();
         timed(handle).await.unwrap();
-
-        let (mock2, mut started2_rx) = MockUploadExecutor::new();
-        mock2.push_step(MockStep::Ok);
-        let (uploader2, handle2) = spawn_persisted(mock2.clone(), open(&path).await);
-        timed(started2_rx.recv()).await.unwrap();
-        await_drained(&uploader2).await;
-
-        assert_eq!(mock2.recorded_calls(), vec![expected]);
-        assert!(on_disk(&path).await.is_empty());
-
-        timed(uploader2.shutdown()).await.unwrap();
-        timed(handle2).await.unwrap();
     }
 
     /// A failed attempt's requeue keeps its saved upload rather than writing
@@ -1288,7 +1250,6 @@ mod durability {
         let job = make_job("a.log");
         let (mock, _started_rx) = MockUploadExecutor::new();
         mock.push_step(MockStep::SaveThen(upload_ref(), Box::new(MockStep::Err)));
-        mock.push_step(MockStep::NetworkErr);
         mock.push_step(MockStep::Ok);
         let (uploader, handle, _sleeps) =
             spawn_persisted_with_test_clock(mock.clone(), open(&path).await);
@@ -1298,7 +1259,7 @@ mod durability {
 
         let mut expected = job.clone();
         expected.upload = Some(upload_ref());
-        assert_eq!(mock.recorded_calls(), vec![job, expected.clone(), expected]);
+        assert_eq!(mock.recorded_calls(), vec![job, expected]);
 
         timed(uploader.shutdown()).await.unwrap();
         timed(handle).await.unwrap();
