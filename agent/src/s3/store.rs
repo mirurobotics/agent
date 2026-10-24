@@ -301,10 +301,10 @@ pub(super) mod tests {
     use miru_agent::filesys::file::File;
     use miru_agent::filesys::path::PathExt;
     use miru_agent::filesys::{files, FileSysErr, WriteOptions};
-    use miru_agent::s3::{aws, sdk, Config, Credentials, Object, Options, S3Err, Source, Store};
+    use miru_agent::s3::{aws, sdk, Object, Options, S3Err, Source, Store};
 
     // external crates
-    use aws_sdk_s3::config::SharedHttpClient;
+    use aws_sdk_s3::config::{Credentials, SharedHttpClient};
     use aws_smithy_http_client::test_util::{ReplayEvent, StaticReplayClient};
     use aws_smithy_types::body::SdkBody;
 
@@ -312,11 +312,13 @@ pub(super) mod tests {
     const BUCKET: &str = "test-bucket";
 
     fn test_credentials() -> Credentials {
-        Credentials {
-            access_key_id: "access-key".to_string(),
-            secret_access_key: "secret-key".to_string(),
-            session_token: "session-token".to_string(),
-        }
+        Credentials::new(
+            "access-key",
+            "secret-key",
+            Some("session-token".to_string()),
+            None,
+            "test",
+        )
     }
 
     // Headers that vary per request (signing, timestamps, user agent) and must be
@@ -354,13 +356,9 @@ pub(super) mod tests {
     /// network.
     pub(crate) fn store_with(events: Vec<ReplayEvent>) -> (Store, StaticReplayClient) {
         let replay = StaticReplayClient::new(events);
-        let cfg = Config {
-            region: REGION.to_string(),
-            creds: test_credentials(),
-        };
         let http_client = SharedHttpClient::new(replay.clone());
         // Path-style URLs, so request URIs match `uri()`.
-        let config = aws::config(cfg, http_client, true);
+        let config = aws::config(test_credentials(), REGION.to_string(), http_client, true);
         let store = Store::new(Options { config, gcs: false });
         (store, replay)
     }
@@ -442,16 +440,9 @@ pub(super) mod tests {
 
         #[tokio::test]
         async fn new_builds_without_network() {
-            let cfg = Config {
-                creds: Credentials {
-                    access_key_id: "AKIA_TEST".to_string(),
-                    secret_access_key: "secret".to_string(),
-                    session_token: "session".to_string(),
-                },
-                region: "us-west-2".to_string(),
-            };
+            let region = "us-west-2".to_string();
             // Constructing must not panic or touch the network.
-            let config = aws::config(cfg, sdk::http_client(), false);
+            let config = aws::config(test_credentials(), region, sdk::http_client(), false);
             let _store = Store::new(Options { config, gcs: false });
         }
     }

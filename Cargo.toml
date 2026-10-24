@@ -18,6 +18,7 @@ git_commit = "arglebargle"
 [workspace.dependencies]
 async-trait = "0.1.88"
 atomicwrites = "0.4.4"
+aws-credential-types = { version = "1.3", default-features = false }
 # The SDK `rustls` feature maps to aws-smithy-http-client's `legacy-rustls-ring`
 # (rustls 0.21 + hyper-rustls 0.24 → rustls-webpki 0.101.7), which carries
 # RUSTSEC-2026-0098/0099. `default-https-client` instead pulls the modern

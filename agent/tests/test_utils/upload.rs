@@ -38,7 +38,8 @@ pub fn destination() -> UploadDestination {
     }
 }
 
-/// The inner `s3_credentials` arm of [`s3_credentials`], as vended JSON.
+/// The inner `s3_credentials` arm of [`s3_credentials`], as vended JSON. They
+/// expire far in the future, so no refresh is due during a test.
 pub fn s3_credentials_json() -> Value {
     json!({
         "scheme": "s3",
@@ -46,7 +47,7 @@ pub fn s3_credentials_json() -> Value {
         "secret_access_key": "secret",
         "session_token": "session",
         "region": "us-east-1",
-        "expires_at": "2021-01-01T01:00:00Z"
+        "expires_at": "2099-01-01T00:00:00Z"
     })
 }
 
@@ -55,7 +56,7 @@ pub fn s3_credentials() -> UploadCredentials {
         "scheme": "s3",
         "s3_credentials": s3_credentials_json(),
         "gcs_credentials": null,
-        "expires_at": "2021-01-01T01:00:00Z"
+        "expires_at": "2099-01-01T00:00:00Z"
     }))
     .unwrap()
 }
