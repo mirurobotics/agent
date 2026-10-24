@@ -61,7 +61,7 @@ async fn enqueue_waiting<J: QueueJob>(
     next_attempt_at: DateTime<Utc>,
 ) {
     let id = enqueue(queue, job).await;
-    assert!(queue.retry(id, attempts, next_attempt_at).await);
+    assert!(queue.retry(id, attempts, next_attempt_at, 0).await);
 }
 
 /// The ready jobs, in selection order. `next_ready` leaves the entry in place,
@@ -165,6 +165,7 @@ pub mod cases {
                     job: make("a.log"),
                     attempts: 7,
                     next_attempt_at: Some(now()),
+                    waited_secs: 0,
                 }],
             };
             let mut value = serde_json::to_value(&snapshot).unwrap();
@@ -486,7 +487,7 @@ pub mod cases {
             enqueue(&mut queue, make("b.log")).await;
 
             let entry = queue.next_ready(now()).unwrap();
-            assert!(queue.retry(entry.id, entry.attempts, now()).await);
+            assert!(queue.retry(entry.id, entry.attempts, now(), 0).await);
             assert_eq!(queue.len(), 2);
 
             assert_eq!(drain(&mut queue).await, jobs(make, &["b.log", "a.log"]));
@@ -497,7 +498,7 @@ pub mod cases {
             enqueue(&mut queue, make("a.log")).await;
 
             let entry = queue.next_ready(now()).unwrap();
-            assert!(queue.retry(entry.id, 2, now()).await);
+            assert!(queue.retry(entry.id, 2, now(), 0).await);
 
             assert_eq!(queue.len(), 1);
             let entry = queue.next_ready(now()).unwrap();
@@ -509,7 +510,7 @@ pub mod cases {
             let mut queue = FileQueue::<J>::new(DEFAULT_CAPACITY);
             enqueue(&mut queue, make("a.log")).await;
 
-            assert!(!queue.retry(Uuid::new_v4(), 1, now()).await);
+            assert!(!queue.retry(Uuid::new_v4(), 1, now(), 0).await);
 
             assert_eq!(queue.len(), 1);
             let entry = queue.next_ready(now()).unwrap();
@@ -531,7 +532,7 @@ pub mod cases {
                 enqueue(&mut queue, make("b.log")).await;
                 let entry = queue.next_ready(now()).unwrap();
                 id = entry.id;
-                assert!(queue.retry(entry.id, entry.attempts, now()).await);
+                assert!(queue.retry(entry.id, entry.attempts, now(), 0).await);
             }
 
             let reloaded = FileQueue::<J>::from_snapshot(
@@ -558,7 +559,7 @@ pub mod cases {
                 );
                 enqueue(&mut queue, make("a.log")).await;
                 let entry = queue.next_ready(now()).unwrap();
-                assert!(queue.retry(entry.id, 5, deadline).await);
+                assert!(queue.retry(entry.id, 5, deadline, 0).await);
                 assert_eq!(queue.len(), 1);
             }
 

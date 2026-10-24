@@ -160,6 +160,7 @@ impl<J: QueueJob> FileQueue<J> {
             job,
             attempts: 0,
             next_attempt_at: None,
+            waited_secs: 0,
         });
     }
 
@@ -185,13 +186,21 @@ impl<J: QueueJob> FileQueue<J> {
     }
 
     /// Move the entry with `id` to the tail with updated `attempts` and
-    /// `next_attempt_at`. Returns `false` for an unknown id.
-    pub async fn retry(&mut self, id: Uuid, attempts: u32, next_attempt_at: DateTime<Utc>) -> bool {
+    /// `next_attempt_at`, adding `waited_secs` to its `waited_secs`. Returns
+    /// `false` for an unknown id.
+    pub async fn retry(
+        &mut self,
+        id: Uuid,
+        attempts: u32,
+        next_attempt_at: DateTime<Utc>,
+        waited_secs: u64,
+    ) -> bool {
         let Some(mut entry) = self.take(id) else {
             return false;
         };
         entry.attempts = attempts;
         entry.next_attempt_at = Some(next_attempt_at);
+        entry.waited_secs = entry.waited_secs.saturating_add(waited_secs);
         self.entries.push_back(entry);
         let _ = self.persist().await;
         info!(
