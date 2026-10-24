@@ -6,7 +6,7 @@ use std::sync::Arc;
 // internal crates
 use crate::mocks::http_client::{Call, MockClient};
 use crate::mocks::stub_token_manager::StubTokenManager;
-use crate::test_utils::calibrations::{received_at, report};
+use crate::test_utils::calibrations::{received_at, report, report_id};
 use backend_api::models::{
     Calibration, CreateCalibrationRequest, InstanceContent, InstanceFormat as BackendFormat,
 };
@@ -50,6 +50,7 @@ pub mod new_request {
         let request = new_request(full_report());
 
         let expected = CreateCalibrationRequest {
+            report_id: report_id("arm"),
             deployment_id: Some("dpl_1".to_string()),
             component: "arm".to_string(),
             role: Some("left".to_string()),
@@ -121,7 +122,7 @@ pub mod send {
     #[tokio::test]
     async fn an_accepted_report_with_an_unparseable_response_is_sent() {
         // a response body is parsed only after a 2xx, so Miru stored the
-        // report; resending it would store it again
+        // report
         let client = Arc::new(MockClient::default());
         client.set_create_calibration(|| {
             Err(HTTPErr::UnmarshalJSONErr(UnmarshalJSONErr {

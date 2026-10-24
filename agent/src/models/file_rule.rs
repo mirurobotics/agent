@@ -1,13 +1,14 @@
 // internal crates
 use crate::deserialize_error;
-use crate::models::Os;
+use crate::models::{status::impl_status_enum, Os};
 use backend_api::models as backend_client;
+use device_api::models as agent_server;
 
 // external crates
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use serde::Serialize;
-use tracing::error;
+use tracing::{error, warn};
 use uuid::Uuid;
 
 // ============================= FILE RULE SOURCE ================================== //
@@ -26,6 +27,34 @@ impl From<backend_client::FileRuleSource> for FileRuleSource {
     }
 }
 
+// ============================ UPLOAD TIMEZONE ==================================== //
+/// The time zone an upload path's time variables are rendered in.
+#[derive(Clone, Copy, Debug, Default, Serialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum UploadTimezone {
+    #[default]
+    Utc,
+    Device,
+}
+
+impl_status_enum!(
+    enum UploadTimezone,
+    default: Utc,
+    label: "upload timezone",
+    log: warn,
+    agent_type: agent_server::FileRuleUploadTimezone,
+    backend_type: backend_client::FileRuleUploadTimezone,
+    unknown_backend: backend_client::FileRuleUploadTimezone::FileRuleUploadTimezoneUnknown,
+    mappings: [
+        Utc => "utc" =>
+            agent_server::FileRuleUploadTimezone::FILE_RULE_UPLOAD_TIMEZONE_UTC =>
+            backend_client::FileRuleUploadTimezone::FILE_RULE_UPLOAD_TIMEZONE_UTC,
+        Device => "device" =>
+            agent_server::FileRuleUploadTimezone::FILE_RULE_UPLOAD_TIMEZONE_DEVICE =>
+            backend_client::FileRuleUploadTimezone::FILE_RULE_UPLOAD_TIMEZONE_DEVICE,
+    ]
+);
+
 // ============================= FILE RULE UPLOAD ================================== //
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FileRuleUpload {
@@ -34,6 +63,9 @@ pub struct FileRuleUpload {
     pub bucket_id: String,
     pub bucket_name: String,
     pub path: String,
+    // file rules cached before timezone existed have none
+    #[serde(default)]
+    pub timezone: UploadTimezone,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bundle: Option<Vec<String>>,
 }
@@ -46,6 +78,7 @@ impl From<backend_client::FileRuleUpload> for FileRuleUpload {
             bucket_id: upload.bucket_id,
             bucket_name: upload.bucket_name,
             path: upload.path,
+            timezone: (&upload.timezone).into(),
             bundle: upload.bundle,
         }
     }

@@ -9,9 +9,15 @@ use miru_agent::http::{self, HTTPErr};
 // external crates
 use axum::routing::post;
 use axum::{Json, Router};
+use uuid::Uuid;
+
+fn report_id() -> Uuid {
+    Uuid::from_u128(0x0b6f3c2e_6a51_4e0f_9a43_2f1d7c9e8b10)
+}
 
 fn payload() -> CreateCalibrationRequest {
     CreateCalibrationRequest {
+        report_id: report_id(),
         deployment_id: Some("dpl_1".to_string()),
         component: "front-camera".to_string(),
         role: Some("left".to_string()),
@@ -32,6 +38,7 @@ fn calibration() -> Calibration {
         component_id: "cmp_1".to_string(),
         digest: "sha256:abc".to_string(),
         deployment_id: Some("dpl_1".to_string()),
+        report_id: report_id(),
         created_at: "2026-10-19T12:00:01Z".to_string(),
         ..Calibration::default()
     }
