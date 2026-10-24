@@ -17,7 +17,7 @@ use uuid::Uuid;
 /// Deterministic report metadata, ready the moment it arrives.
 fn metadata(name: &str) -> ReportMetadata {
     ReportMetadata {
-        report_id: report_id(),
+        report_id: report_id(name),
         component: name.to_string(),
         format: InstanceFormat::Yaml,
         role: Some("aligner-1".to_string()),
@@ -86,7 +86,7 @@ mod wire {
                 r#"}},"attempts":0,"next_attempt_at":null}}]}}"#,
             ),
             id = id,
-            report_id = report_id(),
+            report_id = report_id("arm"),
         );
         files::write_string(&path, &raw, WriteOptions::OVERWRITE_ATOMIC)
             .await
@@ -111,7 +111,7 @@ mod wire {
                 r#""component":"arm","format":"yaml","#,
                 r#""reported_at":"1970-01-01T00:16:40Z"}}}}]}}"#,
             ),
-            report_id = report_id(),
+            report_id = report_id("arm"),
         );
         files::write_string(&path, &raw, WriteOptions::OVERWRITE_ATOMIC)
             .await

@@ -2,6 +2,7 @@
 //! worker, service and server tests.
 
 // standard crates
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::Arc;
 
 // internal crates
@@ -21,16 +22,18 @@ pub fn received_at() -> DateTime<Utc> {
     DateTime::from_timestamp(1000, 0).unwrap()
 }
 
-/// The `report_id` of every fixture report.
-pub fn report_id() -> Uuid {
-    Uuid::from_u128(0x0b6f3c2e_6a51_4e0f_9a43_2f1d7c9e8b10)
+/// The `report_id` of the fixture report for `slug`, the same on every call.
+pub fn report_id(slug: &str) -> Uuid {
+    let mut hasher = DefaultHasher::new();
+    slug.hash(&mut hasher);
+    Uuid::from_u64_pair(0, hasher.finish())
 }
 
 /// A sendable report told apart from others by its `component`.
 pub fn report(slug: &str) -> Report {
     Report {
         metadata: ReportMetadata {
-            report_id: report_id(),
+            report_id: report_id(slug),
             component: slug.to_string(),
             format: InstanceFormat::Json,
             role: None,

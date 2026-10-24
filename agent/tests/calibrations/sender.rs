@@ -50,7 +50,7 @@ pub mod new_request {
         let request = new_request(full_report());
 
         let expected = CreateCalibrationRequest {
-            report_id: report_id(),
+            report_id: report_id("arm"),
             deployment_id: Some("dpl_1".to_string()),
             component: "arm".to_string(),
             role: Some("left".to_string()),
