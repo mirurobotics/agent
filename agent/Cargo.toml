@@ -13,7 +13,6 @@ many_single_char_names = "warn"
 [dependencies]
 atomicwrites = { workspace = true }
 aws-sdk-s3 = { workspace = true }
-# Operation names (`Metadata`) for GCS create-only writes (agent/src/s3/gcs.rs).
 aws-smithy-runtime-api = { workspace = true, features = ["client"] }
 aws-lc-rs = { workspace = true }
 axum = { workspace = true }

@@ -122,34 +122,6 @@ impl Store {
         }
     }
 
-    /// Finishes an object write (PutObject or CompleteMultipartUpload). On GCS
-    /// the client sends writes create-only (see [`gcs`]), so a 412 means an
-    /// earlier attempt already stored the object at this key, which counts as
-    /// done.
-    pub(super) fn finish_write<E>(
-        &self,
-        operation: &str,
-        dst: &Object,
-        result: Result<(), SdkError<E>>,
-    ) -> Result<WriteOutcome, S3Err>
-    where
-        E: std::error::Error + 'static,
-    {
-        match result {
-            Ok(()) => Ok(WriteOutcome::Created),
-            Err(e) if self.gcs && errors::status(&e) == Some(HTTPCode::PRECONDITION_FAILED) => {
-                tracing::info!("upload: {dst} already exists, so an earlier {operation} landed");
-                Ok(WriteOutcome::AlreadyExists)
-            }
-            Err(e) => Err(errors::map_sdk_err(operation, dst, e)),
-        }
-    }
-
-    /// `Content-MD5` for a body, when this store sends one.
-    pub(super) fn content_md5(&self, bytes: &[u8]) -> Option<String> {
-        self.gcs.then(|| gcs::content_md5(bytes))
-    }
-
     /// Creates or overwrites an object from a local file, opened once as a
     /// [`Source`]. GCS never overwrites: an existing object counts as written
     /// (see [`gcs`]).
@@ -195,6 +167,34 @@ impl Store {
             .await
             .map(|_| ());
         self.finish_write("put_object", dst, result).map(|_| ())
+    }
+
+    /// `Content-MD5` for a body, when this store sends one.
+    pub(super) fn content_md5(&self, bytes: &[u8]) -> Option<String> {
+        self.gcs.then(|| gcs::content_md5(bytes))
+    }
+
+    /// Finishes an object write (PutObject or CompleteMultipartUpload). On GCS
+    /// the client sends writes create-only (see [`gcs`]), so a 412 means an
+    /// earlier attempt already stored the object at this key, which counts as
+    /// done.
+    pub(super) fn finish_write<E>(
+        &self,
+        operation: &str,
+        dst: &Object,
+        result: Result<(), SdkError<E>>,
+    ) -> Result<WriteOutcome, S3Err>
+    where
+        E: std::error::Error + 'static,
+    {
+        match result {
+            Ok(()) => Ok(WriteOutcome::Created),
+            Err(e) if self.gcs && errors::status(&e) == Some(HTTPCode::PRECONDITION_FAILED) => {
+                tracing::info!("upload: {dst} already exists, so an earlier {operation} landed");
+                Ok(WriteOutcome::AlreadyExists)
+            }
+            Err(e) => Err(errors::map_sdk_err(operation, dst, e)),
+        }
     }
 
     /// Streams an object's body to a destination file. A missing object maps to

@@ -37,8 +37,6 @@ config-agent = { path = "apps/agent" }
 futures = "0.3.31"
 glob = "0.3.3"
 http = "1"
-# Content-MD5 for GCS uploads (agent/src/s3/gcs.rs). The same md-5 that
-# aws-sdk-s3 already builds for its checksums.
 md5 = { package = "md-5", version = "0.11" }
 nix = { version = "0.31.2", default-features = false, features = ["user"] }
 # `std` implies `alloc` (needed for decode_vec/encode_string) and makes its error a
