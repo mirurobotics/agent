@@ -65,11 +65,7 @@ pub struct ExpiredCredentialsErr {
     pub trace: Box<Trace>,
 }
 
-impl crate::errors::Error for ExpiredCredentialsErr {
-    fn is_expired_credentials_err(&self) -> bool {
-        true
-    }
-}
+impl crate::errors::Error for ExpiredCredentialsErr {}
 
 #[derive(Debug, thiserror::Error)]
 pub struct RequestFailedErr {
@@ -484,16 +480,16 @@ mod tests {
         }
 
         #[test]
-        fn expired_credentials_err_is_expired_credentials_err() {
+        fn expired_credentials_err_defaults_to_internal_server_error() {
             let err = S3Err::ExpiredCredentialsErr(ExpiredCredentialsErr {
                 operation: "upload_part".to_string(),
                 object: object(),
                 msg: "unhandled error (ExpiredToken)".to_string(),
                 trace: crate::trace!(),
             });
-            assert!(err.is_expired_credentials_err());
-            assert!(!err.is_network_conn_err());
             assert!(matches!(err.code(), Code::InternalServerError));
+            assert_eq!(err.http_status().as_u16(), 500);
+            assert!(!err.is_network_conn_err());
             assert!(err.to_string().contains("credentials expired"));
         }
 

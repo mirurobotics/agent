@@ -766,7 +766,6 @@ pub(super) mod tests {
                     matches!(err, S3Err::ExpiredCredentialsErr(_)),
                     "got {err:?}"
                 );
-                assert!(err.is_expired_credentials_err());
             }
         }
 

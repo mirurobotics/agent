@@ -166,7 +166,13 @@ where
     /// attempt budget; any other failure does.
     async fn handle_failure(&mut self, mut entry: QueueEntry, err: UploadErr) {
         let age = (self.now_fn)() - entry.job.first_observed_at;
-        match self.options.retry.on_failure(&err, entry.attempts, age) {
+        let retry = &self.options.retry;
+        let verdict = if matches!(err, UploadErr::ExpiredCredentialsErr(_)) {
+            retry.on_uncounted_failure(entry.attempts, age)
+        } else {
+            retry.on_failure(&err, entry.attempts, age)
+        };
+        match verdict {
             Verdict::Retry {
                 attempts,
                 wait_secs,
@@ -215,7 +221,7 @@ where
     fn log_failure(entry: &QueueEntry, err: &UploadErr) {
         if err.is_network_conn_err() {
             Self::log_network_conn_err(entry, err);
-        } else if err.is_expired_credentials_err() {
+        } else if matches!(err, UploadErr::ExpiredCredentialsErr(_)) {
             Self::log_expired_credentials(entry, err);
         } else {
             Self::log_counted_failure(entry, err);

@@ -12,17 +12,12 @@ use chrono::{DateTime, TimeDelta, Utc};
 #[error("test failure")]
 struct Failure {
     network: bool,
-    expired_credentials: bool,
     terminal: bool,
 }
 
 impl miru_agent::errors::Error for Failure {
     fn is_network_conn_err(&self) -> bool {
         self.network
-    }
-
-    fn is_expired_credentials_err(&self) -> bool {
-        self.expired_credentials
     }
 
     fn is_terminal(&self) -> bool {
@@ -32,22 +27,14 @@ impl miru_agent::errors::Error for Failure {
 
 const NETWORK: Failure = Failure {
     network: true,
-    expired_credentials: false,
-    terminal: false,
-};
-const EXPIRED_CREDENTIALS: Failure = Failure {
-    network: false,
-    expired_credentials: true,
     terminal: false,
 };
 const RETRYABLE: Failure = Failure {
     network: false,
-    expired_credentials: false,
     terminal: false,
 };
 const TERMINAL: Failure = Failure {
     network: false,
-    expired_credentials: false,
     terminal: true,
 };
 
@@ -105,29 +92,6 @@ fn a_network_error_past_the_age_backstop_is_too_old() {
 
     assert_eq!(
         policy().on_failure(&NETWORK, 0, age),
-        Verdict::TooOld { attempts: 0, age }
-    );
-}
-
-#[test]
-fn expired_credentials_wait_the_base_without_counting() {
-    let verdict = policy().on_failure(&EXPIRED_CREDENTIALS, 2, young());
-
-    assert_eq!(
-        verdict,
-        Verdict::Retry {
-            attempts: 2,
-            wait_secs: 10
-        }
-    );
-}
-
-#[test]
-fn expired_credentials_past_the_age_backstop_are_too_old() {
-    let age = TimeDelta::days(7);
-
-    assert_eq!(
-        policy().on_failure(&EXPIRED_CREDENTIALS, 0, age),
         Verdict::TooOld { attempts: 0, age }
     );
 }
@@ -192,7 +156,6 @@ fn a_terminal_error_past_the_age_cap_is_still_terminal() {
 fn a_network_error_marked_terminal_is_still_a_network_error() {
     let both = Failure {
         network: true,
-        expired_credentials: false,
         terminal: true,
     };
 

@@ -1,6 +1,7 @@
 // internal crates
 use crate::errors::Trace;
 pub use crate::queue::{EnqueueErr, QueueFullErr};
+use crate::s3::{errors::ExpiredCredentialsErr, S3Err};
 
 pub type SendActorMessageErr = crate::cache::errors::SendActorMessageErr;
 pub type ReceiveActorMessageErr = crate::cache::errors::ReceiveActorMessageErr;
@@ -12,7 +13,6 @@ pub struct ExecutorErr {
     pub source: Box<dyn std::error::Error + Send + Sync>,
     pub is_terminal: bool,
     pub is_network_conn_err: bool,
-    pub is_expired_credentials_err: bool,
     pub trace: Box<Trace>,
 }
 
@@ -22,9 +22,6 @@ impl crate::errors::Error for ExecutorErr {
     }
     fn is_network_conn_err(&self) -> bool {
         self.is_network_conn_err
-    }
-    fn is_expired_credentials_err(&self) -> bool {
-        self.is_expired_credentials_err
     }
 }
 
@@ -53,6 +50,8 @@ pub enum UploadErr {
     #[error(transparent)]
     ExecutorErr(ExecutorErr),
     #[error(transparent)]
+    ExpiredCredentialsErr(ExpiredCredentialsErr),
+    #[error(transparent)]
     SendActorMessageErr(SendActorMessageErr),
     #[error(transparent)]
     ReceiveActorMessageErr(ReceiveActorMessageErr),
@@ -61,42 +60,41 @@ pub enum UploadErr {
 crate::impl_error!(UploadErr {
     EnqueueErr,
     ExecutorErr,
+    ExpiredCredentialsErr,
     SendActorMessageErr,
     ReceiveActorMessageErr
 });
 
-/// Wraps any concrete error as an [`UploadErr::ExecutorErr`], the single
-/// error surface the actor sees from executor and transfer failures.
+/// Wraps any concrete error as an [`UploadErr::ExecutorErr`], the error the
+/// actor sees for every executor and transfer failure but expired credentials.
 pub(crate) fn executor_err<E>(source: E) -> UploadErr
 where
     E: Into<Box<dyn std::error::Error + Send + Sync>>,
 {
-    wrap_executor_err(source, false, false, false)
+    wrap_executor_err(source, false, false)
 }
 
-/// Wraps a Miru error while preserving its terminal, network-connection and
-/// expired-credentials classifications.
+/// Wraps a Miru error while preserving its terminal and network-connection
+/// classifications.
 pub(crate) fn classified_executor_err<E>(source: E) -> UploadErr
 where
     E: crate::errors::Error + Send + Sync + 'static,
 {
     let is_terminal = source.is_terminal();
     let is_network_conn_err = source.is_network_conn_err();
-    let is_expired_credentials_err = source.is_expired_credentials_err();
-    wrap_executor_err(
-        source,
-        is_terminal,
-        is_network_conn_err,
-        is_expired_credentials_err,
-    )
+    wrap_executor_err(source, is_terminal, is_network_conn_err)
 }
 
-fn wrap_executor_err<E>(
-    source: E,
-    is_terminal: bool,
-    is_network_conn_err: bool,
-    is_expired_credentials_err: bool,
-) -> UploadErr
+/// Wraps an object store failure. Expired credentials keep their own variant,
+/// which the uploader retries without counting the attempt.
+pub(crate) fn store_err(source: S3Err) -> UploadErr {
+    match source {
+        S3Err::ExpiredCredentialsErr(e) => UploadErr::ExpiredCredentialsErr(e),
+        source => classified_executor_err(source),
+    }
+}
+
+fn wrap_executor_err<E>(source: E, is_terminal: bool, is_network_conn_err: bool) -> UploadErr
 where
     E: Into<Box<dyn std::error::Error + Send + Sync>>,
 {
@@ -104,7 +102,6 @@ where
         source: source.into(),
         is_terminal,
         is_network_conn_err,
-        is_expired_credentials_err,
         trace: crate::trace!(),
     })
 }
@@ -149,22 +146,6 @@ mod tests {
     }
 
     #[test]
-    fn classified_s3_expired_credentials_err_is_expired_credentials() {
-        let expired = s3::errors::ExpiredCredentialsErr {
-            operation: "upload_part".to_string(),
-            object: s3::Object {
-                bucket: "bucket".to_string(),
-                key: "key".to_string(),
-            },
-            msg: "unhandled error (ExpiredToken)".to_string(),
-            trace: crate::trace!(),
-        };
-        let err = classified_executor_err(s3::S3Err::ExpiredCredentialsErr(expired));
-        assert!(err.is_expired_credentials_err());
-        assert!(!err.is_network_conn_err());
-    }
-
-    #[test]
     fn classified_authn_mock_network_err_is_network() {
         let err = classified_executor_err(AuthnErr::MockError(MockError {
             is_network_conn_err: true,
@@ -177,7 +158,6 @@ mod tests {
     fn executor_err_defaults_to_non_network() {
         let err = executor_err("some message");
         assert!(!err.is_network_conn_err());
-        assert!(!err.is_expired_credentials_err());
         assert!(!err.is_terminal());
     }
 

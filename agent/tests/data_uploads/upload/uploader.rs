@@ -39,7 +39,6 @@ fn scripted_err() -> Result<(), UploadErr> {
         source: Box::new(std::io::Error::other("scripted failure")),
         is_terminal: false,
         is_network_conn_err: false,
-        is_expired_credentials_err: false,
         trace: miru_agent::trace!(),
     }))
 }
@@ -49,7 +48,6 @@ fn scripted_network_err() -> Result<(), UploadErr> {
         source: Box::new(std::io::Error::other("scripted network failure")),
         is_terminal: false,
         is_network_conn_err: true,
-        is_expired_credentials_err: false,
         trace: miru_agent::trace!(),
     }))
 }

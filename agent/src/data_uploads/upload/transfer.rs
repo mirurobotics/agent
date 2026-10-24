@@ -3,9 +3,7 @@ use std::collections::HashMap;
 use std::future::Future;
 
 // internal crates
-use crate::data_uploads::upload::errors::{
-    classified_executor_err, executor_err, TransferErr, UploadErr,
-};
+use crate::data_uploads::upload::errors::{executor_err, store_err, TransferErr, UploadErr};
 use crate::filesys::File;
 use crate::s3;
 use backend_api::models::upload_credentials::Scheme;
@@ -134,7 +132,7 @@ async fn put(
     store
         .put(file.clone(), &object, metadata)
         .await
-        .map_err(classified_executor_err)
+        .map_err(store_err)
 }
 
 impl ObjectTransfer for SdkTransfer {
@@ -277,10 +275,18 @@ mod tests {
     /// Canned S3 403 AccessDenied response carrying the XML `<Error>` document S3
     /// returns for authorization failures.
     fn s3_access_denied_resp() -> http::Response<SdkBody> {
+        s3_resp_xml(403, ACCESS_DENIED_XML)
+    }
+
+    const EXPIRED_TOKEN_XML: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>ExpiredToken</Code><Message>The provided token has expired.</Message></Error>"#;
+
+    /// Canned S3 response with `status` and an XML body.
+    fn s3_resp_xml(status: u16, xml: &str) -> http::Response<SdkBody> {
         http::Response::builder()
-            .status(403)
+            .status(status)
             .header("content-type", "application/xml")
-            .body(SdkBody::from(ACCESS_DENIED_XML.to_string()))
+            .body(SdkBody::from(xml.to_string()))
             .unwrap()
     }
 
@@ -383,6 +389,26 @@ mod tests {
         assert!(matches!(err, UploadErr::ExecutorErr(_)), "got: {err:?}");
         assert!(!err.is_network_conn_err());
         assert!(!err.is_terminal());
+    }
+
+    #[tokio::test]
+    async fn s3_expired_token_maps_to_expired_credentials_err() {
+        let replay = StaticReplayClient::new(vec![ReplayEvent::new(
+            s3_req("PUT", S3_PUT_URI),
+            s3_resp_xml(400, EXPIRED_TOKEN_XML),
+        )]);
+        let src = temp_file_with(b"hello world").await;
+        let creds = credentials("s3", s3_credentials_json(), Value::Null);
+
+        let err = SdkTransfer::with_http_client(replay)
+            .transfer(&creds, &destination(), src.file(), &HashMap::new())
+            .await
+            .unwrap_err();
+
+        assert!(
+            matches!(err, UploadErr::ExpiredCredentialsErr(_)),
+            "got: {err:?}"
+        );
     }
 
     #[tokio::test]

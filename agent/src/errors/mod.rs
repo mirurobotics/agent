@@ -45,9 +45,6 @@ pub trait Error: std::error::Error {
     fn is_network_conn_err(&self) -> bool {
         false
     }
-    fn is_expired_credentials_err(&self) -> bool {
-        false
-    }
     fn is_terminal(&self) -> bool {
         false
     }
@@ -88,11 +85,6 @@ macro_rules! impl_error {
             fn is_network_conn_err(&self) -> bool {
                 match self {
                     $(Self::$variant(e) => e.is_network_conn_err(),)+
-                }
-            }
-            fn is_expired_credentials_err(&self) -> bool {
-                match self {
-                    $(Self::$variant(e) => e.is_expired_credentials_err(),)+
                 }
             }
             fn is_terminal(&self) -> bool {
