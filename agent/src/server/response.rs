@@ -124,6 +124,7 @@ impl From<&events::model::Event> for device_server::Event {
 impl From<&calibration::Created> for device_server::CreateCalibrationResponse {
     fn from(created: &calibration::Created) -> Self {
         device_server::CreateCalibrationResponse {
+            report_id: created.report_id,
             reported_at: created.reported_at.to_rfc3339(),
         }
     }

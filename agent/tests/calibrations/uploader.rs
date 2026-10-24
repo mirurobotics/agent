@@ -279,16 +279,17 @@ async fn shutdown_mid_upload_keeps_the_report_for_replay() {
     let (_hold, hang) = oneshot::channel();
     h.sender.push(Step::Hang(hang));
     h.spawn().await;
-    h.enqueue("a").await;
+    let id = h.enqueue("a").await;
     h.await_started().await;
 
     h.stop().await;
 
     assert_eq!(h.queued_on_disk().await, 1);
-    // the next boot sends it again: two sends in total, which Miru may store
-    // twice (dedup is out of scope)
+    // the next boot sends it again with the same report_id, so Miru records it
+    // once
     h.spawn().await;
     h.await_drained(&["a", "a"]).await;
+    assert_eq!(h.sender.report_ids(), [id, id]);
 }
 
 #[tokio::test]

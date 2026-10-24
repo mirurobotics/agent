@@ -17,6 +17,13 @@ use miru_agent::http::errors::{HTTPErr, MockErr, RequestFailed, UnmarshalJSONErr
 use miru_agent::http::request::Params;
 use miru_agent::models::InstanceFormat;
 
+// external crates
+use uuid::Uuid;
+
+fn report_id() -> Uuid {
+    Uuid::from_u128(0x0b6f3c2e_6a51_4e0f_9a43_2f1d7c9e8b10)
+}
+
 fn full_report() -> Report {
     let mut report = report("arm");
     report.metadata.role = Some("left".to_string());
@@ -47,9 +54,10 @@ pub mod new_request {
 
     #[test]
     fn maps_the_metadata() {
-        let request = new_request(full_report());
+        let request = new_request(report_id(), full_report());
 
         let expected = CreateCalibrationRequest {
+            report_id: report_id(),
             deployment_id: Some("dpl_1".to_string()),
             component: "arm".to_string(),
             role: Some("left".to_string()),
@@ -70,7 +78,7 @@ pub mod new_request {
         report.metadata.format = InstanceFormat::Yaml;
         report.data = "offset: [1, 2, 3]\n".to_string();
 
-        let request = new_request(report);
+        let request = new_request(report_id(), report);
 
         assert_eq!(
             *request.content,
@@ -90,7 +98,7 @@ pub mod send {
         let client = Arc::new(MockClient::default());
 
         sender(&client, StubTokenManager::ok("tok"))
-            .send(report("arm"))
+            .send(report_id(), report("arm"))
             .await
             .unwrap();
 
@@ -100,7 +108,7 @@ pub mod send {
         assert_eq!(requests[0].token.as_deref(), Some("tok"));
         let body = requests[0].body.as_deref().unwrap();
         let sent: CreateCalibrationRequest = serde_json::from_str(body).unwrap();
-        assert_eq!(sent, new_request(report("arm")));
+        assert_eq!(sent, new_request(report_id(), report("arm")));
     }
 
     #[tokio::test]
@@ -109,7 +117,7 @@ pub mod send {
         client.set_create_calibration(|| Err(request_failed(422)));
 
         let err = sender(&client, StubTokenManager::ok("tok"))
-            .send(report("arm"))
+            .send(report_id(), report("arm"))
             .await
             .unwrap_err();
 
@@ -121,7 +129,7 @@ pub mod send {
     #[tokio::test]
     async fn an_accepted_report_with_an_unparseable_response_is_sent() {
         // a response body is parsed only after a 2xx, so Miru stored the
-        // report; resending it would store it again
+        // report
         let client = Arc::new(MockClient::default());
         client.set_create_calibration(|| {
             Err(HTTPErr::UnmarshalJSONErr(UnmarshalJSONErr {
@@ -132,7 +140,7 @@ pub mod send {
         });
 
         sender(&client, StubTokenManager::ok("tok"))
-            .send(report("arm"))
+            .send(report_id(), report("arm"))
             .await
             .unwrap();
 
@@ -149,7 +157,7 @@ pub mod send {
         });
 
         let err = sender(&client, StubTokenManager::ok("tok"))
-            .send(report("arm"))
+            .send(report_id(), report("arm"))
             .await
             .unwrap_err();
 
@@ -167,7 +175,7 @@ pub mod send {
         }));
 
         let err = sender(&client, tokens)
-            .send(report("arm"))
+            .send(report_id(), report("arm"))
             .await
             .unwrap_err();
 
@@ -189,7 +197,7 @@ pub mod send {
         let tokens = StubTokenManager::err(AuthnErr::HTTPErr(request_failed(403)));
 
         let err = sender(&client, tokens)
-            .send(report("arm"))
+            .send(report_id(), report("arm"))
             .await
             .unwrap_err();
 

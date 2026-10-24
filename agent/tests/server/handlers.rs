@@ -586,7 +586,7 @@ pub mod routes {
         }
 
         #[tokio::test]
-        async fn create_calibration_returns_200_with_reported_at() {
+        async fn create_calibration_returns_200_with_report_id_and_reported_at() {
             let f = Fixture::new("handler_create_calibration").await;
 
             let (status, bytes) = f.post_json(URI, request("yaml", "offset: 1\n")).await;
@@ -594,6 +594,7 @@ pub mod routes {
 
             let actual: openapi::CreateCalibrationResponse =
                 serde_json::from_slice(&bytes).unwrap();
+            assert!(!actual.report_id.is_nil());
             assert!(DateTime::parse_from_rfc3339(&actual.reported_at).is_ok());
         }
 

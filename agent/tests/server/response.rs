@@ -8,6 +8,7 @@ use miru_agent::services::calibration::Created;
 
 // external crates
 use chrono::{DateTime, TimeZone, Utc};
+use uuid::Uuid;
 
 fn fixed_time() -> DateTime<Utc> {
     Utc.with_ymd_and_hms(2025, 6, 15, 12, 0, 0).unwrap()
@@ -476,9 +477,14 @@ pub mod create_calibration_response {
     #[test]
     fn converts_created() {
         let t = fixed_time();
-        let created = Created { reported_at: t };
+        let report_id = Uuid::new_v4();
+        let created = Created {
+            report_id,
+            reported_at: t,
+        };
 
         let expected = openapi::CreateCalibrationResponse {
+            report_id,
             reported_at: t.to_rfc3339(),
         };
 
