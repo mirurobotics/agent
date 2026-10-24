@@ -303,11 +303,11 @@ pub(super) mod tests {
     use miru_agent::filesys::file::File;
     use miru_agent::filesys::path::PathExt;
     use miru_agent::filesys::{files, FileSysErr, WriteOptions};
-    use miru_agent::s3::{aws, sdk, Config, Credentials, Object, Options, S3Err, Source, Store};
+    use miru_agent::s3::{aws, sdk, Object, Options, S3Err, Source, Store};
 
     // external crates
     use aws_sdk_s3::config::retry::RetryConfig;
-    use aws_sdk_s3::config::{SharedHttpClient, StalledStreamProtectionConfig};
+    use aws_sdk_s3::config::{Credentials, SharedHttpClient, StalledStreamProtectionConfig};
     use aws_smithy_http_client::test_util::{NeverClient, ReplayEvent, StaticReplayClient};
     use aws_smithy_runtime_api::client::http::{
         HttpClient, HttpConnector, HttpConnectorFuture, HttpConnectorSettings, SharedHttpConnector,
@@ -323,11 +323,13 @@ pub(super) mod tests {
     const BUCKET: &str = "test-bucket";
 
     fn test_credentials() -> Credentials {
-        Credentials {
-            access_key_id: "access-key".to_string(),
-            secret_access_key: "secret-key".to_string(),
-            session_token: "session-token".to_string(),
-        }
+        Credentials::new(
+            "access-key",
+            "secret-key",
+            Some("session-token".to_string()),
+            None,
+            "test",
+        )
     }
 
     // Headers that vary per request (signing, timestamps, user agent) and must be
@@ -360,17 +362,11 @@ pub(super) mod tests {
         }
     }
 
-    fn test_config() -> Config {
-        Config {
-            region: REGION.to_string(),
-            creds: test_credentials(),
-        }
-    }
-
     /// Wires a `Store` to `client` in place of the HTTPS client.
     pub(crate) fn store_on(client: impl HttpClient + 'static) -> Store {
         // Path-style URLs, so request URIs match `uri()`.
-        let config = aws::config(test_config(), SharedHttpClient::new(client), true);
+        let http_client = SharedHttpClient::new(client);
+        let config = aws::config(test_credentials(), REGION.to_string(), http_client, true);
         Store::new(Options { config, gcs: false })
     }
 
@@ -497,16 +493,9 @@ pub(super) mod tests {
 
         #[tokio::test]
         async fn new_builds_without_network() {
-            let cfg = Config {
-                creds: Credentials {
-                    access_key_id: "AKIA_TEST".to_string(),
-                    secret_access_key: "secret".to_string(),
-                    session_token: "session".to_string(),
-                },
-                region: "us-west-2".to_string(),
-            };
+            let region = "us-west-2".to_string();
             // Constructing must not panic or touch the network.
-            let config = aws::config(cfg, sdk::http_client(), false);
+            let config = aws::config(test_credentials(), region, sdk::http_client(), false);
             let _store = Store::new(Options { config, gcs: false });
         }
     }
@@ -568,7 +557,7 @@ pub(super) mod tests {
                 .grace_period(Duration::from_secs(1))
                 .build();
             let http_client = SharedHttpClient::new(HangAfterFirstFrame);
-            let config = aws::config(test_config(), http_client, true)
+            let config = aws::config(test_credentials(), REGION.to_string(), http_client, true)
                 .to_builder()
                 .stalled_stream_protection(fast_stall)
                 .retry_config(RetryConfig::disabled())

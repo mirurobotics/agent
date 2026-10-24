@@ -1,3 +1,4 @@
+pub mod credentials;
 pub mod errors;
 pub mod executor;
 pub mod job;
@@ -7,6 +8,7 @@ pub mod transfer;
 pub mod uploader;
 mod uploader_impl;
 
+pub use self::credentials::UploadCredentialSource;
 pub use self::errors::UploadErr;
 pub use self::executor::{LiveExecutor, UploadExecutor};
 pub use self::job::Job;

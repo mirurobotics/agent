@@ -5,6 +5,7 @@ use std::sync::Arc;
 // internal crates
 use crate::authn::{Token, TokenManagerExt};
 use crate::data_uploads::upload::{
+    credentials::UploadCredentialSource,
     errors::{classified_executor_err, UploadErr},
     job::Job,
     transfer::ObjectTransfer,
@@ -85,7 +86,12 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> LiveExecutor<C, T, X> {
     }
 }
 
-impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> UploadExecutor for LiveExecutor<C, T, X> {
+impl<C, T, X> UploadExecutor for LiveExecutor<C, T, X>
+where
+    C: ClientI + 'static,
+    T: TokenManagerExt + 'static,
+    X: ObjectTransfer,
+{
     async fn upload(&self, job: &Job) -> Result<(), UploadErr> {
         let resp = self.create_upload(job).await?;
         info!(
@@ -97,9 +103,15 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> UploadExecutor for LiveE
             "upload: transferring file {} to bucket {} key {}",
             job.file, resp.upload.destination.bucket_name, resp.upload.destination.object_key
         );
+        let credentials = UploadCredentialSource::spawn(
+            self.http_client.clone(),
+            self.token_mngr.clone(),
+            resp.upload.id.clone(),
+            *resp.credentials,
+        );
         self.transfer
             .transfer(
-                &resp.credentials,
+                &credentials,
                 &resp.upload.destination,
                 &job.file,
                 &resp.metadata,

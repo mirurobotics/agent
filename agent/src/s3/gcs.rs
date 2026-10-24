@@ -20,6 +20,9 @@
 //! document. The tests below pin the requests we send, and an aws-sdk-s3 bump
 //! needs checking against real GCS before it ships (ENG-1672).
 
+// standard crates
+use std::fmt;
+
 // internal crates
 use crate::errors::HTTPCode;
 use crate::s3::sdk;
@@ -63,8 +66,25 @@ impl Token {
     }
 }
 
+/// Where [`GcsInterceptor`] gets the token for each request.
+pub trait TokenSource: Send + Sync + fmt::Debug {
+    /// The token to send now, if there is one.
+    fn token(&self) -> Option<Token>;
+}
+
+/// A fixed token, for tests.
+#[cfg(test)]
+impl TokenSource for Token {
+    fn token(&self) -> Option<Token> {
+        Some(Token(self.0.clone()))
+    }
+}
+
 /// The SDK config for a GCS [`Store`](crate::s3::Store).
-pub(crate) fn config(token: Token, http_client: SharedHttpClient) -> aws_sdk_s3::Config {
+pub(crate) fn config(
+    token_source: impl TokenSource + 'static,
+    http_client: SharedHttpClient,
+) -> aws_sdk_s3::Config {
     sdk::base_config(http_client)
         .endpoint_url(ENDPOINT)
         .region(Region::new("auto"))
@@ -74,7 +94,7 @@ pub(crate) fn config(token: Token, http_client: SharedHttpClient) -> aws_sdk_s3:
         // No credentials provider: the SDK signs nothing and the interceptor
         // adds the bearer header.
         .allow_no_auth()
-        .interceptor(GcsInterceptor { token })
+        .interceptor(GcsInterceptor { token_source })
         .retry_classifier(TooManyRequests)
         .build()
 }
@@ -95,11 +115,11 @@ pub(crate) fn content_md5(bytes: &[u8]) -> String {
 /// store treats that as done: object keys are per upload, GCS only creates the
 /// object once the whole upload completes, and every part was MD5-checked.
 #[derive(Debug)]
-pub(crate) struct GcsInterceptor {
-    token: Token,
+pub(crate) struct GcsInterceptor<T> {
+    token_source: T,
 }
 
-impl Intercept for GcsInterceptor {
+impl<T: TokenSource> Intercept for GcsInterceptor<T> {
     fn name(&self) -> &'static str {
         "GcsInterceptor"
     }
@@ -115,7 +135,8 @@ impl Intercept for GcsInterceptor {
             set_create_only(headers);
         }
         rename_amz_metadata(headers)?;
-        set_bearer(headers, &self.token)
+        let token = self.token_source.token().ok_or("no GCS bearer token")?;
+        set_bearer(headers, &token)
     }
 }
 
@@ -313,7 +334,9 @@ mod tests {
         fn token_debug_redacts() {
             let token = Token::new("secret-token").unwrap();
             assert!(!format!("{token:?}").contains("secret-token"));
-            let interceptor = GcsInterceptor { token };
+            let interceptor = GcsInterceptor {
+                token_source: token,
+            };
             assert!(!format!("{interceptor:?}").contains("secret-token"));
         }
     }

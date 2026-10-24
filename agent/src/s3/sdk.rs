@@ -82,9 +82,10 @@ mod tests {
 
     // internal crates
     use super::*;
-    use crate::s3::{aws, gcs, Config, Credentials};
+    use crate::s3::{aws, gcs};
 
     // external crates
+    use aws_sdk_s3::config::Credentials;
     use aws_smithy_runtime_api::client::http::{HttpClient, HttpConnectorSettings};
     use aws_smithy_runtime_api::client::runtime_components::RuntimeComponentsBuilder;
 
@@ -112,24 +113,16 @@ mod tests {
 
         #[test]
         fn aws_and_gcs_configs_carry_timeouts_and_stall_protection() {
-            let cfg = Config {
-                creds: Credentials {
-                    access_key_id: "AKIA_TEST".to_string(),
-                    secret_access_key: "secret".to_string(),
-                    session_token: "session".to_string(),
-                },
-                region: "us-west-2".to_string(),
-            };
+            let creds = Credentials::new("AKIA_TEST", "secret", None, None, "test");
+            let aws_config = aws::config(creds, "us-west-2".into(), http_client(), false);
             let token = gcs::Token::new("gcs-token").unwrap();
+            let gcs_config = gcs::config(token, http_client());
             let timeouts = TimeoutConfig::builder()
                 .connect_timeout(Duration::from_secs(15))
                 .operation_timeout(Duration::from_secs(60))
                 .build();
 
-            for (name, config) in [
-                ("aws", aws::config(cfg, http_client(), false)),
-                ("gcs", gcs::config(token, http_client())),
-            ] {
+            for (name, config) in [("aws", aws_config), ("gcs", gcs_config)] {
                 assert_eq!(config.timeout_config(), Some(&timeouts), "{name}");
                 let ssp = config
                     .stalled_stream_protection()

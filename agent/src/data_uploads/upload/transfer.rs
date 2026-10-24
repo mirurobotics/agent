@@ -3,13 +3,14 @@ use std::collections::HashMap;
 use std::future::Future;
 
 // internal crates
-use crate::data_uploads::upload::errors::{
-    classified_executor_err, executor_err, TransferErr, UploadErr,
+use crate::data_uploads::upload::{
+    credentials::UploadCredentialSource,
+    errors::{classified_executor_err, executor_err, TransferErr, UploadErr},
 };
 use crate::filesys::File;
 use crate::s3;
 use backend_api::models::upload_credentials::Scheme;
-use backend_api::models::{S3UploadCredentials, UploadCredentials, UploadDestination};
+use backend_api::models::UploadDestination;
 
 // external crates
 use aws_sdk_s3::config::SharedHttpClient;
@@ -28,7 +29,7 @@ use tracing::info;
 pub trait ObjectTransfer: Send + Sync {
     fn transfer(
         &self,
-        credentials: &UploadCredentials,
+        credentials: &UploadCredentialSource,
         destination: &UploadDestination,
         file: &File,
         metadata: &HashMap<String, String>,
@@ -75,16 +76,16 @@ impl SdkTransfer {
     /// SDK derives the endpoint from the credential `region`.
     async fn transfer_s3(
         &self,
-        credentials: &UploadCredentials,
+        credentials: &UploadCredentialSource,
         destination: &UploadDestination,
         file: &File,
         metadata: &HashMap<String, String>,
     ) -> Result<(), UploadErr> {
         let creds = credentials
+            .current()
             .s3_credentials
-            .as_deref()
             .ok_or_else(|| executor_err(TransferErr::MissingS3Credentials))?;
-        let store = self.s3_store(s3_config(creds));
+        let store = self.s3_store(credentials, creds.region);
         put(&store, destination, file, metadata).await
     }
 
@@ -92,29 +93,35 @@ impl SdkTransfer {
     /// which is scoped to `storage.objects.create` on this exact object.
     async fn transfer_gcs(
         &self,
-        credentials: &UploadCredentials,
+        credentials: &UploadCredentialSource,
         destination: &UploadDestination,
         file: &File,
         metadata: &HashMap<String, String>,
     ) -> Result<(), UploadErr> {
         let creds = credentials
+            .current()
             .gcs_credentials
-            .as_deref()
             .ok_or_else(|| executor_err(TransferErr::MissingGcsCredentials))?;
-        let token = s3::gcs::Token::new(creds.access_token.clone())
-            .ok_or_else(|| executor_err(TransferErr::InvalidGcsToken))?;
-        put(&self.gcs_store(token), destination, file, metadata).await
+        if s3::gcs::Token::new(creds.access_token).is_none() {
+            return Err(executor_err(TransferErr::InvalidGcsToken));
+        }
+        put(&self.gcs_store(credentials), destination, file, metadata).await
     }
 
     /// Builds the S3 store with this transfer's transport settings.
-    fn s3_store(&self, cfg: s3::Config) -> s3::Store {
-        let config = s3::aws::config(cfg, self.http_client.clone(), self.s3_force_path_style);
+    fn s3_store(&self, credentials: &UploadCredentialSource, region: String) -> s3::Store {
+        let config = s3::aws::config(
+            credentials.clone(),
+            region,
+            self.http_client.clone(),
+            self.s3_force_path_style,
+        );
         s3::Store::new(s3::Options { config, gcs: false })
     }
 
     /// Builds the GCS store with this transfer's transport settings.
-    fn gcs_store(&self, token: s3::gcs::Token) -> s3::Store {
-        let config = s3::gcs::config(token, self.http_client.clone());
+    fn gcs_store(&self, credentials: &UploadCredentialSource) -> s3::Store {
+        let config = s3::gcs::config(credentials.clone(), self.http_client.clone());
         s3::Store::new(s3::Options { config, gcs: true })
     }
 }
@@ -140,16 +147,17 @@ async fn put(
 impl ObjectTransfer for SdkTransfer {
     async fn transfer(
         &self,
-        credentials: &UploadCredentials,
+        credentials: &UploadCredentialSource,
         destination: &UploadDestination,
         file: &File,
         metadata: &HashMap<String, String>,
     ) -> Result<(), UploadErr> {
+        let scheme = credentials.current().scheme;
         info!(
             "upload: transferring file {} via scheme {:?} to bucket {} key {}",
-            file, credentials.scheme, destination.bucket_name, destination.object_key
+            file, scheme, destination.bucket_name, destination.object_key
         );
-        match credentials.scheme {
+        match scheme {
             Scheme::S3 => {
                 self.transfer_s3(credentials, destination, file, metadata)
                     .await
@@ -163,33 +171,20 @@ impl ObjectTransfer for SdkTransfer {
     }
 }
 
-/// Maps vended S3 session credentials into an [`s3::Config`]. Kept separate so
-/// the credential→SDK mapping is unit-testable without a live transfer.
-fn s3_config(creds: &S3UploadCredentials) -> s3::Config {
-    s3::Config {
-        creds: s3::Credentials {
-            access_key_id: creds.access_key_id.clone(),
-            secret_access_key: creds.secret_access_key.clone(),
-            session_token: creds.session_token.clone(),
-        },
-        region: creds.region.clone(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     // standard crates
     use std::collections::HashMap;
 
     // internal crates
-    use super::s3_config;
     use crate::test_utils::{
         filesys::{files as test_files, missing_file},
         upload::{destination, response_metadata, s3_credentials_json},
     };
-    use backend_api::models::{S3UploadCredentials, UploadCredentials};
     use miru_agent::data_uploads::upload::errors::TransferErr;
-    use miru_agent::data_uploads::upload::{ObjectTransfer, SdkTransfer, UploadErr};
+    use miru_agent::data_uploads::upload::{
+        ObjectTransfer, SdkTransfer, UploadCredentialSource, UploadErr,
+    };
     use miru_agent::errors::Error as ErrorTrait;
     use miru_agent::filesys::{files, File, WriteOptions};
 
@@ -223,15 +218,16 @@ mod tests {
         })
     }
 
-    /// A full `UploadCredentials` for `scheme` with the given credential arms.
-    fn credentials(scheme: &str, s3: Value, gcs: Value) -> UploadCredentials {
-        serde_json::from_value(json!({
+    /// Fixed credentials for `scheme` with the given credential arms.
+    fn credentials(scheme: &str, s3: Value, gcs: Value) -> UploadCredentialSource {
+        let creds = serde_json::from_value(json!({
             "scheme": scheme,
             "s3_credentials": s3,
             "gcs_credentials": gcs,
             "expires_at": "2021-01-01T01:00:00Z"
         }))
-        .unwrap()
+        .unwrap();
+        UploadCredentialSource::fixed(creds)
     }
 
     /// Writes `bytes` to a fresh temp file and returns the guard (kept alive so
@@ -499,21 +495,6 @@ mod tests {
             .unwrap_err();
 
         assert!(matches!(err, UploadErr::ExecutorErr(_)), "got: {err:?}");
-    }
-
-    #[test]
-    fn s3_config_maps_credentials() {
-        let creds: S3UploadCredentials = serde_json::from_value(s3_credentials_json()).unwrap();
-        let cfg = s3_config(&creds);
-        assert_eq!(
-            (
-                cfg.region.as_str(),
-                cfg.creds.access_key_id.as_str(),
-                cfg.creds.secret_access_key.as_str(),
-                cfg.creds.session_token.as_str(),
-            ),
-            ("us-east-1", "AKIA_TEST", "secret", "session")
-        );
     }
 
     /// Fails every request as a refused connection.
