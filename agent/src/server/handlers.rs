@@ -4,21 +4,23 @@ use std::sync::Arc;
 
 // internal crates
 use crate::errors::Error;
-use crate::server::{errors::*, state::State};
+use crate::server::{errors::*, routes, state::State};
 use crate::services::{
-    deployment as dpl_svc, device as dvc_svc, file_rule as file_rule_svc,
-    git_commit as git_cmt_svc, release as rls_svc, HttpBackend,
+    calibration as calibration_svc, deployment as dpl_svc, device as dvc_svc,
+    file_rule as file_rule_svc, git_commit as git_cmt_svc, release as rls_svc, HttpBackend,
 };
+use crate::trace;
 use crate::version;
 use device_api::models as device_server;
 
 // external crates
 use axum::{
-    extract::{Path, State as AxumState},
+    extract::{rejection::JsonRejection, Path, State as AxumState},
     http::StatusCode,
     response::IntoResponse,
     Json,
 };
+use chrono::Utc;
 use serde::Serialize;
 use serde_json::{json, Value};
 use tracing::error;
@@ -168,6 +170,44 @@ pub async fn get_file_rule(
         "Error getting file rule",
     )
     .await
+}
+
+// =============================== CALIBRATIONS ==================================== //
+pub async fn create_calibration(
+    AxumState(state): AxumState<Arc<State>>,
+    request: Result<Json<device_server::CreateCalibrationRequest>, JsonRejection>,
+) -> impl IntoResponse {
+    handle(
+        async {
+            let Json(request) = request.map_err(reject_body)?;
+            let params = calibration_svc::CreateParams::try_from(request)
+                .map_err(ServerErr::InvalidRequestErr)?;
+            let created = calibration_svc::create(
+                &state.calibration_uploader,
+                &state.storage.deployments,
+                params,
+                Utc::now(),
+            )
+            .await?;
+            Ok::<_, ServerErr>(device_server::CreateCalibrationResponse::from(&created))
+        },
+        "Error creating calibration",
+    )
+    .await
+}
+
+/// A body over the limit is 413; any other unreadable body is 422.
+fn reject_body(rejection: JsonRejection) -> ServerErr {
+    if rejection.status() == StatusCode::PAYLOAD_TOO_LARGE {
+        return ServerErr::CalibrationRequestTooLargeErr(CalibrationRequestTooLargeErr {
+            max_request_bytes: routes::MAX_REQUEST_BYTES,
+            trace: trace!(),
+        });
+    }
+    ServerErr::InvalidRequestErr(InvalidRequestErr {
+        msg: rejection.body_text(),
+        trace: trace!(),
+    })
 }
 
 // ================================ UTILITIES ====================================== //

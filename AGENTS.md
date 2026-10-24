@@ -40,6 +40,10 @@ use crate::app::state::AppState;
 use tokio::sync::broadcast;
 ```
 
+### Device API conversions
+
+Handlers in `agent/src/server/handlers.rs` don't convert wire types. Response conversions live in `server/response.rs` and request conversions in `server/request.rs` ([agent#383](https://github.com/mirurobotics/agent/pull/383#discussion_r4363970314)).
+
 ### Error handling
 
 All error types derive `thiserror::Error` and implement the custom `crate::errors::Error` trait (defined in `agent/src/errors/`). The trait provides default implementations for `code()`, `http_status()`, `params()`, and `is_network_conn_err()`. Aggregating enum errors use the `impl_error!` macro (also in `agent/src/errors/`).
@@ -115,6 +119,8 @@ fine for them on every platform; build a raw `PathBuf` fixture that will be
 compared or displayed with `test_utils::filesys::abs_path`.
 
 Integration test files in `agent/tests/` mirror the `agent/src/` module structure.
+
+Route tests in `agent/tests/server/handlers.rs` check the API contract only: status codes and response or error bodies. What a service does with a request, such as how a report is stored, belongs in the service tests ([agent#383](https://github.com/mirurobotics/agent/pull/383#discussion_r4364316671)).
 
 ### Coverage gates
 

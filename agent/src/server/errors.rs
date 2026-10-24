@@ -5,7 +5,7 @@ use crate::calibrations::CalibrationsErr;
 use crate::crypt;
 use crate::data_uploads::{retention, scan, upload};
 use crate::disk::DiskErr;
-use crate::errors::Trace;
+use crate::errors::{Code, HTTPCode, Trace};
 use crate::events;
 use crate::filesys;
 use crate::http;
@@ -77,6 +77,49 @@ pub struct TimestampConversionErr {
 
 impl crate::errors::Error for TimestampConversionErr {}
 
+/// The request body isn't a request the route accepts: 422 `invalid_request`.
+#[derive(Debug, thiserror::Error)]
+#[error("invalid request: {msg}")]
+pub struct InvalidRequestErr {
+    pub msg: String,
+    pub trace: Box<Trace>,
+}
+
+impl crate::errors::Error for InvalidRequestErr {
+    fn code(&self) -> Code {
+        Code::InvalidRequest
+    }
+
+    fn http_status(&self) -> HTTPCode {
+        HTTPCode::UNPROCESSABLE_ENTITY
+    }
+}
+
+/// A calibration request body over the server's body limit: 413
+/// `calibration_too_large`, the code an oversized report gets.
+#[derive(Debug, thiserror::Error)]
+#[error("calibration request is over the {max_request_bytes}-byte cap")]
+pub struct CalibrationRequestTooLargeErr {
+    pub max_request_bytes: usize,
+    pub trace: Box<Trace>,
+}
+
+impl crate::errors::Error for CalibrationRequestTooLargeErr {
+    fn code(&self) -> Code {
+        Code::CalibrationTooLarge
+    }
+
+    fn http_status(&self) -> HTTPCode {
+        HTTPCode::PAYLOAD_TOO_LARGE
+    }
+
+    fn params(&self) -> Option<serde_json::Value> {
+        Some(serde_json::json!({
+            "max_request_bytes": self.max_request_bytes,
+        }))
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum ServerErr {
     // server errors
@@ -86,6 +129,10 @@ pub enum ServerErr {
     ShutdownMngrDuplicateArgErr(ShutdownMngrDuplicateArgErr),
     #[error(transparent)]
     GenerateTokenErr(GenerateTokenErr),
+    #[error(transparent)]
+    InvalidRequestErr(InvalidRequestErr),
+    #[error(transparent)]
+    CalibrationRequestTooLargeErr(CalibrationRequestTooLargeErr),
 
     // internal crate errors
     #[error(transparent)]
@@ -208,6 +255,8 @@ crate::impl_error!(ServerErr {
     TimestampConversionErr,
     ShutdownMngrDuplicateArgErr,
     GenerateTokenErr,
+    InvalidRequestErr,
+    CalibrationRequestTooLargeErr,
     EventsErr,
     AuthnErr,
     CacheErr,

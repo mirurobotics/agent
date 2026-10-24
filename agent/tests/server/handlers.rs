@@ -60,6 +60,7 @@ pub mod routes {
     use tower::ServiceExt;
 
     use device_api::models as openapi;
+    use miru_agent::calibrations::UploaderOptions;
     use miru_agent::events::hub::{EventHub, SpawnOptions};
     use miru_agent::filesys::Overwrite;
     use miru_agent::models::{
@@ -69,11 +70,14 @@ pub mod routes {
     use miru_agent::server::{routes, State};
     use miru_agent::sync::Syncer;
 
+    use crate::mocks::calibration_sender::MockCalibrationSender;
     use crate::mocks::http_client::{self as mock, MockClient};
+    use crate::test_utils::calibrations::uploader;
     use crate::test_utils::filesys::dirs as test_dirs;
     use crate::test_utils::sync::{create_storage, create_token_manager};
 
     use chrono::{DateTime, TimeZone, Utc};
+    use serde_json::json;
     use tokio::sync::{broadcast, mpsc};
 
     fn fixed_time() -> DateTime<Utc> {
@@ -89,6 +93,10 @@ pub mod routes {
 
     impl Fixture {
         async fn new(name: &str) -> Self {
+            Self::with_calibration_options(name, UploaderOptions::default()).await
+        }
+
+        async fn with_calibration_options(name: &str, options: UploaderOptions) -> Self {
             let dir = test_dirs::temp(name).unwrap();
             let storage = Arc::new(create_storage(dir.dir()).await);
             let http_client = Arc::new(MockClient::default());
@@ -113,6 +121,8 @@ pub mod routes {
                 .await
                 .unwrap();
 
+            let calibration_uploader = uploader(&dir, MockCalibrationSender::new().0, options);
+
             let (shutdown_tx, _) = broadcast::channel::<()>(1);
             let state = Arc::new(State::new(
                 storage,
@@ -120,6 +130,7 @@ pub mod routes {
                 syncer,
                 Arc::new(token_mngr),
                 event_hub,
+                Arc::new(calibration_uploader),
                 shutdown_tx,
             ));
 
@@ -154,6 +165,25 @@ pub mod routes {
                         .method("POST")
                         .uri(uri)
                         .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let status = response.status();
+            let bytes = body::to_bytes(response.into_body(), 16384).await.unwrap();
+            (status, bytes.to_vec())
+        }
+
+        async fn post_json(&self, uri: &str, body: String) -> (StatusCode, Vec<u8>) {
+            let response = self
+                .app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri(uri)
+                        .header("content-type", "application/json")
+                        .body(Body::from(body))
                         .unwrap(),
                 )
                 .await
@@ -531,6 +561,110 @@ pub mod routes {
 
             let actual: openapi::ErrorResponse = serde_json::from_slice(&bytes).unwrap();
             assert_eq!(actual.error.code, "internal_server_error");
+        }
+    }
+
+    mod calibrations {
+        use super::*;
+
+        const URI: &str = "/v0.2/calibrations";
+
+        fn request(format: &str, data: &str) -> String {
+            json!({
+                "component_slug": "arm",
+                "role": "left",
+                "aspect": "pose",
+                "serial_number": "SN-1",
+                "content": { "format": format, "data": data },
+            })
+            .to_string()
+        }
+
+        fn error_code(bytes: &[u8]) -> String {
+            let actual: openapi::ErrorResponse = serde_json::from_slice(bytes).unwrap();
+            actual.error.code
+        }
+
+        #[tokio::test]
+        async fn create_calibration_returns_200_with_reported_at() {
+            let f = Fixture::new("handler_create_calibration").await;
+
+            let (status, bytes) = f.post_json(URI, request("yaml", "offset: 1\n")).await;
+            assert_eq!(status, StatusCode::OK);
+
+            let actual: openapi::CreateCalibrationResponse =
+                serde_json::from_slice(&bytes).unwrap();
+            assert!(DateTime::parse_from_rfc3339(&actual.reported_at).is_ok());
+        }
+
+        #[tokio::test]
+        async fn create_calibration_accepts_1_mib_of_content_that_escaping_doubles() {
+            let f = Fixture::new("handler_create_calibration_1mib").await;
+            let data = "\n".repeat(1024 * 1024);
+
+            let (status, _) = f.post_json(URI, request("text", &data)).await;
+            assert_eq!(status, StatusCode::OK);
+        }
+
+        #[tokio::test]
+        async fn create_calibration_returns_413_when_content_is_over_1_mib() {
+            let f = Fixture::new("handler_create_calibration_too_large").await;
+            let data = "x".repeat(1024 * 1024 + 1);
+
+            let (status, bytes) = f.post_json(URI, request("text", &data)).await;
+            assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
+            assert_eq!(error_code(&bytes), "calibration_too_large");
+        }
+
+        #[tokio::test]
+        async fn create_calibration_returns_413_when_body_is_over_the_limit() {
+            let f = Fixture::new("handler_create_calibration_body_too_large").await;
+            let data = "x".repeat(routes::MAX_REQUEST_BYTES);
+
+            let (status, bytes) = f.post_json(URI, request("text", &data)).await;
+            assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
+            assert_eq!(error_code(&bytes), "calibration_too_large");
+        }
+
+        #[tokio::test]
+        async fn create_calibration_returns_422_for_malformed_json() {
+            let f = Fixture::new("handler_create_calibration_malformed").await;
+
+            let (status, bytes) = f.post_json(URI, "{".to_string()).await;
+            assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+            assert_eq!(error_code(&bytes), "invalid_request");
+        }
+
+        #[tokio::test]
+        async fn create_calibration_returns_422_when_a_required_field_is_missing() {
+            let f = Fixture::new("handler_create_calibration_missing_field").await;
+            let body = json!({ "content": { "format": "json", "data": "{}" } }).to_string();
+
+            let (status, bytes) = f.post_json(URI, body).await;
+            assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+            assert_eq!(error_code(&bytes), "invalid_request");
+        }
+
+        #[tokio::test]
+        async fn create_calibration_returns_422_for_an_unknown_format() {
+            let f = Fixture::new("handler_create_calibration_unknown_format").await;
+
+            let (status, bytes) = f.post_json(URI, request("toml", "a = 1")).await;
+            assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+            assert_eq!(error_code(&bytes), "invalid_request");
+        }
+
+        #[tokio::test]
+        async fn create_calibration_returns_507_when_the_buffer_is_full() {
+            let options = UploaderOptions {
+                capacity: 0,
+                ..UploaderOptions::default()
+            };
+            let f = Fixture::with_calibration_options("handler_calibration_full", options).await;
+
+            let (status, bytes) = f.post_json(URI, request("json", "{}")).await;
+            assert_eq!(status, StatusCode::INSUFFICIENT_STORAGE);
+            assert_eq!(error_code(&bytes), "calibration_buffer_full");
         }
     }
 }
