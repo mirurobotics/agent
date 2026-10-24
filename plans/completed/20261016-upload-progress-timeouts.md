@@ -6,9 +6,9 @@ This ExecPlan is a living document. The sections Progress, Surprises & Discoveri
 
 | Repository | Access | Description |
 | --- | --- | --- |
-| `agent/` (`/home/ben/miru/workbench5/repos/agent`) | read-write | GCS and S3 store upload paths, upload transfer wiring, Cargo manifests, uploader doc comments. |
+| `agent/` | read-write | GCS and S3 store upload paths, upload transfer wiring, Cargo manifests, uploader doc comments. |
 
-This plan lives in `agent/plans/` because every change is in the agent repo. Work happens on the already checked-out branch `fix/eng-1303-upload-progress-timeouts`; do not switch branches. All commands below run from `/home/ben/miru/workbench5/repos/agent` (the repo root, written `agent/` below; source paths are relative to it, e.g. `agent/src/gcs/store.rs`).
+This plan lives in `agent/plans/` because every change is in the agent repo. Work happens on the already checked-out branch `fix/eng-1303-upload-progress-timeouts`; do not switch branches. All commands below run from the repo root (written `agent/` below; source paths are relative to it, e.g. `agent/src/gcs/store.rs`).
 
 ## Purpose / Big Picture
 
@@ -20,15 +20,15 @@ Resuming a GCS resumable session or S3 multipart upload across agent attempts (s
 
 ## Progress
 
-- [ ] Move this plan to `plans/active/` and commit it.
-- [ ] Milestone 1: GCS progress source and idle watchdog for `gcs::Store::put`, with tests; commit.
-- [ ] Milestone 2: S3 timeouts, stalled-stream protection, chunked request bodies, uploader backstop docs, with tests; commit.
-- [ ] Milestone 3: shared S3 HTTPS client wired into `SdkTransfer::default()`, with tests; commit.
-- [ ] Push the branch and run `$preflight` until it reports CLEAN.
+- [x] Move this plan to `plans/active/` and commit it.
+- [x] Milestone 1: GCS progress source and idle watchdog for `gcs::Store::put`, with tests; commit. Superseded: removed in the 2026-10-24 merge of `main` (see Surprises).
+- [x] Milestone 2: S3 timeouts, stalled-stream protection, chunked request bodies, uploader backstop docs, with tests; commit.
+- [x] Milestone 3: shared S3 HTTPS client wired into `SdkTransfer::default()`, with tests; commit.
+- [x] Push the branch and run `$preflight` until it reports CLEAN.
 
 ## Surprises & Discoveries
 
-(Add entries as work proceeds.)
+- 2026-10-24: agent#385 moved GCS uploads onto the S3 store over GCS's XML API and removed `agent/src/gcs`. Merging `main` dropped Milestone 1's watchdog, moved the S3 limits and shared client into `agent/src/s3/store.rs`, and made `Store::new` apply them to every store, so GCS uploads get the same bounds as S3.
 
 ## Decision Log
 
@@ -50,7 +50,7 @@ Resuming a GCS resumable session or S3 multipart upload across agent attempts (s
 
 ## Outcomes & Retrospective
 
-(Summarize at completion.)
+Stalled uploads now end at byte-progress bounds (stalled-stream protection and per-call limits) instead of only at the file-size backstop. After agent#385 these bounds cover S3 and GCS alike; the GCS-only watchdog from Milestone 1 no longer exists.
 
 ## Context and Orientation
 
@@ -225,7 +225,7 @@ If any verification step shows Milestone 3 needs more than about 40 lines or tou
 
 ## Concrete Steps
 
-All commands run from `/home/ben/miru/workbench5/repos/agent`. Never run cargo build, test, clippy, fmt or covgate locally; CI does validation.
+All commands run from the repo root. Never run cargo build, test, clippy, fmt or covgate locally; CI does validation.
 
 0. Activate the plan:
 

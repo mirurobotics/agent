@@ -350,6 +350,8 @@ mod tests {
                 !headers.iter().any(|(k, _)| k.starts_with("x-amz-checksum")),
                 "SDK checksum header sent to GCS"
             );
+            // Streamed in frames, but with a length: GCS gets no chunked encoding.
+            assert_eq!(headers.get("content-length"), Some("65536"));
             assert_eq!(recorded_payload(requests[0]).await, bytes);
         }
     }
@@ -403,6 +405,8 @@ mod tests {
                     part.headers().get("content-md5"),
                     Some(content_md5(slice).as_str())
                 );
+                let len = slice.len().to_string();
+                assert_eq!(part.headers().get("content-length"), Some(len.as_str()));
                 assert_eq!(recorded_payload(part).await, slice);
             }
         }

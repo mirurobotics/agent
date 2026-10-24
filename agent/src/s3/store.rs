@@ -680,7 +680,10 @@ pub(super) mod tests {
                 .build();
 
             for (config, is_gcs) in stores {
-                let store = Store::new(Options { config, gcs: is_gcs });
+                let store = Store::new(Options {
+                    config,
+                    gcs: is_gcs,
+                });
                 let config = store.client.config();
 
                 assert_eq!(config.timeout_config(), Some(&timeouts), "gcs {is_gcs}");
