@@ -1,10 +1,8 @@
 // standard crates
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 // internal crates
 use crate::mocks::{
-    checkpointer::{NoopCheckpointer, RecordingCheckpointer},
     http_client::{Call, MockClient},
     object_transfer::MockObjectTransfer,
     stub_token_manager::StubTokenManager,
@@ -19,7 +17,7 @@ use miru_agent::authn::errors::MockError as AuthnMockError;
 use miru_agent::authn::AuthnErr;
 use miru_agent::data_uploads::upload::executor::new_upl_request;
 use miru_agent::data_uploads::upload::{
-    Job, LiveExecutor, MultipartCheckpoint, UploadCheckpoint, UploadErr, UploadExecutor,
+    Job, LiveExecutor, MultipartCheckpoint, Prepared, UploadCheckpoint, UploadErr, UploadExecutor,
 };
 use miru_agent::errors::Error;
 use miru_agent::filesys::File;
@@ -50,6 +48,15 @@ fn request_failed_err(status: u16) -> HTTPErr {
     })
 }
 
+/// Runs an attempt as the actor does: prepare, then upload unless the upload
+/// was already confirmed.
+async fn attempt<E: UploadExecutor>(executor: &E, job: &Job) -> Result<(), UploadErr> {
+    match executor.prepare(job).await? {
+        Some(prepared) => executor.upload(job, &prepared).await,
+        None => Ok(()),
+    }
+}
+
 // ============================ MockUploadExecutor ================================= //
 
 #[tokio::test]
@@ -60,8 +67,8 @@ async fn mock_follows_script() {
     let job_a = make_job("a.log");
     let job_b = make_job("b.log");
 
-    mock.upload(&job_a, &NoopCheckpointer).await.unwrap();
-    let result = mock.upload(&job_b, &NoopCheckpointer).await;
+    attempt(mock.as_ref(), &job_a).await.unwrap();
+    let result = attempt(mock.as_ref(), &job_b).await;
     assert!(
         matches!(result, Err(UploadErr::ExecutorErr(_))),
         "expected ExecutorErr, got: {result:?}"
@@ -74,7 +81,7 @@ async fn mock_empty_script_defaults_to_ok() {
     let (mock, _started_rx) = MockUploadExecutor::new();
     let job = make_job("a.log");
 
-    mock.upload(&job, &NoopCheckpointer).await.unwrap();
+    attempt(mock.as_ref(), &job).await.unwrap();
     assert_eq!(mock.recorded_calls(), vec![job]);
 }
 
@@ -89,7 +96,7 @@ async fn happy_path_creates_transfers_confirms() {
     let job = make_job("a.log");
     let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone());
 
-    executor.upload(&job, &NoopCheckpointer).await.unwrap();
+    attempt(&executor, &job).await.unwrap();
 
     // Exactly one transfer, carrying the create response's credentials, its
     // upload (the physical `bucket_name`, not the Miru `bucket_id`, plus key and
@@ -122,10 +129,7 @@ async fn unknown_status_proceeds_like_pending() {
     let transfer = MockObjectTransfer::new();
     let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone());
 
-    executor
-        .upload(&make_job("a.log"), &NoopCheckpointer)
-        .await
-        .unwrap();
+    attempt(&executor, &make_job("a.log")).await.unwrap();
 
     assert_eq!(transfer.recorded_calls().len(), 1);
     assert_eq!(client.call_count(Call::ConfirmUpload), 1);
@@ -141,7 +145,7 @@ async fn token_failure_maps_to_executor_err() {
     let transfer = MockObjectTransfer::new();
     let executor = LiveExecutor::new(client.clone(), token_mngr, transfer.clone());
 
-    let result = executor.upload(&make_job("a.log"), &NoopCheckpointer).await;
+    let result = attempt(&executor, &make_job("a.log")).await;
 
     assert!(
         matches!(result, Err(UploadErr::ExecutorErr(_))),
@@ -161,10 +165,7 @@ async fn token_network_failure_is_network_classified() {
     let transfer = MockObjectTransfer::new();
     let executor = LiveExecutor::new(client.clone(), token_mngr, transfer.clone());
 
-    let err = executor
-        .upload(&make_job("a.log"), &NoopCheckpointer)
-        .await
-        .unwrap_err();
+    let err = attempt(&executor, &make_job("a.log")).await.unwrap_err();
 
     // the authn network classification survives the executor's type erasure
     assert!(err.is_network_conn_err());
@@ -179,7 +180,7 @@ async fn create_failure_maps_to_executor_err() {
     let transfer = MockObjectTransfer::new();
     let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone());
 
-    let result = executor.upload(&make_job("a.log"), &NoopCheckpointer).await;
+    let result = attempt(&executor, &make_job("a.log")).await;
 
     assert!(
         matches!(result, Err(UploadErr::ExecutorErr(_))),
@@ -196,7 +197,7 @@ async fn transfer_failure_propagates_and_skips_confirm() {
     transfer.push_err();
     let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone());
 
-    let result = executor.upload(&make_job("a.log"), &NoopCheckpointer).await;
+    let result = attempt(&executor, &make_job("a.log")).await;
 
     assert!(
         matches!(result, Err(UploadErr::ExecutorErr(_))),
@@ -213,7 +214,7 @@ async fn confirm_failure_maps_to_executor_err() {
     let transfer = MockObjectTransfer::new();
     let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone());
 
-    let result = executor.upload(&make_job("a.log"), &NoopCheckpointer).await;
+    let result = attempt(&executor, &make_job("a.log")).await;
 
     assert!(
         matches!(result, Err(UploadErr::ExecutorErr(_))),
@@ -231,10 +232,7 @@ async fn create_4xx_failure_is_terminal() {
     let transfer = MockObjectTransfer::new();
     let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone());
 
-    let err = executor
-        .upload(&make_job("a.log"), &NoopCheckpointer)
-        .await
-        .unwrap_err();
+    let err = attempt(&executor, &make_job("a.log")).await.unwrap_err();
 
     assert!(err.is_terminal());
 }
@@ -247,10 +245,7 @@ async fn create_transient_statuses_are_not_terminal() {
         let transfer = MockObjectTransfer::new();
         let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone());
 
-        let err = executor
-            .upload(&make_job("a.log"), &NoopCheckpointer)
-            .await
-            .unwrap_err();
+        let err = attempt(&executor, &make_job("a.log")).await.unwrap_err();
 
         assert!(!err.is_terminal(), "status {status}");
     }
@@ -264,10 +259,7 @@ async fn confirm_4xx_failure_is_terminal() {
     let transfer = MockObjectTransfer::new();
     let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone());
 
-    let err = executor
-        .upload(&make_job("a.log"), &NoopCheckpointer)
-        .await
-        .unwrap_err();
+    let err = attempt(&executor, &make_job("a.log")).await.unwrap_err();
 
     assert!(err.is_terminal());
 }
@@ -357,23 +349,39 @@ fn calls(client: &MockClient) -> Vec<Call> {
     client.requests().iter().map(|r| r.call.clone()).collect()
 }
 
-// The new upload is saved before the transfer starts, so a failed transfer
-// leaves it for the next attempt.
+// A new upload is prepared without transferring anything, so the actor can
+// save it before the transfer starts.
 #[tokio::test]
-async fn new_upload_is_saved_before_the_transfer() {
+async fn new_upload_is_prepared_before_the_transfer() {
     let client = Arc::new(MockClient::default());
     client.set_create_upload(|| Ok(pending_response()));
     let transfer = MockObjectTransfer::new();
-    transfer.push_err();
-    let checkpointer = RecordingCheckpointer::new();
     let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone());
 
-    executor
-        .upload(&make_job("a.log"), &checkpointer)
-        .await
-        .unwrap_err();
+    let prepared = executor.prepare(&make_job("a.log")).await.unwrap();
 
-    assert_eq!(checkpointer.saved(), [upload_checkpoint()]);
+    let expected = Prepared {
+        upload: upload_checkpoint(),
+        credentials: s3_credentials(),
+    };
+    assert_eq!(prepared, Some(expected));
+    assert_eq!(calls(&client), vec![Call::CreateUpload]);
+    assert!(transfer.recorded_calls().is_empty());
+}
+
+// The prepared upload carries the multipart upload the transfer started, so
+// the actor saves it before any part is sent.
+#[tokio::test]
+async fn prepared_upload_carries_the_multipart_upload() {
+    let client = Arc::new(MockClient::default());
+    client.set_create_upload(|| Ok(pending_response()));
+    let transfer = MockObjectTransfer::new();
+    transfer.set_multipart(upload_mid_transfer().multipart.unwrap());
+    let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone());
+
+    let prepared = executor.prepare(&make_job("a.log")).await.unwrap().unwrap();
+
+    assert_eq!(prepared.upload, upload_mid_transfer());
 }
 
 // A retry gets fresh credentials for the saved upload instead of creating a
@@ -383,11 +391,10 @@ async fn retry_reuses_the_saved_upload() {
     let client = Arc::new(MockClient::default());
     client.set_vend_upload_credentials(|| Ok(s3_credentials()));
     let transfer = MockObjectTransfer::new();
-    let checkpointer = RecordingCheckpointer::new();
     let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone());
     let job = job_with(upload_mid_transfer());
 
-    executor.upload(&job, &checkpointer).await.unwrap();
+    attempt(&executor, &job).await.unwrap();
 
     assert_eq!(
         calls(&client),
@@ -398,7 +405,6 @@ async fn retry_reuses_the_saved_upload() {
         transfer.recorded_calls(),
         vec![(s3_credentials(), upload_mid_transfer(), job.file.clone())]
     );
-    assert!(checkpointer.saved().is_empty());
 }
 
 // The backend no longer accepts the upload (409 on credentials), but confirm
@@ -409,20 +415,19 @@ async fn already_uploaded_upload_is_done() {
     client.set_vend_upload_credentials(|| Err(request_failed_err(409)));
     client.set_confirm_upload(|| Ok(*uploaded_response().upload));
     let transfer = MockObjectTransfer::new();
-    let checkpointer = RecordingCheckpointer::new();
     let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone());
 
-    executor
-        .upload(&job_with(upload_checkpoint()), &checkpointer)
+    let prepared = executor
+        .prepare(&job_with(upload_checkpoint()))
         .await
         .unwrap();
 
+    assert_eq!(prepared, None);
     assert_eq!(
         calls(&client),
         vec![Call::VendUploadCredentials, Call::ConfirmUpload]
     );
     assert!(transfer.recorded_calls().is_empty());
-    assert!(checkpointer.saved().is_empty());
 }
 
 // A deleted (404) or failed (409) upload is replaced with a new one, which
@@ -432,19 +437,15 @@ async fn gone_upload_is_replaced_with_a_new_one() {
     for status in [404, 409] {
         let client = Arc::new(MockClient::default());
         client.set_vend_upload_credentials(move || Err(request_failed_err(status)));
-        let confirms = AtomicUsize::new(0);
-        client.set_confirm_upload(move || match confirms.fetch_add(1, Ordering::SeqCst) {
-            0 => Err(request_failed_err(status)),
-            _ => Ok(*uploaded_response().upload),
-        });
+        client.set_confirm_upload(move || Err(request_failed_err(status)));
         client.set_create_upload(|| Ok(pending_response()));
         let transfer = MockObjectTransfer::new();
-        let checkpointer = RecordingCheckpointer::new();
         let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone());
 
-        executor
-            .upload(&job_with(upload_mid_transfer()), &checkpointer)
+        let prepared = executor
+            .prepare(&job_with(upload_mid_transfer()))
             .await
+            .unwrap()
             .unwrap();
 
         assert_eq!(
@@ -452,35 +453,25 @@ async fn gone_upload_is_replaced_with_a_new_one() {
             vec![
                 Call::VendUploadCredentials,
                 Call::ConfirmUpload,
-                Call::CreateUpload,
-                Call::ConfirmUpload
+                Call::CreateUpload
             ],
             "status {status}"
         );
-        assert_eq!(
-            checkpointer.saved(),
-            vec![upload_checkpoint()],
-            "status {status}"
-        );
-        assert_eq!(
-            transfer.recorded_calls()[0].1,
-            upload_checkpoint(),
-            "status {status}"
-        );
+        assert_eq!(prepared.upload, upload_checkpoint(), "status {status}");
     }
 }
 
-// Any other credentials failure fails the attempt and keeps the saved upload.
+// Any other credentials failure fails the attempt, so the job keeps its saved
+// upload for the next one.
 #[tokio::test]
 async fn credentials_failure_keeps_the_upload() {
     let client = Arc::new(MockClient::default());
     client.set_vend_upload_credentials(|| Err(request_failed_err(500)));
     let transfer = MockObjectTransfer::new();
-    let checkpointer = RecordingCheckpointer::new();
     let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone());
 
     let err = executor
-        .upload(&job_with(upload_checkpoint()), &checkpointer)
+        .prepare(&job_with(upload_checkpoint()))
         .await
         .unwrap_err();
 
@@ -488,5 +479,4 @@ async fn credentials_failure_keeps_the_upload() {
     assert!(!err.is_terminal());
     assert_eq!(calls(&client), vec![Call::VendUploadCredentials]);
     assert!(transfer.recorded_calls().is_empty());
-    assert!(checkpointer.saved().is_empty());
 }

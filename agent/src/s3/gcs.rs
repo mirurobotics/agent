@@ -560,12 +560,12 @@ mod tests {
                 ReplayEvent::new(req("DELETE", "big.bin"), resp(204, &[])),
             ]);
             let big = temp_file_with(&vec![3u8; PART_SIZE as usize + 1]).await;
-            let mut src = Source::open(big.file().clone(), &obj("big.bin"))
+            let src = Source::open(big.file().clone(), &obj("big.bin"))
                 .await
                 .unwrap();
 
             gcs_store(&replay)
-                .resume_multipart_upload(&mut src, &obj("big.bin"), UPLOAD_ID)
+                .resume_multipart_upload(src, &obj("big.bin"), UPLOAD_ID)
                 .await
                 .unwrap();
 

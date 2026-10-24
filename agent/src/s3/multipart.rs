@@ -56,12 +56,12 @@ impl Store {
     /// against the same file bytes and part size the upload was started for.
     pub async fn resume_multipart_upload(
         &self,
-        src: &mut Source,
+        mut src: Source,
         dst: &Object,
         upload_id: &str,
     ) -> Result<(), S3Err> {
         let landed = self.list_parts(dst, upload_id).await?;
-        let parts = self.upload_parts(src, dst, upload_id, &landed).await?;
+        let parts = self.upload_parts(&mut src, dst, upload_id, &landed).await?;
         let written = self
             .complete_multipart_upload(dst, upload_id, &parts)
             .await?;
@@ -69,6 +69,13 @@ impl Store {
             let _ = self.abort_multipart_upload(dst, upload_id).await;
         }
         Ok(())
+    }
+
+    /// Whether S3 still has the multipart upload `upload_id` in progress. It
+    /// no longer does once the upload is completed or aborted.
+    pub async fn has_multipart_upload(&self, dst: &Object, upload_id: &str) -> Result<bool, S3Err> {
+        let page = self.list_parts_page(dst, upload_id, None).await?;
+        Ok(page.is_some())
     }
 
     /// Walks [`Self::part_plan`] in order. For each part number present in
@@ -942,7 +949,7 @@ mod tests {
         #[tokio::test]
         async fn resume_skips_landed_parts() {
             let tf = two_part_file().await;
-            let mut src = source_of(&tf).await;
+            let src = source_of(&tf).await;
 
             let (store, replay) = store_with(vec![
                 ReplayEvent::new(
@@ -954,7 +961,7 @@ mod tests {
             ]);
 
             store
-                .resume_multipart_upload(&mut src, &obj("big.bin"), UPLOAD_ID)
+                .resume_multipart_upload(src, &obj("big.bin"), UPLOAD_ID)
                 .await
                 .unwrap();
 
@@ -971,7 +978,7 @@ mod tests {
         #[tokio::test]
         async fn resume_expired_upload_maps_to_no_such_upload() {
             let tf = two_part_file().await;
-            let mut src = source_of(&tf).await;
+            let src = source_of(&tf).await;
 
             let (store, replay) = store_with(vec![ReplayEvent::new(
                 list_parts_req(),
@@ -979,7 +986,7 @@ mod tests {
             )]);
 
             let err = store
-                .resume_multipart_upload(&mut src, &obj("big.bin"), UPLOAD_ID)
+                .resume_multipart_upload(src, &obj("big.bin"), UPLOAD_ID)
                 .await
                 .unwrap_err();
 
@@ -992,9 +999,41 @@ mod tests {
         }
 
         #[tokio::test]
+        async fn open_upload_is_found() {
+            let (store, replay) = store_with(vec![ReplayEvent::new(
+                list_parts_req(),
+                list_parts_resp(&[], None),
+            )]);
+
+            let found = store
+                .has_multipart_upload(&obj("big.bin"), UPLOAD_ID)
+                .await
+                .unwrap();
+
+            assert!(found);
+            assert_eq!(actual_shapes(&replay), vec![list_parts_shape()]);
+        }
+
+        #[tokio::test]
+        async fn completed_or_aborted_upload_is_not_found() {
+            let (store, replay) = store_with(vec![ReplayEvent::new(
+                list_parts_req(),
+                resp_xml(404, NO_SUCH_UPLOAD_XML),
+            )]);
+
+            let found = store
+                .has_multipart_upload(&obj("big.bin"), UPLOAD_ID)
+                .await
+                .unwrap();
+
+            assert!(!found);
+            assert_eq!(actual_shapes(&replay), vec![list_parts_shape()]);
+        }
+
+        #[tokio::test]
         async fn resume_merges_paginated_list_parts() {
             let tf = two_part_file().await;
-            let mut src = source_of(&tf).await;
+            let src = source_of(&tf).await;
 
             let page2_req = req("GET", &list_parts_page2_query());
 
@@ -1011,7 +1050,7 @@ mod tests {
             ]);
 
             store
-                .resume_multipart_upload(&mut src, &obj("big.bin"), UPLOAD_ID)
+                .resume_multipart_upload(src, &obj("big.bin"), UPLOAD_ID)
                 .await
                 .unwrap();
 
@@ -1039,7 +1078,7 @@ mod tests {
             // no abort (or complete) event is queued, so an abort would panic the
             // replay client on an unexpected request.
             let tf = two_part_file().await;
-            let mut src = source_of(&tf).await;
+            let src = source_of(&tf).await;
 
             let (store, replay) = store_with(vec![
                 ReplayEvent::new(
@@ -1050,7 +1089,7 @@ mod tests {
             ]);
 
             let err = store
-                .resume_multipart_upload(&mut src, &obj("big.bin"), UPLOAD_ID)
+                .resume_multipart_upload(src, &obj("big.bin"), UPLOAD_ID)
                 .await
                 .unwrap_err();
             assert!(matches!(err, S3Err::RequestFailedErr(_)));
@@ -1067,7 +1106,7 @@ mod tests {
             // A valid upload with zero landed parts (empty listing) is NOT a missing
             // upload: every part is uploaded, then complete.
             let tf = two_part_file().await;
-            let mut src = source_of(&tf).await;
+            let src = source_of(&tf).await;
 
             let (store, replay) = store_with(vec![
                 ReplayEvent::new(list_parts_req(), list_parts_resp(&[], None)),
@@ -1077,7 +1116,7 @@ mod tests {
             ]);
 
             store
-                .resume_multipart_upload(&mut src, &obj("big.bin"), UPLOAD_ID)
+                .resume_multipart_upload(src, &obj("big.bin"), UPLOAD_ID)
                 .await
                 .unwrap();
 
@@ -1097,7 +1136,7 @@ mod tests {
             // Both parts already landed (single page): nothing is re-uploaded, and
             // the complete manifest carries both landed etags in ascending order.
             let tf = two_part_file().await;
-            let mut src = source_of(&tf).await;
+            let src = source_of(&tf).await;
 
             let (store, replay) = store_with(vec![
                 ReplayEvent::new(
@@ -1114,7 +1153,7 @@ mod tests {
             ]);
 
             store
-                .resume_multipart_upload(&mut src, &obj("big.bin"), UPLOAD_ID)
+                .resume_multipart_upload(src, &obj("big.bin"), UPLOAD_ID)
                 .await
                 .unwrap();
 

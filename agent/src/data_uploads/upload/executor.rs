@@ -23,31 +23,43 @@ use tracing::info;
 /// backend, transfers the file with the native storage SDK, then confirms the upload.
 /// This trait keeps the actor independent of those mechanics.
 ///
-/// An attempt saves the job's upload through `checkpointer` as it goes, and the
-/// next attempt reads it back from `job.upload`, so a retry or a restart
-/// continues the same upload.
+/// An attempt takes two calls. The actor saves the upload [`Self::prepare`]
+/// returns on the queued job before calling [`Self::upload`], and the next
+/// attempt reads it back from `job.upload`, so a retry or a restart continues
+/// the same upload.
 ///
 /// # Cancel safety
 ///
-/// The actor drops an in-progress `upload` future on shutdown, so implementations
-/// must tolerate being cancelled at any await point. An interrupted transfer is
-/// re-driven from the persisted queue, which keeps the entry, with its saved
-/// upload, until the upload is confirmed. Scanner re-observation does NOT re-drive
-/// it — the scanner ledger records that a file was reported, not that it was
-/// uploaded.
+/// The actor drops an in-progress `prepare` or `upload` future on shutdown, so
+/// implementations must tolerate being cancelled at any await point. An
+/// interrupted transfer is re-driven from the persisted queue, which keeps the
+/// entry, with its saved upload, until the upload is confirmed. Scanner
+/// re-observation does NOT re-drive it — the scanner ledger records that a file
+/// was reported, not that it was uploaded.
 pub trait UploadExecutor: Send + Sync {
-    fn upload<K: Checkpointer>(
+    /// Reuses or creates the job's backend upload and, for a file of more than
+    /// one part, the multipart upload the transfer resumes. `None` if the
+    /// backend upload was already confirmed.
+    fn prepare(
         &self,
         job: &Job,
-        checkpointer: &K,
+    ) -> impl std::future::Future<Output = Result<Option<Prepared>, UploadErr>> + Send;
+
+    /// Transfers the file and confirms the upload.
+    fn upload(
+        &self,
+        job: &Job,
+        prepared: &Prepared,
     ) -> impl std::future::Future<Output = Result<(), UploadErr>> + Send;
 }
 
-/// Saves a job's upload while an attempt runs. `save` returns once the upload is
-/// on disk (or can no longer be saved), so the caller can rely on it before its
-/// next step.
-pub trait Checkpointer: Send + Sync {
-    fn save(&self, upload: &UploadCheckpoint) -> impl std::future::Future<Output = ()> + Send;
+/// What [`UploadExecutor::prepare`] hands to [`UploadExecutor::upload`].
+#[derive(Debug, PartialEq)]
+pub struct Prepared {
+    /// The job's upload, which the actor saves before the transfer starts.
+    pub upload: UploadCheckpoint,
+    /// Fresh credentials for the transfer.
+    pub credentials: UploadCredentials,
 }
 
 pub struct LiveExecutor<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> {
@@ -72,12 +84,9 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> LiveExecutor<C, T, X> {
             .map_err(classified_executor_err)
     }
 
-    /// Creates the backend upload and saves it before any bytes move, so every
-    /// later attempt reuses it.
-    async fn create_upload<K: Checkpointer>(
+    async fn create_upload(
         &self,
         job: &Job,
-        checkpointer: &K,
     ) -> Result<(UploadCheckpoint, UploadCredentials), UploadErr> {
         let token = self.token().await?;
         let payload = new_upl_request(job, &Local);
@@ -101,7 +110,6 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> LiveExecutor<C, T, X> {
             metadata: resp.metadata,
             multipart: None,
         };
-        checkpointer.save(&upload).await;
         Ok((upload, *resp.credentials))
     }
 
@@ -158,33 +166,41 @@ fn unless_gone<T>(result: Result<T, HTTPErr>) -> Result<Option<T>, UploadErr> {
 }
 
 impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> UploadExecutor for LiveExecutor<C, T, X> {
-    async fn upload<K: Checkpointer>(&self, job: &Job, checkpointer: &K) -> Result<(), UploadErr> {
+    async fn prepare(&self, job: &Job) -> Result<Option<Prepared>, UploadErr> {
         // A retry reuses the job's upload with fresh credentials, unless the
         // backend no longer accepts it.
         let (upload, credentials) = match &job.upload {
-            None => self.create_upload(job, checkpointer).await?,
+            None => self.create_upload(job).await?,
             Some(upload) => match self.vend_credentials(&upload.id).await? {
                 Some(credentials) => (upload.clone(), credentials),
                 None if self.already_uploaded(&upload.id).await? => {
                     info!("upload: upload {} was already confirmed", upload.id);
-                    return Ok(());
+                    return Ok(None);
                 }
                 None => {
                     info!(
                         "upload: upload {} is gone; creating a new one for file {}",
                         upload.id, job.file
                     );
-                    self.create_upload(job, checkpointer).await?
+                    self.create_upload(job).await?
                 }
             },
         };
+        let upload = self.transfer.prepare(&credentials, upload, &job.file).await;
+        Ok(Some(Prepared {
+            upload,
+            credentials,
+        }))
+    }
 
+    async fn upload(&self, job: &Job, prepared: &Prepared) -> Result<(), UploadErr> {
+        let upload = &prepared.upload;
         info!(
             "upload: transferring file {} to bucket {} key {}",
             job.file, upload.bucket_name, upload.object_key
         );
         self.transfer
-            .transfer(&credentials, &upload, &job.file, checkpointer)
+            .transfer(&prepared.credentials, upload, &job.file)
             .await?;
 
         info!(
@@ -222,7 +238,6 @@ mod tests {
 
     // internal crates
     use crate::test_utils::{
-        checkpointer::NoopCheckpointer,
         filesys::files as test_files,
         http_client::{Call, MockClient},
         upload::{make_job, pending_response, token_manager},
@@ -273,7 +288,8 @@ mod tests {
             SdkTransfer::with_http_client(replay.clone()),
         );
 
-        executor.upload(&job, &NoopCheckpointer).await.unwrap();
+        let prepared = executor.prepare(&job).await.unwrap().unwrap();
+        executor.upload(&job, &prepared).await.unwrap();
 
         // The replay client saw exactly one PUT at the expected URI — the create
         // response's credentials and destination drove the production transfer —

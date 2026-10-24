@@ -1142,14 +1142,14 @@ mod durability {
         let path = dir.to_dir().file("upload_queue.json");
         let (mock, mut started_rx) = MockUploadExecutor::new();
         let (_release_tx, release_rx) = oneshot::channel();
-        mock.push_step(MockStep::SaveThen(
+        mock.push_step(MockStep::PrepareThen(
             upload_checkpoint(),
             Box::new(MockStep::Hang(release_rx)),
         ));
         let (uploader, handle) = spawn_persisted(mock.clone(), open(&path).await);
 
         timed(uploader.enqueue(make_job("a.log"))).await.unwrap();
-        // once when the attempt starts, again once its upload is saved
+        // once when the attempt starts, again when its upload starts after the save
         timed(started_rx.recv()).await.unwrap();
         timed(started_rx.recv()).await.unwrap();
 
@@ -1168,7 +1168,7 @@ mod durability {
         let path = dir.to_dir().file("upload_queue.json");
         let job = make_job("a.log");
         let (mock, _started_rx) = MockUploadExecutor::new();
-        mock.push_step(MockStep::SaveThen(
+        mock.push_step(MockStep::PrepareThen(
             upload_checkpoint(),
             Box::new(MockStep::Err),
         ));

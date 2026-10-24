@@ -10,8 +10,6 @@
 pub mod calibration_sender;
 #[path = "calibrations.rs"]
 pub mod calibrations;
-#[path = "../mocks/checkpointer.rs"]
-pub mod checkpointer;
 #[path = "../errors/harnesses.rs"]
 pub mod error_harnesses;
 #[path = "filesys/mod.rs"]
