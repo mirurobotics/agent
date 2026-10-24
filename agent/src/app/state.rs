@@ -241,10 +241,12 @@ impl AppState {
             }
         };
 
+        let clock = http_client.clock().clone();
         let executor = Arc::new(upload::LiveExecutor::new(
             http_client,
             token_mngr,
             upload::SdkTransfer::default(),
+            clock,
         ));
         let (uploader, handle) = upload::Uploader::spawn(
             64,

@@ -12,6 +12,7 @@ use std::time::Duration;
 
 // internal crates
 use crate::authn::TokenManagerExt;
+use crate::clock::Clock;
 use crate::data_uploads::upload::errors::{classified_executor_err, UploadErr};
 use crate::http::{self, ClientI};
 use crate::s3;
@@ -21,7 +22,7 @@ use backend_api::models::UploadCredentials;
 // external crates
 use aws_credential_types::provider::{error::CredentialsError, future, ProvideCredentials};
 use aws_credential_types::Credentials as AwsCredentials;
-use chrono::{DateTime, Utc};
+use chrono::DateTime;
 use tokio::sync::watch;
 use tracing::{info, warn};
 
@@ -41,15 +42,16 @@ pub struct UploadCredentialSource {
 
 impl UploadCredentialSource {
     /// Starts from `creds` and spawns the task that re-vends them for
-    /// `upload_id` before they expire.
+    /// `upload_id` before they expire, by `clock`'s reading of the server's time.
     pub fn spawn<C: ClientI + 'static, T: TokenManagerExt + 'static>(
         http_client: Arc<C>,
         token_mngr: Arc<T>,
+        clock: Clock,
         upload_id: String,
         creds: UploadCredentials,
     ) -> Self {
         let (tx, current) = watch::channel(creds);
-        tokio::spawn(refresh(http_client, token_mngr, upload_id, tx));
+        tokio::spawn(refresh(http_client, token_mngr, clock, upload_id, tx));
         Self { current }
     }
 
@@ -108,12 +110,13 @@ impl s3::gcs::TokenSource for UploadCredentialSource {
 async fn refresh<C: ClientI, T: TokenManagerExt>(
     http_client: Arc<C>,
     token_mngr: Arc<T>,
+    clock: Clock,
     upload_id: String,
     tx: watch::Sender<UploadCredentials>,
 ) {
     let (scheme, mut wait) = {
         let creds = tx.borrow();
-        (creds.scheme, until_refresh(&creds))
+        (creds.scheme, until_refresh(&creds, &clock))
     };
     loop {
         tokio::select! {
@@ -124,7 +127,7 @@ async fn refresh<C: ClientI, T: TokenManagerExt>(
         wait = match vend(http_client.as_ref(), token_mngr.as_ref(), &upload_id).await {
             Ok(creds) if usable_for(&creds, scheme) => {
                 info!("upload: refreshed the credentials of upload {upload_id}");
-                let wait = until_refresh(&creds);
+                let wait = until_refresh(&creds, &clock);
                 tx.send_replace(creds);
                 wait.max(RETRY_DELAY)
             }
@@ -160,11 +163,16 @@ async fn vend<C: ClientI, T: TokenManagerExt>(
 }
 
 /// How long until `creds` are due for a refresh, [`REFRESH_WINDOW`] before
-/// they expire. Zero once that has passed or if the expiry can't be read.
-fn until_refresh(creds: &UploadCredentials) -> Duration {
+/// they expire by the server's clock (the robot's own clock may be years off).
+/// Zero once that has passed, or if the expiry can't be read or the server's
+/// time isn't known yet.
+fn until_refresh(creds: &UploadCredentials, clock: &Clock) -> Duration {
+    let Some(now) = clock.server_now() else {
+        return Duration::ZERO;
+    };
     DateTime::parse_from_rfc3339(&creds.expires_at)
         .ok()
-        .and_then(|expires_at| expires_at.signed_duration_since(Utc::now()).to_std().ok())
+        .and_then(|expires_at| expires_at.signed_duration_since(now).to_std().ok())
         .map_or(Duration::ZERO, |left| left.saturating_sub(REFRESH_WINDOW))
 }
 
@@ -202,6 +210,7 @@ mod tests {
     use aws_sdk_s3::config::SharedHttpClient;
     use aws_smithy_http_client::test_util::{ReplayEvent, StaticReplayClient};
     use aws_smithy_types::body::SdkBody;
+    use chrono::Utc;
     use serde_json::json;
 
     fn s3_creds(access_key_id: &str, expires_at: &str) -> UploadCredentials {
@@ -235,8 +244,21 @@ mod tests {
         .unwrap()
     }
 
+    /// The server's time in these tests, years from the robot's own clock, so
+    /// only a refresh timed by the server's clock passes.
+    fn server_time() -> DateTime<Utc> {
+        "2030-01-01T00:00:00Z".parse().unwrap()
+    }
+
+    /// A clock that has heard [`server_time`] from the backend.
+    fn clock() -> Clock {
+        let clock = Clock::new();
+        clock.observe_server_time(server_time());
+        clock
+    }
+
     fn in_an_hour() -> String {
-        (Utc::now() + chrono::Duration::hours(1)).to_rfc3339()
+        (server_time() + chrono::Duration::hours(1)).to_rfc3339()
     }
 
     fn access_key_id(source: &UploadCredentialSource) -> String {
@@ -244,7 +266,13 @@ mod tests {
     }
 
     fn spawn_source(client: &Arc<MockClient>, creds: UploadCredentials) -> UploadCredentialSource {
-        UploadCredentialSource::spawn(client.clone(), token_manager(), "upl_1".into(), creds)
+        UploadCredentialSource::spawn(
+            client.clone(),
+            token_manager(),
+            clock(),
+            "upl_1".into(),
+            creds,
+        )
     }
 
     fn vends(client: &MockClient) -> usize {
@@ -316,13 +344,19 @@ mod tests {
 
         #[test]
         fn refresh_is_due_before_expiry() {
-            let due = until_refresh(&s3_creds("OLD", &in_an_hour())).as_secs();
-            assert!((54 * 60..=55 * 60).contains(&due), "{due}");
+            let due = until_refresh(&s3_creds("OLD", &in_an_hour()), &clock());
+            assert!((54 * 60..=55 * 60).contains(&due.as_secs()), "{due:?}");
 
             for expires_at in ["2021-01-01T00:00:00Z", "not a time"] {
-                let due = until_refresh(&s3_creds("OLD", expires_at));
+                let due = until_refresh(&s3_creds("OLD", expires_at), &clock());
                 assert_eq!(due, Duration::ZERO, "{expires_at}");
             }
+        }
+
+        #[test]
+        fn refresh_is_due_at_once_until_the_servers_time_is_known() {
+            let due = until_refresh(&s3_creds("OLD", &in_an_hour()), &Clock::new());
+            assert_eq!(due, Duration::ZERO);
         }
 
         #[test]

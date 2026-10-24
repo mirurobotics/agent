@@ -8,6 +8,7 @@ use backend_api::models::{
     Upload, UploadCredentials, UploadDestination, UploadStatus, UploadWithCredentials,
 };
 use miru_agent::authn::Token;
+use miru_agent::clock::Clock;
 use miru_agent::data_uploads::upload::Job;
 use miru_agent::filesys::File;
 
@@ -82,6 +83,14 @@ pub fn response_with_status(status: UploadStatus) -> UploadWithCredentials {
 
 pub fn pending_response() -> UploadWithCredentials {
     response_with_status(UploadStatus::UPLOAD_STATUS_PENDING)
+}
+
+/// The agent's clock once it has heard the backend's time, as it has by the
+/// time an upload starts.
+pub fn clock() -> Clock {
+    let clock = Clock::new();
+    clock.observe_server_time(Utc::now());
+    clock
 }
 
 pub fn token_manager() -> Arc<MockTokenManager> {

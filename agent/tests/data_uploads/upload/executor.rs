@@ -9,7 +9,7 @@ use crate::mocks::{
     upload_executor::{MockStep, MockUploadExecutor},
 };
 use crate::test_utils::upload::{
-    destination, make_job, pending_response, response_metadata, response_with_status,
+    clock, destination, make_job, pending_response, response_metadata, response_with_status,
     s3_credentials, token_manager,
 };
 use backend_api::models::{CreateUploadRequest, UploadSource, UploadStatus, UploadWithCredentials};
@@ -83,7 +83,7 @@ async fn happy_path_creates_transfers_confirms() {
     client.set_confirm_upload(|| Ok(*uploaded_response().upload));
     let transfer = MockObjectTransfer::new();
     let job = make_job("a.log");
-    let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone());
+    let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone(), clock());
 
     executor.upload(&job).await.unwrap();
 
@@ -120,7 +120,7 @@ async fn unknown_status_proceeds_like_pending() {
     // with transfer and confirm rather than stranding the file.
     client.set_create_upload(|| Ok(response_with_status(UploadStatus::UploadStatusUnknown)));
     let transfer = MockObjectTransfer::new();
-    let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone());
+    let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone(), clock());
 
     executor.upload(&make_job("a.log")).await.unwrap();
 
@@ -136,7 +136,7 @@ async fn token_failure_maps_to_executor_err() {
         trace: miru_agent::trace!(),
     })));
     let transfer = MockObjectTransfer::new();
-    let executor = LiveExecutor::new(client.clone(), token_mngr, transfer.clone());
+    let executor = LiveExecutor::new(client.clone(), token_mngr, transfer.clone(), clock());
 
     let result = executor.upload(&make_job("a.log")).await;
 
@@ -156,7 +156,7 @@ async fn token_network_failure_is_network_classified() {
         trace: miru_agent::trace!(),
     })));
     let transfer = MockObjectTransfer::new();
-    let executor = LiveExecutor::new(client.clone(), token_mngr, transfer.clone());
+    let executor = LiveExecutor::new(client.clone(), token_mngr, transfer.clone(), clock());
 
     let err = executor.upload(&make_job("a.log")).await.unwrap_err();
 
@@ -171,7 +171,7 @@ async fn create_failure_maps_to_executor_err() {
     let client = Arc::new(MockClient::default());
     client.set_create_upload(|| Err(non_network_http_err()));
     let transfer = MockObjectTransfer::new();
-    let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone());
+    let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone(), clock());
 
     let result = executor.upload(&make_job("a.log")).await;
 
@@ -188,7 +188,7 @@ async fn transfer_failure_propagates_and_skips_confirm() {
     client.set_create_upload(|| Ok(pending_response()));
     let transfer = MockObjectTransfer::new();
     transfer.push_err();
-    let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone());
+    let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone(), clock());
 
     let result = executor.upload(&make_job("a.log")).await;
 
@@ -205,7 +205,7 @@ async fn confirm_failure_maps_to_executor_err() {
     client.set_create_upload(|| Ok(pending_response()));
     client.set_confirm_upload(|| Err(non_network_http_err()));
     let transfer = MockObjectTransfer::new();
-    let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone());
+    let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone(), clock());
 
     let result = executor.upload(&make_job("a.log")).await;
 
@@ -223,7 +223,7 @@ async fn create_4xx_failure_is_terminal() {
     let client = Arc::new(MockClient::default());
     client.set_create_upload(|| Err(request_failed_err(404)));
     let transfer = MockObjectTransfer::new();
-    let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone());
+    let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone(), clock());
 
     let err = executor.upload(&make_job("a.log")).await.unwrap_err();
 
@@ -236,7 +236,8 @@ async fn create_transient_statuses_are_not_terminal() {
         let client = Arc::new(MockClient::default());
         client.set_create_upload(move || Err(request_failed_err(status)));
         let transfer = MockObjectTransfer::new();
-        let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone());
+        let executor =
+            LiveExecutor::new(client.clone(), token_manager(), transfer.clone(), clock());
 
         let err = executor.upload(&make_job("a.log")).await.unwrap_err();
 
@@ -250,7 +251,7 @@ async fn confirm_4xx_failure_is_terminal() {
     client.set_create_upload(|| Ok(pending_response()));
     client.set_confirm_upload(|| Err(request_failed_err(422)));
     let transfer = MockObjectTransfer::new();
-    let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone());
+    let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone(), clock());
 
     let err = executor.upload(&make_job("a.log")).await.unwrap_err();
 

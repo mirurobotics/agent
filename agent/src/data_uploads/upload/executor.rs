@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 // internal crates
 use crate::authn::{Token, TokenManagerExt};
+use crate::clock::Clock;
 use crate::data_uploads::upload::{
     credentials::UploadCredentialSource,
     errors::{classified_executor_err, UploadErr},
@@ -39,14 +40,17 @@ pub struct LiveExecutor<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> {
     http_client: Arc<C>,
     token_mngr: Arc<T>,
     transfer: X,
+    /// Times credential refreshes by the server's clock.
+    clock: Clock,
 }
 
 impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> LiveExecutor<C, T, X> {
-    pub fn new(http_client: Arc<C>, token_mngr: Arc<T>, transfer: X) -> Self {
+    pub fn new(http_client: Arc<C>, token_mngr: Arc<T>, transfer: X, clock: Clock) -> Self {
         Self {
             http_client,
             token_mngr,
             transfer,
+            clock,
         }
     }
 
@@ -106,6 +110,7 @@ where
         let credentials = UploadCredentialSource::spawn(
             self.http_client.clone(),
             self.token_mngr.clone(),
+            self.clock.clone(),
             resp.upload.id.clone(),
             *resp.credentials,
         );
@@ -156,7 +161,7 @@ mod tests {
     use crate::test_utils::{
         filesys::files as test_files,
         http_client::{Call, MockClient},
-        upload::{make_job, pending_response, token_manager},
+        upload::{clock, make_job, pending_response, token_manager},
     };
     use miru_agent::data_uploads::upload::{LiveExecutor, SdkTransfer, UploadExecutor};
     use miru_agent::filesys::{files, WriteOptions};
@@ -202,6 +207,7 @@ mod tests {
             client.clone(),
             token_manager(),
             SdkTransfer::with_http_client(replay.clone()),
+            clock(),
         );
 
         executor.upload(&job).await.unwrap();
