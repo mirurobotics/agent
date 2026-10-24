@@ -9,7 +9,7 @@ use crate::s3::{body, errors, errors::ObjectNotFoundErr, gcs, sdk, S3Err};
 use crate::trace;
 
 // external crates
-use aws_sdk_s3::error::SdkError;
+use aws_sdk_s3::error::{ProvideErrorMetadata, SdkError};
 use aws_sdk_s3::Client;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
@@ -186,7 +186,7 @@ impl Store {
         result: Result<(), SdkError<E>>,
     ) -> Result<WriteOutcome, S3Err>
     where
-        E: std::error::Error + 'static,
+        E: std::error::Error + ProvideErrorMetadata + 'static,
     {
         match result {
             Ok(()) => Ok(WriteOutcome::Created),
@@ -740,6 +740,30 @@ pub(super) mod tests {
                     &err,
                     Expected::new(Code::InternalServerError, HTTPCode::INTERNAL_SERVER_ERROR),
                 );
+            }
+        }
+
+        pub mod expired_token {
+            use super::*;
+
+            const EXPIRED_TOKEN_XML: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>ExpiredToken</Code><Message>The provided token has expired.</Message></Error>"#;
+
+            #[tokio::test]
+            async fn put_expired_token_maps_to_expired_credentials() {
+                let src = temp_file_with(b"x").await;
+                let (store, _replay) = store_expecting(
+                    req("PUT", "late.txt?x-id=PutObject"),
+                    resp_xml(400, EXPIRED_TOKEN_XML),
+                );
+
+                let err = store
+                    .put(src.to_file(), &obj("late.txt"), &HashMap::new())
+                    .await
+                    .unwrap_err();
+
+                assert!(matches!(err, S3Err::ExpiredCredentialsErr(_)), "got {err:?}");
+                assert!(err.is_expired_credentials_err());
             }
         }
 

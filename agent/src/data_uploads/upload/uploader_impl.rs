@@ -162,8 +162,8 @@ where
     }
 
     /// Settle a failed attempt as the retry policy says. Network connection
-    /// errors are expected and don't count toward the attempt budget; any
-    /// other failure does.
+    /// errors and expired credentials are expected and don't count toward the
+    /// attempt budget; any other failure does.
     async fn handle_failure(&mut self, mut entry: QueueEntry, err: UploadErr) {
         let age = (self.now_fn)() - entry.job.first_observed_at;
         match self.options.retry.on_failure(&err, entry.attempts, age) {
@@ -210,10 +210,13 @@ where
     }
 
     /// A network error logs at debug, since it repeats every `base_secs` while
-    /// the device is offline; any other failure counts and logs at warn.
+    /// the device is offline. Expired credentials log at info, since a long
+    /// upload outlives them. Any other failure counts and logs at warn.
     fn log_failure(entry: &QueueEntry, err: &UploadErr) {
         if err.is_network_conn_err() {
             Self::log_network_conn_err(entry, err);
+        } else if err.is_expired_credentials_err() {
+            Self::log_expired_credentials(entry, err);
         } else {
             Self::log_counted_failure(entry, err);
         }
@@ -222,6 +225,13 @@ where
     fn log_network_conn_err(entry: &QueueEntry, err: &UploadErr) {
         debug!(
             "upload: network connection error for file {}; not counting attempt: {err:?}",
+            entry.job.file
+        );
+    }
+
+    fn log_expired_credentials(entry: &QueueEntry, err: &UploadErr) {
+        info!(
+            "upload: credentials expired for file {}; not counting attempt: {err:?}",
             entry.job.file
         );
     }

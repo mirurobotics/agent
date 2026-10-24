@@ -6,10 +6,10 @@ use crate::errors::Error;
 use chrono::{DateTime, TimeDelta, Utc};
 
 /// When a queued job that failed is retried, and when it is given up on. A
-/// network error doesn't count as an attempt: the job waits a flat
-/// `backoff.base_secs`. Any other failure counts, and the job waits out a
-/// backoff that grows with its attempts. Whatever the error, a job older than
-/// `max_age` is dropped.
+/// network error or expired credentials don't count as an attempt: the job
+/// waits a flat `backoff.base_secs`. Any other failure counts, and the job
+/// waits out a backoff that grows with its attempts. Whatever the error, a job
+/// older than `max_age` is dropped.
 #[derive(Clone, Copy, Debug)]
 pub struct RetryPolicy {
     /// Total counted attempts per job before it is dropped.
@@ -18,7 +18,7 @@ pub struct RetryPolicy {
     /// count minus one.
     pub backoff: cooldown::Backoff,
     /// Age past which a failing job is dropped, whatever the error. This is
-    /// what ends a job that only ever fails with network errors.
+    /// what ends a job whose failures never count.
     pub max_age: TimeDelta,
 }
 
@@ -60,15 +60,15 @@ impl RetryPolicy {
     /// The verdict on a job that failed with `err` after `attempts` counted
     /// attempts, `age` after it was first seen.
     pub fn on_failure(&self, err: &impl Error, attempts: u32, age: TimeDelta) -> Verdict {
-        if err.is_network_conn_err() {
-            return self.on_network_failure(attempts, age);
+        if err.is_network_conn_err() || err.is_expired_credentials_err() {
+            return self.on_uncounted_failure(attempts, age);
         }
         self.on_counted_failure(err.is_terminal(), attempts.saturating_add(1), age)
     }
 
-    /// A network error leaves `attempts` as it is and waits a flat
-    /// `base_secs`, even if the error is also marked terminal.
-    fn on_network_failure(&self, attempts: u32, age: TimeDelta) -> Verdict {
+    /// A network error or expired credentials leave `attempts` as it is and
+    /// wait a flat `base_secs`, even if the error is also marked terminal.
+    fn on_uncounted_failure(&self, attempts: u32, age: TimeDelta) -> Verdict {
         if age >= self.max_age {
             return Verdict::TooOld { attempts, age };
         }

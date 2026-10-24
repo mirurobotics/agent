@@ -17,6 +17,8 @@ pub enum MockStep {
     TerminalErr,
     /// Fail with an error classified as a network connection error
     NetworkErr,
+    /// Fail with an error classified as expired credentials
+    ExpiredCredentialsErr,
     /// Await the receiver and return the sent result (or `Ok(())` if the
     /// sender was dropped). The test holds the sender, so it controls when —
     /// and how — the in-flight upload finishes.
@@ -67,18 +69,28 @@ impl UploadExecutor for MockUploadExecutor {
                 source: Box::new(std::io::Error::other("scripted failure")),
                 is_terminal: false,
                 is_network_conn_err: false,
+                is_expired_credentials_err: false,
                 trace: miru_agent::trace!(),
             })),
             Some(MockStep::TerminalErr) => Err(UploadErr::ExecutorErr(ExecutorErr {
                 source: Box::new(std::io::Error::other("scripted terminal failure")),
                 is_terminal: true,
                 is_network_conn_err: false,
+                is_expired_credentials_err: false,
                 trace: miru_agent::trace!(),
             })),
             Some(MockStep::NetworkErr) => Err(UploadErr::ExecutorErr(ExecutorErr {
                 source: Box::new(std::io::Error::other("scripted network failure")),
                 is_terminal: false,
                 is_network_conn_err: true,
+                is_expired_credentials_err: false,
+                trace: miru_agent::trace!(),
+            })),
+            Some(MockStep::ExpiredCredentialsErr) => Err(UploadErr::ExecutorErr(ExecutorErr {
+                source: Box::new(std::io::Error::other("scripted expired credentials")),
+                is_terminal: false,
+                is_network_conn_err: false,
+                is_expired_credentials_err: true,
                 trace: miru_agent::trace!(),
             })),
             Some(MockStep::Hang(rx)) => rx.await.unwrap_or(Ok(())),

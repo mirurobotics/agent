@@ -4,7 +4,7 @@ use crate::filesys::{self, file::File};
 use crate::s3::Object;
 
 // external crates
-use aws_sdk_s3::error::SdkError;
+use aws_sdk_s3::error::{ProvideErrorMetadata, SdkError};
 use aws_sdk_s3::primitives::ByteStreamError;
 
 #[derive(Debug, thiserror::Error)]
@@ -52,6 +52,21 @@ pub struct ConnectionErr {
 
 impl crate::errors::Error for ConnectionErr {
     fn is_network_conn_err(&self) -> bool {
+        true
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("credentials expired for S3 {operation} request for object '{object}': {msg}")]
+pub struct ExpiredCredentialsErr {
+    pub operation: String,
+    pub object: Object,
+    pub msg: String,
+    pub trace: Box<Trace>,
+}
+
+impl crate::errors::Error for ExpiredCredentialsErr {
+    fn is_expired_credentials_err(&self) -> bool {
         true
     }
 }
@@ -112,6 +127,8 @@ pub enum S3Err {
     #[error(transparent)]
     ConnectionErr(ConnectionErr),
     #[error(transparent)]
+    ExpiredCredentialsErr(ExpiredCredentialsErr),
+    #[error(transparent)]
     RequestFailedErr(RequestFailedErr),
     #[error(transparent)]
     InvalidResponseErr(InvalidResponseErr),
@@ -131,6 +148,7 @@ crate::impl_error!(S3Err {
     ObjectNotFoundErr,
     NoSuchUploadErr,
     ConnectionErr,
+    ExpiredCredentialsErr,
     RequestFailedErr,
     InvalidResponseErr,
     LocalIoErr,
@@ -160,7 +178,7 @@ pub fn status<E>(err: &SdkError<E>) -> Option<HTTPCode> {
 /// construction failures, and the service-error fallback.
 pub fn map_sdk_err<E>(operation: &str, object: &Object, err: SdkError<E>) -> S3Err
 where
-    E: std::error::Error + 'static,
+    E: std::error::Error + ProvideErrorMetadata + 'static,
 {
     match err {
         SdkError::TimeoutError(e) => S3Err::ConnectionErr(ConnectionErr {
@@ -192,14 +210,7 @@ where
         }),
         SdkError::ServiceError(e) => {
             let status = e.raw().status().as_u16();
-            let source = e.into_err();
-            S3Err::RequestFailedErr(RequestFailedErr {
-                operation: operation.to_string(),
-                object: object.clone(),
-                status: Some(status),
-                msg: source.to_string(),
-                trace: crate::trace!(),
-            })
+            map_service_err(operation, object, status, e.into_err())
         }
         // `SdkError` is `#[non_exhaustive]`; treat any future variant as a
         // generic request failure rather than panicking.
@@ -211,6 +222,30 @@ where
             trace: crate::trace!(),
         }),
     }
+}
+
+/// Maps an error response from the service. S3 rejects expired session
+/// credentials with `ExpiredToken`, and GCS rejects an expired bearer token
+/// with 401.
+fn map_service_err<E>(operation: &str, object: &Object, status: u16, err: E) -> S3Err
+where
+    E: std::error::Error + ProvideErrorMetadata,
+{
+    if err.code() == Some("ExpiredToken") || status == HTTPCode::UNAUTHORIZED.as_u16() {
+        return S3Err::ExpiredCredentialsErr(ExpiredCredentialsErr {
+            operation: operation.to_string(),
+            object: object.clone(),
+            msg: err.to_string(),
+            trace: crate::trace!(),
+        });
+    }
+    S3Err::RequestFailedErr(RequestFailedErr {
+        operation: operation.to_string(),
+        object: object.clone(),
+        status: Some(status),
+        msg: err.to_string(),
+        trace: crate::trace!(),
+    })
 }
 
 /// Maps a local filesystem I/O error hit while streaming an object body
@@ -251,7 +286,7 @@ mod tests {
     use crate::errors::Error as _;
     use crate::test_utils::filesys::missing_file;
     use aws_sdk_s3::config::http::HttpResponse;
-    use aws_sdk_s3::error::ConnectorError;
+    use aws_sdk_s3::error::{ConnectorError, ErrorMetadata};
     use aws_smithy_types::body::SdkBody;
 
     fn object() -> Object {
@@ -261,11 +296,17 @@ mod tests {
         }
     }
 
-    // A stand-in service error `E` for the mapper's generic parameter. The
-    // timeout/construction/dispatch branches never inspect it.
-    #[derive(Debug, thiserror::Error)]
+    // A stand-in service error `E` for the mapper's generic parameter. It
+    // carries no error code, so a service error maps by status alone.
+    #[derive(Debug, Default, thiserror::Error)]
     #[error("dummy service error")]
-    struct DummyErr;
+    struct DummyErr(ErrorMetadata);
+
+    impl ProvideErrorMetadata for DummyErr {
+        fn meta(&self) -> &ErrorMetadata {
+            &self.0
+        }
+    }
 
     // Builds a raw smithy HTTP response carrying `status` with an empty body, as
     // the SDK attaches to `ResponseError`/`ServiceError` variants. Goes through
@@ -314,7 +355,8 @@ mod tests {
 
     #[test]
     fn service_error_maps_to_request_failed_with_status() {
-        let err: SdkError<DummyErr> = SdkError::service_error(DummyErr, raw_response(403));
+        let err: SdkError<DummyErr> =
+            SdkError::service_error(DummyErr::default(), raw_response(403));
         let mapped = map_sdk_err("head_object", &object(), err);
         match mapped {
             S3Err::RequestFailedErr(e) => assert_eq!(e.status, Some(403)),
@@ -439,6 +481,20 @@ mod tests {
             assert!(err.is_network_conn_err());
             assert!(matches!(err.code(), Code::InternalServerError));
             assert!(err.to_string().contains("connection error"));
+        }
+
+        #[test]
+        fn expired_credentials_err_is_expired_credentials_err() {
+            let err = S3Err::ExpiredCredentialsErr(ExpiredCredentialsErr {
+                operation: "upload_part".to_string(),
+                object: object(),
+                msg: "unhandled error (ExpiredToken)".to_string(),
+                trace: crate::trace!(),
+            });
+            assert!(err.is_expired_credentials_err());
+            assert!(!err.is_network_conn_err());
+            assert!(matches!(err.code(), Code::InternalServerError));
+            assert!(err.to_string().contains("credentials expired"));
         }
 
         #[test]

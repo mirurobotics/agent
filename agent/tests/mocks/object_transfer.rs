@@ -40,6 +40,7 @@ impl MockObjectTransfer {
                 source: Box::new(std::io::Error::other("scripted transfer failure")),
                 is_terminal: false,
                 is_network_conn_err: false,
+                is_expired_credentials_err: false,
                 trace: miru_agent::trace!(),
             })));
     }

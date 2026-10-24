@@ -39,6 +39,7 @@ fn scripted_err() -> Result<(), UploadErr> {
         source: Box::new(std::io::Error::other("scripted failure")),
         is_terminal: false,
         is_network_conn_err: false,
+        is_expired_credentials_err: false,
         trace: miru_agent::trace!(),
     }))
 }
@@ -48,6 +49,7 @@ fn scripted_network_err() -> Result<(), UploadErr> {
         source: Box::new(std::io::Error::other("scripted network failure")),
         is_terminal: false,
         is_network_conn_err: true,
+        is_expired_credentials_err: false,
         trace: miru_agent::trace!(),
     }))
 }
@@ -409,6 +411,35 @@ async fn network_failures_do_not_consume_attempt_budget() {
     let mut expected = vec![job_a; 5];
     expected.push(job_b);
     assert_eq!(mock.recorded_calls(), expected);
+}
+
+#[tokio::test]
+async fn expired_credentials_do_not_consume_attempt_budget() {
+    let (mock, mut started_rx) = MockUploadExecutor::new();
+    for _ in 0..3 {
+        mock.push_step(MockStep::ExpiredCredentialsErr);
+    }
+    mock.push_step(MockStep::Ok);
+    // a budget the expired credentials would use up if they counted
+    let options = UploaderOptions {
+        retry: RetryPolicy {
+            attempts: 3,
+            ..RetryPolicy::default()
+        },
+        ..UploaderOptions::default()
+    };
+    let (uploader, handle, _sleeps) = spawn_with_test_clock(mock.clone(), options);
+    let job = make_job("a.log");
+
+    timed(uploader.enqueue(job.clone())).await.unwrap();
+    for _ in 0..4 {
+        timed(started_rx.recv()).await.unwrap();
+    }
+    assert_eq!(timed(uploader.len()).await.unwrap(), 0);
+
+    timed(uploader.shutdown()).await.unwrap();
+    timed(handle).await.unwrap();
+    assert_eq!(mock.recorded_calls(), vec![job; 4]);
 }
 
 #[tokio::test]
