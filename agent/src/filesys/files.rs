@@ -462,6 +462,43 @@ pub async fn size(file: &File) -> Result<u64, FileSysErr> {
     Ok(metadata(file).await?.len())
 }
 
+/// Fills `buf` from `file` at `offset`, ignoring the handle's cursor, so one
+/// opened handle can serve several readers. A file that ends before `buf` is
+/// full is [`std::io::ErrorKind::UnexpectedEof`].
+pub(crate) fn read_exact_at(
+    file: &std::fs::File,
+    mut buf: &mut [u8],
+    mut offset: u64,
+) -> std::io::Result<()> {
+    while !buf.is_empty() {
+        match read_at(file, buf, offset) {
+            Ok(0) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::UnexpectedEof,
+                    "file ended before the requested range",
+                ))
+            }
+            Ok(n) => {
+                buf = &mut buf[n..];
+                offset += n as u64;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn read_at(file: &std::fs::File, buf: &mut [u8], offset: u64) -> std::io::Result<usize> {
+    std::os::unix::fs::FileExt::read_at(file, buf, offset)
+}
+
+#[cfg(windows)]
+fn read_at(file: &std::fs::File, buf: &mut [u8], offset: u64) -> std::io::Result<usize> {
+    std::os::windows::fs::FileExt::seek_read(file, buf, offset)
+}
+
 fn map_io_err_for_open(e: std::io::Error, file: &File) -> FileSysErr {
     if e.kind() == std::io::ErrorKind::NotFound {
         FileSysErr::PathDoesNotExistErr(PathDoesNotExistErr {
@@ -523,5 +560,24 @@ mod tests {
         // dropping the guard deletes the file
         drop(tf);
         assert!(!path.exists());
+    }
+
+    // =========================== read_exact_at ============================ //
+
+    #[tokio::test]
+    async fn read_exact_at_reads_at_the_offset() {
+        let tf = temp("read-exact-at").unwrap();
+        write_bytes(tf.file(), b"0123456789", WriteOptions::OVERWRITE_NONATOMIC)
+            .await
+            .unwrap();
+        let handle = std::fs::File::open(tf.path()).unwrap();
+        let mut buf = [0u8; 3];
+
+        read_exact_at(&handle, &mut buf, 4).unwrap();
+        assert_eq!(&buf, b"456");
+        read_exact_at(&handle, &mut buf, 0).unwrap();
+        assert_eq!(&buf, b"012");
+        let err = read_exact_at(&handle, &mut buf, 8).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
     }
 }

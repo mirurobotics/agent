@@ -22,6 +22,8 @@
 
 // internal crates
 use crate::errors::HTTPCode;
+use crate::filesys::files;
+use crate::s3::body::FRAME_SIZE;
 use crate::s3::sdk;
 
 // external crates
@@ -79,9 +81,24 @@ pub(crate) fn config(token: Token, http_client: SharedHttpClient) -> aws_sdk_s3:
         .build()
 }
 
-/// Base64 MD5 of `bytes`, for the `Content-MD5` header.
-pub(crate) fn content_md5(bytes: &[u8]) -> String {
-    base64::engine::general_purpose::STANDARD.encode(Md5::digest(bytes))
+/// Base64 MD5 of `len` bytes of `file` from `offset`, for the `Content-MD5`
+/// header. Reads [`FRAME_SIZE`] at a time, so the range is never held in
+/// memory. Blocking.
+pub(crate) fn content_md5_of_range(
+    file: &std::fs::File,
+    mut offset: u64,
+    len: u64,
+) -> std::io::Result<String> {
+    let mut hasher = Md5::new();
+    let mut buf = vec![0u8; FRAME_SIZE];
+    let end = offset + len;
+    while offset < end {
+        let n = (end - offset).min(FRAME_SIZE as u64) as usize;
+        files::read_exact_at(file, &mut buf[..n], offset)?;
+        hasher.update(&buf[..n]);
+        offset += n as u64;
+    }
+    Ok(base64::engine::general_purpose::STANDARD.encode(hasher.finalize()))
 }
 
 /// Sets the bearer token and GCS metadata header names on each attempt, right
@@ -186,13 +203,19 @@ mod tests {
 
     // internal crates
     use super::*;
-    use crate::s3::store::tests::{resp, resp_xml, temp_file_with};
+    use crate::filesys::path::PathExt;
+    use crate::s3::store::tests::{recorded_payload, resp, resp_xml, temp_file_with};
     use crate::s3::store::PART_SIZE;
     use crate::s3::{Object, Options, S3Err, Store};
 
     // external crates
     use aws_smithy_http_client::test_util::{ReplayEvent, StaticReplayClient};
     use aws_smithy_types::body::SdkBody;
+
+    /// Base64 MD5 of `bytes`: what `Content-MD5` should carry for them.
+    fn content_md5(bytes: &[u8]) -> String {
+        base64::engine::general_purpose::STANDARD.encode(Md5::digest(bytes))
+    }
 
     const BUCKET: &str = "gcs-bucket";
     const UPLOAD_ID: &str = "gcs-upload-1";
@@ -346,17 +369,40 @@ mod tests {
                 !headers.iter().any(|(k, _)| k.starts_with("x-amz-checksum")),
                 "SDK checksum header sent to GCS"
             );
-            assert_eq!(requests[0].body().bytes(), Some(&bytes[..]));
+            // Streamed in frames, but with a length: GCS gets no chunked encoding.
+            assert_eq!(headers.get("content-length"), Some("65536"));
+            assert_eq!(recorded_payload(requests[0]).await, bytes);
         }
     }
 
     mod content_md5 {
         use super::*;
 
-        #[test]
-        fn content_md5_is_base64_digest() {
-            assert_eq!(content_md5(b""), "1B2M2Y8AsgTpgAmY7PhCfg==");
-            assert_eq!(content_md5(b"hello world"), "XrY7u+Ae7tCTyyK7j1rNww==");
+        #[tokio::test]
+        async fn content_md5_of_range_is_base64_digest() {
+            let src = temp_file_with(b"hello world").await;
+            let file = std::fs::File::open(src.file().path()).unwrap();
+
+            let empty = content_md5_of_range(&file, 0, 0).unwrap();
+            assert_eq!(empty, "1B2M2Y8AsgTpgAmY7PhCfg==");
+            let all = content_md5_of_range(&file, 0, 11).unwrap();
+            assert_eq!(all, "XrY7u+Ae7tCTyyK7j1rNww==");
+        }
+
+        #[tokio::test]
+        async fn content_md5_of_range_matches_the_in_memory_digest() {
+            let bytes: Vec<u8> = (0..100 * 1024).map(|i| (i % 251) as u8).collect();
+            let src = temp_file_with(&bytes).await;
+            let file = std::fs::File::open(src.file().path()).unwrap();
+
+            for (offset, len) in [(0, 0), (0, 100 * 1024), (7, 70 * 1024), (99 * 1024, 1024)] {
+                assert_eq!(
+                    content_md5_of_range(&file, offset as u64, len as u64).unwrap(),
+                    content_md5(&bytes[offset..offset + len])
+                );
+            }
+            let err = content_md5_of_range(&file, 90 * 1024, 20 * 1024).unwrap_err();
+            assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
         }
 
         #[tokio::test]
@@ -399,7 +445,9 @@ mod tests {
                     part.headers().get("content-md5"),
                     Some(content_md5(slice).as_str())
                 );
-                assert_eq!(part.body().bytes(), Some(slice));
+                let len = slice.len().to_string();
+                assert_eq!(part.headers().get("content-length"), Some(len.as_str()));
+                assert_eq!(recorded_payload(part).await, slice);
             }
         }
     }

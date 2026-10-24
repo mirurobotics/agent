@@ -156,8 +156,10 @@ pub fn status<E>(err: &SdkError<E>) -> Option<HTTPCode> {
 /// short-circuited by the caller before delegating here, because some callers
 /// treat a 404 as a success value (`Ok(false)`) that this `-> S3Err` signature
 /// cannot express. This helper only covers the variants that need no
-/// operation-specific knowledge: dispatch/timeout (network), response and
-/// construction failures, and the service-error fallback.
+/// operation-specific knowledge: dispatch/timeout (network, unless our own
+/// request body failed), response and construction failures, and the
+/// service-error fallback.
+// lint:allow(funclen) — error mapping table; one arm per SdkError case
 pub fn map_sdk_err<E>(operation: &str, object: &Object, err: SdkError<E>) -> S3Err
 where
     E: std::error::Error + 'static,
@@ -166,6 +168,14 @@ where
         SdkError::TimeoutError(e) => S3Err::ConnectionErr(ConnectionErr {
             object: object.clone(),
             msg: format!("request timed out: {e:?}"),
+            trace: crate::trace!(),
+        }),
+        // The SDK marks a failure of our own request body, such as a file read,
+        // as a user error: local, not the network's.
+        SdkError::DispatchFailure(e) if e.is_user() => S3Err::LocalIoErr(LocalIoErr {
+            operation: operation.to_string(),
+            object: object.clone(),
+            msg: format!("request body failed: {e:?}"),
             trace: crate::trace!(),
         }),
         SdkError::DispatchFailure(e) => S3Err::ConnectionErr(ConnectionErr {
@@ -297,6 +307,15 @@ mod tests {
         let mapped = map_sdk_err("get_object", &object(), err);
         assert!(matches!(mapped, S3Err::ConnectionErr(_)));
         assert!(mapped.is_network_conn_err());
+    }
+
+    #[test]
+    fn body_dispatch_failure_maps_to_local_io_err() {
+        let source: Box<dyn std::error::Error + Send + Sync> = "file ended".into();
+        let err: SdkError<DummyErr> = SdkError::dispatch_failure(ConnectorError::user(source));
+        let mapped = map_sdk_err("upload_part", &object(), err);
+        assert!(matches!(mapped, S3Err::LocalIoErr(_)));
+        assert!(!mapped.is_network_conn_err());
     }
 
     #[test]
