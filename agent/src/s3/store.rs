@@ -1,20 +1,17 @@
 // standard crates
 use std::collections::HashMap;
 use std::io::SeekFrom;
-use std::time::Duration;
 
 // internal crates
 use crate::errors::HTTPCode;
 use crate::filesys::{errors::PathDoesNotExistErr, file::File, path::PathExt, FileSysErr};
+use crate::s3::sdk::{attempt_override, body_attempt_timeout};
 use crate::s3::{body, errors, errors::ObjectNotFoundErr, gcs, S3Err};
 use crate::trace;
 
 // external crates
-use aws_sdk_s3::config::timeout::TimeoutConfig;
-use aws_sdk_s3::config::{SharedHttpClient, StalledStreamProtectionConfig};
 use aws_sdk_s3::error::SdkError;
 use aws_sdk_s3::Client;
-use aws_smithy_http_client::{proxy, tls, Builder, ConnectorBuilder};
 use bytes::Bytes;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
@@ -22,69 +19,6 @@ use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 /// below it go through a single `PutObject`. S3's own multipart part-size
 /// floor is 5 MiB; 8 MiB gives headroom while keeping part counts small.
 pub(crate) const PART_SIZE: u64 = 8 * 1024 * 1024; // 8 MiB
-
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
-
-/// Time limit for bodyless calls, SDK retries and backoff included.
-const ATTEMPT_TIMEOUT: Duration = Duration::from_secs(60);
-
-/// PutObject/UploadPart get `BODY_ATTEMPT_FLOOR` plus one second per
-/// `MIN_UPLOAD_BYTES_PER_SEC` of body: a tail or response stall after the last
-/// frame (which stalled-stream protection no longer watches) ends at this limit.
-const BODY_ATTEMPT_FLOOR: Duration = Duration::from_secs(90);
-const MIN_UPLOAD_BYTES_PER_SEC: u64 = 64 * 1024;
-
-/// Longest a request body may go without progress.
-const STALL_GRACE: Duration = Duration::from_secs(60);
-
-/// Cap for `CompleteMultipartUpload`, which can take minutes on large uploads.
-const COMPLETE_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(600);
-
-/// Best-effort `AbortMultipartUpload` cleanup.
-pub(super) const ABORT_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(10);
-
-/// One limit for both the whole operation and each attempt, so SDK retries
-/// cannot stack past it.
-fn timeout_config(limit: Duration) -> TimeoutConfig {
-    TimeoutConfig::builder()
-        .connect_timeout(CONNECT_TIMEOUT)
-        .operation_timeout(limit)
-        .operation_attempt_timeout(limit)
-        .build()
-}
-
-pub(super) fn body_attempt_timeout(len: u64) -> Duration {
-    BODY_ATTEMPT_FLOOR + Duration::from_secs(len.div_ceil(MIN_UPLOAD_BYTES_PER_SEC))
-}
-
-/// `CompleteMultipartUpload` shares the attempt budget with the calls before
-/// it (create or list, then the parts), so it gets the body budget they left.
-pub(super) fn complete_attempt_timeout(size: u64, elapsed: Duration) -> Duration {
-    body_attempt_timeout(size)
-        .saturating_sub(elapsed)
-        .clamp(ATTEMPT_TIMEOUT, COMPLETE_ATTEMPT_TIMEOUT)
-}
-
-/// Per-operation config override applying `limit` (see [`timeout_config`]).
-pub(super) fn attempt_override(limit: Duration) -> aws_sdk_s3::config::Builder {
-    aws_sdk_s3::Config::builder().timeout_config(timeout_config(limit))
-}
-
-/// One HTTPS client for every store built from it, so uploads reuse pooled
-/// connections instead of a fresh TCP+TLS handshake per upload. Mirrors the
-/// SDK default client: rustls with aws-lc, proxy settings from the environment.
-pub fn http_client() -> SharedHttpClient {
-    Builder::new().build_with_connector_fn(|settings, components| {
-        let provider = tls::Provider::Rustls(tls::rustls_provider::CryptoMode::AwsLc);
-        let mut conn = ConnectorBuilder::default().tls_provider(provider);
-        conn.set_connector_settings(settings.cloned());
-        if let Some(components) = components {
-            conn.set_sleep_impl(components.sleep_impl());
-        }
-        conn.set_proxy_config(Some(proxy::ProxyConfig::from_env()));
-        conn.build()
-    })
-}
 
 /// How a successful object write ended.
 #[derive(Debug)]
@@ -180,23 +114,11 @@ pub struct Store {
 }
 
 impl Store {
-    /// Builds a store from `opts`, adding the call limits and stalled-stream
-    /// protection every store shares. No network I/O happens here; the first
+    /// Builds a store from `opts`. No network I/O happens here; the first
     /// request is made lazily on the first call.
     pub fn new(opts: Options) -> Self {
-        let config = opts
-            .config
-            .to_builder()
-            .timeout_config(timeout_config(ATTEMPT_TIMEOUT))
-            .stalled_stream_protection(
-                StalledStreamProtectionConfig::enabled()
-                    .upload_enabled(true)
-                    .grace_period(STALL_GRACE)
-                    .build(),
-            )
-            .build();
         Self {
-            client: Client::from_conf(config),
+            client: Client::from_conf(opts.config),
             gcs: opts.gcs,
         }
     }
@@ -377,25 +299,20 @@ pub(super) mod tests {
 
     // internal crates
     use crate::s3::body::chunked;
-    use crate::s3::store::{
-        body_attempt_timeout, complete_attempt_timeout, http_client, ABORT_ATTEMPT_TIMEOUT,
-        PART_SIZE,
-    };
+    use crate::s3::sdk::body_attempt_timeout;
     use crate::test_utils::{
         error_harnesses::{assert_error, Expected},
         filesys::{files as test_files, missing_file},
     };
-    use miru_agent::data_uploads::upload::UploaderOptions;
     use miru_agent::errors::{Code, Error, HTTPCode};
     use miru_agent::filesys::file::File;
     use miru_agent::filesys::path::PathExt;
     use miru_agent::filesys::{files, FileSysErr, WriteOptions};
     use miru_agent::s3::errors::map_sdk_err;
-    use miru_agent::s3::{aws, gcs, Config, Credentials, Object, Options, S3Err, Source, Store};
+    use miru_agent::s3::{aws, sdk, Config, Credentials, Object, Options, S3Err, Source, Store};
 
     // external crates
     use aws_sdk_s3::config::retry::RetryConfig;
-    use aws_sdk_s3::config::timeout::TimeoutConfig;
     use aws_sdk_s3::config::{SharedHttpClient, StalledStreamProtectionConfig};
     use aws_smithy_http_client::test_util::{NeverClient, ReplayEvent, StaticReplayClient};
     use aws_smithy_runtime_api::client::http::{
@@ -403,9 +320,7 @@ pub(super) mod tests {
     };
     use aws_smithy_runtime_api::client::orchestrator::{HttpRequest, HttpResponse};
     use aws_smithy_runtime_api::client::result::ConnectorError;
-    use aws_smithy_runtime_api::client::runtime_components::{
-        RuntimeComponents, RuntimeComponentsBuilder,
-    };
+    use aws_smithy_runtime_api::client::runtime_components::RuntimeComponents;
     use aws_smithy_types::body::SdkBody;
     use bytes::Bytes;
     use http_body_util::BodyExt;
@@ -462,7 +377,7 @@ pub(super) mod tests {
     /// Wires an S3 `Store` to `client` in place of the HTTPS connector.
     pub(crate) fn store_on(client: impl HttpClient + 'static) -> Store {
         // Path-style URLs, so request URIs match `uri()`.
-        let config = aws::config(test_config(), Some(SharedHttpClient::new(client)), true);
+        let config = aws::config(test_config(), SharedHttpClient::new(client), true);
         Store::new(Options { config, gcs: false })
     }
 
@@ -591,42 +506,6 @@ pub(super) mod tests {
     pub mod timeouts {
         use super::*;
 
-        #[test]
-        fn call_limits_stay_under_uploader_backstop() {
-            const MIB: u64 = 1024 * 1024;
-            let secs = Duration::from_secs;
-            assert_eq!(body_attempt_timeout(0), secs(90));
-            assert_eq!(body_attempt_timeout(PART_SIZE), secs(218));
-            assert_eq!(complete_attempt_timeout(PART_SIZE + 1, secs(0)), secs(219));
-            assert_eq!(complete_attempt_timeout(1024 * MIB, secs(0)), secs(600));
-            assert_eq!(
-                complete_attempt_timeout(PART_SIZE + 1, secs(3600)),
-                secs(60)
-            );
-
-            let backstop = |len: u64| UploaderOptions::default().attempt_deadline(len);
-            // PutObject/UploadPart: the call limit after up to 30 s of backend create.
-            for len in [0, MIB, PART_SIZE] {
-                assert!(
-                    body_attempt_timeout(len) + secs(30) <= backstop(len),
-                    "len {len}"
-                );
-            }
-            // Multipart: 20 s backend create, then the S3 create and the parts at the
-            // minimum rate eat into complete's budget, and the abort follows. Once
-            // create + parts exceed `parts + 30 s`, complete's 60 s floor can
-            // overshoot the backstop; that is accepted and not covered here.
-            for len in [PART_SIZE + 1, 20 * MIB, 1024 * MIB] {
-                let parts = secs(len.div_ceil(64 * 1024));
-                for s3_create in [secs(0), secs(30)] {
-                    let spent = s3_create + parts;
-                    let complete = complete_attempt_timeout(len, spent);
-                    let total = secs(20) + spent + complete + ABORT_ATTEMPT_TIMEOUT;
-                    assert!(total <= backstop(len), "len {len}, create {s3_create:?}");
-                }
-            }
-        }
-
         #[tokio::test(start_paused = true)]
         async fn stalled_put_maps_to_connection_err() {
             let len = 1024 * 1024;
@@ -662,55 +541,8 @@ pub(super) mod tests {
                 region: "us-west-2".to_string(),
             };
             // Constructing must not panic or touch the network.
-            let config = aws::config(cfg, None, false);
+            let config = aws::config(cfg, sdk::http_client(), false);
             let _store = Store::new(Options { config, gcs: false });
-        }
-
-        #[tokio::test]
-        async fn new_sets_timeouts_and_stall_protection() {
-            let token = gcs::Token::new("gcs-token").unwrap();
-            let stores = [
-                (aws::config(test_config(), None, false), false),
-                (gcs::config(token, None), true),
-            ];
-            let timeouts = TimeoutConfig::builder()
-                .connect_timeout(Duration::from_secs(15))
-                .operation_timeout(Duration::from_secs(60))
-                .operation_attempt_timeout(Duration::from_secs(60))
-                .build();
-
-            for (config, is_gcs) in stores {
-                let store = Store::new(Options {
-                    config,
-                    gcs: is_gcs,
-                });
-                let config = store.client.config();
-
-                assert_eq!(config.timeout_config(), Some(&timeouts), "gcs {is_gcs}");
-                let ssp = config
-                    .stalled_stream_protection()
-                    .expect("stall protection configured");
-                assert!(ssp.upload_enabled(), "gcs {is_gcs}");
-                assert_eq!(ssp.grace_period(), Duration::from_secs(60), "gcs {is_gcs}");
-            }
-        }
-
-        #[tokio::test]
-        async fn http_client_builds_connector() {
-            let config = aws::config(test_config(), Some(http_client()), false);
-            let store = Store::new(Options { config, gcs: false });
-            assert!(store.client.config().http_client().is_some());
-
-            // The SDK calls the connector closure with settings and components
-            // only on a request; call it directly with both.
-            let components = RuntimeComponentsBuilder::for_tests()
-                .with_time_source(store.client.config().time_source())
-                .build()
-                .unwrap();
-            let settings = HttpConnectorSettings::builder()
-                .connect_timeout(Duration::from_secs(15))
-                .build();
-            let _connector = http_client().http_connector(&settings, &components);
         }
     }
 

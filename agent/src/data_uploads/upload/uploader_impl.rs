@@ -57,7 +57,7 @@ impl UploaderOptions {
     /// every attempt terminates; expiry counts against the attempt budget.
     ///
     /// Stalls are caught first by the store's stalled-stream protection and
-    /// per-call limits ([`crate::s3::store`]), sized to end before this deadline,
+    /// per-call limits ([`crate::s3::sdk`]), sized to end before this deadline,
     /// and surface as uncounted network errors.
     pub fn attempt_deadline(&self, size: u64) -> Duration {
         let bps = self.attempt_timeout_bytes_per_sec.max(1);

@@ -28,7 +28,8 @@ Resuming a GCS resumable session or S3 multipart upload across agent attempts (s
 
 ## Surprises & Discoveries
 
-- 2026-10-24: agent#385 moved GCS uploads onto the S3 store over GCS's XML API and removed `agent/src/gcs`. Merging `main` dropped Milestone 1's watchdog, moved the S3 limits and shared client into `agent/src/s3/store.rs`, and made `Store::new` apply them to every store, so GCS uploads get the same bounds as S3.
+- 2026-10-24: agent#385 moved GCS uploads onto the S3 store over GCS's XML API and removed `agent/src/gcs`. Merging `main` dropped Milestone 1's watchdog, moved the S3 limits and shared client into `agent/src/s3/store.rs`, and made `Store::new` apply them to every store (later moved, see below), so GCS uploads get the same bounds as S3.
+- 2026-10-24: agent#389 added `agent/src/s3/sdk.rs` with the shared HTTPS client and the base SDK config. Merging it moved the limits and stalled-stream protection into `sdk::base_config`, which both `aws::config` and `gcs::config` start from, and dropped this branch's copy of the client.
 
 ## Decision Log
 

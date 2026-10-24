@@ -1,9 +1,10 @@
 //! AWS S3, signed with SigV4 from the backend's temporary credentials.
 
+// internal crates
+use crate::s3::sdk;
+
 // external crates
-use aws_sdk_s3::config::{
-    BehaviorVersion, Credentials as AwsCredentials, Region, SharedHttpClient,
-};
+use aws_sdk_s3::config::{Credentials as AwsCredentials, Region, SharedHttpClient};
 
 pub struct Config {
     pub creds: Credentials,
@@ -16,11 +17,10 @@ pub struct Credentials {
     pub session_token: String,
 }
 
-/// The SDK config for an AWS S3 [`Store`](crate::s3::Store). `http_client`
-/// replaces the default HTTPS client when given.
+/// The SDK config for an AWS S3 [`Store`](crate::s3::Store).
 pub(crate) fn config(
     cfg: Config,
-    http_client: Option<SharedHttpClient>,
+    http_client: SharedHttpClient,
     force_path_style: bool,
 ) -> aws_sdk_s3::Config {
     let s3creds = AwsCredentials::new(
@@ -30,13 +30,9 @@ pub(crate) fn config(
         None,
         "miru-agent",
     );
-    let mut builder = aws_sdk_s3::Config::builder()
-        .behavior_version(BehaviorVersion::latest())
+    sdk::base_config(http_client)
         .region(Region::new(cfg.region))
         .credentials_provider(s3creds)
-        .force_path_style(force_path_style);
-    if let Some(http_client) = http_client {
-        builder = builder.http_client(http_client);
-    }
-    builder.build()
+        .force_path_style(force_path_style)
+        .build()
 }

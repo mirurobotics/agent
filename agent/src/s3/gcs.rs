@@ -22,13 +22,14 @@
 
 // internal crates
 use crate::errors::HTTPCode;
+use crate::s3::sdk;
 
 // external crates
 use aws_sdk_s3::config::interceptors::{BeforeTransmitInterceptorContextMut, InterceptorContext};
 use aws_sdk_s3::config::retry::{ClassifyRetry, RetryAction};
 use aws_sdk_s3::config::{
-    BehaviorVersion, ConfigBag, Intercept, Region, RequestChecksumCalculation,
-    ResponseChecksumValidation, RuntimeComponents, SharedHttpClient,
+    ConfigBag, Intercept, Region, RequestChecksumCalculation, ResponseChecksumValidation,
+    RuntimeComponents, SharedHttpClient,
 };
 use aws_sdk_s3::error::BoxError;
 use aws_smithy_runtime_api::client::orchestrator::Metadata;
@@ -62,11 +63,9 @@ impl Token {
     }
 }
 
-/// The SDK config for a GCS [`Store`](crate::s3::Store). `http_client`
-/// replaces the default HTTPS client when given.
-pub(crate) fn config(token: Token, http_client: Option<SharedHttpClient>) -> aws_sdk_s3::Config {
-    let mut builder = aws_sdk_s3::Config::builder()
-        .behavior_version(BehaviorVersion::latest())
+/// The SDK config for a GCS [`Store`](crate::s3::Store).
+pub(crate) fn config(token: Token, http_client: SharedHttpClient) -> aws_sdk_s3::Config {
+    sdk::base_config(http_client)
         .endpoint_url(ENDPOINT)
         .region(Region::new("auto"))
         .force_path_style(true)
@@ -76,11 +75,8 @@ pub(crate) fn config(token: Token, http_client: Option<SharedHttpClient>) -> aws
         // adds the bearer header.
         .allow_no_auth()
         .interceptor(GcsInterceptor { token })
-        .retry_classifier(TooManyRequests);
-    if let Some(http_client) = http_client {
-        builder = builder.http_client(http_client);
-    }
-    builder.build()
+        .retry_classifier(TooManyRequests)
+        .build()
 }
 
 /// Base64 MD5 of `bytes`, for the `Content-MD5` header.
@@ -222,7 +218,7 @@ mod tests {
 
     fn gcs_store(replay: &StaticReplayClient) -> Store {
         let token = Token::new("gcs-token").unwrap();
-        let http_client = Some(SharedHttpClient::new(replay.clone()));
+        let http_client = SharedHttpClient::new(replay.clone());
         Store::new(Options {
             config: config(token, http_client),
             gcs: true,
@@ -462,7 +458,7 @@ mod tests {
             // own failure.
             let replay = StaticReplayClient::new(vec![]);
             let token = Token(SecretString::from("bad\ntoken"));
-            let http_client = Some(SharedHttpClient::new(replay.clone()));
+            let http_client = SharedHttpClient::new(replay.clone());
             let store = Store::new(Options {
                 config: config(token, http_client),
                 gcs: true,

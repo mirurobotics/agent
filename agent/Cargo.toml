@@ -65,7 +65,8 @@ ignored = ["openssl"]
 [dev-dependencies]
 aws-sdk-s3 = { workspace = true }
 aws-smithy-http-client = { workspace = true, features = ["test-util"] }
-aws-smithy-runtime-api = { workspace = true, features = ["client", "http-1x", "test-util"] }
+aws-smithy-runtime-api = { workspace = true, features = ["http-1x", "test-util"] }
+aws-smithy-types = { workspace = true }
 http = { workspace = true }
 http-body-util = "0.1"
 mockall = "0.14"

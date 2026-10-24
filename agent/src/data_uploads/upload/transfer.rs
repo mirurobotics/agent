@@ -12,6 +12,7 @@ use backend_api::models::upload_credentials::Scheme;
 use backend_api::models::{S3UploadCredentials, UploadCredentials, UploadDestination};
 
 // external crates
+use aws_sdk_s3::config::SharedHttpClient;
 use tracing::info;
 
 /// The seam between the upload executor and the concrete cloud-storage SDKs.
@@ -40,16 +41,16 @@ pub trait ObjectTransfer: Send + Sync {
 /// [`s3::Store::put`]: single-part or multipart by size. Tests can replace the
 /// HTTP client of both stores.
 pub struct SdkTransfer {
-    http_client: Option<aws_sdk_s3::config::SharedHttpClient>,
+    http_client: SharedHttpClient,
     s3_force_path_style: bool,
 }
 
-/// Builds the HTTPS client once per transfer, which lives for the app's
-/// lifetime, so every upload shares its connection pool.
+/// Every upload through this transfer shares one HTTPS client and its
+/// connection pool.
 impl Default for SdkTransfer {
     fn default() -> Self {
         Self {
-            http_client: Some(s3::store::http_client()),
+            http_client: s3::sdk::http_client(),
             s3_force_path_style: false,
         }
     }
@@ -64,7 +65,7 @@ impl SdkTransfer {
         http_client: impl aws_sdk_s3::config::HttpClient + 'static,
     ) -> Self {
         Self {
-            http_client: Some(aws_sdk_s3::config::IntoShared::into_shared(http_client)),
+            http_client: SharedHttpClient::new(http_client),
             s3_force_path_style: true,
         }
     }
@@ -289,14 +290,6 @@ mod tests {
     const GCS_PUT_URI: &str = "https://storage.googleapis.com/my-bucket/logs/a.log?x-id=PutObject";
 
     #[tokio::test]
-    async fn default_carries_shared_http_client() {
-        let transfer = SdkTransfer::default();
-
-        assert!(transfer.http_client.is_some());
-        assert!(!transfer.s3_force_path_style);
-    }
-
-    #[tokio::test]
     async fn unknown_scheme_is_unsupported() {
         let creds = credentials("something-new", s3_credentials_json(), Value::Null);
         let err = SdkTransfer::default()
@@ -395,8 +388,8 @@ mod tests {
 
     #[tokio::test]
     async fn s3_default_store_fails_offline_on_missing_file() {
-        // Default settings carry the shared `s3::store::http_client()`. Construction
-        // makes no network calls and `put` stats the file before dispatching any
+        // Default settings use the shared S3 builder without a transport override.
+        // Construction does no I/O and `put` stats the file before dispatching any
         // request, so a missing local file fails fast offline.
         let creds = credentials("s3", s3_credentials_json(), Value::Null);
         let missing = missing_file();

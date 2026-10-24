@@ -2,10 +2,8 @@
 use crate::s3::{
     body, errors,
     errors::NoSuchUploadErr,
-    store::{
-        attempt_override, body_attempt_timeout, complete_attempt_timeout, WriteOutcome,
-        ABORT_ATTEMPT_TIMEOUT, PART_SIZE,
-    },
+    sdk::{attempt_override, body_attempt_timeout, complete_attempt_timeout, ABORT_ATTEMPT_TIMEOUT},
+    store::{WriteOutcome, PART_SIZE},
     Object, S3Err, Source, Store,
 };
 
