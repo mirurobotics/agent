@@ -2,7 +2,7 @@
 use device_api::models as openapi;
 use miru_agent::models::{
     Deployment, Device, DeviceStatus, DplActivity, DplErrStatus, DplTarget, FileRule,
-    FileRuleRetention, FileRuleSource, FileRuleUpload, GitCommit, Release,
+    FileRuleRetention, FileRuleSource, FileRuleUpload, GitCommit, Release, UploadTimezone,
 };
 use miru_agent::services::calibration::Created;
 
@@ -305,6 +305,7 @@ pub mod file_rule_response {
             bucket_id: "bkt-1".into(),
             bucket_name: "fleet-logs".into(),
             path: "robots/".into(),
+            timezone: UploadTimezone::Device,
             bundle: Some(vec!["robot".into()]),
         }
     }
@@ -354,6 +355,7 @@ pub mod file_rule_response {
                 bucket_id: "bkt-1".into(),
                 bucket_name: "fleet-logs".into(),
                 path: "robots/".into(),
+                timezone: openapi::FileRuleUploadTimezone::FILE_RULE_UPLOAD_TIMEZONE_DEVICE,
                 bundle: Some(vec!["robot".into()]),
             })),
             retention: Some(Box::new(openapi::FileRuleRetention {

@@ -65,7 +65,7 @@ pub mod routes {
     use miru_agent::filesys::Overwrite;
     use miru_agent::models::{
         Deployment, DplActivity, DplErrStatus, DplTarget, FileRule, FileRuleRetention,
-        FileRuleUpload, GitCommit, Release,
+        FileRuleUpload, GitCommit, Release, UploadTimezone,
     };
     use miru_agent::server::{routes, State};
     use miru_agent::sync::Syncer;
@@ -518,6 +518,7 @@ pub mod routes {
                     bucket_id: "bkt-1".into(),
                     bucket_name: "fleet-logs".into(),
                     path: "robots/".into(),
+                    timezone: UploadTimezone::Device,
                     bundle: None,
                 }),
                 retention: Some(FileRuleRetention {
