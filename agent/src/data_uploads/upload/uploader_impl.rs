@@ -29,11 +29,11 @@ pub struct UploaderOptions {
     /// When a failed job is retried and when it is dropped. A job's age is
     /// measured from when its file was first observed.
     pub retry: RetryPolicy,
-    /// Fixed floor of the per-attempt backstop deadline. Covers control-plane
+    /// Fixed floor of the per-attempt upload deadline. Covers control-plane
     /// RPCs (create/confirm, each bounded at 3 × 10s attempts) and connection
     /// setup so tiny files are never starved.
     pub attempt_timeout_floor: Duration,
-    /// Minimum-throughput assumption scaling the per-attempt backstop with
+    /// Minimum-throughput assumption scaling the per-attempt deadline with
     /// file size. Deliberately far below any plausible sustained uplink: a
     /// false timeout discards transfer progress, so this errs generous while
     /// still guaranteeing every attempt terminates.
@@ -52,13 +52,8 @@ impl Default for UploaderOptions {
 }
 
 impl UploaderOptions {
-    /// Backstop deadline for one upload attempt of `size` bytes: floor plus a
-    /// per-byte allowance at the minimum-throughput assumption. Guarantees
-    /// every attempt terminates; expiry counts against the attempt budget.
-    ///
-    /// Stalls are caught first by the store's stalled-stream protection and
-    /// per-call limits ([`crate::s3::sdk`]), sized to end before this deadline,
-    /// and surface as uncounted network errors.
+    /// Deadline for one upload attempt of `size` bytes: floor plus a
+    /// per-byte allowance at the minimum-throughput assumption.
     pub fn attempt_deadline(&self, size: u64) -> Duration {
         let bps = self.attempt_timeout_bytes_per_sec.max(1);
         self.attempt_timeout_floor

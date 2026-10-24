@@ -5,19 +5,12 @@ use std::io::SeekFrom;
 // internal crates
 use crate::errors::HTTPCode;
 use crate::filesys::{errors::PathDoesNotExistErr, file::File, path::PathExt, FileSysErr};
-use crate::s3::{
-    body, errors,
-    errors::ObjectNotFoundErr,
-    gcs,
-    sdk::{attempt_override, body_attempt_timeout},
-    S3Err,
-};
+use crate::s3::{body, errors, errors::ObjectNotFoundErr, gcs, sdk, S3Err};
 use crate::trace;
 
 // external crates
 use aws_sdk_s3::error::SdkError;
 use aws_sdk_s3::Client;
-use bytes::Bytes;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
 /// Objects larger than this stream through a multipart upload; objects at or
@@ -151,8 +144,7 @@ impl Store {
     }
 
     /// Uploads `src` as a single `PutObject`. The body is buffered in memory, so
-    /// the SDK can replay it on a retry without reopening the path, and is
-    /// yielded in frames so a stalled transfer is detected.
+    /// the SDK can replay it on a retry without reopening the path.
     pub async fn put_singlepart(
         &self,
         mut src: Source,
@@ -167,11 +159,11 @@ impl Store {
             .put_object()
             .bucket(&dst.bucket)
             .key(&dst.key)
-            .body(body::chunked(Bytes::from(bytes)))
+            .body(body::framed(bytes))
             .set_content_md5(content_md5)
             .set_metadata((!metadata.is_empty()).then(|| metadata.clone()))
             .customize()
-            .config_override(attempt_override(body_attempt_timeout(size)))
+            .config_override(sdk::timeout(sdk::upload_timeout(size)))
             .send()
             .await
             .map(|_| ());
@@ -303,8 +295,6 @@ pub(super) mod tests {
     use std::time::Duration;
 
     // internal crates
-    use crate::s3::body::chunked;
-    use crate::s3::sdk::body_attempt_timeout;
     use crate::test_utils::{
         error_harnesses::{assert_error, Expected},
         filesys::{files as test_files, missing_file},
@@ -313,7 +303,6 @@ pub(super) mod tests {
     use miru_agent::filesys::file::File;
     use miru_agent::filesys::path::PathExt;
     use miru_agent::filesys::{files, FileSysErr, WriteOptions};
-    use miru_agent::s3::errors::map_sdk_err;
     use miru_agent::s3::{aws, sdk, Config, Credentials, Object, Options, S3Err, Source, Store};
 
     // external crates
@@ -327,7 +316,6 @@ pub(super) mod tests {
     use aws_smithy_runtime_api::client::result::ConnectorError;
     use aws_smithy_runtime_api::client::runtime_components::RuntimeComponents;
     use aws_smithy_types::body::SdkBody;
-    use bytes::Bytes;
     use http_body_util::BodyExt;
     use tokio::time::Instant;
 
@@ -379,7 +367,7 @@ pub(super) mod tests {
         }
     }
 
-    /// Wires an S3 `Store` to `client` in place of the HTTPS connector.
+    /// Wires a `Store` to `client` in place of the HTTPS client.
     pub(crate) fn store_on(client: impl HttpClient + 'static) -> Store {
         // Path-style URLs, so request URIs match `uri()`.
         let config = aws::config(test_config(), SharedHttpClient::new(client), true);
@@ -466,14 +454,10 @@ pub(super) mod tests {
             .collect()
     }
 
-    /// The payload bytes a recorded request carried. Bodies over the frame size
-    /// stream, so the SDK sends them aws-chunked (`<hex len>[;ext]\r\n<data>\r\n`
-    /// chunks ending in a `0` chunk and trailers); those are replayed from the
-    /// retryable body and decoded.
+    /// The payload a recorded request carried. AWS gets streamed bodies
+    /// aws-chunked (`<hex len>[;ext]\r\n<data>\r\n` chunks ending in a `0`
+    /// chunk and trailers), so those are decoded.
     pub(crate) async fn recorded_payload(request: &HttpRequest) -> Vec<u8> {
-        if let Some(bytes) = request.body().bytes() {
-            return bytes.to_vec();
-        }
         let wire = request
             .body()
             .try_clone()
@@ -508,30 +492,6 @@ pub(super) mod tests {
         }
     }
 
-    pub mod timeouts {
-        use super::*;
-
-        #[tokio::test(start_paused = true)]
-        async fn stalled_put_maps_to_connection_err() {
-            let len = 1024 * 1024;
-            let tf = temp_file_with(&vec![0u8; len]).await;
-            let src = Source::open(tf.to_file(), &obj("k")).await.unwrap();
-            let store = store_on(NeverClient::new());
-            let start = Instant::now();
-
-            let err = store
-                .put_singlepart(src, &obj("k"), &HashMap::new())
-                .await
-                .unwrap_err();
-
-            assert!(matches!(err, S3Err::ConnectionErr(_)), "got {err:?}");
-            assert!(err.is_network_conn_err());
-            // Ends at the call limit (106 s): stall protection's window runs on the
-            // wall clock, which barely moves while paused time races ahead.
-            assert_eq!(start.elapsed(), body_attempt_timeout(len as u64));
-        }
-    }
-
     pub mod construction {
         use super::*;
 
@@ -551,7 +511,7 @@ pub(super) mod tests {
         }
     }
 
-    pub mod stall_protection {
+    pub mod stalls {
         use super::*;
 
         /// Takes the first request body frame, then never polls the body again
@@ -579,34 +539,49 @@ pub(super) mod tests {
             }
         }
 
+        #[tokio::test(start_paused = true)]
+        async fn stalled_put_maps_to_connection_err() {
+            let len = 1024 * 1024;
+            let tf = temp_file_with(&vec![0u8; len]).await;
+            let src = Source::open(tf.to_file(), &obj("k")).await.unwrap();
+            let store = store_on(NeverClient::new());
+            let start = Instant::now();
+
+            let err = store
+                .put_singlepart(src, &obj("k"), &HashMap::new())
+                .await
+                .unwrap_err();
+
+            // Only the call's time limit can end it: stall protection measures on
+            // the wall clock, which barely moves while paused time races ahead.
+            assert!(matches!(err, S3Err::ConnectionErr(_)), "got {err:?}");
+            assert_eq!(start.elapsed(), sdk::upload_timeout(len as u64));
+        }
+
         #[tokio::test]
-        async fn chunked_body_trips_stall_protection() {
-            let store = store_on(HangAfterFirstFrame);
-            // A 1 s grace (instead of 60 s) and no retries keep the test short.
+        async fn put_that_stops_sending_trips_stall_protection() {
+            let tf = temp_file_with(&vec![0u8; 256 * 1024]).await;
+            let src = Source::open(tf.to_file(), &obj("k")).await.unwrap();
+            // A 1 s grace and no SDK retries keep the test short.
             let fast_stall = StalledStreamProtectionConfig::enabled()
-                .upload_enabled(true)
                 .grace_period(Duration::from_secs(1))
                 .build();
-            let config = aws_sdk_s3::Config::builder()
+            let http_client = SharedHttpClient::new(HangAfterFirstFrame);
+            let config = aws::config(test_config(), http_client, true)
+                .to_builder()
                 .stalled_stream_protection(fast_stall)
-                .retry_config(RetryConfig::disabled());
-            let send = store
-                .client
-                .put_object()
-                .bucket(BUCKET)
-                .key("k")
-                .body(chunked(Bytes::from(vec![0u8; 256 * 1024])))
-                .customize()
-                .config_override(config)
-                .send();
+                .retry_config(RetryConfig::disabled())
+                .build();
+            let store = Store::new(Options { config, gcs: false });
 
-            // Well under the 60 s call limit, so only stall protection can end it.
-            let result = tokio::time::timeout(Duration::from_secs(30), send)
+            // Shorter than the call's time limit, so only stall protection can
+            // end the call.
+            let put = store.put_singlepart(src, &obj("k"), &HashMap::new());
+            let result = tokio::time::timeout(Duration::from_secs(30), put)
                 .await
                 .expect("stall protection ends the call");
 
-            let err = map_sdk_err("put_object", &obj("k"), result.unwrap_err());
-            assert!(matches!(err, S3Err::ConnectionErr(_)), "got {err:?}");
+            assert!(matches!(result, Err(S3Err::ConnectionErr(_))), "got {result:?}");
         }
     }
 

@@ -14,7 +14,7 @@ This plan lives in `agent/plans/` because every change is in the agent repo. Wor
 
 Today an upload attempt (create, transfer, confirm) has one deadline of 120 s plus one second per 64 KiB of file (about 4.6 h for 1 GiB, about 22.8 h for 5.4 GB). A connection that silently dies mid-upload is only noticed when that deadline expires, and the failure counts against the job's attempt budget. In the field, a 5.4 GB GCS upload stalled for about 9 h after a laptop suspend/resume, logged nothing, and only restarted (from byte 0) when the agent restarted.
 
-After this change, any upload request that makes no byte progress for 60 s (or, after the full body, gets no response within a bounded tail) is aborted and surfaces as the existing retryable network error (`GcsErr::ConnectionErr` or `S3Err::ConnectionErr`). The uploader already requeues network errors after a flat 10 s wait without counting an attempt. S3 also gets an explicit 15 s connect timeout, per-call time limits (SDK retries included) sized to end before the backstop (multipart complete gets what is left of the attempt's body budget; the best-effort abort is capped at 10 s), stalled-stream protection that actually works on uploads, and one long-lived HTTPS client shared by all uploads. The whole-attempt deadline stays unchanged as a backstop. Uploads moving at or above the backstop's 64 KiB/s design rate are never cut short (see the Decision Log for the slow-link trade-off).
+After this change, any upload request that makes no byte progress for 60 s (or, after the full body, gets no response within a bounded tail) is aborted and surfaces as the existing retryable network error (`GcsErr::ConnectionErr` or `S3Err::ConnectionErr`). The uploader already requeues network errors after a flat 10 s wait without counting an attempt. S3 also gets an explicit 15 s connect timeout, per-call time limits that include SDK retries (60 s by default; uploads add 1 s per 64 KiB of body and end before the backstop; multipart complete gets 10 min and the best-effort abort 10 s), and stalled-stream protection that actually works on uploads. One long-lived HTTPS client shared by all uploads landed separately in agent#389. The whole-attempt deadline stays unchanged as a backstop. Uploads moving at or above the backstop's 64 KiB/s design rate are never cut short (see the Decision Log for the slow-link trade-off).
 
 Resuming a GCS resumable session or S3 multipart upload across agent attempts (so a retry does not restart from byte 0) is out of scope.
 
@@ -25,6 +25,7 @@ Resuming a GCS resumable session or S3 multipart upload across agent attempts (s
 - [x] Milestone 2: S3 timeouts, stalled-stream protection, chunked request bodies, uploader backstop docs, with tests; commit.
 - [x] Milestone 3: shared S3 HTTPS client wired into `SdkTransfer::default()`, with tests; commit.
 - [x] Push the branch and run `$preflight` until it reports CLEAN.
+- [x] 2026-10-24: Simplify the S3 call limits and the framed body (see the Decision Log), then run `$preflight` again.
 
 ## Surprises & Discoveries
 
@@ -48,10 +49,16 @@ Resuming a GCS resumable session or S3 multipart upload across agent attempts (s
 - Decision: The shared S3 client uses `aws_smithy_http_client::Builder::build_with_connector_fn` (public but `#[doc(hidden)]`) instead of the documented `build_https()`.
   Rationale: `build_https()` turns HTTP proxies off. The SDK default client that we replace honors `HTTP(S)_PROXY` from the environment, and builds itself through this same function. Dropping proxy support would silently break proxied devices. Cargo.lock pins the version.
   Date/Author: 2026-10-16 / plan author.
+- Decision: Simplify the S3 call limits. Each call gets one operation timeout, SDK retries and backoff included: 60 s by default, 60 s + 1 s per 64 KiB of body for PutObject/UploadPart, a fixed 10 min for CompleteMultipartUpload, and 10 s for the best-effort abort. The attempt timeout, the 90 s body floor and the complete budget measured from before create are gone. Supersedes the 2026-10-16 call-limit decision.
+  Rationale: The attempt timeout equalled the operation timeout, so it never fired first. The 90 s floor and the complete budget only existed to fit every stall under the uploader backstop, and the budget threaded the attempt's start time through the multipart path. With the 60 s floor an upload call still ends 60 s before the backstop. A fixed complete limit can outlast the backstop on small multipart uploads; a stalled complete there costs one counted attempt, as it does without this change, and the case goes away when the backstop is removed in a follow-up after agent#320 and agent#321.
+  Date/Author: 2026-10-24 / Claude.
+- Decision: Drop the `Box::pin` around `store.put` in `transfer.rs` and the uploader doc edits.
+  Rationale: The boxing was added while the GCS watchdog's future was part of the uploader future; that code left with agent#385, `main` builds the same S3 path unboxed, and `.customize().send()` returns a boxed future. The uploader's backstop docs change again when the backstop is removed.
+  Date/Author: 2026-10-24 / Claude.
 
 ## Outcomes & Retrospective
 
-Stalled uploads now end at byte-progress bounds (stalled-stream protection and per-call limits) instead of only at the file-size backstop. After agent#385 these bounds cover S3 and GCS alike; the GCS-only watchdog from Milestone 1 no longer exists.
+Stalled uploads now end at byte-progress bounds (stalled-stream protection and per-call limits) instead of only at the file-size backstop. After agent#385 these bounds cover S3 and GCS alike; the GCS-only watchdog from Milestone 1 no longer exists. On 2026-10-24 the call limits were simplified to one operation timeout per call, with no attempt timeout, body floor or complete budget (see the Decision Log).
 
 ## Context and Orientation
 
@@ -336,7 +343,7 @@ Acceptance behaviors and the tests that prove them:
 - A GCS upload whose connection stops accepting bytes fails with `GcsErr::ConnectionErr` about 60 s after the last frame was taken (or 90 s after the full body if GCS never answers) instead of hanging for hours. Proved by the `progress.rs` watchdog tests (`fires_after_idle`, `dropped_sender_still_waits_full_window`, `eof_switches_to_finalize_bound`, `seek_after_eof_restores_idle_bound`) and `put::progress::unanswered_upload_maps_to_connection_err`.
 - The uploader requeues that error after 10 s without counting an attempt. Proved by the existing `network_failures_do_not_consume_attempt_budget` and `network_failure_uses_flat_cooldown` together with the classification tests in `agent/src/data_uploads/upload/errors.rs`.
 - A slow but moving GCS upload is not cut off while bytes flow or while its buffered tail drains. Proved by `keeps_waiting_while_progress_arrives`, `rechunks_into_bounded_frames` and `put::progress::slow_response_after_full_body_succeeds`.
-- S3 PutObject/UploadPart requests that stall fail as `S3Err::ConnectionErr` before the uploader backstop: mid-stream within ~60 s of SSP grace (retried by the SDK inside the call's limit), otherwise at the call limit of 90 s + 1 s per 64 KiB (complete: the body budget the earlier S3 calls left, 60 s-10 min; best-effort abort: 10 s). Proved by `stalled_put_maps_to_connection_err`, `stalled_upload_part_maps_to_connection_err`, `stalled_complete_maps_to_connection_err`, `stalled_abort_gives_up_after_10s`, `chunked_body_trips_stall_protection`, `call_limits_stay_under_uploader_backstop` and `build_sets_timeouts_and_stall_protection`. S3 connects are bounded at 15 s.
+- S3 PutObject/UploadPart requests that stall fail as `S3Err::ConnectionErr` before the uploader backstop: mid-stream within ~60 s of SSP grace (retried by the SDK inside the call's limit), otherwise at the call limit of 60 s + 1 s per 64 KiB (complete: 10 min; best-effort abort: 10 s). Proved by `stalled_put_maps_to_connection_err`, `stalled_upload_part_maps_to_connection_err`, `stalled_complete_maps_to_connection_err`, `stalled_abort_maps_to_connection_err`, `put_that_stops_sending_trips_stall_protection`, `ends_before_uploader_backstop` and `aws_and_gcs_configs_carry_timeouts_and_stall_protection`. S3 connects are bounded at 15 s.
 - Normal uploads are unaffected: all existing GCS put/get and S3 put/multipart/get tests pass, with only the body-inspection change described in step 5.
 - `UploaderOptions::attempt_deadline` is unchanged and still fires as a counted backstop. Proved by the existing `attempt_deadline_formula` and `hung_attempt_times_out_and_is_retried`.
 - One S3 HTTPS client is created per `SdkTransfer` and passed to every store. Proved by `default_carries_shared_s3_http_client` and `http_client_builds_connector`.

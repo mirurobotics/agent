@@ -9,27 +9,28 @@ use aws_smithy_types::body::SdkBody;
 use bytes::Bytes;
 use http_body::{Body, Frame, SizeHint};
 
-pub(crate) const FRAME_SIZE: usize = 32 * 1024;
+const FRAME_SIZE: usize = 32 * 1024;
 
-/// Request body for PutObject/UploadPart. Larger bodies are yielded in
-/// [`FRAME_SIZE`] frames so stalled-stream protection sees per-frame progress;
-/// retryable because each retry rebuilds from a cheap `Bytes` clone.
-pub(crate) fn chunked(bytes: Bytes) -> ByteStream {
-    if bytes.len() <= FRAME_SIZE {
-        return ByteStream::from(bytes);
+/// A request body sent in frames, so stalled-stream protection sees progress
+/// as each frame goes out. A body of one frame stays a plain buffer. Retries
+/// replay the body from a cheap `Bytes` clone.
+pub(super) fn framed(body: Vec<u8>) -> ByteStream {
+    let body = Bytes::from(body);
+    if body.len() <= FRAME_SIZE {
+        return ByteStream::from(body);
     }
     ByteStream::new(SdkBody::retryable(move || {
-        SdkBody::from_body_1_x(ChunkedBytes {
-            remaining: bytes.clone(),
+        SdkBody::from_body_1_x(FramedBytes {
+            remaining: body.clone(),
         })
     }))
 }
 
-struct ChunkedBytes {
+struct FramedBytes {
     remaining: Bytes,
 }
 
-impl Body for ChunkedBytes {
+impl Body for FramedBytes {
     type Data = Bytes;
     type Error = Infallible;
 
@@ -49,7 +50,7 @@ impl Body for ChunkedBytes {
         self.remaining.is_empty()
     }
 
-    // Exact, so the SDK can send Content-Length and the aws-chunked checksum
+    // Exact, so the SDK can send a Content-Length and, on AWS, the checksum
     // trailer.
     fn size_hint(&self) -> SizeHint {
         SizeHint::with_exact(self.remaining.len() as u64)
@@ -68,8 +69,8 @@ mod tests {
 
     /// Bytes with a period (251) that no frame size divides, so a dropped or
     /// reordered frame cannot go unnoticed.
-    fn pattern(len: usize) -> Bytes {
-        Bytes::from((0..len).map(|i| (i % 251) as u8).collect::<Vec<u8>>())
+    fn pattern(len: usize) -> Vec<u8> {
+        (0..len).map(|i| (i % 251) as u8).collect()
     }
 
     /// Polls `body` to its end, returning each data frame.
@@ -81,48 +82,31 @@ mod tests {
         frames
     }
 
-    fn lens(frames: &[Bytes]) -> Vec<usize> {
-        frames.iter().map(Bytes::len).collect()
-    }
-
     #[test]
     fn small_body_stays_in_memory() {
         let input = pattern(FRAME_SIZE);
 
-        let body = chunked(input.clone()).into_inner();
+        let body = framed(input.clone()).into_inner();
 
         assert_eq!(body.bytes(), Some(&input[..]));
-        assert!(!body.is_streaming());
     }
 
     #[tokio::test]
     async fn large_body_yields_bounded_frames() {
         let input = pattern(100 * KIB);
-        let mut body = chunked(input.clone()).into_inner();
-        assert!(body.bytes().is_none());
+        let mut body = framed(input.clone()).into_inner();
 
         let frames = drain(&mut body).await;
 
-        assert_eq!(lens(&frames), vec![32 * KIB, 32 * KIB, 32 * KIB, 4 * KIB]);
-        assert_eq!(frames.concat(), input.to_vec());
-    }
-
-    #[tokio::test]
-    async fn one_byte_over_frame_size_streams() {
-        let input = pattern(FRAME_SIZE + 1);
-        let mut body = chunked(input.clone()).into_inner();
-        assert!(body.bytes().is_none());
-
-        let frames = drain(&mut body).await;
-
-        assert_eq!(lens(&frames), vec![FRAME_SIZE, 1]);
-        assert_eq!(frames.concat(), input.to_vec());
+        let lens: Vec<usize> = frames.iter().map(Bytes::len).collect();
+        assert_eq!(lens, vec![32 * KIB, 32 * KIB, 32 * KIB, 4 * KIB]);
+        assert_eq!(frames.concat(), input);
     }
 
     #[tokio::test]
     async fn size_hint_is_exact_and_end_stream_tracks_remaining() {
-        let mut body = ChunkedBytes {
-            remaining: pattern(40 * KIB),
+        let mut body = FramedBytes {
+            remaining: Bytes::from(pattern(40 * KIB)),
         };
         assert_eq!(body.size_hint().exact(), Some(40 * KIB as u64));
         assert!(!body.is_end_stream());
@@ -139,11 +123,11 @@ mod tests {
     #[tokio::test]
     async fn retry_clone_replays_full_body() {
         let input = pattern(100 * KIB);
-        let mut body = chunked(input.clone()).into_inner();
+        let mut body = framed(input.clone()).into_inner();
         drain(&mut body).await;
 
-        let mut retry = body.try_clone().expect("chunked bodies are retryable");
+        let mut retry = body.try_clone().expect("framed bodies are retryable");
 
-        assert_eq!(drain(&mut retry).await.concat(), input.to_vec());
+        assert_eq!(drain(&mut retry).await.concat(), input);
     }
 }

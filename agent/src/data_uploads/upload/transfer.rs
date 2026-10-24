@@ -131,9 +131,8 @@ async fn put(
         bucket: destination.bucket_name.clone(),
         key: destination.object_key.clone(),
     };
-    // Boxed to keep the uploader future's type shallow enough for rustc's
-    // query depth limit.
-    Box::pin(store.put(file.clone(), &object, metadata))
+    store
+        .put(file.clone(), &object, metadata)
         .await
         .map_err(classified_executor_err)
 }
