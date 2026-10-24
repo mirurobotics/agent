@@ -581,7 +581,10 @@ pub(super) mod tests {
                 .await
                 .expect("stall protection ends the call");
 
-            assert!(matches!(result, Err(S3Err::ConnectionErr(_))), "got {result:?}");
+            assert!(
+                matches!(result, Err(S3Err::ConnectionErr(_))),
+                "got {result:?}"
+            );
         }
     }
 
