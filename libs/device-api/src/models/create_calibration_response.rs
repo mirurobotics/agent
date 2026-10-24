@@ -11,14 +11,18 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CreateCalibrationResponse {
+    /// ID the agent gave this report. The agent sends it to Miru with the calibration, and Miru stores it as the calibration's `report_id`.
+    #[serde(rename = "report_id")]
+    pub report_id: uuid::Uuid,
     /// Timestamp of when the agent received the calibration. Miru stores it as the time the calibration was reported.
     #[serde(rename = "reported_at")]
     pub reported_at: String,
 }
 
 impl CreateCalibrationResponse {
-    pub fn new(reported_at: String) -> CreateCalibrationResponse {
+    pub fn new(report_id: uuid::Uuid, reported_at: String) -> CreateCalibrationResponse {
         CreateCalibrationResponse {
+            report_id,
             reported_at,
         }
     }

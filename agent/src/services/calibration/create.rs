@@ -6,6 +6,7 @@ use crate::services::errors::ServiceErr;
 
 // external crates
 use chrono::{DateTime, Utc};
+use uuid::Uuid;
 
 /// A calibration as an on-device application reports it.
 #[derive(Clone, Debug, PartialEq)]
@@ -22,6 +23,8 @@ pub struct CreateParams {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Created {
+    /// The report's queue entry id, sent to Miru with every upload of it.
+    pub report_id: Uuid,
     /// When the agent received the report; Miru records it as `reported_at`.
     pub reported_at: DateTime<Utc>,
 }
@@ -51,6 +54,9 @@ pub async fn create(
         },
         data: params.data,
     };
-    uploader.enqueue(report).await?;
-    Ok(Created { reported_at: now })
+    let report_id = uploader.enqueue(report).await?;
+    Ok(Created {
+        report_id,
+        reported_at: now,
+    })
 }

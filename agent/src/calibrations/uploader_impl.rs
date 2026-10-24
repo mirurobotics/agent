@@ -151,8 +151,9 @@ where
         self.queue.next_attempt(now, horizon).await
     }
 
-    /// Upload the report queued as `entry`: read its file, then send it. The
-    /// future owns what it needs and borrows nothing from `self`, so the
+    /// Upload the report queued as `entry`: read its file, then send it with
+    /// the entry's id as its `report_id`, so every attempt sends the same id.
+    /// The future owns what it needs and borrows nothing from `self`, so the
     /// worker can serve commands while it runs. The metadata is cloned into
     /// the future, which is cheap: the data is read from disk inside it.
     pub(crate) fn attempt(
@@ -160,11 +161,12 @@ where
         entry: &QueueEntry,
     ) -> impl Future<Output = Result<(), CalibrationsErr>> {
         let sender = self.sender.clone();
-        let file = self.report_file(entry.id);
+        let id = entry.id;
+        let file = self.report_file(id);
         let metadata = entry.job.clone();
         async move {
             let data = read(&file).await?;
-            sender.send(Report { metadata, data }).await
+            sender.send(id, Report { metadata, data }).await
         }
     }
 
@@ -641,6 +643,20 @@ mod tests {
     }
 
     // =============================== ATTEMPT ================================ //
+    #[tokio::test]
+    async fn every_attempt_sends_the_entry_id_as_the_report_id() {
+        let f = Fixture::new();
+        f.sender.push(Step::Server);
+        let mut u = f.uploader().await;
+        let id = u.enqueue(report("a")).await.unwrap();
+
+        run_next_attempt(&mut u).await;
+        f.advance_secs(10);
+        run_next_attempt(&mut u).await;
+
+        assert_eq!(f.sender.report_ids(), [id, id]);
+    }
+
     #[tokio::test]
     async fn a_report_whose_file_is_missing_is_dropped() {
         let f = Fixture::new();

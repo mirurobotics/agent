@@ -1,7 +1,9 @@
 // internal crates
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::disk::{Capacities, Layout, Storage};
-use miru_agent::models::{FileRule, FileRuleRetention, FileRuleSource, FileRuleUpload};
+use miru_agent::models::{
+    FileRule, FileRuleRetention, FileRuleSource, FileRuleUpload, UploadTimezone,
+};
 
 // external crates
 use chrono::{DateTime, Utc};
@@ -22,6 +24,7 @@ fn rule(id: &str, digest: &str, retention: Option<FileRuleRetention>) -> FileRul
             bucket_id: "buck_1".to_string(),
             bucket_name: "my-bucket".to_string(),
             path: "{device_id}/logs".to_string(),
+            timezone: UploadTimezone::Device,
             bundle: None,
         }),
         retention,

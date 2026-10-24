@@ -9,6 +9,7 @@ use miru_agent::http::request::Params;
 
 // external crates
 use tokio::sync::{mpsc, oneshot};
+use uuid::Uuid;
 
 /// One scripted result for a `MockCalibrationSender::send` call.
 pub enum Step {
@@ -27,7 +28,7 @@ pub enum Step {
 /// A scripted [`Sender`]. An empty script succeeds.
 pub struct MockCalibrationSender {
     script: Mutex<VecDeque<Step>>,
-    sent: Mutex<Vec<Report>>,
+    sent: Mutex<Vec<(Uuid, Report)>>,
     started_tx: mpsc::UnboundedSender<()>,
 }
 
@@ -51,12 +52,21 @@ impl MockCalibrationSender {
     /// The `component` of every report `send` was called with, in order.
     pub fn sent(&self) -> Vec<String> {
         let sent = self.sent.lock().unwrap();
-        sent.iter().map(|r| r.metadata.component.clone()).collect()
+        sent.iter()
+            .map(|(_, r)| r.metadata.component.clone())
+            .collect()
+    }
+
+    /// The `report_id` of every `send` call, in order.
+    pub fn report_ids(&self) -> Vec<Uuid> {
+        let sent = self.sent.lock().unwrap();
+        sent.iter().map(|(id, _)| *id).collect()
     }
 
     /// Every report `send` was called with, in order.
     pub fn reports(&self) -> Vec<Report> {
-        self.sent.lock().unwrap().clone()
+        let sent = self.sent.lock().unwrap();
+        sent.iter().map(|(_, r)| r.clone()).collect()
     }
 }
 
@@ -70,8 +80,8 @@ fn request_failed(status: u16) -> CalibrationsErr {
 }
 
 impl Sender for MockCalibrationSender {
-    async fn send(&self, report: Report) -> Result<(), CalibrationsErr> {
-        self.sent.lock().unwrap().push(report);
+    async fn send(&self, report_id: Uuid, report: Report) -> Result<(), CalibrationsErr> {
+        self.sent.lock().unwrap().push((report_id, report));
         let step = self.script.lock().unwrap().pop_front();
         // both guards are dropped: never hold a std Mutex across an await
         let _ = self.started_tx.send(());
