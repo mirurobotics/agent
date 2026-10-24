@@ -1,14 +1,14 @@
 // internal crates
 use crate::s3::{
-    errors,
+    body, errors,
     errors::NoSuchUploadErr,
+    sdk,
     store::{WriteOutcome, PART_SIZE},
     Object, S3Err, Source, Store,
 };
 
 // external crates
 use aws_sdk_s3::operation::list_parts::ListPartsOutput;
-use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart};
 
 type UploadID = String;
@@ -246,7 +246,8 @@ impl Store {
         buf: Vec<u8>,
     ) -> Result<CompletedPart, S3Err> {
         let content_md5 = self.content_md5(&buf);
-        let body = ByteStream::from(buf);
+        let len = buf.len() as u64;
+        let body = body::framed(buf);
 
         let output = self
             .client
@@ -257,6 +258,8 @@ impl Store {
             .part_number(part_number)
             .body(body)
             .set_content_md5(content_md5)
+            .customize()
+            .config_override(sdk::timeout(sdk::upload_timeout(len)))
             .send()
             .await
             .map_err(|e| errors::map_sdk_err("upload_part", dst, e))?;
@@ -288,6 +291,8 @@ impl Store {
             .key(&obj.key)
             .upload_id(upload_id)
             .multipart_upload(completed)
+            .customize()
+            .config_override(sdk::timeout(sdk::COMPLETE_TIMEOUT))
             .send()
             .await
             .map(|_| ());
@@ -302,6 +307,8 @@ impl Store {
             .bucket(&obj.bucket)
             .key(&obj.key)
             .upload_id(upload_id)
+            .customize()
+            .config_override(sdk::timeout(sdk::ABORT_TIMEOUT))
             .send()
             .await
             .map_err(|e| errors::map_sdk_err("abort_multipart_upload", obj, e))?;
@@ -317,16 +324,17 @@ mod tests {
     // internal crates
     use super::*;
     use crate::s3::store::tests::{
-        access_denied_resp, actual_shapes, obj, req, resp, resp_xml, shape, store_expecting,
-        store_with, temp_file_with, uri,
+        access_denied_resp, actual_shapes, obj, recorded_payload, req, resp, resp_xml, shape,
+        store_expecting, store_on, store_with, temp_file_with, uri,
     };
     use crate::test_utils::filesys::files as test_files;
     use miru_agent::errors::{Code, Error};
     use miru_agent::filesys::path::PathExt;
 
     // external crates
-    use aws_smithy_http_client::test_util::{ReplayEvent, StaticReplayClient};
+    use aws_smithy_http_client::test_util::{NeverClient, ReplayEvent, StaticReplayClient};
     use aws_smithy_types::body::SdkBody;
+    use tokio::time::Instant;
 
     const BUCKET: &str = "test-bucket";
 
@@ -780,10 +788,63 @@ mod tests {
                 ]
             );
             let requests = replay.actual_requests().collect::<Vec<_>>();
-            assert!(requests[1].body().bytes() == Some(&original[..PART_SIZE as usize]));
-            assert!(requests[2].body().bytes() == Some(&original[PART_SIZE as usize..]));
+            assert!(recorded_payload(requests[1]).await == original[..PART_SIZE as usize]);
+            assert!(recorded_payload(requests[2]).await == original[PART_SIZE as usize..]);
 
             tokio::fs::remove_file(&moved).await.unwrap();
+        }
+    }
+
+    /// Calls to a server that never answers end at their own time limits with
+    /// a retryable error. Stall protection measures on the wall clock, which
+    /// barely moves while paused time races ahead, so only the limit ends them.
+    pub mod stalls {
+        use super::*;
+
+        #[tokio::test(start_paused = true)]
+        async fn stalled_upload_part_maps_to_connection_err() {
+            let store = store_on(NeverClient::new());
+            let start = Instant::now();
+
+            let err = store
+                .upload_part(&obj("big.bin"), UPLOAD_ID, 1, vec![0; 64 * 1024])
+                .await
+                .unwrap_err();
+
+            assert!(matches!(err, S3Err::ConnectionErr(_)), "got {err:?}");
+            assert_eq!(start.elapsed(), sdk::upload_timeout(64 * 1024));
+        }
+
+        #[tokio::test(start_paused = true)]
+        async fn stalled_complete_maps_to_connection_err() {
+            let store = store_on(NeverClient::new());
+            let part = CompletedPart::builder()
+                .part_number(1)
+                .e_tag("\"e1\"")
+                .build();
+            let start = Instant::now();
+
+            let err = store
+                .complete_multipart_upload(&obj("big.bin"), UPLOAD_ID, &[part])
+                .await
+                .unwrap_err();
+
+            assert!(matches!(err, S3Err::ConnectionErr(_)), "got {err:?}");
+            assert_eq!(start.elapsed(), sdk::COMPLETE_TIMEOUT);
+        }
+
+        #[tokio::test(start_paused = true)]
+        async fn stalled_abort_maps_to_connection_err() {
+            let store = store_on(NeverClient::new());
+            let start = Instant::now();
+
+            let err = store
+                .abort_multipart_upload(&obj("big.bin"), UPLOAD_ID)
+                .await
+                .unwrap_err();
+
+            assert!(matches!(err, S3Err::ConnectionErr(_)), "got {err:?}");
+            assert_eq!(start.elapsed(), sdk::ABORT_TIMEOUT);
         }
     }
 
@@ -1152,22 +1213,13 @@ mod tests {
                 "manifest carries part 2's etag"
             );
 
-            // Parts are sent as in-memory buffers, so their exact bytes are recorded:
-            // each part must carry its own file slice (right offset and length).
+            // Each part must carry its own file slice (right offset and length).
             assert!(
-                requests[1]
-                    .body()
-                    .bytes()
-                    .expect("part 1 body is in-memory")
-                    == &big[..PART_SIZE as usize],
+                recorded_payload(requests[1]).await == big[..PART_SIZE as usize],
                 "part 1 must be the first PART_SIZE bytes of the source"
             );
             assert!(
-                requests[2]
-                    .body()
-                    .bytes()
-                    .expect("part 2 body is in-memory")
-                    == &big[PART_SIZE as usize..],
+                recorded_payload(requests[2]).await == big[PART_SIZE as usize..],
                 "part 2 must be the remaining bytes of the source"
             );
         }

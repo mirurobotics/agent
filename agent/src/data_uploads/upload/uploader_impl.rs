@@ -1,7 +1,6 @@
 // standard crates
 use std::future::Future;
 use std::sync::Arc;
-use std::time::Duration;
 
 // internal crates
 use crate::data_uploads::{
@@ -15,7 +14,6 @@ use crate::data_uploads::{
 };
 use crate::errors::Error;
 use crate::queue::{NextAttempt, Persistence, RetryPolicy, Verdict};
-use crate::trace;
 
 // external crates
 use chrono::{DateTime, TimeDelta, Utc};
@@ -29,15 +27,6 @@ pub struct UploaderOptions {
     /// When a failed job is retried and when it is dropped. A job's age is
     /// measured from when its file was first observed.
     pub retry: RetryPolicy,
-    /// Fixed floor of the per-attempt upload deadline. Covers control-plane
-    /// RPCs (create/confirm, each bounded at 3 × 10s attempts) and connection
-    /// setup so tiny files are never starved.
-    pub attempt_timeout_floor: Duration,
-    /// Minimum-throughput assumption scaling the per-attempt deadline with
-    /// file size. Deliberately far below any plausible sustained uplink: a
-    /// false timeout discards transfer progress, so this errs generous while
-    /// still guaranteeing every attempt terminates.
-    pub attempt_timeout_bytes_per_sec: u64,
 }
 
 impl Default for UploaderOptions {
@@ -45,19 +34,7 @@ impl Default for UploaderOptions {
         Self {
             queue_capacity: 1024,
             retry: RetryPolicy::default(),
-            attempt_timeout_floor: Duration::from_secs(120),
-            attempt_timeout_bytes_per_sec: 64 * 1024,
         }
-    }
-}
-
-impl UploaderOptions {
-    /// Deadline for one upload attempt of `size` bytes: floor plus a
-    /// per-byte allowance at the minimum-throughput assumption.
-    pub fn attempt_deadline(&self, size: u64) -> Duration {
-        let bps = self.attempt_timeout_bytes_per_sec.max(1);
-        self.attempt_timeout_floor
-            .saturating_add(Duration::from_secs(size.div_ceil(bps)))
     }
 }
 
@@ -121,11 +98,10 @@ where
         self.queue.next_attempt(now, horizon).await
     }
 
-    /// Build one executor attempt on `entry`, bounded by its size-scaled
-    /// deadline. The future is built from clones so it borrows nothing from
-    /// `self`, leaving the worker free to serve commands while it runs. The
-    /// attempt saves its upload through `checkpointer`; the worker hands each
-    /// save to [`Self::save_upload`].
+    /// Build one executor attempt on `entry`. The future is built from clones
+    /// so it borrows nothing from `self`, leaving the worker free to serve
+    /// commands while it runs. The attempt saves its upload through
+    /// `checkpointer`; the worker hands each save to [`Self::save_upload`].
     pub(crate) fn attempt<K: Checkpointer + 'static>(
         &self,
         entry: &QueueEntry,
@@ -134,18 +110,7 @@ where
         Self::log_attempt(entry);
         let executor = self.executor.clone();
         let job = entry.job.clone();
-        let deadline = self.options.attempt_deadline(job.size);
-        async move {
-            match tokio::time::timeout(deadline, executor.upload(&job, &checkpointer)).await {
-                Ok(result) => result,
-                Err(_) => Err(UploadErr::AttemptTimeoutErr(AttemptTimeoutErr {
-                    file: job.file.to_string(),
-                    size: job.size,
-                    deadline,
-                    trace: trace!(),
-                })),
-            }
-        }
+        async move { executor.upload(&job, &checkpointer).await }
     }
 
     /// Save an in-flight attempt's `upload` on its queued job, so the next
