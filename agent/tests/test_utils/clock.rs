@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 // internal crates
-use miru_agent::clock::Clock;
+use miru_agent::clock::{Clock, Uptime};
 
 // external crates
 use chrono::{DateTime, TimeDelta, Utc};
@@ -38,6 +38,11 @@ impl FakeClock {
     /// The [`Clock`] to hand to the code under test.
     pub fn clock(&self) -> Clock {
         self.clock.clone()
+    }
+
+    /// An [`Uptime`] on this clock, counting from zero.
+    pub fn uptime(&self) -> Uptime {
+        Uptime::new(self.clock(), Duration::ZERO)
     }
 
     /// Advance the system and monotonic clocks together by `secs`, as real

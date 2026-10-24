@@ -1,9 +1,9 @@
 // standard crates
 use std::fs::Metadata;
-use std::sync::Arc;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 // internal crates
+use crate::clock::{Clock, Uptime};
 use crate::cooldown;
 use crate::data_uploads::retention::{
     errors::*,
@@ -21,7 +21,9 @@ const DEFAULT_QUEUE_CAPACITY: usize = 4096;
 const DEFAULT_ATTEMPTS: u32 = 10;
 
 pub struct DeleterArgs {
-    pub now_fn: Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>,
+    /// The agent's uptime, on which every TTL runs. `AppState` saves it, so
+    /// uptime deadlines survive a restart.
+    pub uptime: Uptime,
     pub queue_capacity: usize,
     pub snapshot_file: Option<DeleteQueueSnapshotFile>,
     pub attempts: u32,
@@ -31,7 +33,7 @@ pub struct DeleterArgs {
 impl Default for DeleterArgs {
     fn default() -> Self {
         Self {
-            now_fn: Arc::new(Utc::now),
+            uptime: Uptime::new(Clock::new(), Duration::ZERO),
             queue_capacity: DEFAULT_QUEUE_CAPACITY,
             snapshot_file: None,
             attempts: DEFAULT_ATTEMPTS,
@@ -44,9 +46,13 @@ impl Default for DeleterArgs {
     }
 }
 
+/// Deletes each queued file once its TTL has run out on the agent's
+/// [`Uptime`]. Uptime never runs ahead of real time, so a file is never
+/// deleted early, whatever the robot's system clock says. Retry backoff is
+/// counted on uptime too.
 pub struct DeleterImpl {
     queue: Queue,
-    now_fn: Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>,
+    uptime: Uptime,
     attempts: u32,
     backoff: cooldown::Backoff,
 }
@@ -73,7 +79,7 @@ impl DeleterImpl {
         };
         Self {
             queue,
-            now_fn: args.now_fn,
+            uptime: args.uptime,
             attempts: args.attempts,
             backoff: args.backoff,
         }
@@ -83,13 +89,22 @@ impl DeleterImpl {
         self.queue.len()
     }
 
-    pub(crate) async fn enqueue(&mut self, job: Job) -> Result<(), DeleteErr> {
+    /// Queue `job` with its TTL starting now, replacing any deadlines the
+    /// producer set.
+    pub(crate) async fn enqueue(&mut self, mut job: Job) -> Result<(), DeleteErr> {
+        job.uptime_due_secs = Some(job.uptime_due_from(self.uptime.now()));
         self.queue.enqueue(job).await?;
         Ok(())
     }
 
     pub(crate) async fn sweep(&mut self) -> Result<(), DeleteErr> {
-        let now = (self.now_fn)();
+        self.start_unset_deadlines().await;
+        let now = self.uptime.now_as_datetime();
+        // Retry deadlines saved before they were counted in uptime hold
+        // calendar dates, decades ahead of any uptime; pull them back.
+        self.queue
+            .reset_invalid_deadlines(now + TimeDelta::seconds(self.backoff.max_secs.max(0)))
+            .await;
         // Budget: one visit per entry that is due at `now`. A retried entry is
         // requeued at the tail, behind every entry not yet visited, so this
         // budget is exactly enough to visit each due entry once and never
@@ -106,6 +121,28 @@ impl DeleterImpl {
             }
         }
         Ok(())
+    }
+
+    /// Make sure every uptime deadline is at most a full TTL from now, which
+    /// no deadline can honestly exceed.
+    /// - A job saved before deadlines existed has none. Its only stamp came
+    ///   from the system clock, which cannot be trusted, so its TTL starts
+    ///   over from now.
+    /// - A deadline further out means the saved uptime was lost (a corrupt
+    ///   or missing `uptime.json`) and the count restarted from zero. Pulling
+    ///   it in to a full TTL from now still never deletes early.
+    async fn start_unset_deadlines(&mut self) {
+        let uptime_now = self.uptime.now();
+        self.queue
+            .update_jobs(|job| {
+                let latest = job.uptime_due_from(uptime_now);
+                if job.uptime_due_secs.is_some_and(|due| due <= latest) {
+                    return false;
+                }
+                job.uptime_due_secs = Some(latest);
+                true
+            })
+            .await;
     }
 
     /// Counted failures bump the attempt budget. Drop when the budget is
@@ -224,10 +261,6 @@ impl DeleterImpl {
 
 #[cfg(test)]
 mod tests {
-    // standard crates
-    use std::sync::atomic::{AtomicI64, Ordering};
-    use std::sync::Arc;
-
     // internal crates
     use super::{DeleterArgs, DeleterImpl, SweepOutcome};
     use crate::cooldown;
@@ -235,38 +268,12 @@ mod tests {
     use crate::data_uploads::retention::queue::{DeleteQueueSnapshot, DeleteQueueSnapshotFile};
     use crate::filesys::{dirs, files, Dir, File, PathExt, WriteOptions};
     use crate::test_utils::{
-        filesys::dirs as test_dirs, filesys::files as test_files, retention::undeletable_dir_job,
+        clock::FakeClock as Clock, filesys::dirs as test_dirs, filesys::files as test_files,
+        retention::undeletable_dir_job,
     };
 
     // external crates
     use chrono::{DateTime, Utc};
-
-    /// A controllable monotonic-ish clock for deterministic sweep tests. Holds
-    /// the current time as epoch seconds in a shared atomic so a test can step
-    /// it forward independently of wall-clock time. `now_fn()` produces the
-    /// `Fn() -> DateTime<Utc>` closure that the deleter's injected `now_fn`
-    /// expects.
-    #[derive(Clone)]
-    pub struct Clock {
-        secs: Arc<AtomicI64>,
-    }
-
-    impl Clock {
-        pub fn new(start_secs: i64) -> Self {
-            Self {
-                secs: Arc::new(AtomicI64::new(start_secs)),
-            }
-        }
-
-        pub fn now_fn(&self) -> impl Fn() -> DateTime<Utc> {
-            let secs = self.secs.clone();
-            move || DateTime::from_timestamp(secs.load(Ordering::SeqCst), 0).unwrap()
-        }
-
-        pub fn advance(&self, secs: i64) {
-            self.secs.fetch_add(secs, Ordering::SeqCst);
-        }
-    }
 
     // =============================== TEST HELPERS ================================= //
 
@@ -294,6 +301,15 @@ mod tests {
             ttl_secs,
             file_rule_id: "file_rule_1".to_string(),
             deployment_id: "dpl_1".to_string(),
+            uptime_due_secs: None,
+        }
+    }
+
+    /// `job` as the deleter queues it at uptime zero.
+    fn stamped(job: Job) -> Job {
+        Job {
+            uptime_due_secs: Some(job.ttl_secs),
+            ..job
         }
     }
 
@@ -310,7 +326,7 @@ mod tests {
     /// and no backoff.
     fn deleter(clock: &Clock) -> DeleterImpl {
         DeleterImpl::new(DeleterArgs {
-            now_fn: Arc::new(clock.now_fn()),
+            uptime: clock.uptime(),
             backoff: NO_BACKOFF,
             ..DeleterArgs::default()
         })
@@ -344,6 +360,7 @@ mod tests {
             ttl_secs: 0,
             file_rule_id: "rule_1".to_string(),
             deployment_id: "dpl_1".to_string(),
+            uptime_due_secs: None,
         }
     }
 
@@ -360,7 +377,7 @@ mod tests {
 
             deleter.enqueue(job.clone()).await.unwrap();
 
-            assert_eq!(deleter.queue.entries(), [job]);
+            assert_eq!(deleter.queue.entries(), [stamped(job)]);
         }
 
         #[tokio::test]
@@ -370,7 +387,7 @@ mod tests {
             let tmp = temp_file(b"aaaa").await;
             let clock = Clock::new(1000);
             let mut deleter = DeleterImpl::new(DeleterArgs {
-                now_fn: Arc::new(clock.now_fn()),
+                uptime: clock.uptime(),
                 snapshot_file: Some(snapshot_file(&state_path).await),
                 ..DeleterArgs::default()
             });
@@ -382,7 +399,7 @@ mod tests {
                 snapshot_file: Some(snapshot_file(&state_path).await),
                 ..DeleterArgs::default()
             });
-            assert_eq!(restored.queue.entries(), [job]);
+            assert_eq!(restored.queue.entries(), [stamped(job)]);
         }
 
         #[tokio::test]
@@ -391,7 +408,7 @@ mod tests {
             let tmp_b = temp_file(b"bbbb").await;
             let clock = Clock::new(1000);
             let mut deleter = DeleterImpl::new(DeleterArgs {
-                now_fn: Arc::new(clock.now_fn()),
+                uptime: clock.uptime(),
                 queue_capacity: 1,
                 ..DeleterArgs::default()
             });
@@ -416,7 +433,7 @@ mod tests {
             let tmp = temp_file(b"aaaa").await;
             let clock = Clock::new(1000);
             let mut deleter = DeleterImpl::new(DeleterArgs {
-                now_fn: Arc::new(clock.now_fn()),
+                uptime: clock.uptime(),
                 snapshot_file: Some(snapshot_file(&state_path).await),
                 ..DeleterArgs::default()
             });
@@ -429,7 +446,7 @@ mod tests {
 
             let job = make_job(tmp.file(), 1000, 0).await;
             deleter.enqueue(job.clone()).await.unwrap();
-            assert_eq!(deleter.queue.entries(), [job]);
+            assert_eq!(deleter.queue.entries(), [stamped(job)]);
         }
     }
 
@@ -456,7 +473,7 @@ mod tests {
 
             assert!(!due.file().exists());
             assert!(waiting.file().exists());
-            assert_eq!(deleter.queue.entries(), [waiting_job]);
+            assert_eq!(deleter.queue.entries(), [stamped(waiting_job)]);
         }
 
         // Same-path duplicates coexist in the queue (no dedup on enqueue);
@@ -484,21 +501,21 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn positive_delay_entry_waits_for_ready_at() {
+        async fn positive_ttl_entry_waits_for_its_ttl() {
             let tmp = temp_file(b"aaaa").await;
             let clock = Clock::new(1000);
             let mut deleter = deleter(&clock);
             let record = make_job(tmp.file(), 1000, 500).await;
             deleter.enqueue(record.clone()).await.unwrap();
 
-            // not yet ready: both 1000 and 1499 are before ready_at (1500).
+            // not yet due: 0s and 499s into the 500s TTL.
             deleter.sweep().await.unwrap();
             clock.advance(499);
             deleter.sweep().await.unwrap();
-            assert_eq!(deleter.queue.entries(), [record]);
+            assert_eq!(deleter.queue.entries(), [stamped(record)]);
             assert!(tmp.file().exists());
 
-            // ready exactly at ready_at.
+            // due exactly when the TTL runs out.
             clock.advance(1);
             deleter.sweep().await.unwrap();
             assert!(deleter.queue.is_empty());
@@ -690,7 +707,7 @@ mod tests {
             let waiting = temp_file(b"bbbb").await;
             let clock = Clock::new(1000);
             let mut deleter = DeleterImpl::new(DeleterArgs {
-                now_fn: Arc::new(clock.now_fn()),
+                uptime: clock.uptime(),
                 snapshot_file: Some(snapshot_file(&state_path).await),
                 ..DeleterArgs::default()
             });
@@ -713,7 +730,7 @@ mod tests {
             });
             assert!(!due.file().exists());
             assert!(waiting.file().exists());
-            assert_eq!(restored.queue.entries(), [waiting_job]);
+            assert_eq!(restored.queue.entries(), [stamped(waiting_job)]);
         }
 
         // A not-due entry is never selected, so a sweep leaves it exactly
@@ -728,7 +745,7 @@ mod tests {
             let due = temp_file(b"cccc").await;
             let clock = Clock::new(1000);
             let mut deleter = DeleterImpl::new(DeleterArgs {
-                now_fn: Arc::new(clock.now_fn()),
+                uptime: clock.uptime(),
                 snapshot_file: Some(snapshot_file(&state_path).await),
                 ..DeleterArgs::default()
             });
@@ -782,7 +799,7 @@ mod tests {
             let dir = test_dirs::temp("delete-attempts-cap").unwrap();
             let clock = Clock::new(1000);
             let mut deleter = DeleterImpl::new(DeleterArgs {
-                now_fn: Arc::new(clock.now_fn()),
+                uptime: clock.uptime(),
                 attempts: 3,
                 backoff: NO_BACKOFF,
                 ..DeleterArgs::default()
@@ -826,7 +843,7 @@ mod tests {
             let tmp = temp_file(b"aaaa").await;
             let clock = Clock::new(1000);
             let mut deleter = DeleterImpl::new(DeleterArgs {
-                now_fn: Arc::new(clock.now_fn()),
+                uptime: clock.uptime(),
                 snapshot_file: Some(snapshot_file(&state_path).await),
                 ..DeleterArgs::default()
             });
@@ -868,7 +885,7 @@ mod tests {
                 None => None,
             };
             DeleterImpl::new(DeleterArgs {
-                now_fn: Arc::new(clock.now_fn()),
+                uptime: clock.uptime(),
                 backoff: BACKOFF,
                 snapshot_file,
                 ..DeleterArgs::default()
@@ -890,7 +907,7 @@ mod tests {
             assert_eq!(entry.attempts, 1);
             assert_eq!(
                 entry.next_attempt_at,
-                Some(DateTime::from_timestamp(1010, 0).unwrap())
+                Some(DateTime::from_timestamp(10, 0).unwrap())
             );
 
             // still deferred: the next sweep must not touch it.
@@ -915,7 +932,7 @@ mod tests {
                 .unwrap();
 
             // 10, 20, 40, then pinned at the 40s cap.
-            let mut at = 1000;
+            let mut at = 0; // retry deadlines are on the uptime clock
             for wait in [10, 20, 40, 40, 40] {
                 deleter.sweep().await.unwrap();
                 at += wait;
@@ -924,7 +941,7 @@ mod tests {
                     Some(DateTime::from_timestamp(at, 0).unwrap()),
                     "after a {wait}s wait"
                 );
-                clock.advance(wait);
+                clock.advance(wait as u64);
             }
         }
 
@@ -945,7 +962,7 @@ mod tests {
 
             assert_eq!(
                 restored.queue.queue_entries()[0].next_attempt_at,
-                Some(DateTime::from_timestamp(1010, 0).unwrap())
+                Some(DateTime::from_timestamp(10, 0).unwrap())
             );
         }
 
@@ -963,13 +980,193 @@ mod tests {
                 .unwrap();
             deleter.sweep().await.unwrap();
 
-            let deferred = DateTime::from_timestamp(1005, 0).unwrap();
+            let deferred = DateTime::from_timestamp(5, 0).unwrap();
             assert_eq!(deleter.queue.count_ready(deferred), 0);
             assert!(deleter.queue.next_ready(deferred).is_none());
 
-            let due = DateTime::from_timestamp(1010, 0).unwrap();
+            let due = DateTime::from_timestamp(10, 0).unwrap();
             assert_eq!(deleter.queue.count_ready(due), 1);
             assert!(deleter.queue.next_ready(due).is_some());
+        }
+    }
+
+    /// Each TTL is counted on the agent's uptime, never on the system clock.
+    mod deadlines {
+        use super::*;
+        use crate::clock::{UptimeFile, UptimeSaver};
+        use crate::data_uploads::retention::queue::QueueEntry;
+        use uuid::Uuid;
+
+        /// 2026-10-20T00:00:00Z, a real date.
+        const REAL_DATE: i64 = 1_792_454_400;
+
+        /// A deleter on `clock` persisting its queue under `dir`, with the
+        /// uptime saver for the same directory, as one run of the agent.
+        async fn persisted(clock: &Clock, dir: &Dir) -> (DeleterImpl, UptimeSaver) {
+            let uptime_file =
+                UptimeFile::new_with_default(dir.file("uptime.json"), Default::default())
+                    .await
+                    .unwrap();
+            let saver = UptimeSaver::new(clock.clock(), Some(uptime_file));
+            let deleter = DeleterImpl::new(DeleterArgs {
+                uptime: saver.uptime(),
+                backoff: NO_BACKOFF,
+                snapshot_file: Some(snapshot_file(&dir.file("delete_queue.json")).await),
+                ..DeleterArgs::default()
+            });
+            (deleter, saver)
+        }
+
+        fn only_job(deleter: &DeleterImpl) -> Job {
+            deleter.queue.entries()[0].clone()
+        }
+
+        #[tokio::test]
+        async fn enqueue_sets_the_uptime_deadline() {
+            let tmp = temp_file(b"aaaa").await;
+            let clock = Clock::new(1000);
+            let mut deleter = deleter(&clock);
+            clock.advance(50);
+
+            deleter
+                .enqueue(make_job(tmp.file(), 1000, 500).await)
+                .await
+                .unwrap();
+
+            assert_eq!(only_job(&deleter).uptime_due_secs, Some(550));
+        }
+
+        // A producer's deadline is never trusted: the TTL starts at enqueue.
+        #[tokio::test]
+        async fn enqueue_replaces_producer_deadlines() {
+            let tmp = temp_file(b"aaaa").await;
+            let clock = Clock::new(1000);
+            let mut deleter = deleter(&clock);
+            let job = Job {
+                uptime_due_secs: Some(0),
+                ..make_job(tmp.file(), 1000, 500).await
+            };
+
+            deleter.enqueue(job).await.unwrap();
+            deleter.sweep().await.unwrap();
+
+            assert!(tmp.file().exists());
+            assert_eq!(only_job(&deleter).uptime_due_secs, Some(500));
+        }
+
+        // The pre-NTP case: a file observed while the system clock read 1970
+        // is not deleted when NTP moves the clock to the real date.
+        #[tokio::test]
+        async fn a_system_clock_jump_never_deletes_early() {
+            let tmp = temp_file(b"aaaa").await;
+            let clock = Clock::new(1000);
+            let mut deleter = deleter(&clock);
+            deleter
+                .enqueue(make_job(tmp.file(), 1000, 500).await)
+                .await
+                .unwrap();
+
+            clock.set_system(REAL_DATE);
+            deleter.sweep().await.unwrap();
+            clock.advance(499);
+            deleter.sweep().await.unwrap();
+            assert!(tmp.file().exists());
+
+            clock.advance(1);
+            deleter.sweep().await.unwrap();
+            assert!(!tmp.file().exists());
+        }
+
+        // Restarted offline: uptime resumes from the last save, so the TTL
+        // carries on. Time the agent was not running does not count.
+        #[tokio::test]
+        async fn uptime_deadlines_survive_a_restart() {
+            let dir = test_dirs::temp("delete-deadlines-restart-offline").unwrap();
+            let tmp = temp_file(b"aaaa").await;
+            let clock = Clock::new(1000);
+            let (mut deleter, mut saver) = persisted(&clock, &dir).await;
+            deleter
+                .enqueue(make_job(tmp.file(), 1000, 3600).await)
+                .await
+                .unwrap();
+            clock.advance(1200);
+            deleter.sweep().await.unwrap();
+            saver.save().await;
+            drop((deleter, saver));
+
+            let clock = clock.restart();
+            clock.set_system(1);
+            let (mut restored, _saver) = persisted(&clock, &dir).await;
+            clock.advance(2399);
+            restored.sweep().await.unwrap();
+            assert!(tmp.file().exists());
+
+            clock.advance(1);
+            restored.sweep().await.unwrap();
+            assert!(!tmp.file().exists());
+        }
+
+        // A job saved before deadlines existed carries only a system-clock
+        // stamp, which cannot be trusted, so its TTL starts over.
+        #[tokio::test]
+        async fn a_job_saved_without_deadlines_starts_its_ttl_over() {
+            let dir = test_dirs::temp("delete-deadlines-legacy").unwrap();
+            let tmp = temp_file(b"aaaa").await;
+            let mut snapshot = snapshot_file(&dir.file("delete_queue.json")).await;
+            snapshot
+                .patch(DeleteQueueSnapshot {
+                    entries: vec![QueueEntry {
+                        id: Uuid::new_v4(),
+                        job: make_job(tmp.file(), 1000, 500).await,
+                        attempts: 0,
+                        next_attempt_at: Some(at(REAL_DATE)),
+                    }],
+                })
+                .await
+                .unwrap();
+            let clock = Clock::new(REAL_DATE);
+            let (mut deleter, _saver) = persisted(&clock, &dir).await;
+
+            deleter.sweep().await.unwrap();
+            assert!(tmp.file().exists());
+            assert_eq!(only_job(&deleter).uptime_due_secs, Some(500));
+
+            // its calendar-date retry deadline was pulled back too
+            clock.advance(500);
+            deleter.sweep().await.unwrap();
+            assert!(!tmp.file().exists());
+        }
+
+        #[tokio::test]
+        async fn a_lost_uptime_file_keeps_files_at_most_one_more_ttl() {
+            let dir = test_dirs::temp("delete-deadlines-lost-uptime").unwrap();
+            let tmp = temp_file(b"aaaa").await;
+            let mut snapshot = snapshot_file(&dir.file("delete_queue.json")).await;
+            snapshot
+                .patch(DeleteQueueSnapshot {
+                    entries: vec![QueueEntry {
+                        id: Uuid::new_v4(),
+                        job: Job {
+                            // counted on a saved uptime that is now gone
+                            uptime_due_secs: Some(1_000_000),
+                            ..make_job(tmp.file(), 1000, 500).await
+                        },
+                        attempts: 0,
+                        next_attempt_at: None,
+                    }],
+                })
+                .await
+                .unwrap();
+            let clock = Clock::new(REAL_DATE);
+            let (mut deleter, _saver) = persisted(&clock, &dir).await;
+
+            deleter.sweep().await.unwrap();
+            assert!(tmp.file().exists());
+            assert_eq!(only_job(&deleter).uptime_due_secs, Some(500));
+
+            clock.advance(500);
+            deleter.sweep().await.unwrap();
+            assert!(!tmp.file().exists());
         }
     }
 
@@ -982,7 +1179,7 @@ mod tests {
             let state_path = dir.file("delete_queue.json");
             let clock = Clock::new(1000);
             let mut deleter = DeleterImpl::new(DeleterArgs {
-                now_fn: Arc::new(clock.now_fn()),
+                uptime: clock.uptime(),
                 backoff: NO_BACKOFF,
                 snapshot_file: Some(snapshot_file(&state_path).await),
                 ..DeleterArgs::default()
@@ -995,8 +1192,8 @@ mod tests {
             deleter.sweep().await.unwrap();
             drop(deleter);
 
-            // no injected clock: the wedged job's ready_at is in 1970, so the
-            // wall clock finds it ready. The cap is tightened on the rebuild so
+            // no injected clock: the wedged job's TTL is zero, so it is due
+            // at once. The cap is tightened on the rebuild so
             // the restored entry's third attempt is its last.
             let mut restored = DeleterImpl::new(DeleterArgs {
                 attempts: 3,
@@ -1015,7 +1212,7 @@ mod tests {
             let state_path = dir.file("delete_queue.json");
             let clock = Clock::new(1000);
             let mut deleter = DeleterImpl::new(DeleterArgs {
-                now_fn: Arc::new(clock.now_fn()),
+                uptime: clock.uptime(),
                 attempts: 1,
                 snapshot_file: Some(snapshot_file(&state_path).await),
                 ..DeleterArgs::default()

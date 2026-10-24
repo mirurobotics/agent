@@ -248,6 +248,21 @@ impl<J: QueueJob> FileQueue<J> {
         warn!("{}: pulled {reset} deadline(s) back to {horizon}", J::LABEL);
     }
 
+    /// Apply `f` to every queued job, persisting once if `f` reported a change
+    /// for any of them. Returns how many jobs changed.
+    pub async fn update_jobs(&mut self, mut f: impl FnMut(&mut J) -> bool) -> usize {
+        let mut changed = 0;
+        for entry in self.entries.iter_mut() {
+            if f(&mut entry.job) {
+                changed += 1;
+            }
+        }
+        if changed > 0 {
+            let _ = self.persist().await;
+        }
+        changed
+    }
+
     /// The sole writer to disk, called by every mutator as its last act. A
     /// failed write is logged and returned. Only a durable `enqueue` acts on
     /// the error; every other caller keeps the in-memory queue authoritative.
@@ -303,6 +318,7 @@ mod tests {
             ttl_secs: 0,
             file_rule_id: "file_rule_1".to_string(),
             deployment_id: "dpl_1".to_string(),
+            uptime_due_secs: Some(0),
         }
     }
 

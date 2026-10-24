@@ -82,7 +82,7 @@ impl AppState {
 
         // initialize the data upload pipeline (deleter, uploader, scanner)
         let (deleter, uploader, scanner, [scanner_handle, deleter_handle, uploader_handle]) =
-            Self::init_data_uploads(layout, http_client.clone(), token_mngr.clone()).await?;
+            Self::init_data_uploads(layout, http_client.clone(), &token_mngr, &uptime).await?;
 
         // initialize the calibration uploader
         let (calibration_uploader, calibration_uploader_handle) =
@@ -146,11 +146,12 @@ impl AppState {
     async fn init_data_uploads(
         layout: &disk::Layout,
         http_client: Arc<http::Client>,
-        token_mngr: Arc<authn::TokenManager>,
+        token_mngr: &Arc<authn::TokenManager>,
+        uptime: &clock::Uptime,
     ) -> Result<DataUploadActors, server::ServerErr> {
-        let (deleter, deleter_handle) = Self::init_deleter(layout).await?;
+        let (deleter, deleter_handle) = Self::init_deleter(layout, uptime.clone()).await?;
         let (uploader, uploader_handle) =
-            Self::init_uploader(layout, http_client, token_mngr, deleter.clone()).await?;
+            Self::init_uploader(layout, http_client, token_mngr.clone(), deleter.clone()).await?;
 
         let sinks: Vec<Arc<dyn scan::StableFileSink>> = vec![
             Arc::new(upload::UploadStableFileSink::new(uploader.clone())),
@@ -204,6 +205,7 @@ impl AppState {
     /// (`Deleter::spawn` cannot fail today).
     async fn init_deleter(
         layout: &disk::Layout,
+        uptime: clock::Uptime,
     ) -> Result<(Arc<retention::Deleter>, tokio::task::JoinHandle<()>), server::ServerErr> {
         let snapshot_file = match retention::DeleteQueueSnapshotFile::new_with_default(
             layout.delete_queue(),
@@ -221,6 +223,7 @@ impl AppState {
         };
 
         let args = retention::DeleterArgs {
+            uptime,
             snapshot_file,
             ..retention::DeleterArgs::default()
         };

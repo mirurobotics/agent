@@ -8,6 +8,8 @@ use chrono::{DateTime, Utc};
 impl queue::QueueJob for Job {
     const LABEL: &'static str = "delete";
 
+    /// The TTL deadline on the agent's uptime clock: the deleter selects
+    /// with the uptime as `now`, never the system clock.
     fn ready_at(&self) -> DateTime<Utc> {
         Job::ready_at(self)
     }
