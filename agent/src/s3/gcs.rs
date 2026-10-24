@@ -18,7 +18,7 @@
 //!
 //! These rely on how GCS treats aws-sdk-s3's requests, which Google doesn't
 //! document. The tests below pin the requests we send, and the gated `gcs-xml`
-//! CI job (`agent/tests/gcs_xml.rs`) checks real GCS on every aws-sdk-s3 bump.
+//! CI job (`agent/tests/s3/gcs.rs`) checks real GCS on every aws-sdk-s3 bump.
 
 // internal crates
 use crate::errors::HTTPCode;
@@ -64,7 +64,7 @@ impl Token {
 
 /// The SDK config for a GCS [`Store`](crate::s3::Store). `http_client`
 /// replaces the default HTTPS client when given. Public so the real-GCS test
-/// (`agent/tests/gcs_xml.rs`) uses this exact config.
+/// (`agent/tests/s3/gcs.rs`) uses this exact config.
 pub fn config(token: Token, http_client: Option<SharedHttpClient>) -> aws_sdk_s3::Config {
     let mut builder = aws_sdk_s3::Config::builder()
         .behavior_version(BehaviorVersion::latest())

@@ -1,4 +1,4 @@
-# Real-GCS guard for GCS uploads through aws-sdk-s3 (agent/tests/gcs_xml.rs).
+# Real-GCS guard for GCS uploads through aws-sdk-s3 (agent/tests/s3/gcs.rs).
 #
 # GCS uploads rely on SDK behaviour Google doesn't document, and the worst
 # break is silent (aws-chunked checksums stored as object bytes with a 200).
@@ -22,7 +22,7 @@ on:
     paths:
       - Cargo.lock
       - agent/src/s3/**
-      - agent/tests/gcs_xml.rs
+      - agent/tests/s3/**
       - .github/workflows/gcs-xml.yml
   workflow_dispatch:
 
@@ -94,11 +94,11 @@ jobs:
 
       - name: Build
         if: steps.creds.outputs.any == 'true'
-        run: cargo test --package miru-agent --locked --test gcs_xml --no-run
+        run: cargo test --package miru-agent --locked --test mod --no-run
 
       - name: Upload to GCS and verify
         if: steps.creds.outputs.any == 'true'
         env:
           GCS_IT_SOURCE_TOKEN: ${{ steps.auth.outputs.access_token || secrets.GCS_IT_SOURCE_TOKEN }}
           GCS_IT_BUCKET: ${{ vars.GCS_IT_BUCKET || secrets.GCS_IT_BUCKET }}
-        run: cargo test --package miru-agent --locked --test gcs_xml -- --nocapture
+        run: cargo test --package miru-agent --locked --test mod s3::gcs -- --nocapture
