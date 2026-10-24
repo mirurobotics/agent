@@ -116,6 +116,7 @@ fn backend_upload() -> backend_client::FileRuleUpload {
         bucket_id: "buck_123".to_string(),
         bucket_name: "my-bucket".to_string(),
         path: "{device_id}/logs".to_string(),
+        timezone: backend_client::FileRuleUploadTimezone::FILE_RULE_UPLOAD_TIMEZONE_UTC,
         bundle: Some(vec!["camera".to_string()]),
     }
 }
