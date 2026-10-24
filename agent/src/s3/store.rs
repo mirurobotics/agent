@@ -301,7 +301,7 @@ pub(super) mod tests {
     use miru_agent::filesys::file::File;
     use miru_agent::filesys::path::PathExt;
     use miru_agent::filesys::{files, FileSysErr, WriteOptions};
-    use miru_agent::s3::{aws, Config, Credentials, Object, Options, S3Err, Source, Store};
+    use miru_agent::s3::{aws, sdk, Config, Credentials, Object, Options, S3Err, Source, Store};
 
     // external crates
     use aws_sdk_s3::config::SharedHttpClient;
@@ -358,7 +358,7 @@ pub(super) mod tests {
             region: REGION.to_string(),
             creds: test_credentials(),
         };
-        let http_client = Some(SharedHttpClient::new(replay.clone()));
+        let http_client = SharedHttpClient::new(replay.clone());
         // Path-style URLs, so request URIs match `uri()`.
         let config = aws::config(cfg, http_client, true);
         let store = Store::new(Options { config, gcs: false });
@@ -451,7 +451,7 @@ pub(super) mod tests {
                 region: "us-west-2".to_string(),
             };
             // Constructing must not panic or touch the network.
-            let config = aws::config(cfg, None, false);
+            let config = aws::config(cfg, sdk::http_client(), false);
             let _store = Store::new(Options { config, gcs: false });
         }
     }

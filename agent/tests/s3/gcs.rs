@@ -20,7 +20,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 // internal crates
 use miru_agent::filesys::File;
 use miru_agent::s3::gcs::{self, content_md5, Token};
-use miru_agent::s3::{Object, Options, S3Err, Source, Store};
+use miru_agent::s3::{sdk, Object, Options, S3Err, Source, Store};
 
 // external crates
 use aws_sdk_s3::error::ProvideErrorMetadata;
@@ -123,7 +123,7 @@ impl Env {
 
     async fn upload_store(&self, obj: &Object) -> Store {
         let token = Token::new(self.upload_token(obj).await).unwrap();
-        let config = gcs::config(token, None);
+        let config = gcs::config(token, sdk::http_client());
         Store::new(Options { config, gcs: true })
     }
 
@@ -189,7 +189,8 @@ impl Env {
 
 /// The production GCS client, for the calls `Store` doesn't expose.
 fn client(token: String) -> Client {
-    Client::from_conf(gcs::config(Token::new(token).unwrap(), None))
+    let config = gcs::config(Token::new(token).unwrap(), sdk::http_client());
+    Client::from_conf(config)
 }
 
 fn metadata() -> HashMap<String, String> {
