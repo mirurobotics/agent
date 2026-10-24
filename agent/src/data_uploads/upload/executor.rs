@@ -115,10 +115,6 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> UploadExecutor for LiveE
     }
 }
 
-/// Builds the create-upload request. `tz` is the device's time zone (`Local` in
-/// production, which honors `TZ` and then the system zone): the mtime carries
-/// its offset at that instant, so the backend can render upload paths in the
-/// device's local time.
 pub fn new_upl_request<Tz>(job: &Job, tz: &Tz) -> CreateUploadRequest
 where
     Tz: TimeZone,
