@@ -5,12 +5,11 @@ use std::io::SeekFrom;
 // internal crates
 use crate::errors::HTTPCode;
 use crate::filesys::{errors::PathDoesNotExistErr, file::File, path::PathExt, FileSysErr};
-use crate::s3::{errors, errors::ObjectNotFoundErr, gcs, S3Err};
+use crate::s3::{body, errors, errors::ObjectNotFoundErr, gcs, sdk, S3Err};
 use crate::trace;
 
 // external crates
 use aws_sdk_s3::error::SdkError;
-use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::Client;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
@@ -160,9 +159,11 @@ impl Store {
             .put_object()
             .bucket(&dst.bucket)
             .key(&dst.key)
-            .body(ByteStream::from(bytes))
+            .body(body::framed(bytes))
             .set_content_md5(content_md5)
             .set_metadata((!metadata.is_empty()).then(|| metadata.clone()))
+            .customize()
+            .config_override(sdk::timeout(sdk::upload_timeout(size)))
             .send()
             .await
             .map(|_| ());
@@ -291,6 +292,7 @@ impl Store {
 pub(super) mod tests {
     // standard crates
     use std::collections::HashMap;
+    use std::time::Duration;
 
     // internal crates
     use crate::test_utils::{
@@ -304,9 +306,18 @@ pub(super) mod tests {
     use miru_agent::s3::{aws, sdk, Config, Credentials, Object, Options, S3Err, Source, Store};
 
     // external crates
-    use aws_sdk_s3::config::SharedHttpClient;
-    use aws_smithy_http_client::test_util::{ReplayEvent, StaticReplayClient};
+    use aws_sdk_s3::config::retry::RetryConfig;
+    use aws_sdk_s3::config::{SharedHttpClient, StalledStreamProtectionConfig};
+    use aws_smithy_http_client::test_util::{NeverClient, ReplayEvent, StaticReplayClient};
+    use aws_smithy_runtime_api::client::http::{
+        HttpClient, HttpConnector, HttpConnectorFuture, HttpConnectorSettings, SharedHttpConnector,
+    };
+    use aws_smithy_runtime_api::client::orchestrator::{HttpRequest, HttpResponse};
+    use aws_smithy_runtime_api::client::result::ConnectorError;
+    use aws_smithy_runtime_api::client::runtime_components::RuntimeComponents;
     use aws_smithy_types::body::SdkBody;
+    use http_body_util::BodyExt;
+    use tokio::time::Instant;
 
     const REGION: &str = "us-east-1";
     const BUCKET: &str = "test-bucket";
@@ -349,20 +360,26 @@ pub(super) mod tests {
         }
     }
 
+    fn test_config() -> Config {
+        Config {
+            region: REGION.to_string(),
+            creds: test_credentials(),
+        }
+    }
+
+    /// Wires a `Store` to `client` in place of the HTTPS client.
+    pub(crate) fn store_on(client: impl HttpClient + 'static) -> Store {
+        // Path-style URLs, so request URIs match `uri()`.
+        let config = aws::config(test_config(), SharedHttpClient::new(client), true);
+        Store::new(Options { config, gcs: false })
+    }
+
     /// Wires a `Store` to a `StaticReplayClient` serving the given events, so the
     /// client's requests are matched against canned responses without touching the
     /// network.
     pub(crate) fn store_with(events: Vec<ReplayEvent>) -> (Store, StaticReplayClient) {
         let replay = StaticReplayClient::new(events);
-        let cfg = Config {
-            region: REGION.to_string(),
-            creds: test_credentials(),
-        };
-        let http_client = SharedHttpClient::new(replay.clone());
-        // Path-style URLs, so request URIs match `uri()`.
-        let config = aws::config(cfg, http_client, true);
-        let store = Store::new(Options { config, gcs: false });
-        (store, replay)
+        (store_on(replay.clone()), replay)
     }
 
     /// Writes `bytes` to a fresh temp file and returns the guard (kept alive so
@@ -437,6 +454,44 @@ pub(super) mod tests {
             .collect()
     }
 
+    /// The payload a recorded request carried. AWS gets streamed bodies
+    /// aws-chunked (`<hex len>[;ext]\r\n<data>\r\n` chunks ending in a `0`
+    /// chunk and trailers), so those are decoded.
+    pub(crate) async fn recorded_payload(request: &HttpRequest) -> Vec<u8> {
+        let wire = request
+            .body()
+            .try_clone()
+            .expect("request bodies are retryable")
+            .collect()
+            .await
+            .expect("recorded body replays")
+            .to_bytes();
+        let aws_chunked = request
+            .headers()
+            .get("content-encoding")
+            .is_some_and(|v| v.contains("aws-chunked"));
+        if !aws_chunked {
+            return wire.to_vec();
+        }
+        let mut payload = Vec::new();
+        let mut rest = &wire[..];
+        loop {
+            let header_end = rest
+                .windows(2)
+                .position(|w| w == b"\r\n")
+                .expect("chunk header");
+            let header = std::str::from_utf8(&rest[..header_end]).unwrap();
+            let size_hex = header.split(';').next().unwrap_or_default();
+            let size = usize::from_str_radix(size_hex, 16).unwrap();
+            if size == 0 {
+                return payload;
+            }
+            let data = &rest[header_end + 2..];
+            payload.extend_from_slice(&data[..size]);
+            rest = &data[size + 2..];
+        }
+    }
+
     pub mod construction {
         use super::*;
 
@@ -453,6 +508,85 @@ pub(super) mod tests {
             // Constructing must not panic or touch the network.
             let config = aws::config(cfg, sdk::http_client(), false);
             let _store = Store::new(Options { config, gcs: false });
+        }
+    }
+
+    pub mod stalls {
+        use super::*;
+
+        /// Takes the first request body frame, then never polls the body again
+        /// or answers.
+        #[derive(Clone, Debug)]
+        struct HangAfterFirstFrame;
+
+        impl HttpConnector for HangAfterFirstFrame {
+            fn call(&self, request: HttpRequest) -> HttpConnectorFuture {
+                let mut body = request.into_body();
+                HttpConnectorFuture::new(async move {
+                    let _ = body.frame().await;
+                    std::future::pending::<Result<HttpResponse, ConnectorError>>().await
+                })
+            }
+        }
+
+        impl HttpClient for HangAfterFirstFrame {
+            fn http_connector(
+                &self,
+                _: &HttpConnectorSettings,
+                _: &RuntimeComponents,
+            ) -> SharedHttpConnector {
+                SharedHttpConnector::new(self.clone())
+            }
+        }
+
+        #[tokio::test(start_paused = true)]
+        async fn stalled_put_maps_to_connection_err() {
+            let len = 1024 * 1024;
+            let tf = temp_file_with(&vec![0u8; len]).await;
+            let src = Source::open(tf.to_file(), &obj("k")).await.unwrap();
+            let store = store_on(NeverClient::new());
+            let start = Instant::now();
+
+            let err = store
+                .put_singlepart(src, &obj("k"), &HashMap::new())
+                .await
+                .unwrap_err();
+
+            // Only the call's time limit can end it: stall protection measures on
+            // the wall clock, which barely moves while paused time races ahead.
+            assert!(matches!(err, S3Err::ConnectionErr(_)), "got {err:?}");
+            assert_eq!(start.elapsed(), sdk::upload_timeout(len as u64));
+        }
+
+        #[tokio::test]
+        async fn put_that_stops_sending_trips_stall_protection() {
+            let dst = obj("k");
+            let tf = temp_file_with(&vec![0u8; 256 * 1024]).await;
+            let src = Source::open(tf.to_file(), &dst).await.unwrap();
+            // A 1 s grace and no SDK retries keep the test short.
+            let fast_stall = StalledStreamProtectionConfig::enabled()
+                .grace_period(Duration::from_secs(1))
+                .build();
+            let http_client = SharedHttpClient::new(HangAfterFirstFrame);
+            let config = aws::config(test_config(), http_client, true)
+                .to_builder()
+                .stalled_stream_protection(fast_stall)
+                .retry_config(RetryConfig::disabled())
+                .build();
+            let store = Store::new(Options { config, gcs: false });
+
+            // Shorter than the call's time limit, so only stall protection can
+            // end the call.
+            let metadata = HashMap::new();
+            let put = store.put_singlepart(src, &dst, &metadata);
+            let result = tokio::time::timeout(Duration::from_secs(30), put)
+                .await
+                .expect("stall protection ends the call");
+
+            assert!(
+                matches!(result, Err(S3Err::ConnectionErr(_))),
+                "got {result:?}"
+            );
         }
     }
 
