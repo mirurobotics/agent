@@ -8,7 +8,7 @@ use crate::data_uploads::upload::{
     errors::{classified_executor_err, executor_err, TransferErr, UploadErr},
 };
 use crate::filesys::File;
-use crate::s3;
+use crate::s3::{self, gcs::TokenSource};
 use backend_api::models::upload_credentials::Scheme;
 use backend_api::models::UploadDestination;
 
@@ -98,11 +98,10 @@ impl SdkTransfer {
         file: &File,
         metadata: &HashMap<String, String>,
     ) -> Result<(), UploadErr> {
-        let creds = credentials
-            .current()
-            .gcs_credentials
-            .ok_or_else(|| executor_err(TransferErr::MissingGcsCredentials))?;
-        if s3::gcs::Token::new(creds.access_token).is_none() {
+        if credentials.current().gcs_credentials.is_none() {
+            return Err(executor_err(TransferErr::MissingGcsCredentials));
+        }
+        if credentials.token().is_none() {
             return Err(executor_err(TransferErr::InvalidGcsToken));
         }
         put(&self.gcs_store(credentials), destination, file, metadata).await

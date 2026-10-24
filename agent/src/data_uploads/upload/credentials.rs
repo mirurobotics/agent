@@ -15,13 +15,11 @@ use crate::authn::TokenManagerExt;
 use crate::clock::Clock;
 use crate::data_uploads::upload::errors::{classified_executor_err, UploadErr};
 use crate::http::{self, ClientI};
-use crate::s3;
+use crate::s3::{self, aws::CredentialSource, gcs::TokenSource};
 use backend_api::models::upload_credentials::Scheme;
 use backend_api::models::UploadCredentials;
 
 // external crates
-use aws_credential_types::provider::{error::CredentialsError, future, ProvideCredentials};
-use aws_credential_types::Credentials as AwsCredentials;
 use chrono::DateTime;
 use tokio::sync::watch;
 use tracing::{info, warn};
@@ -76,29 +74,21 @@ impl fmt::Debug for UploadCredentialSource {
     }
 }
 
-/// S3 stores sign every request with the current credentials.
-impl ProvideCredentials for UploadCredentialSource {
-    fn provide_credentials<'a>(&'a self) -> future::ProvideCredentials<'a>
-    where
-        Self: 'a,
-    {
-        let creds = self.current.borrow();
-        let provided = match creds.s3_credentials.as_deref() {
-            Some(s3) => Ok(AwsCredentials::new(
-                &s3.access_key_id,
-                &s3.secret_access_key,
-                Some(s3.session_token.clone()),
-                None,
-                "miru-agent",
-            )),
-            None => Err(CredentialsError::not_loaded("no S3 upload credentials")),
-        };
-        future::ProvideCredentials::ready(provided)
+/// The S3 store signs every request with the current credentials.
+impl CredentialSource for UploadCredentialSource {
+    fn credentials(&self) -> Option<s3::aws::Credentials> {
+        let current = self.current.borrow();
+        let creds = current.s3_credentials.as_deref()?;
+        Some(s3::aws::Credentials {
+            access_key_id: creds.access_key_id.clone(),
+            secret_access_key: creds.secret_access_key.clone(),
+            session_token: creds.session_token.clone(),
+        })
     }
 }
 
-/// GCS stores send the current token on every request.
-impl s3::gcs::TokenSource for UploadCredentialSource {
+/// The GCS store sends the current token on every request.
+impl TokenSource for UploadCredentialSource {
     fn token(&self) -> Option<s3::gcs::Token> {
         gcs_token(&self.current.borrow())
     }
@@ -199,7 +189,6 @@ mod tests {
 
     // internal crates
     use super::*;
-    use crate::s3::gcs::TokenSource;
     use crate::test_utils::{
         http_client::{Call, MockClient},
         upload::token_manager,
@@ -207,9 +196,6 @@ mod tests {
     use miru_agent::http::errors::{HTTPErr, MockErr};
 
     // external crates
-    use aws_sdk_s3::config::SharedHttpClient;
-    use aws_smithy_http_client::test_util::{ReplayEvent, StaticReplayClient};
-    use aws_smithy_types::body::SdkBody;
     use chrono::Utc;
     use serde_json::json;
 
@@ -380,92 +366,37 @@ mod tests {
         }
     }
 
-    // The stores read the current credentials on every request, so a refresh
-    // is used from the next request on.
     mod stores {
         use super::*;
 
-        fn object() -> s3::Object {
-            s3::Object {
-                bucket: "my-bucket".to_string(),
-                key: "logs/a.log".to_string(),
-            }
-        }
-
-        /// A 200 with no body. The request it answers isn't checked.
-        fn ok() -> ReplayEvent {
-            let request = ::http::Request::builder().body(SdkBody::empty()).unwrap();
-            let response = ::http::Response::builder()
-                .status(200)
-                .header("content-length", "0")
-                .body(SdkBody::empty())
-                .unwrap();
-            ReplayEvent::new(request, response)
-        }
-
-        /// Checks `object()` exists twice, with `new` credentials swapped in
-        /// between, and returns each request's `authorization` header.
-        async fn auth_before_and_after(
-            store_for: impl FnOnce(UploadCredentialSource, SharedHttpClient) -> s3::Store,
-            old: UploadCredentials,
-            new: UploadCredentials,
-        ) -> Vec<String> {
-            let (tx, current) = watch::channel(old);
-            let replay = StaticReplayClient::new(vec![ok(), ok()]);
-            let store = store_for(
-                UploadCredentialSource { current },
-                SharedHttpClient::new(replay.clone()),
+        #[test]
+        fn s3_store_gets_the_s3_credentials() {
+            let source = UploadCredentialSource::fixed(s3_creds("AKIA_TEST", &in_an_hour()));
+            let creds = source.credentials().unwrap();
+            assert_eq!(
+                (
+                    creds.access_key_id.as_str(),
+                    creds.secret_access_key.as_str(),
+                    creds.session_token.as_str(),
+                ),
+                ("AKIA_TEST", "secret", "session")
             );
-            store.exists(&object()).await.unwrap();
-            tx.send_replace(new);
-            store.exists(&object()).await.unwrap();
-            replay
-                .actual_requests()
-                .map(|r| r.headers().get("authorization").unwrap().to_string())
-                .collect()
-        }
-
-        #[tokio::test]
-        async fn s3_signs_with_the_current_credentials() {
-            let auth = auth_before_and_after(
-                |source, http_client| {
-                    let config = s3::aws::config(source, "us-east-1".into(), http_client, true);
-                    s3::Store::new(s3::Options { config, gcs: false })
-                },
-                s3_creds("OLD", &in_an_hour()),
-                s3_creds("NEW", &in_an_hour()),
-            )
-            .await;
-
-            assert!(auth[0].contains("Credential=OLD/"), "{}", auth[0]);
-            assert!(auth[1].contains("Credential=NEW/"), "{}", auth[1]);
-        }
-
-        #[tokio::test]
-        async fn gcs_sends_the_current_token() {
-            let auth = auth_before_and_after(
-                |source, http_client| {
-                    let config = s3::gcs::config(source, http_client);
-                    s3::Store::new(s3::Options { config, gcs: true })
-                },
-                gcs_creds("old-token", &in_an_hour()),
-                gcs_creds("new-token", &in_an_hour()),
-            )
-            .await;
-
-            assert_eq!(auth, ["Bearer old-token", "Bearer new-token"]);
-        }
-
-        #[tokio::test]
-        async fn each_store_finds_nothing_in_the_other_schemes_credentials() {
-            let gcs = UploadCredentialSource::fixed(gcs_creds("token", &in_an_hour()));
-            assert!(gcs.provide_credentials().await.is_err());
-            let s3 = UploadCredentialSource::fixed(s3_creds("OLD", &in_an_hour()));
-            assert!(s3.token().is_none());
         }
 
         #[test]
-        fn debug_leaves_the_credentials_out() {
+        fn each_store_finds_nothing_in_the_other_schemes_credentials() {
+            let gcs = UploadCredentialSource::fixed(gcs_creds("token", &in_an_hour()));
+            assert!(gcs.credentials().is_none());
+            let s3 = UploadCredentialSource::fixed(s3_creds("OLD", &in_an_hour()));
+            assert!(s3.token().is_none());
+        }
+    }
+
+    mod debug {
+        use super::*;
+
+        #[test]
+        fn leaves_the_credentials_out() {
             let source = UploadCredentialSource::fixed(s3_creds("AKIA_SECRET", &in_an_hour()));
             assert_eq!(format!("{source:?}"), "UploadCredentialSource");
         }

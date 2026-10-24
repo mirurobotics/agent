@@ -204,6 +204,7 @@ impl ClassifyRetry for TooManyRequests {
 mod tests {
     // standard crates
     use std::collections::HashMap;
+    use std::sync::{Arc, Mutex};
 
     // internal crates
     use super::*;
@@ -235,6 +236,16 @@ mod tests {
             .uri(uri(path_and_query))
             .body(SdkBody::empty())
             .unwrap()
+    }
+
+    /// A token the test can change between requests.
+    #[derive(Clone, Debug, Default)]
+    struct SwappableToken(Arc<Mutex<String>>);
+
+    impl TokenSource for SwappableToken {
+        fn token(&self) -> Option<Token> {
+            Token::new(self.0.lock().unwrap().clone())
+        }
     }
 
     fn gcs_store(replay: &StaticReplayClient) -> Store {
@@ -473,6 +484,34 @@ mod tests {
             for r in &requests {
                 assert_eq!(r.headers().get("authorization"), Some("Bearer gcs-token"));
             }
+        }
+
+        #[tokio::test]
+        async fn sends_the_sources_current_token() {
+            let token = SwappableToken::default();
+            let mut events = put_ok();
+            events.extend(put_ok());
+            let replay = StaticReplayClient::new(events);
+            let http_client = SharedHttpClient::new(replay.clone());
+            let store = Store::new(Options {
+                config: config(token.clone(), http_client),
+                gcs: true,
+            });
+            let src = temp_file_with(b"hello world").await;
+
+            for value in ["old-token", "new-token"] {
+                *token.0.lock().unwrap() = value.to_string();
+                store
+                    .put(src.file().clone(), &obj("small.bin"), &HashMap::new())
+                    .await
+                    .unwrap();
+            }
+
+            let auth = replay
+                .actual_requests()
+                .map(|r| r.headers().get("authorization").unwrap().to_string())
+                .collect::<Vec<_>>();
+            assert_eq!(auth, ["Bearer old-token", "Bearer new-token"]);
         }
 
         #[tokio::test]

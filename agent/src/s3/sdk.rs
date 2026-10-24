@@ -85,7 +85,6 @@ mod tests {
     use crate::s3::{aws, gcs};
 
     // external crates
-    use aws_sdk_s3::config::Credentials;
     use aws_smithy_runtime_api::client::http::{HttpClient, HttpConnectorSettings};
     use aws_smithy_runtime_api::client::runtime_components::RuntimeComponentsBuilder;
 
@@ -113,7 +112,11 @@ mod tests {
 
         #[test]
         fn aws_and_gcs_configs_carry_timeouts_and_stall_protection() {
-            let creds = Credentials::new("AKIA_TEST", "secret", None, None, "test");
+            let creds = aws::Credentials {
+                access_key_id: "AKIA_TEST".to_string(),
+                secret_access_key: "secret".to_string(),
+                session_token: "session".to_string(),
+            };
             let aws_config = aws::config(creds, "us-west-2".into(), http_client(), false);
             let token = gcs::Token::new("gcs-token").unwrap();
             let gcs_config = gcs::config(token, http_client());

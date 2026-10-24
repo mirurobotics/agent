@@ -307,7 +307,7 @@ pub(super) mod tests {
 
     // external crates
     use aws_sdk_s3::config::retry::RetryConfig;
-    use aws_sdk_s3::config::{Credentials, SharedHttpClient, StalledStreamProtectionConfig};
+    use aws_sdk_s3::config::{SharedHttpClient, StalledStreamProtectionConfig};
     use aws_smithy_http_client::test_util::{NeverClient, ReplayEvent, StaticReplayClient};
     use aws_smithy_runtime_api::client::http::{
         HttpClient, HttpConnector, HttpConnectorFuture, HttpConnectorSettings, SharedHttpConnector,
@@ -322,14 +322,12 @@ pub(super) mod tests {
     const REGION: &str = "us-east-1";
     const BUCKET: &str = "test-bucket";
 
-    fn test_credentials() -> Credentials {
-        Credentials::new(
-            "access-key",
-            "secret-key",
-            Some("session-token".to_string()),
-            None,
-            "test",
-        )
+    fn test_credentials() -> aws::Credentials {
+        aws::Credentials {
+            access_key_id: "access-key".to_string(),
+            secret_access_key: "secret-key".to_string(),
+            session_token: "session-token".to_string(),
+        }
     }
 
     // Headers that vary per request (signing, timestamps, user agent) and must be
