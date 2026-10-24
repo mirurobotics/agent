@@ -1,8 +1,11 @@
+// standard crates
+use std::time::Duration;
+
 // internal crates
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::deploy::apply::{self, apply, Outcome};
 use miru_agent::deploy::fsm::RetryPolicy;
-use miru_agent::deploy::DeployErr;
+use miru_agent::deploy::{Cooldowns, DeployErr};
 use miru_agent::disk;
 #[cfg(unix)]
 use miru_agent::filesys::dirs;
@@ -12,9 +15,6 @@ use miru_agent::models::{
     Release,
 };
 
-// external crates
-use chrono::TimeDelta;
-
 // ================================= FIXTURE ===================================== //
 
 struct Fixture {
@@ -23,6 +23,7 @@ struct Fixture {
     cfg_inst_content: disk::CfgInstContent,
     releases: disk::Releases,
     file_rules: disk::FileRules,
+    cooldowns: Cooldowns,
     temp_dir: test_dirs::TempDir,
 }
 
@@ -56,6 +57,7 @@ impl Fixture {
             cfg_inst_content,
             releases,
             file_rules,
+            cooldowns: Cooldowns::default(),
             temp_dir,
         }
     }
@@ -167,6 +169,7 @@ impl Fixture {
         let args = apply::Args {
             storage: &storage,
             opts: &opts,
+            cooldowns: &self.cooldowns,
         };
         apply(&args).await
     }
@@ -180,6 +183,7 @@ impl Fixture {
         let args = apply::Args {
             storage: &storage,
             opts: &opts,
+            cooldowns: &self.cooldowns,
         };
         apply(&args).await
     }
@@ -235,16 +239,18 @@ struct ComparableOutcome {
     transitioned: bool,
 }
 
-impl From<&Outcome> for ComparableOutcome {
-    fn from(o: &Outcome) -> Self {
-        Self {
+impl Fixture {
+    /// `o` as a [`ComparableOutcome`], with `in_cooldown` read from the
+    /// fixture's cooldowns.
+    fn comparable(&self, o: &Outcome) -> ComparableOutcome {
+        ComparableOutcome {
             id: o.deployment.id.clone(),
             activity: o.deployment.activity_status,
             error_status: o.deployment.error_status,
             attempts: o.deployment.attempts,
             has_error: o.error.is_some(),
             has_wait: o.wait.is_some(),
-            in_cooldown: o.deployment.is_in_cooldown(),
+            in_cooldown: self.cooldowns.remaining(&o.deployment.id).is_some(),
             transitioned: o.transitioned,
         }
     }
@@ -348,7 +354,7 @@ mod find_target_deployed {
         // The failed one is skipped by apply_actionables (FSM next_action == None).
         assert_eq!(outcomes.len(), 1);
         assert_eq!(
-            ComparableOutcome::from(&outcomes[0]),
+            f.comparable(&outcomes[0]),
             ComparableOutcome {
                 id: "dpl-healthy".into(),
                 activity: DplActivity::Deployed,
@@ -391,7 +397,7 @@ mod deploy_success {
         let outcomes = f.apply().await.unwrap();
         assert_eq!(outcomes.len(), 1);
         assert_eq!(
-            ComparableOutcome::from(&outcomes[0]),
+            f.comparable(&outcomes[0]),
             ComparableOutcome {
                 id: "dpl-1".into(),
                 activity: DplActivity::Deployed,
@@ -440,7 +446,7 @@ mod deploy_success {
         let outcomes = f.apply().await.unwrap();
         assert_eq!(outcomes.len(), 1);
         assert_eq!(
-            ComparableOutcome::from(&outcomes[0]),
+            f.comparable(&outcomes[0]),
             ComparableOutcome {
                 id: "dpl-multi".into(),
                 activity: DplActivity::Deployed,
@@ -490,7 +496,7 @@ mod deploy_success {
         let outcomes = f.apply().await.unwrap();
         assert_eq!(outcomes.len(), 1);
         assert_eq!(
-            ComparableOutcome::from(&outcomes[0]),
+            f.comparable(&outcomes[0]),
             ComparableOutcome {
                 id: "dpl-redeploy".into(),
                 activity: DplActivity::Deployed,
@@ -608,7 +614,7 @@ mod deploy_errors {
         let outcomes = f.apply().await.unwrap();
         assert_eq!(outcomes.len(), 1);
         assert_eq!(
-            ComparableOutcome::from(&outcomes[0]),
+            f.comparable(&outcomes[0]),
             ComparableOutcome {
                 id: "dpl-empty".into(),
                 activity: DplActivity::Queued,
@@ -682,7 +688,7 @@ mod deploy_errors {
         let outcomes = f.apply().await.unwrap();
         assert_eq!(outcomes.len(), 1);
         assert_eq!(
-            ComparableOutcome::from(&outcomes[0]),
+            f.comparable(&outcomes[0]),
             ComparableOutcome {
                 id: "dpl-no-content".into(),
                 activity: DplActivity::Queued,
@@ -747,7 +753,7 @@ mod deploy_errors {
         // deployment's removal is skipped because the deploy phase errored.
         assert_eq!(outcomes.len(), 1);
         assert_eq!(
-            ComparableOutcome::from(&outcomes[0]),
+            f.comparable(&outcomes[0]),
             ComparableOutcome {
                 id: "dpl-new".into(),
                 activity: DplActivity::Queued,
@@ -807,7 +813,7 @@ mod deploy_errors {
 
         assert_eq!(outcomes.len(), 1);
         assert_eq!(
-            ComparableOutcome::from(&outcomes[0]),
+            f.comparable(&outcomes[0]),
             ComparableOutcome {
                 id: "dpl-inaccessible-dest".into(),
                 activity: DplActivity::Queued,
@@ -850,7 +856,7 @@ mod deploy_errors {
         let outcomes = f.apply().await.unwrap();
         assert_eq!(outcomes.len(), 1);
         assert_eq!(
-            ComparableOutcome::from(&outcomes[0]),
+            f.comparable(&outcomes[0]),
             ComparableOutcome {
                 id: "dpl-attempts".into(),
                 activity: DplActivity::Queued,
@@ -897,7 +903,7 @@ mod deploy_errors {
         let outcomes = f.apply_with_retry_policy(policy).await.unwrap();
         assert_eq!(outcomes.len(), 1);
         assert_eq!(
-            ComparableOutcome::from(&outcomes[0]),
+            f.comparable(&outcomes[0]),
             ComparableOutcome {
                 id: "dpl-maxed".into(),
                 activity: DplActivity::Queued,
@@ -942,7 +948,7 @@ mod deploy_errors {
         assert_eq!(outcomes.len(), 2);
         // First outcome: the failed target
         assert_eq!(
-            ComparableOutcome::from(&outcomes[0]),
+            f.comparable(&outcomes[0]),
             ComparableOutcome {
                 id: "dpl-target".into(),
                 activity: DplActivity::Queued,
@@ -956,7 +962,7 @@ mod deploy_errors {
         );
         // Second outcome: the old deployment was archived
         assert_eq!(
-            ComparableOutcome::from(&outcomes[1]),
+            f.comparable(&outcomes[1]),
             ComparableOutcome {
                 id: "dpl-to-archive".into(),
                 activity: DplActivity::Archived,
@@ -1007,7 +1013,7 @@ mod deploy_errors {
         // Only 2 outcomes: failed target + archived. Removal is skipped.
         assert_eq!(outcomes.len(), 2);
         assert_eq!(
-            ComparableOutcome::from(&outcomes[0]),
+            f.comparable(&outcomes[0]),
             ComparableOutcome {
                 id: "dpl-target".into(),
                 activity: DplActivity::Queued,
@@ -1020,7 +1026,7 @@ mod deploy_errors {
             }
         );
         assert_eq!(
-            ComparableOutcome::from(&outcomes[1]),
+            f.comparable(&outcomes[1]),
             ComparableOutcome {
                 id: "dpl-to-archive".into(),
                 activity: DplActivity::Archived,
@@ -1048,14 +1054,15 @@ mod deploy_errors {
         f.seed_deployment(&dpl).await;
 
         // Deployment in cooldown: (Archived, Deployed) → FSM would be Remove,
-        // but set_cooldown makes it Wait
-        let mut dpl_wait = make_deployment(
+        // but the cooldown makes it Wait
+        let dpl_wait = make_deployment(
             "dpl-in-cooldown",
             DplTarget::Archived,
             DplActivity::Deployed,
             vec![],
         );
-        dpl_wait.set_cooldown(TimeDelta::minutes(60));
+        f.cooldowns
+            .start("dpl-in-cooldown", Duration::from_secs(60 * 60));
         f.seed_deployment(&dpl_wait).await;
 
         let outcomes = f.apply().await.unwrap();
@@ -1063,7 +1070,7 @@ mod deploy_errors {
         assert_eq!(outcomes.len(), 2);
         // First outcome: the failed target
         assert_eq!(
-            ComparableOutcome::from(&outcomes[0]),
+            f.comparable(&outcomes[0]),
             ComparableOutcome {
                 id: "dpl-target".into(),
                 activity: DplActivity::Queued,
@@ -1077,7 +1084,7 @@ mod deploy_errors {
         );
         // Second outcome: the wait deployment is included with no transition
         assert_eq!(
-            ComparableOutcome::from(&outcomes[1]),
+            f.comparable(&outcomes[1]),
             ComparableOutcome {
                 id: "dpl-in-cooldown".into(),
                 activity: DplActivity::Deployed,
@@ -1129,7 +1136,7 @@ mod remove_action {
         let outcomes = f.apply().await.unwrap();
         assert_eq!(outcomes.len(), 1);
         assert_eq!(
-            ComparableOutcome::from(&outcomes[0]),
+            f.comparable(&outcomes[0]),
             ComparableOutcome {
                 id: "dpl-deploy-first".into(),
                 activity: DplActivity::Archived,
@@ -1182,7 +1189,7 @@ mod remove_action {
         let outcomes = f.apply().await.unwrap();
         assert_eq!(outcomes.len(), 1);
         assert_eq!(
-            ComparableOutcome::from(&outcomes[0]),
+            f.comparable(&outcomes[0]),
             ComparableOutcome {
                 id: "dpl-staged-remove".into(),
                 activity: DplActivity::Archived,
@@ -1216,7 +1223,7 @@ mod remove_action {
         let outcomes = f.apply().await.unwrap();
         assert_eq!(outcomes.len(), 1);
         assert_eq!(
-            ComparableOutcome::from(&outcomes[0]),
+            f.comparable(&outcomes[0]),
             ComparableOutcome {
                 id: "dpl-empty".into(),
                 activity: DplActivity::Archived,
@@ -1253,7 +1260,7 @@ mod remove_action {
         let outcomes = f.apply().await.unwrap();
         assert_eq!(outcomes.len(), 1);
         assert_eq!(
-            ComparableOutcome::from(&outcomes[0]),
+            f.comparable(&outcomes[0]),
             ComparableOutcome {
                 id: "dpl-remove-err".into(),
                 activity: DplActivity::Removing,
@@ -1318,7 +1325,7 @@ mod remove_action {
 
         // new deployment should deploy successfully
         assert_eq!(
-            ComparableOutcome::from(&outcomes[0]),
+            f.comparable(&outcomes[0]),
             ComparableOutcome {
                 id: "dpl-new".into(),
                 activity: DplActivity::Deployed,
@@ -1333,7 +1340,7 @@ mod remove_action {
 
         // old deployment should be archived
         assert_eq!(
-            ComparableOutcome::from(&outcomes[1]),
+            f.comparable(&outcomes[1]),
             ComparableOutcome {
                 id: "dpl-old".into(),
                 activity: DplActivity::Archived,
@@ -1388,7 +1395,7 @@ mod remove_action {
         let outcomes = f.apply().await.unwrap();
         assert_eq!(outcomes.len(), 1);
         assert_eq!(
-            ComparableOutcome::from(&outcomes[0]),
+            f.comparable(&outcomes[0]),
             ComparableOutcome {
                 id: "dpl-removing".into(),
                 activity: DplActivity::Archived,
@@ -1454,7 +1461,7 @@ mod remove_action {
 
         assert_eq!(outcomes.len(), 1);
         assert_eq!(
-            ComparableOutcome::from(&outcomes[0]),
+            f.comparable(&outcomes[0]),
             ComparableOutcome {
                 id: "dpl-remove-locked".into(),
                 activity: DplActivity::Removing,
@@ -1493,7 +1500,7 @@ mod archive_action {
         let outcomes = f.apply().await.unwrap();
         assert_eq!(outcomes.len(), 1);
         assert_eq!(
-            ComparableOutcome::from(&outcomes[0]),
+            f.comparable(&outcomes[0]),
             ComparableOutcome {
                 id: "dpl-archive-1".into(),
                 activity: DplActivity::Archived,
@@ -1522,7 +1529,7 @@ mod archive_action {
         let outcomes = f.apply().await.unwrap();
         assert_eq!(outcomes.len(), 1);
         assert_eq!(
-            ComparableOutcome::from(&outcomes[0]),
+            f.comparable(&outcomes[0]),
             ComparableOutcome {
                 id: "dpl-archive-2".into(),
                 activity: DplActivity::Archived,
@@ -1551,7 +1558,7 @@ mod archive_action {
         let outcomes = f.apply().await.unwrap();
         assert_eq!(outcomes.len(), 1);
         assert_eq!(
-            ComparableOutcome::from(&outcomes[0]),
+            f.comparable(&outcomes[0]),
             ComparableOutcome {
                 id: "dpl-archive-3".into(),
                 activity: DplActivity::Archived,
@@ -1580,7 +1587,7 @@ mod archive_action {
         let outcomes = f.apply().await.unwrap();
         assert_eq!(outcomes.len(), 1);
         assert_eq!(
-            ComparableOutcome::from(&outcomes[0]),
+            f.comparable(&outcomes[0]),
             ComparableOutcome {
                 id: "dpl-archive-4".into(),
                 activity: DplActivity::Archived,
@@ -1635,7 +1642,7 @@ mod no_action {
         // to apply_one, which returns a no-op outcome (transitioned: false).
         assert_eq!(outcomes.len(), 1);
         assert_eq!(
-            ComparableOutcome::from(&outcomes[0]),
+            f.comparable(&outcomes[0]),
             ComparableOutcome {
                 id: "dpl-steady".into(),
                 activity: DplActivity::Deployed,
@@ -1657,14 +1664,14 @@ mod wait_action {
     async fn target_deployed_in_cooldown() {
         let f = Fixture::new().await;
 
-        let mut dpl = make_deployment("dpl-wait", DplTarget::Deployed, DplActivity::Queued, vec![]);
-        dpl.set_cooldown(TimeDelta::minutes(60));
+        let dpl = make_deployment("dpl-wait", DplTarget::Deployed, DplActivity::Queued, vec![]);
+        f.cooldowns.start("dpl-wait", Duration::from_secs(60 * 60));
         f.seed_deployment(&dpl).await;
 
         let outcomes = f.apply().await.unwrap();
         assert_eq!(outcomes.len(), 1);
         assert_eq!(
-            ComparableOutcome::from(&outcomes[0]),
+            f.comparable(&outcomes[0]),
             ComparableOutcome {
                 id: "dpl-wait".into(),
                 activity: DplActivity::Queued,
@@ -1678,9 +1685,9 @@ mod wait_action {
         );
         let wait = outcomes[0].wait.unwrap();
         assert!(
-            wait.num_seconds() > 3500,
+            wait.as_secs() > 3500,
             "wait should be ~60 min, got {}s",
-            wait.num_seconds()
+            wait.as_secs()
         );
     }
 
@@ -1689,13 +1696,14 @@ mod wait_action {
         let f = Fixture::new().await;
 
         // target=Archived, activity=Deployed -> FSM: Remove, but in cooldown -> Wait
-        let mut dpl = make_deployment(
+        let dpl = make_deployment(
             "dpl-wait-act",
             DplTarget::Archived,
             DplActivity::Deployed,
             vec![],
         );
-        dpl.set_cooldown(TimeDelta::minutes(60));
+        f.cooldowns
+            .start("dpl-wait-act", Duration::from_secs(60 * 60));
         f.seed_deployment(&dpl).await;
 
         // No deployment targets Deployed, so find_target_deployed returns None,
@@ -1703,7 +1711,7 @@ mod wait_action {
         let outcomes = f.apply().await.unwrap();
         assert_eq!(outcomes.len(), 1);
         assert_eq!(
-            ComparableOutcome::from(&outcomes[0]),
+            f.comparable(&outcomes[0]),
             ComparableOutcome {
                 id: "dpl-wait-act".into(),
                 activity: DplActivity::Deployed,
@@ -1716,7 +1724,7 @@ mod wait_action {
             }
         );
         let wait = outcomes[0].wait.unwrap();
-        assert!(wait.num_seconds() > 3500);
+        assert!(wait.as_secs() > 3500);
     }
 }
 
@@ -1749,7 +1757,7 @@ mod ordering_and_composition {
         assert_eq!(outcomes.len(), 2);
         // Ordering guarantee: deployed target always first
         assert_eq!(
-            ComparableOutcome::from(&outcomes[0]),
+            f.comparable(&outcomes[0]),
             ComparableOutcome {
                 id: "dpl-active".into(),
                 activity: DplActivity::Deployed,
@@ -1762,7 +1770,7 @@ mod ordering_and_composition {
             }
         );
         assert_eq!(
-            ComparableOutcome::from(&outcomes[1]),
+            f.comparable(&outcomes[1]),
             ComparableOutcome {
                 id: "dpl-stale".into(),
                 activity: DplActivity::Archived,
@@ -1811,7 +1819,7 @@ mod ordering_and_composition {
 
         // Active is always first
         assert_eq!(
-            ComparableOutcome::from(&outcomes[0]),
+            f.comparable(&outcomes[0]),
             ComparableOutcome {
                 id: "active".into(),
                 activity: DplActivity::Deployed,
@@ -1840,7 +1848,7 @@ mod ordering_and_composition {
             .collect();
         assert_eq!(stale_outcomes.len(), 2);
         for o in stale_outcomes {
-            let mut actual = ComparableOutcome::from(o);
+            let mut actual = f.comparable(o);
             actual.id = String::new(); // normalize for comparison
             assert_eq!(actual, stale_expected);
         }
@@ -1891,7 +1899,7 @@ mod file_rule_validation {
         // the old deployment's removal is skipped because the deploy errored
         assert_eq!(outcomes.len(), 1);
         assert_eq!(
-            ComparableOutcome::from(&outcomes[0]),
+            f.comparable(&outcomes[0]),
             ComparableOutcome {
                 id: "dpl-new".into(),
                 activity: DplActivity::Queued,

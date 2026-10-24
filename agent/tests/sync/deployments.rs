@@ -1,9 +1,10 @@
 // standard crates
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
 
 // internal crates
 use crate::test_utils::filesys::dirs as test_dirs;
-use miru_agent::deploy::{apply, fsm};
+use miru_agent::deploy::{apply, fsm, Cooldowns};
 use miru_agent::disk::{
     self, CfgInstContent, CfgInsts, Deployments, FileRules, GitCommits, Releases,
 };
@@ -24,7 +25,7 @@ use backend_api::models::{
 };
 
 // external crates
-use chrono::{DateTime, TimeDelta, Utc};
+use chrono::{DateTime, Utc};
 
 // ========================= FIXTURE ========================= //
 
@@ -37,6 +38,7 @@ struct Fixture {
     file_rule_stor: FileRules,
     http_client: MockClient,
     retry_policy: fsm::RetryPolicy,
+    cooldowns: Cooldowns,
     event_hub: EventHub,
     dir: test_dirs::TempDir,
 }
@@ -76,12 +78,13 @@ impl Fixture {
             file_rule_stor,
             http_client: MockClient::default(),
             retry_policy: fsm::RetryPolicy::default(),
+            cooldowns: Cooldowns::default(),
             event_hub,
             dir,
         }
     }
 
-    async fn sync(&self) -> Result<Option<TimeDelta>, SyncErr> {
+    async fn sync(&self) -> Result<Option<Duration>, SyncErr> {
         let opts = apply::DeployOpts {
             retry_policy: self.retry_policy,
         };
@@ -98,6 +101,7 @@ impl Fixture {
             },
             http_client: &self.http_client,
             opts: &opts,
+            cooldowns: &self.cooldowns,
             token: "test_token",
             event_hub: &self.event_hub,
         })
@@ -311,7 +315,6 @@ mod pull_success {
         let f = Fixture::new("sync_merge").await;
 
         // seed a deployment with agent-side fields set
-        let future_cooldown = Utc::now() + chrono::TimeDelta::seconds(3600);
         let seeded = models::Deployment {
             id: "dpl_1".to_string(),
             activity_status: DplActivity::Deployed,
@@ -320,7 +323,6 @@ mod pull_success {
             created_at: DateTime::<Utc>::UNIX_EPOCH,
             config_instance_ids: vec!["cfg_inst_1".to_string()],
             attempts: 5,
-            cooldown_ends_at: future_cooldown,
             ..Default::default()
         };
         f.deployment_stor
@@ -777,16 +779,15 @@ pub mod apply_success {
     async fn sync_returns_wait_for_deployment_in_cooldown() {
         let f = Fixture::new("sync_wait_cooldown").await;
 
-        let future_cooldown = Utc::now() + TimeDelta::seconds(30);
         let seeded = models::Deployment {
             id: "dpl_1".to_string(),
             activity_status: DplActivity::Queued,
             error_status: DplErrStatus::Retrying,
             target_status: DplTarget::Deployed,
             config_instance_ids: vec!["cfg_inst_1".to_string()],
-            cooldown_ends_at: future_cooldown,
             ..Default::default()
         };
+        f.cooldowns.start("dpl_1", Duration::from_secs(30));
         f.deployment_stor
             .write("dpl_1".to_string(), seeded, |_, _| false, Overwrite::Allow)
             .await
@@ -803,7 +804,7 @@ pub mod apply_success {
             .await
             .unwrap();
 
-        // backend returns same deployment (resolve_dpl preserves cooldown)
+        // backend returns same deployment; the cooldown is kept in memory
         let backend_dep =
             make_deployment("dpl_1", cfg_inst_args(&f, &["cfg_inst_1", "cfg_inst_2"]));
         f.http_client
@@ -815,7 +816,7 @@ pub mod apply_success {
             wait.is_some(),
             "should return Some(wait) for deployment in cooldown"
         );
-        assert!(wait.unwrap() > TimeDelta::zero(), "wait should be positive");
+        assert!(!wait.unwrap().is_zero(), "wait should be positive");
     }
 
     #[tokio::test]
@@ -823,14 +824,13 @@ pub mod apply_success {
         let f = Fixture::new("sync_min_wait").await;
 
         // Deployment A: target=Deployed, error=Retrying, cooldown=30s
-        let cooldown_a = Utc::now() + TimeDelta::seconds(30);
+        f.cooldowns.start("dpl_a", Duration::from_secs(30));
         let seeded_a = models::Deployment {
             id: "dpl_a".to_string(),
             activity_status: DplActivity::Queued,
             error_status: DplErrStatus::Retrying,
             target_status: DplTarget::Deployed,
             config_instance_ids: vec!["cfg_inst_a".to_string()],
-            cooldown_ends_at: cooldown_a,
             ..Default::default()
         };
         f.deployment_stor
@@ -844,14 +844,13 @@ pub mod apply_success {
             .unwrap();
 
         // Deployment B: target=Archived, error=Retrying, cooldown=120s
-        let cooldown_b = Utc::now() + TimeDelta::seconds(120);
+        f.cooldowns.start("dpl_b", Duration::from_secs(120));
         let seeded_b = models::Deployment {
             id: "dpl_b".to_string(),
             activity_status: DplActivity::Deployed,
             error_status: DplErrStatus::Retrying,
             target_status: DplTarget::Archived,
             config_instance_ids: vec!["cfg_inst_b".to_string()],
-            cooldown_ends_at: cooldown_b,
             ..Default::default()
         };
         f.deployment_stor
@@ -899,10 +898,13 @@ pub mod apply_success {
         let wait = wait.unwrap();
         // The smaller cooldown (~30s) should be returned, not the larger (~120s)
         assert!(
-            wait <= TimeDelta::seconds(31),
-            "wait should be ~30s (the minimum), got: {wait}"
+            wait <= Duration::from_secs(30),
+            "wait should be ~30s (the minimum), got: {wait:?}"
         );
-        assert!(wait > TimeDelta::zero(), "wait should be positive");
+        assert!(
+            wait > Duration::from_secs(29),
+            "wait should be ~30s, got: {wait:?}"
+        );
     }
 }
 
@@ -953,7 +955,7 @@ pub mod apply_failure {
         );
         assert!(cached.attempts > 0, "attempts should be bumped");
         assert!(
-            cached.cooldown_ends_at > DateTime::<Utc>::UNIX_EPOCH,
+            f.cooldowns.remaining("dpl_1").is_some(),
             "cooldown should be set"
         );
     }
@@ -1329,7 +1331,7 @@ mod cross_phase {
             config_instance_ids: vec!["cfg_inst_1".to_string()],
             release_id: "dpl_1_rel".to_string(),
             attempts: 3,
-            // no cooldown (UNIX_EPOCH is in the past)
+            // no cooldown
             ..Default::default()
         };
         f.deployment_stor
@@ -1551,16 +1553,15 @@ mod event_emission {
         let f = Fixture::new("evt_non_actionable").await;
 
         // seed a deployment in cooldown (not actionable)
-        let future_cooldown = Utc::now() + chrono::TimeDelta::seconds(3600);
         let seeded = models::Deployment {
             id: "dpl_1".to_string(),
             activity_status: DplActivity::Queued,
             error_status: DplErrStatus::Retrying,
             target_status: DplTarget::Deployed,
             config_instance_ids: vec!["cfg_inst_1".to_string()],
-            cooldown_ends_at: future_cooldown,
             ..Default::default()
         };
+        f.cooldowns.start("dpl_1", Duration::from_secs(3600));
         f.deployment_stor
             .write("dpl_1".to_string(), seeded, |_, _| false, Overwrite::Allow)
             .await

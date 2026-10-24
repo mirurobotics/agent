@@ -293,9 +293,10 @@ async fn init_deployment_storage(
     Ok((Arc::new(deployment_stor), deployment_stor_handle))
 }
 
-/// Resets retry state (attempts, cooldown) for all persisted deployments so
-/// they are retried immediately after an agent restart. The most common
-/// reason for a restart is "I fixed the problem, retry now."
+/// Resets the attempt count of every persisted deployment after an agent
+/// restart, so the backoff starts over. Retry cooldowns are kept in memory, so
+/// a restart already retries right away. The most common reason for a restart
+/// is "I fixed the problem, retry now."
 async fn reset_deployment_retry_state(deployments: &Deployments) -> Result<(), StorErr> {
     let entries = deployments
         .find_entries_where(|e| !e.value.has_clean_retry_state())
