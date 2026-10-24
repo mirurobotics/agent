@@ -346,6 +346,7 @@ fn upload_mid_transfer() -> UploadRef {
             id: "mpu_1".to_string(),
             size: 42,
             mtime: Utc.timestamp_opt(1_700_000_000, 0).unwrap(),
+            part_size: 32,
         }),
         ..upload_ref()
     }

@@ -41,13 +41,14 @@ pub struct UploadRef {
 }
 
 /// A multipart upload started on S3 or GCS. `size` and `mtime` pin it to the
-/// file version it was started for; if either no longer matches, the next
-/// attempt starts a new one.
+/// file version it was started for, and `part_size` to how the file was cut
+/// into parts. If any no longer matches, the next attempt starts a new one.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MultipartRef {
     pub id: String,
     pub size: u64,
     pub mtime: DateTime<Utc>,
+    pub part_size: u64,
 }
 
 #[cfg(test)]
@@ -67,6 +68,7 @@ mod tests {
                 id: "mpu_1".to_string(),
                 size: 42,
                 mtime: DateTime::from_timestamp(900, 0).unwrap(),
+                part_size: 32,
             }),
             ..upload_ref()
         });

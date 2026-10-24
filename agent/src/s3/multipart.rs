@@ -53,7 +53,7 @@ impl Store {
     /// [`Self::put_multipart`].
     ///
     /// `NoSuchUploadErr` if S3 no longer knows the upload. The caller must resume
-    /// against the same file bytes the upload was started for.
+    /// against the same file bytes and part size the upload was started for.
     pub async fn resume_multipart_upload(
         &self,
         src: &mut Source,

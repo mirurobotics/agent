@@ -147,11 +147,10 @@ async fn put<K: Checkpointer>(
 }
 
 /// Resumes the multipart upload in `upload.multipart` if it was started for
-/// this version of the file. Otherwise, or if the provider no longer has it
-/// (`NoSuchUpload`), starts a new one on the same key and saves it before the
-/// first part goes up. Never aborts on failure, so the next attempt can resume.
-/// The part layout depends only on the file size, so a matching size means the
-/// landed parts line up.
+/// this version of the file and cut into the same part size. Otherwise, or if
+/// the provider no longer has it (`NoSuchUpload`), starts a new one on the same
+/// key and saves it before the first part goes up. Never aborts on failure, so
+/// the next attempt can resume.
 async fn put_resumable<K: Checkpointer>(
     store: &s3::Store,
     mut src: s3::Source,
@@ -164,8 +163,9 @@ async fn put_resumable<K: Checkpointer>(
         // it runs start to finish without being saved.
         return store.put_multipart(src, object, &upload.metadata).await;
     };
+    let part_size = s3::Store::part_size_for(src.size);
     if let Some(prev) = &upload.multipart {
-        if prev.size == src.size && prev.mtime == mtime {
+        if prev.size == src.size && prev.mtime == mtime && prev.part_size == part_size {
             let id = &prev.id;
             info!("upload: resuming multipart upload {id} for {object}");
             match store.resume_multipart_upload(&mut src, object, id).await {
@@ -174,8 +174,7 @@ async fn put_resumable<K: Checkpointer>(
             }
         }
         info!(
-            "upload: multipart upload {} for {object} is gone or no longer matches the file; \
-             starting a new one",
+            "upload: multipart upload {} for {object} can't be resumed; starting a new one",
             prev.id
         );
     }
@@ -187,6 +186,7 @@ async fn put_resumable<K: Checkpointer>(
         id: id.clone(),
         size: src.size,
         mtime,
+        part_size,
     };
     checkpointer
         .save(&UploadRef {
@@ -636,13 +636,14 @@ mod tests {
         }
 
         /// The upload with multipart upload `id` saved for a file of `size` bytes
-        /// last modified at `mtime`.
+        /// last modified at `mtime`, cut into [`PART_SIZE`] parts.
         fn saved(id: &str, size: u64, mtime: DateTime<Utc>) -> UploadRef {
             UploadRef {
                 multipart: Some(MultipartRef {
                     id: id.to_string(),
                     size,
                     mtime,
+                    part_size: PART_SIZE,
                 }),
                 ..upload_ref()
             }
@@ -828,14 +829,17 @@ mod tests {
             assert_eq!(sent(&replay)[1], "POST ?uploads");
         }
 
-        // A saved upload for another version of the file (size or mtime) starts
-        // a new one without listing the old one's parts.
+        // A saved upload for another version of the file (size or mtime), or one
+        // cut into another part size, starts a new one without listing its parts.
         #[tokio::test]
-        async fn changed_file_starts_a_new_upload() {
+        async fn changed_file_or_part_size_starts_a_new_upload() {
             let (tf, mtime) = two_part_file().await;
+            let mut other_part_size = saved("mpu_old", SIZE, mtime);
+            other_part_size.multipart.as_mut().unwrap().part_size = 2 * PART_SIZE;
             for upload in [
                 saved("mpu_old", SIZE + 1, mtime),
                 saved("mpu_old", SIZE, mtime + TimeDelta::seconds(1)),
+                other_part_size,
             ] {
                 let replay = replay(new_upload_resps("mpu_new"));
 
