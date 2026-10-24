@@ -356,7 +356,7 @@ pub mod shutdown {
         state
             .storage
             .device
-            .patch(models::device::Updates::connected())
+            .patch(models::device::Updates::connected(Utc::now()))
             .await
             .unwrap();
 
@@ -381,7 +381,7 @@ pub mod shutdown {
         state
             .storage
             .device
-            .patch(models::device::Updates::connected())
+            .patch(models::device::Updates::connected(Utc::now()))
             .await
             .unwrap();
 
@@ -408,7 +408,7 @@ pub mod shutdown {
         state
             .storage
             .device
-            .patch(models::device::Updates::connected())
+            .patch(models::device::Updates::connected(Utc::now()))
             .await
             .unwrap();
 
@@ -439,7 +439,7 @@ pub mod shutdown {
         state
             .storage
             .device
-            .patch(models::device::Updates::connected())
+            .patch(models::device::Updates::connected(Utc::now()))
             .await
             .unwrap();
 
@@ -467,7 +467,7 @@ pub mod shutdown {
         state
             .storage
             .device
-            .patch(models::device::Updates::connected())
+            .patch(models::device::Updates::connected(Utc::now()))
             .await
             .unwrap();
 
@@ -494,7 +494,7 @@ pub mod shutdown {
         state
             .storage
             .device
-            .patch(models::device::Updates::connected())
+            .patch(models::device::Updates::connected(Utc::now()))
             .await
             .unwrap();
 
@@ -537,7 +537,7 @@ pub mod shutdown {
         state
             .storage
             .device
-            .patch(models::device::Updates::connected())
+            .patch(models::device::Updates::connected(Utc::now()))
             .await
             .unwrap();
 

@@ -30,6 +30,7 @@ pub use crate::network::{BackendHost, MqttHost};
 use self::device::Device as DeviceStorage;
 use self::errors::DiskErr as StorErr;
 use self::layout::Layout as StorLayout;
+use crate::clock::Clock;
 use crate::filesys::Overwrite;
 use crate::models;
 
@@ -87,6 +88,8 @@ pub struct Storage {
     pub releases: Arc<Releases>,
     pub file_rules: Arc<FileRules>,
     pub git_commits: Arc<GitCommits>,
+    /// Stamps the device's `last_disconnected_at` when shutdown marks it offline.
+    pub clock: Clock,
 }
 
 impl Storage {
@@ -94,6 +97,7 @@ impl Storage {
         layout: &StorLayout,
         capacities: Capacities,
         device_id: String,
+        clock: Clock,
     ) -> Result<(Storage, impl Future<Output = ()>), StorErr> {
         // device storage
         let (device, device_handle) = init_device_storage(layout, device_id).await?;
@@ -140,6 +144,7 @@ impl Storage {
                 releases,
                 file_rules,
                 git_commits,
+                clock,
             },
             shutdown_handle,
         ))
@@ -162,7 +167,7 @@ impl Storage {
                     first_err,
                     "device offline patch",
                     self.device
-                        .patch(models::device::Updates::disconnected())
+                        .patch(models::device::Updates::disconnected(self.clock.now().time))
                         .await,
                 )
             }

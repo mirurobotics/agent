@@ -6,6 +6,7 @@ use std::time::Duration;
 
 // internal crates
 use crate::authn::{self, TokenManagerExt};
+use crate::clock::Clock;
 use crate::cooldown;
 use crate::disk;
 use crate::errors::*;
@@ -54,6 +55,7 @@ pub async fn run<F, Fut, TokenManagerT: TokenManagerExt, SyncerT: SyncerExt>(
     token_mngr: &TokenManagerT,
     syncer: &SyncerT,
     device_stor: &disk::Device,
+    clock: &Clock,
     sleep_fn: F,
     mut shutdown_signal: Pin<Box<impl Future<Output = ()> + Send + 'static>>,
 ) where
@@ -70,6 +72,7 @@ pub async fn run<F, Fut, TokenManagerT: TokenManagerExt, SyncerT: SyncerExt>(
             token_mngr,
             syncer,
             device_stor,
+            clock,
             sleep_fn,
         ) => {}
     }
@@ -80,6 +83,7 @@ pub async fn run_impl<F, Fut, TokenManagerT: TokenManagerExt, SyncerT: SyncerExt
     token_mngr: &TokenManagerT,
     syncer: &SyncerT,
     device_stor: &disk::Device,
+    clock: &Clock,
     sleep_fn: F,
 ) where
     F: Fn(Duration) -> Fut,
@@ -116,6 +120,7 @@ pub async fn run_impl<F, Fut, TokenManagerT: TokenManagerExt, SyncerT: SyncerExt
                             syncer,
                             &device.id,
                             device_stor,
+                            clock,
                         ).await;
                     }
                     Err(e) => {
@@ -126,6 +131,7 @@ pub async fn run_impl<F, Fut, TokenManagerT: TokenManagerExt, SyncerT: SyncerExt
                             token_mngr,
                             &options.broker_address,
                             device_stor,
+                            clock,
                         ).await;
                     }
                 }
@@ -240,6 +246,7 @@ pub async fn handle_event<ClientT: ClientI, SyncerT: SyncerExt>(
     syncer: &SyncerT,
     device_id: &str,
     device_stor: &disk::Device,
+    clock: &Clock,
 ) -> ErrStreak {
     let err_streak = 0;
 
@@ -250,7 +257,9 @@ pub async fn handle_event<ClientT: ClientI, SyncerT: SyncerExt>(
                 return err_streak;
             }
             info!("Established connection to mqtt broker");
-            let _ = device_stor.patch(device::Updates::connected()).await;
+            let _ = device_stor
+                .patch(device::Updates::connected(clock.now().time))
+                .await;
 
             // Re-subscribe on every successful (re)connect. rumqttc auto-reconnects
             // internally without replaying subscribes, and the broker may have
@@ -262,7 +271,9 @@ pub async fn handle_event<ClientT: ClientI, SyncerT: SyncerExt>(
         // update the device connection status on successful disconnections
         Event::Incoming(Incoming::Disconnect) => {
             info!("Disconnected from mqtt broker");
-            let _ = device_stor.patch(device::Updates::disconnected()).await;
+            let _ = device_stor
+                .patch(device::Updates::disconnected(clock.now().time))
+                .await;
         }
 
         // sync the device if the payload is a sync request
@@ -338,6 +349,7 @@ pub async fn handle_error<TokenManagerT: TokenManagerExt>(
     token_mngr: &TokenManagerT,
     broker_address: &ConnectAddress,
     device_stor: &disk::Device,
+    clock: &Clock,
 ) -> State {
     state.err_streak = if e.is_network_conn_err() {
         // don't increment the error streak on network connection errors
@@ -350,11 +362,15 @@ pub async fn handle_error<TokenManagerT: TokenManagerExt>(
     match device_stor.read().await {
         Ok(device) => {
             if device.status == models::DeviceStatus::Online {
-                let _ = device_stor.patch(device::Updates::disconnected()).await;
+                let _ = device_stor
+                    .patch(device::Updates::disconnected(clock.now().time))
+                    .await;
             }
         }
         Err(_) => {
-            let _ = device_stor.patch(device::Updates::disconnected()).await;
+            let _ = device_stor
+                .patch(device::Updates::disconnected(clock.now().time))
+                .await;
         }
     }
 

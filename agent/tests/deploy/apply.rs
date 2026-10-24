@@ -13,7 +13,7 @@ use miru_agent::models::{
 };
 
 // external crates
-use chrono::TimeDelta;
+use chrono::{DateTime, TimeDelta, Utc};
 
 // ================================= FIXTURE ===================================== //
 
@@ -167,6 +167,7 @@ impl Fixture {
         let args = apply::Args {
             storage: &storage,
             opts: &opts,
+            now_fn: &fixed_now,
         };
         apply(&args).await
     }
@@ -180,12 +181,19 @@ impl Fixture {
         let args = apply::Args {
             storage: &storage,
             opts: &opts,
+            now_fn: &fixed_now,
         };
         apply(&args).await
     }
 }
 
 // ================================= HELPERS ===================================== //
+
+/// The time source the fixture hands to `apply`, so tests can check the
+/// recorded `deployed_at` and `archived_at` exactly.
+fn fixed_now() -> DateTime<Utc> {
+    "2026-10-21T12:00:00Z".parse().unwrap()
+}
 
 fn make_cfg_inst(filepath: String) -> ConfigInstance {
     ConfigInstance {
@@ -403,6 +411,9 @@ mod deploy_success {
                 transitioned: true,
             }
         );
+
+        // deployed_at comes from the time source, not the system clock
+        assert_eq!(outcomes[0].deployment.deployed_at, Some(fixed_now()));
 
         // verify file on disk
         let file = File::new(&ci.filepath);
@@ -1145,6 +1156,7 @@ mod remove_action {
             !dest.path().exists(),
             "file should be deleted after removal"
         );
+        assert_eq!(outcomes[0].deployment.archived_at, Some(fixed_now()));
     }
 
     #[tokio::test]
@@ -1505,6 +1517,8 @@ mod archive_action {
                 transitioned: true,
             }
         );
+        // archived_at comes from the time source, not the system clock
+        assert_eq!(outcomes[0].deployment.archived_at, Some(fixed_now()));
     }
 
     #[tokio::test]

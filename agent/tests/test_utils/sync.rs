@@ -6,6 +6,7 @@ use super::filesys::files as test_files;
 use super::http_client::MockClient;
 use miru_agent::authn::token_mngr::TokenFile;
 use miru_agent::authn::{Token, TokenManager};
+use miru_agent::clock::Clock;
 use miru_agent::disk::{
     self, CfgInstContent, CfgInstStor, CfgInsts, Deployments, FileRules, GitCommits, Releases,
     Storage,
@@ -73,5 +74,6 @@ pub async fn create_storage(dir: &filesys::Dir) -> Storage {
         releases: Arc::new(release_stor),
         file_rules: Arc::new(file_rule_stor),
         git_commits: Arc::new(git_commit_stor),
+        clock: Clock::new(),
     }
 }

@@ -86,8 +86,9 @@ mod deployment_deployed {
             ..Default::default()
         };
 
-        let actual = EventArgs::deployed(&dpl).unwrap();
+        let actual = EventArgs::deployed(&dpl, fixed_time()).unwrap();
         assert_eq!(actual.event_type, DEPLOYMENT_DEPLOYED);
+        assert_eq!(actual.occurred_at, t);
         assert_eq!(
             actual.data,
             serde_json::json!(DeploymentDeployedEvent {
@@ -112,7 +113,7 @@ mod deployment_deployed {
             ..Default::default()
         };
 
-        let event = EventArgs::deployed(&dpl).unwrap();
+        let event = EventArgs::deployed(&dpl, fixed_time()).unwrap();
         let actual: DeploymentDeployedEvent = serde_json::from_value(event.data).unwrap();
         assert_eq!(actual.deployed_at, None);
     }
@@ -126,7 +127,7 @@ mod deployment_deployed {
             ..Default::default()
         };
 
-        let event = EventArgs::deployed(&dpl).unwrap();
+        let event = EventArgs::deployed(&dpl, fixed_time()).unwrap();
         assert_eq!(event.event_type, DEPLOYMENT_DEPLOYED);
         let actual: DeploymentDeployedEvent = serde_json::from_value(event.data).unwrap();
         assert_eq!(
@@ -153,8 +154,9 @@ mod deployment_removed {
             ..Default::default()
         };
 
-        let actual = EventArgs::removed(&dpl).unwrap();
+        let actual = EventArgs::removed(&dpl, fixed_time()).unwrap();
         assert_eq!(actual.event_type, DEPLOYMENT_REMOVED);
+        assert_eq!(actual.occurred_at, t);
         assert_eq!(
             actual.data,
             serde_json::json!(DeploymentRemovedEvent {
@@ -179,7 +181,7 @@ mod deployment_removed {
             ..Default::default()
         };
 
-        let event = EventArgs::removed(&dpl).unwrap();
+        let event = EventArgs::removed(&dpl, fixed_time()).unwrap();
         let actual: DeploymentRemovedEvent = serde_json::from_value(event.data).unwrap();
         assert_eq!(actual.archived_at, None);
     }
@@ -193,7 +195,7 @@ mod deployment_removed {
             ..Default::default()
         };
 
-        let event = EventArgs::removed(&dpl).unwrap();
+        let event = EventArgs::removed(&dpl, fixed_time()).unwrap();
         assert_eq!(event.event_type, DEPLOYMENT_REMOVED);
         let actual: DeploymentRemovedEvent = serde_json::from_value(event.data).unwrap();
         assert_eq!(

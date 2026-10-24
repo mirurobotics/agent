@@ -143,7 +143,8 @@ impl<HTTPClientT: http::ClientI> SyncerImpl<HTTPClientT> {
         } else {
             info!("successfully synced with backend");
         }
-        self.state.last_synced_at = Utc::now();
+        // shown to people only, so use the server-checked time, not the raw system clock
+        self.state.last_synced_at = self.http_client.clock().now().time;
         self.state.err_streak = 0;
         TimeDelta::seconds(self.backoff.base_secs)
     }

@@ -221,12 +221,14 @@ async fn init_poller_worker(
 
     let syncer = app_state.syncer.clone();
     let device_stor = app_state.storage.device.clone();
+    let clock = app_state.http_client.clock().clone();
 
     let poller_handle = tokio::spawn(async move {
         poller::run(
             &options,
             syncer.as_ref(),
             device_stor.as_ref(),
+            &clock,
             tokio::time::sleep,
             Box::pin(async move {
                 let _ = shutdown_rx.recv().await;
@@ -253,6 +255,7 @@ async fn init_mqtt_worker(
     let token_mngr = app_state.token_mngr.clone();
     let syncer = app_state.syncer.clone();
     let device_stor = app_state.storage.device.clone();
+    let clock = app_state.http_client.clock().clone();
 
     let mqtt_handle = tokio::spawn(async move {
         mqtt::run(
@@ -260,6 +263,7 @@ async fn init_mqtt_worker(
             token_mngr.as_ref(),
             syncer.as_ref(),
             device_stor.as_ref(),
+            &clock,
             tokio::time::sleep,
             Box::pin(async move {
                 let _ = shutdown_rx.recv().await;

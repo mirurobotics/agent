@@ -63,7 +63,17 @@ pub async fn sync<HTTPClientT: http::ClientI>(
         errors.push(e);
     }
 
-    let wait = apply_deployments(args.storage, args.opts, args.event_hub, &mut errors).await;
+    // deployed_at, archived_at and event times are shown to people, so record
+    // the server-checked time rather than the raw system clock
+    let now_fn = || args.http_client.clock().now().time;
+    let wait = apply_deployments(
+        args.storage,
+        args.opts,
+        &now_fn,
+        args.event_hub,
+        &mut errors,
+    )
+    .await;
 
     debug!("pushing deployment status updates to server");
     if let Err(e) = push_deployments(args.http_client, args.storage.deployments, args.token).await {
@@ -329,6 +339,7 @@ fn resolve_dpl(new: models::Deployment, cached: Option<models::Deployment>) -> m
 async fn apply_deployments<'a>(
     storage: &'a Storage<'a>,
     opts: &'a apply::DeployOpts,
+    now_fn: &'a apply::NowFn<'a>,
     event_hub: &'a events::EventHub,
     errors: &mut Vec<SyncErr>,
 ) -> chrono::TimeDelta {
@@ -337,6 +348,7 @@ async fn apply_deployments<'a>(
     let apply_args = apply::Args {
         storage: &apply_stor,
         opts,
+        now_fn,
     };
     let outcomes = match apply::apply(&apply_args).await {
         Ok(v) => v,
@@ -354,14 +366,18 @@ async fn apply_deployments<'a>(
             debug!("successfully applied deployment {}", outcome.deployment.id);
             // emit deployment events on success
             match outcome.deployment.activity_status {
-                DplActivity::Deployed => match events::EventArgs::deployed(&outcome.deployment) {
-                    Ok(event) => event_hub.try_publish(event).await,
-                    Err(e) => error!("failed to build deployed event: {e}"),
-                },
-                DplActivity::Archived => match events::EventArgs::removed(&outcome.deployment) {
-                    Ok(event) => event_hub.try_publish(event).await,
-                    Err(e) => error!("failed to build removed event: {e}"),
-                },
+                DplActivity::Deployed => {
+                    match events::EventArgs::deployed(&outcome.deployment, now_fn()) {
+                        Ok(event) => event_hub.try_publish(event).await,
+                        Err(e) => error!("failed to build deployed event: {e}"),
+                    }
+                }
+                DplActivity::Archived => {
+                    match events::EventArgs::removed(&outcome.deployment, now_fn()) {
+                        Ok(event) => event_hub.try_publish(event).await,
+                        Err(e) => error!("failed to build removed event: {e}"),
+                    }
+                }
                 _ => {}
             }
         }

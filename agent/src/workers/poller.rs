@@ -5,6 +5,7 @@ use std::pin::Pin;
 use std::time::Duration;
 
 // internal crates
+use crate::clock::Clock;
 use crate::disk;
 use crate::models::device;
 use crate::sync::{
@@ -34,6 +35,7 @@ pub async fn run<F, Fut, SyncerT: SyncerExt>(
     options: &Options,
     syncer: &SyncerT,
     device_stor: &disk::Device,
+    clock: &Clock,
     sleep_fn: F,
     mut shutdown_signal: Pin<Box<impl Future<Output = ()> + Send + 'static>>,
 ) where
@@ -49,6 +51,7 @@ pub async fn run<F, Fut, SyncerT: SyncerExt>(
             options,
             syncer,
             device_stor,
+            clock,
             sleep_fn,
         ) => {}
     }
@@ -58,6 +61,7 @@ async fn run_impl<F, Fut, SyncerT: SyncerExt>(
     options: &Options,
     syncer: &SyncerT,
     device_stor: &disk::Device,
+    clock: &Clock,
     sleep_fn: F, // for testing purposes
 ) where
     F: Fn(Duration) -> Fut,
@@ -102,7 +106,7 @@ async fn run_impl<F, Fut, SyncerT: SyncerExt>(
                     }
                     Some(SyncEvent::SyncSuccess) => {
                         let patch = device::Updates {
-                            last_synced_at: Some(Utc::now()),
+                            last_synced_at: Some(clock.now().time),
                             ..device::Updates::empty()
                         };
                         let _ = device_stor.patch(patch).await;

@@ -3,7 +3,8 @@ use std::sync::Arc;
 
 // internal crates
 use crate::mocks::{error::SleepController, syncer::MockSyncer};
-use crate::test_utils::filesys::dirs as test_dirs;
+use crate::test_utils::{clock as test_clock, filesys::dirs as test_dirs};
+use miru_agent::clock::Clock;
 use miru_agent::disk::{self, Layout};
 use miru_agent::models::Device;
 use miru_agent::sync::errors::MockErr as SyncMockErr;
@@ -42,6 +43,7 @@ pub mod run {
                 &options_for_spawn,
                 syncer_for_spawn.as_ref(),
                 &device_file,
+                &Clock::new(),
                 sleep_ctrl_for_spawn.sleep_fn(),
                 shutdown_signal,
             )
@@ -127,6 +129,7 @@ pub mod run {
                 &options_for_spawn,
                 syncer_for_spawn.as_ref(),
                 &device_file,
+                &Clock::new(),
                 sleep_ctrl_for_spawn.sleep_fn(),
                 shutdown_signal,
             )
@@ -211,6 +214,7 @@ pub mod run {
                 &options_for_spawn,
                 syncer_for_spawn.as_ref(),
                 &device_file_for_spawn,
+                &test_clock::server_clock(),
                 sleep_ctrl_for_spawn.sleep_fn(),
                 shutdown_signal,
             )
@@ -239,20 +243,16 @@ pub mod run {
         );
 
         // send SyncSuccess event while the poller is sleeping
-        let before_event = Utc::now();
         syncer_tx.send(SyncEvent::SyncSuccess).unwrap();
         sleep_ctrl.release().await;
 
         // wait for the poller to process the event and re-enter sleep
         sleep_ctrl.await_sleep().await;
 
-        // verify last_synced_at was updated
+        // verify last_synced_at was updated with the server's time, not the
+        // robot's 1970 clock
         let device_after = device_file.read().await.unwrap();
-        assert!(
-            device_after.last_synced_at >= before_event,
-            "last_synced_at should be updated after SyncSuccess event"
-        );
-        assert!(device_after.last_synced_at <= Utc::now());
+        assert_eq!(device_after.last_synced_at, test_clock::server_time());
     }
 
     #[tokio::test]
@@ -280,6 +280,7 @@ pub mod run {
                 &options_for_spawn,
                 syncer_for_spawn.as_ref(),
                 &device_file,
+                &Clock::new(),
                 sleep_ctrl_for_spawn.sleep_fn(),
                 shutdown_signal,
             )
@@ -341,6 +342,7 @@ pub mod run {
                 &options_for_spawn,
                 syncer_for_spawn.as_ref(),
                 &device_file,
+                &Clock::new(),
                 sleep_ctrl_for_spawn.sleep_fn(),
                 shutdown_signal,
             )
@@ -403,6 +405,7 @@ pub mod run {
                 &options_for_spawn,
                 syncer_for_spawn.as_ref(),
                 &device_file,
+                &Clock::new(),
                 sleep_ctrl_for_spawn.sleep_fn(),
                 shutdown_signal,
             )

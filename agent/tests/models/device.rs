@@ -192,16 +192,12 @@ fn updates_empty() {
 
 #[test]
 fn updates_disconnected() {
-    let before = Utc::now();
-    let actual = Updates::disconnected();
-    let after = Utc::now();
-
-    let disconnected_at = actual.last_disconnected_at.unwrap();
-    assert!(disconnected_at >= before && disconnected_at <= after);
+    let at = "2026-10-21T12:00:00Z".parse::<DateTime<Utc>>().unwrap();
+    let actual = Updates::disconnected(at);
 
     let expected = Updates {
         status: Some(DeviceStatus::Offline),
-        last_disconnected_at: Some(disconnected_at),
+        last_disconnected_at: Some(at),
         ..Updates::empty()
     };
 
@@ -210,16 +206,12 @@ fn updates_disconnected() {
 
 #[test]
 fn updates_connected() {
-    let before = Utc::now();
-    let actual = Updates::connected();
-    let after = Utc::now();
-
-    let connected_at = actual.last_connected_at.unwrap();
-    assert!(connected_at >= before && connected_at <= after);
+    let at = "2026-10-21T12:00:00Z".parse::<DateTime<Utc>>().unwrap();
+    let actual = Updates::connected(at);
 
     let expected = Updates {
         status: Some(DeviceStatus::Online),
-        last_connected_at: Some(connected_at),
+        last_connected_at: Some(at),
         ..Updates::empty()
     };
     assert_eq!(actual, expected);
