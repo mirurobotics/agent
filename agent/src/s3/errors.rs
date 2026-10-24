@@ -140,9 +140,13 @@ crate::impl_error!(S3Err {
 /// Whether an `SdkError` carries an HTTP 404 (checked against the raw response
 /// status, so it works for any operation's service-error enum `E`).
 pub fn is_not_found<E>(err: &SdkError<E>) -> bool {
-    err.raw_response()
-        .map(|r| r.status().as_u16() == 404)
-        .unwrap_or(false)
+    status(err) == Some(HTTPCode::NOT_FOUND)
+}
+
+/// The HTTP status of the response an `SdkError` carries, if any.
+pub fn status<E>(err: &SdkError<E>) -> Option<HTTPCode> {
+    let code = err.raw_response()?.status().as_u16();
+    HTTPCode::from_u16(code).ok()
 }
 
 /// Maps the operation-agnostic `SdkError` variants into an `S3Err`.

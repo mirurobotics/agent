@@ -27,6 +27,7 @@ atomicwrites = "0.4.4"
 # points), and it pulls crypto-bigint 0.5 (RUSTSEC-2026-0387).
 aws-sdk-s3 = { version = "1.137", default-features = false, features = ["behavior-version-latest", "rt-tokio", "http-1x", "default-https-client"] }
 aws-smithy-http-client = { version = "1.1", default-features = false }
+aws-smithy-runtime-api = { version = "1.14", default-features = false }
 aws-smithy-types = { version = "1.5", default-features = false }
 aws-lc-rs = "1.18.0"
 axum = { version = "0.8.3" }
@@ -35,13 +36,8 @@ chrono = { version = "0.4.40", features = ["serde"] }
 config-agent = { path = "apps/agent" }
 futures = "0.3.31"
 glob = "0.3.3"
-# GCS object storage. Default features pull `default-rustls-provider` (rustls
-# 0.23 + aws-lc-rs → rustls-webpki 0.103.x, unaffected by RUSTSEC-2026-0098/0099).
-# Do NOT disable defaults: that drops the crypto provider and forces manual setup.
-google-cloud-auth = { version = "1.13.0" }
-google-cloud-gax = { version = "1.11.0" }
-google-cloud-storage = { version = "1.15.0" }
 http = "1"
+md5 = { package = "md-5", version = "0.11" }
 nix = { version = "0.31.2", default-features = false, features = ["user"] }
 # `std` implies `alloc` (needed for decode_vec/encode_string) and makes its error a
 # std::error::Error.

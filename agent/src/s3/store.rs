@@ -3,11 +3,13 @@ use std::collections::HashMap;
 use std::io::SeekFrom;
 
 // internal crates
+use crate::errors::HTTPCode;
 use crate::filesys::{errors::PathDoesNotExistErr, file::File, path::PathExt, FileSysErr};
-use crate::s3::{errors, errors::ObjectNotFoundErr, S3Err};
+use crate::s3::{errors, errors::ObjectNotFoundErr, gcs, S3Err};
 use crate::trace;
 
 // external crates
+use aws_sdk_s3::error::SdkError;
 use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::Client;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
@@ -16,6 +18,14 @@ use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 /// below it go through a single `PutObject`. S3's own multipart part-size
 /// floor is 5 MiB; 8 MiB gives headroom while keeping part counts small.
 pub(crate) const PART_SIZE: u64 = 8 * 1024 * 1024; // 8 MiB
+
+/// How a successful object write ended.
+#[derive(Debug)]
+pub(super) enum WriteOutcome {
+    Created,
+    /// An earlier attempt already stored the object (GCS create-only).
+    AlreadyExists,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Object {
@@ -85,22 +95,36 @@ impl Source {
     }
 }
 
+/// What a [`Store`] is built from.
+pub struct Options {
+    /// The SDK config, from [`aws::config`](crate::s3::aws::config) or
+    /// [`gcs::config`].
+    pub config: aws_sdk_s3::Config,
+    /// Set for a [`gcs::config`]. Bodies then carry a `Content-MD5` the store
+    /// computes, since the GCS client turns the SDK's own request checksums
+    /// off, and object writes are create-only.
+    pub gcs: bool,
+}
+
 pub struct Store {
     pub(super) client: Client,
+    /// See [`Options::gcs`].
+    gcs: bool,
 }
 
 impl Store {
-    /// Builds a store on an SDK config from
-    /// [`aws::config`](crate::s3::aws::config). No network I/O happens here; the
-    /// first request is made lazily on the first call.
-    pub fn new(config: aws_sdk_s3::Config) -> Self {
+    /// Builds a store from `opts`. No network I/O happens here; the first
+    /// request is made lazily on the first call.
+    pub fn new(opts: Options) -> Self {
         Self {
-            client: Client::from_conf(config),
+            client: Client::from_conf(opts.config),
+            gcs: opts.gcs,
         }
     }
 
     /// Creates or overwrites an object from a local file, opened once as a
-    /// [`Source`].
+    /// [`Source`]. GCS never overwrites: an existing object counts as written
+    /// (see [`gcs`]).
     ///
     /// Files at or below [`PART_SIZE`] go through one `PutObject`
     /// ([`Self::put_singlepart`]); larger files go part-by-part through a
@@ -129,17 +153,48 @@ impl Store {
         metadata: &HashMap<String, String>,
     ) -> Result<(), S3Err> {
         let size = src.size;
-        let body = ByteStream::from(src.read("put_object", dst, 0, size).await?);
-        self.client
+        let bytes = src.read("put_object", dst, 0, size).await?;
+        let content_md5 = self.content_md5(&bytes);
+        let result = self
+            .client
             .put_object()
             .bucket(&dst.bucket)
             .key(&dst.key)
-            .body(body)
+            .body(ByteStream::from(bytes))
+            .set_content_md5(content_md5)
             .set_metadata((!metadata.is_empty()).then(|| metadata.clone()))
             .send()
             .await
-            .map_err(|e| errors::map_sdk_err("put_object", dst, e))?;
-        Ok(())
+            .map(|_| ());
+        self.finish_write("put_object", dst, result).map(|_| ())
+    }
+
+    /// `Content-MD5` for a body, when this store sends one.
+    pub(super) fn content_md5(&self, bytes: &[u8]) -> Option<String> {
+        self.gcs.then(|| gcs::content_md5(bytes))
+    }
+
+    /// Finishes an object write (PutObject or CompleteMultipartUpload). On GCS
+    /// the client sends writes create-only (see [`gcs`]), so a 412 means an
+    /// earlier attempt already stored the object at this key, which counts as
+    /// done.
+    pub(super) fn finish_write<E>(
+        &self,
+        operation: &str,
+        dst: &Object,
+        result: Result<(), SdkError<E>>,
+    ) -> Result<WriteOutcome, S3Err>
+    where
+        E: std::error::Error + 'static,
+    {
+        match result {
+            Ok(()) => Ok(WriteOutcome::Created),
+            Err(e) if self.gcs && errors::status(&e) == Some(HTTPCode::PRECONDITION_FAILED) => {
+                tracing::info!("upload: {dst} already exists, so an earlier {operation} landed");
+                Ok(WriteOutcome::AlreadyExists)
+            }
+            Err(e) => Err(errors::map_sdk_err(operation, dst, e)),
+        }
     }
 
     /// Streams an object's body to a destination file. A missing object maps to
@@ -246,7 +301,7 @@ pub(super) mod tests {
     use miru_agent::filesys::file::File;
     use miru_agent::filesys::path::PathExt;
     use miru_agent::filesys::{files, FileSysErr, WriteOptions};
-    use miru_agent::s3::{aws, Config, Credentials, Object, S3Err, Source, Store};
+    use miru_agent::s3::{aws, Config, Credentials, Object, Options, S3Err, Source, Store};
 
     // external crates
     use aws_sdk_s3::config::SharedHttpClient;
@@ -305,7 +360,8 @@ pub(super) mod tests {
         };
         let http_client = Some(SharedHttpClient::new(replay.clone()));
         // Path-style URLs, so request URIs match `uri()`.
-        let store = Store::new(aws::config(cfg, http_client, true));
+        let config = aws::config(cfg, http_client, true);
+        let store = Store::new(Options { config, gcs: false });
         (store, replay)
     }
 
@@ -395,7 +451,8 @@ pub(super) mod tests {
                 region: "us-west-2".to_string(),
             };
             // Constructing must not panic or touch the network.
-            let _store = Store::new(aws::config(cfg, None, false));
+            let config = aws::config(cfg, None, false);
+            let _store = Store::new(Options { config, gcs: false });
         }
     }
 
