@@ -24,27 +24,27 @@ pub struct Job {
     /// The backend upload every attempt reuses, saved before the first
     /// transfer starts. `None` until `POST /uploads` succeeds.
     #[serde(default)]
-    pub upload: Option<UploadRef>,
+    pub upload: Option<UploadCheckpoint>,
 }
 
 /// The backend upload (`upl_…`) a job reuses across attempts and restarts.
 /// Holds everything the transfer needs besides credentials, because
 /// `POST /uploads/{id}/credentials` only returns credentials.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct UploadRef {
+pub struct UploadCheckpoint {
     pub id: String,
     pub bucket_name: String,
     pub object_key: String,
     pub metadata: HashMap<String, String>,
     /// The multipart upload started for this object, if any.
-    pub multipart: Option<MultipartRef>,
+    pub multipart: Option<MultipartCheckpoint>,
 }
 
 /// A multipart upload started on S3 or GCS. `size` and `mtime` pin it to the
 /// file version it was started for, and `part_size` to how the file was cut
 /// into parts. If any no longer matches, the next attempt starts a new one.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct MultipartRef {
+pub struct MultipartCheckpoint {
     pub id: String,
     pub size: u64,
     pub mtime: DateTime<Utc>,
@@ -55,7 +55,7 @@ pub struct MultipartRef {
 mod tests {
     // internal crates
     use super::*;
-    use crate::test_utils::upload::{make_job, upload_ref};
+    use crate::test_utils::upload::{make_job, upload_checkpoint};
 
     // external crates
     use serde_json::json;
@@ -63,14 +63,14 @@ mod tests {
     #[test]
     fn upload_round_trips() {
         let mut job = make_job("a.log");
-        job.upload = Some(UploadRef {
-            multipart: Some(MultipartRef {
+        job.upload = Some(UploadCheckpoint {
+            multipart: Some(MultipartCheckpoint {
                 id: "mpu_1".to_string(),
                 size: 42,
                 mtime: DateTime::from_timestamp(900, 0).unwrap(),
                 part_size: 32,
             }),
-            ..upload_ref()
+            ..upload_checkpoint()
         });
         let value = serde_json::to_value(&job).unwrap();
         assert_eq!(value["upload"]["multipart"]["id"], json!("mpu_1"));

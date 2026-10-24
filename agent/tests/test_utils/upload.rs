@@ -8,7 +8,7 @@ use backend_api::models::{
     Upload, UploadCredentials, UploadDestination, UploadStatus, UploadWithCredentials,
 };
 use miru_agent::authn::Token;
-use miru_agent::data_uploads::upload::{Job, UploadRef};
+use miru_agent::data_uploads::upload::{Job, UploadCheckpoint};
 use miru_agent::filesys::File;
 
 // external crates
@@ -85,8 +85,8 @@ pub fn pending_response() -> UploadWithCredentials {
 }
 
 /// The upload a job saves from [`pending_response`].
-pub fn upload_ref() -> UploadRef {
-    UploadRef {
+pub fn upload_checkpoint() -> UploadCheckpoint {
+    UploadCheckpoint {
         id: "upl_1".to_string(),
         bucket_name: "my-bucket".to_string(),
         object_key: "logs/a.log".to_string(),

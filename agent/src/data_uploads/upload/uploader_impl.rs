@@ -8,7 +8,7 @@ use crate::data_uploads::{
     upload::{
         errors::*,
         executor::{Checkpointer, UploadExecutor},
-        job::{Job, UploadRef},
+        job::{Job, UploadCheckpoint},
         queue::{Queue, QueueEntry, QueueSnapshotFile},
     },
 };
@@ -115,7 +115,7 @@ where
 
     /// Save an in-flight attempt's `upload` on its queued job, so the next
     /// attempt (or process) continues from it.
-    pub(crate) async fn save_upload(&mut self, entry: &QueueEntry, upload: UploadRef) {
+    pub(crate) async fn save_upload(&mut self, entry: &QueueEntry, upload: UploadCheckpoint) {
         debug!("upload: saving upload for {}: {upload:?}", entry.job.file);
         self.queue
             .update_job(entry.id, |job| job.upload = Some(upload))

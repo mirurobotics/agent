@@ -5,7 +5,7 @@ use std::future::Future;
 use crate::data_uploads::upload::{
     errors::{classified_executor_err, executor_err, TransferErr, UploadErr},
     executor::Checkpointer,
-    job::{MultipartRef, UploadRef},
+    job::{MultipartCheckpoint, UploadCheckpoint},
 };
 use crate::filesys::File;
 use crate::s3;
@@ -32,7 +32,7 @@ pub trait ObjectTransfer: Send + Sync {
     fn transfer<K: Checkpointer>(
         &self,
         credentials: &UploadCredentials,
-        upload: &UploadRef,
+        upload: &UploadCheckpoint,
         file: &File,
         checkpointer: &K,
     ) -> impl Future<Output = Result<(), UploadErr>> + Send;
@@ -79,7 +79,7 @@ impl SdkTransfer {
     async fn transfer_s3<K: Checkpointer>(
         &self,
         credentials: &UploadCredentials,
-        upload: &UploadRef,
+        upload: &UploadCheckpoint,
         file: &File,
         checkpointer: &K,
     ) -> Result<(), UploadErr> {
@@ -96,7 +96,7 @@ impl SdkTransfer {
     async fn transfer_gcs<K: Checkpointer>(
         &self,
         credentials: &UploadCredentials,
-        upload: &UploadRef,
+        upload: &UploadCheckpoint,
         file: &File,
         checkpointer: &K,
     ) -> Result<(), UploadErr> {
@@ -127,7 +127,7 @@ impl SdkTransfer {
 /// can resume.
 async fn put<K: Checkpointer>(
     store: &s3::Store,
-    upload: &UploadRef,
+    upload: &UploadCheckpoint,
     file: &File,
     checkpointer: &K,
 ) -> Result<(), UploadErr> {
@@ -155,7 +155,7 @@ async fn put_resumable<K: Checkpointer>(
     store: &s3::Store,
     mut src: s3::Source,
     object: &s3::Object,
-    upload: &UploadRef,
+    upload: &UploadCheckpoint,
     checkpointer: &K,
 ) -> Result<(), s3::S3Err> {
     let Some(mtime) = src.mtime.map(DateTime::<Utc>::from) else {
@@ -182,14 +182,14 @@ async fn put_resumable<K: Checkpointer>(
     let id = store
         .create_multipart_upload(object, &upload.metadata)
         .await?;
-    let multipart = MultipartRef {
+    let multipart = MultipartCheckpoint {
         id: id.clone(),
         size: src.size,
         mtime,
         part_size,
     };
     checkpointer
-        .save(&UploadRef {
+        .save(&UploadCheckpoint {
             multipart: Some(multipart),
             ..upload.clone()
         })
@@ -202,7 +202,7 @@ impl ObjectTransfer for SdkTransfer {
     async fn transfer<K: Checkpointer>(
         &self,
         credentials: &UploadCredentials,
-        upload: &UploadRef,
+        upload: &UploadCheckpoint,
         file: &File,
         checkpointer: &K,
     ) -> Result<(), UploadErr> {
@@ -244,7 +244,7 @@ mod tests {
     use crate::test_utils::{
         checkpointer::{NoopCheckpointer, RecordingCheckpointer},
         filesys::{files as test_files, missing_file},
-        upload::{s3_credentials_json, upload_ref},
+        upload::{s3_credentials_json, upload_checkpoint},
     };
     use backend_api::models::{S3UploadCredentials, UploadCredentials};
     use miru_agent::data_uploads::upload::errors::TransferErr;
@@ -303,7 +303,7 @@ mod tests {
         tf
     }
 
-    /// The path-style PutObject URI the S3 SDK emits for [`upload_ref`]'s bucket
+    /// The path-style PutObject URI the S3 SDK emits for [`upload_checkpoint`]'s bucket
     /// and key with the vended `us-east-1` region.
     const S3_PUT_URI: &str =
         "https://s3.us-east-1.amazonaws.com/my-bucket/logs/a.log?x-id=PutObject";
@@ -342,7 +342,7 @@ mod tests {
             .unwrap()
     }
 
-    /// The path-style PutObject URI on GCS's XML API for [`upload_ref`]'s
+    /// The path-style PutObject URI on GCS's XML API for [`upload_checkpoint`]'s
     /// bucket and key.
     const GCS_PUT_URI: &str = "https://storage.googleapis.com/my-bucket/logs/a.log?x-id=PutObject";
 
@@ -352,7 +352,7 @@ mod tests {
         let err = SdkTransfer::default()
             .transfer(
                 &creds,
-                &upload_ref(),
+                &upload_checkpoint(),
                 &File::new("/data/a.log"),
                 &NoopCheckpointer,
             )
@@ -371,7 +371,7 @@ mod tests {
         let err = SdkTransfer::default()
             .transfer(
                 &creds,
-                &upload_ref(),
+                &upload_checkpoint(),
                 &File::new("/data/a.log"),
                 &NoopCheckpointer,
             )
@@ -394,7 +394,7 @@ mod tests {
         let creds = credentials("s3", s3_credentials_json(), Value::Null);
 
         SdkTransfer::with_http_client(replay.clone())
-            .transfer(&creds, &upload_ref(), src.file(), &NoopCheckpointer)
+            .transfer(&creds, &upload_checkpoint(), src.file(), &NoopCheckpointer)
             .await
             .unwrap();
 
@@ -433,7 +433,7 @@ mod tests {
         let creds = credentials("s3", s3_credentials_json(), Value::Null);
 
         let err = SdkTransfer::with_http_client(replay.clone())
-            .transfer(&creds, &upload_ref(), src.file(), &NoopCheckpointer)
+            .transfer(&creds, &upload_checkpoint(), src.file(), &NoopCheckpointer)
             .await
             .unwrap_err();
 
@@ -451,7 +451,7 @@ mod tests {
         let missing = missing_file();
 
         let err = SdkTransfer::default()
-            .transfer(&creds, &upload_ref(), &missing, &NoopCheckpointer)
+            .transfer(&creds, &upload_checkpoint(), &missing, &NoopCheckpointer)
             .await
             .unwrap_err();
 
@@ -464,7 +464,7 @@ mod tests {
         let err = SdkTransfer::default()
             .transfer(
                 &creds,
-                &upload_ref(),
+                &upload_checkpoint(),
                 &File::new("/data/a.log"),
                 &NoopCheckpointer,
             )
@@ -485,7 +485,7 @@ mod tests {
         let err = SdkTransfer::default()
             .transfer(
                 &creds,
-                &upload_ref(),
+                &upload_checkpoint(),
                 &File::new("/data/a.log"),
                 &NoopCheckpointer,
             )
@@ -507,7 +507,7 @@ mod tests {
         let creds = credentials("gcs", Value::Null, gcs_credentials_json("vended-token"));
 
         SdkTransfer::with_http_client(replay.clone())
-            .transfer(&creds, &upload_ref(), src.file(), &NoopCheckpointer)
+            .transfer(&creds, &upload_checkpoint(), src.file(), &NoopCheckpointer)
             .await
             .unwrap();
 
@@ -533,7 +533,7 @@ mod tests {
         let creds = credentials("gcs", Value::Null, gcs_credentials_json("vended-token"));
 
         let err = SdkTransfer::with_http_client(replay)
-            .transfer(&creds, &upload_ref(), src.file(), &NoopCheckpointer)
+            .transfer(&creds, &upload_checkpoint(), src.file(), &NoopCheckpointer)
             .await
             .unwrap_err();
 
@@ -551,7 +551,7 @@ mod tests {
         let missing = missing_file();
 
         let err = SdkTransfer::default()
-            .transfer(&creds, &upload_ref(), &missing, &NoopCheckpointer)
+            .transfer(&creds, &upload_checkpoint(), &missing, &NoopCheckpointer)
             .await
             .unwrap_err();
 
@@ -600,7 +600,7 @@ mod tests {
         let creds = credentials("gcs", Value::Null, gcs_credentials_json("vended-token"));
 
         let err = SdkTransfer::with_http_client(Refused)
-            .transfer(&creds, &upload_ref(), src.file(), &NoopCheckpointer)
+            .transfer(&creds, &upload_checkpoint(), src.file(), &NoopCheckpointer)
             .await
             .unwrap_err();
 
@@ -614,7 +614,7 @@ mod tests {
         // internal crates
         use super::*;
         use crate::s3::store::PART_SIZE;
-        use miru_agent::data_uploads::upload::{MultipartRef, UploadRef};
+        use miru_agent::data_uploads::upload::{MultipartCheckpoint, UploadCheckpoint};
         use miru_agent::filesys::path::PathExt;
 
         // external crates
@@ -637,15 +637,15 @@ mod tests {
 
         /// The upload with multipart upload `id` saved for a file of `size` bytes
         /// last modified at `mtime`, cut into [`PART_SIZE`] parts.
-        fn saved(id: &str, size: u64, mtime: DateTime<Utc>) -> UploadRef {
-            UploadRef {
-                multipart: Some(MultipartRef {
+        fn saved(id: &str, size: u64, mtime: DateTime<Utc>) -> UploadCheckpoint {
+            UploadCheckpoint {
+                multipart: Some(MultipartCheckpoint {
                     id: id.to_string(),
                     size,
                     mtime,
                     part_size: PART_SIZE,
                 }),
-                ..upload_ref()
+                ..upload_checkpoint()
             }
         }
 
@@ -753,8 +753,8 @@ mod tests {
             creds: &UploadCredentials,
             replay: &StaticReplayClient,
             file: &File,
-            upload: &UploadRef,
-        ) -> (Result<(), UploadErr>, Vec<UploadRef>) {
+            upload: &UploadCheckpoint,
+        ) -> (Result<(), UploadErr>, Vec<UploadCheckpoint>) {
             let checkpointer = RecordingCheckpointer::new();
             let result = SdkTransfer::with_http_client(replay.clone())
                 .transfer(creds, upload, file, &checkpointer)
@@ -767,7 +767,7 @@ mod tests {
             let (tf, mtime) = two_part_file().await;
             let replay = replay(new_upload_resps("mpu_new"));
 
-            let (result, saves) = run(&s3(), &replay, tf.file(), &upload_ref()).await;
+            let (result, saves) = run(&s3(), &replay, tf.file(), &upload_checkpoint()).await;
 
             result.unwrap();
             assert_eq!(saves, [saved("mpu_new", SIZE, mtime)]);
@@ -862,7 +862,7 @@ mod tests {
                 s3_access_denied_resp(),
             ]);
 
-            let (result, saves) = run(&s3(), &replay, tf.file(), &upload_ref()).await;
+            let (result, saves) = run(&s3(), &replay, tf.file(), &upload_checkpoint()).await;
 
             result.unwrap_err();
             assert_eq!(saves, [saved("mpu_new", SIZE, mtime)]);

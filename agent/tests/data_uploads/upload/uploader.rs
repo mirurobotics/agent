@@ -10,7 +10,7 @@ use crate::mocks::{
 };
 use crate::test_utils::{
     filesys::dirs as test_dirs,
-    upload::{make_job, upload_ref},
+    upload::{make_job, upload_checkpoint},
 };
 use miru_agent::data_uploads::retention::Job as DeleteJob;
 use miru_agent::data_uploads::upload::errors::{EnqueueErr, ExecutorErr};
@@ -1143,7 +1143,7 @@ mod durability {
         let (mock, mut started_rx) = MockUploadExecutor::new();
         let (_release_tx, release_rx) = oneshot::channel();
         mock.push_step(MockStep::SaveThen(
-            upload_ref(),
+            upload_checkpoint(),
             Box::new(MockStep::Hang(release_rx)),
         ));
         let (uploader, handle) = spawn_persisted(mock.clone(), open(&path).await);
@@ -1154,7 +1154,7 @@ mod durability {
         timed(started_rx.recv()).await.unwrap();
 
         let saved = open(&path).await.read().entries[0].job.upload.clone();
-        assert_eq!(saved, Some(upload_ref()));
+        assert_eq!(saved, Some(upload_checkpoint()));
 
         timed(uploader.shutdown()).await.unwrap();
         timed(handle).await.unwrap();
@@ -1168,7 +1168,10 @@ mod durability {
         let path = dir.to_dir().file("upload_queue.json");
         let job = make_job("a.log");
         let (mock, _started_rx) = MockUploadExecutor::new();
-        mock.push_step(MockStep::SaveThen(upload_ref(), Box::new(MockStep::Err)));
+        mock.push_step(MockStep::SaveThen(
+            upload_checkpoint(),
+            Box::new(MockStep::Err),
+        ));
         mock.push_step(MockStep::Ok);
         let (uploader, handle, _sleeps) =
             spawn_persisted_with_test_clock(mock.clone(), open(&path).await);
@@ -1177,7 +1180,7 @@ mod durability {
         await_drained(&uploader).await;
 
         let mut expected = job.clone();
-        expected.upload = Some(upload_ref());
+        expected.upload = Some(upload_checkpoint());
         assert_eq!(mock.recorded_calls(), vec![job, expected]);
 
         timed(uploader.shutdown()).await.unwrap();

@@ -5,11 +5,11 @@ use std::sync::{Arc, Mutex};
 // internal crates
 use backend_api::models::UploadCredentials;
 use miru_agent::data_uploads::upload::errors::ExecutorErr;
-use miru_agent::data_uploads::upload::{Checkpointer, ObjectTransfer, UploadErr, UploadRef};
+use miru_agent::data_uploads::upload::{Checkpointer, ObjectTransfer, UploadCheckpoint, UploadErr};
 use miru_agent::filesys::File;
 
 /// One recorded `transfer` call's arguments.
-pub type TransferCall = (UploadCredentials, UploadRef, File);
+pub type TransferCall = (UploadCredentials, UploadCheckpoint, File);
 
 /// Scripted [`ObjectTransfer`] test double. Each `transfer` call pops the next
 /// scripted result (an empty script defaults to `Ok`) and records the call's
@@ -48,7 +48,7 @@ impl ObjectTransfer for MockObjectTransfer {
     async fn transfer<K: Checkpointer>(
         &self,
         credentials: &UploadCredentials,
-        upload: &UploadRef,
+        upload: &UploadCheckpoint,
         file: &File,
         _checkpointer: &K,
     ) -> Result<(), UploadErr> {

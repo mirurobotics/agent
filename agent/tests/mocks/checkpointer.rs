@@ -2,12 +2,12 @@
 use std::sync::{Arc, Mutex};
 
 // internal crates
-use miru_agent::data_uploads::upload::{Checkpointer, UploadRef};
+use miru_agent::data_uploads::upload::{Checkpointer, UploadCheckpoint};
 
 /// Records every saved upload, in order. Clones share the record.
 #[derive(Clone, Default)]
 pub struct RecordingCheckpointer {
-    saved: Arc<Mutex<Vec<UploadRef>>>,
+    saved: Arc<Mutex<Vec<UploadCheckpoint>>>,
 }
 
 impl RecordingCheckpointer {
@@ -15,13 +15,13 @@ impl RecordingCheckpointer {
         Self::default()
     }
 
-    pub fn saved(&self) -> Vec<UploadRef> {
+    pub fn saved(&self) -> Vec<UploadCheckpoint> {
         self.saved.lock().unwrap().clone()
     }
 }
 
 impl Checkpointer for RecordingCheckpointer {
-    async fn save(&self, upload: &UploadRef) {
+    async fn save(&self, upload: &UploadCheckpoint) {
         self.saved.lock().unwrap().push(upload.clone());
     }
 }
@@ -30,5 +30,5 @@ impl Checkpointer for RecordingCheckpointer {
 pub struct NoopCheckpointer;
 
 impl Checkpointer for NoopCheckpointer {
-    async fn save(&self, _upload: &UploadRef) {}
+    async fn save(&self, _upload: &UploadCheckpoint) {}
 }

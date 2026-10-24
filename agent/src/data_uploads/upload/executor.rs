@@ -6,7 +6,7 @@ use std::sync::Arc;
 use crate::authn::{Token, TokenManagerExt};
 use crate::data_uploads::upload::{
     errors::{classified_executor_err, UploadErr},
-    job::{Job, UploadRef},
+    job::{Job, UploadCheckpoint},
     transfer::ObjectTransfer,
 };
 use crate::errors::{Error, HTTPCode};
@@ -47,7 +47,7 @@ pub trait UploadExecutor: Send + Sync {
 /// on disk (or can no longer be saved), so the caller can rely on it before its
 /// next step.
 pub trait Checkpointer: Send + Sync {
-    fn save(&self, upload: &UploadRef) -> impl std::future::Future<Output = ()> + Send;
+    fn save(&self, upload: &UploadCheckpoint) -> impl std::future::Future<Output = ()> + Send;
 }
 
 pub struct LiveExecutor<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> {
@@ -78,7 +78,7 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> LiveExecutor<C, T, X> {
         &self,
         job: &Job,
         checkpointer: &K,
-    ) -> Result<(UploadRef, UploadCredentials), UploadErr> {
+    ) -> Result<(UploadCheckpoint, UploadCredentials), UploadErr> {
         let token = self.token().await?;
         let payload = new_upl_request(job, &Local);
         let resp = http::with_retry(|| async {
@@ -94,7 +94,7 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> LiveExecutor<C, T, X> {
             "upload: created upload {} for file {} (scheme {:?})",
             resp.upload.id, job.file, resp.credentials.scheme
         );
-        let upload = UploadRef {
+        let upload = UploadCheckpoint {
             id: resp.upload.id,
             bucket_name: resp.upload.destination.bucket_name,
             object_key: resp.upload.destination.object_key,

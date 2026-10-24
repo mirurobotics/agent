@@ -4,7 +4,9 @@ use std::sync::{Arc, Mutex};
 
 // internal crates
 use miru_agent::data_uploads::upload::errors::ExecutorErr;
-use miru_agent::data_uploads::upload::{Checkpointer, Job, UploadErr, UploadExecutor, UploadRef};
+use miru_agent::data_uploads::upload::{
+    Checkpointer, Job, UploadCheckpoint, UploadErr, UploadExecutor,
+};
 
 // external crates
 use tokio::sync::{mpsc, oneshot};
@@ -23,7 +25,7 @@ pub enum MockStep {
     Hang(oneshot::Receiver<Result<(), UploadErr>>),
     /// Save the upload, notify the started receiver again once it is saved,
     /// then run the inner step.
-    SaveThen(UploadRef, Box<MockStep>),
+    SaveThen(UploadCheckpoint, Box<MockStep>),
 }
 
 pub struct MockUploadExecutor {

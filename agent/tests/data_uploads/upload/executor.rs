@@ -11,14 +11,15 @@ use crate::mocks::{
     upload_executor::{MockStep, MockUploadExecutor},
 };
 use crate::test_utils::upload::{
-    make_job, pending_response, response_with_status, s3_credentials, token_manager, upload_ref,
+    make_job, pending_response, response_with_status, s3_credentials, token_manager,
+    upload_checkpoint,
 };
 use backend_api::models::{CreateUploadRequest, UploadSource, UploadStatus, UploadWithCredentials};
 use miru_agent::authn::errors::MockError as AuthnMockError;
 use miru_agent::authn::AuthnErr;
 use miru_agent::data_uploads::upload::executor::new_upl_request;
 use miru_agent::data_uploads::upload::{
-    Job, LiveExecutor, MultipartRef, UploadErr, UploadExecutor, UploadRef,
+    Job, LiveExecutor, MultipartCheckpoint, UploadCheckpoint, UploadErr, UploadExecutor,
 };
 use miru_agent::errors::Error;
 use miru_agent::filesys::File;
@@ -95,7 +96,7 @@ async fn happy_path_creates_transfers_confirms() {
     // metadata) and the job's file.
     assert_eq!(
         transfer.recorded_calls(),
-        vec![(s3_credentials(), upload_ref(), job.file.clone())]
+        vec![(s3_credentials(), upload_checkpoint(), job.file.clone())]
     );
     // The captured HTTP exchange: create (with the job's payload and the token
     // manager's bearer string) then confirm for the created upload's id.
@@ -333,22 +334,22 @@ fn new_upl_request_sends_mtime_with_device_offset() {
 // =========================== Reusing the upload ================================= //
 
 /// A job an earlier attempt already saved `upload` on.
-fn job_with(upload: UploadRef) -> Job {
+fn job_with(upload: UploadCheckpoint) -> Job {
     let mut job = make_job("a.log");
     job.upload = Some(upload);
     job
 }
 
 /// The upload with a multipart upload in progress.
-fn upload_mid_transfer() -> UploadRef {
-    UploadRef {
-        multipart: Some(MultipartRef {
+fn upload_mid_transfer() -> UploadCheckpoint {
+    UploadCheckpoint {
+        multipart: Some(MultipartCheckpoint {
             id: "mpu_1".to_string(),
             size: 42,
             mtime: Utc.timestamp_opt(1_700_000_000, 0).unwrap(),
             part_size: 32,
         }),
-        ..upload_ref()
+        ..upload_checkpoint()
     }
 }
 
@@ -372,7 +373,7 @@ async fn new_upload_is_saved_before_the_transfer() {
         .await
         .unwrap_err();
 
-    assert_eq!(checkpointer.saved(), [upload_ref()]);
+    assert_eq!(checkpointer.saved(), [upload_checkpoint()]);
 }
 
 // A retry gets fresh credentials for the saved upload instead of creating a
@@ -412,7 +413,7 @@ async fn already_uploaded_upload_is_done() {
     let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone());
 
     executor
-        .upload(&job_with(upload_ref()), &checkpointer)
+        .upload(&job_with(upload_checkpoint()), &checkpointer)
         .await
         .unwrap();
 
@@ -456,10 +457,14 @@ async fn gone_upload_is_replaced_with_a_new_one() {
             ],
             "status {status}"
         );
-        assert_eq!(checkpointer.saved(), vec![upload_ref()], "status {status}");
+        assert_eq!(
+            checkpointer.saved(),
+            vec![upload_checkpoint()],
+            "status {status}"
+        );
         assert_eq!(
             transfer.recorded_calls()[0].1,
-            upload_ref(),
+            upload_checkpoint(),
             "status {status}"
         );
     }
@@ -475,7 +480,7 @@ async fn credentials_failure_keeps_the_upload() {
     let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone());
 
     let err = executor
-        .upload(&job_with(upload_ref()), &checkpointer)
+        .upload(&job_with(upload_checkpoint()), &checkpointer)
         .await
         .unwrap_err();
 

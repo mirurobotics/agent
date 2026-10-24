@@ -9,7 +9,7 @@ use crate::data_uploads::{
     upload::{
         errors::*,
         executor::{Checkpointer, UploadExecutor},
-        job::{Job, UploadRef},
+        job::{Job, UploadCheckpoint},
         queue::{QueueEntry, QueueSnapshotFile},
         uploader_impl::{UploaderImpl, UploaderOptions},
     },
@@ -65,14 +65,14 @@ pub(crate) enum Command {
 
 /// An upload an attempt saves, and the sender the worker acks once it is on
 /// disk.
-type SaveRequest = (UploadRef, oneshot::Sender<()>);
+type SaveRequest = (UploadCheckpoint, oneshot::Sender<()>);
 
 /// Hands an attempt's saves to the worker, which owns the queue file, and waits
 /// for each to reach disk.
 pub(crate) struct ChannelCheckpointer(Sender<SaveRequest>);
 
 impl Checkpointer for ChannelCheckpointer {
-    async fn save(&self, upload: &UploadRef) {
+    async fn save(&self, upload: &UploadCheckpoint) {
         let (ack_tx, ack_rx) = oneshot::channel();
         // A failed send means the worker dropped the attempt; it drops the ack
         // sender too, so the wait returns at once.
