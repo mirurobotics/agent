@@ -10,7 +10,6 @@ use backend_api::models::{CreateCalibrationRequest, InstanceContent};
 
 // external crates
 use tracing::warn;
-use uuid::Uuid;
 
 /// The seam between the upload worker and Miru.
 ///
@@ -18,13 +17,10 @@ use uuid::Uuid;
 ///
 /// The worker drops an in-flight `send` on shutdown. The report is removed
 /// from the queue only after `send` returns `Ok`, so an interrupted send is
-/// retried on the next boot with the same `report_id`, which Miru records once.
+/// retried on the next boot with the report's own `report_id`, which Miru
+/// records once.
 pub trait Sender: Send + Sync {
-    fn send(
-        &self,
-        report_id: Uuid,
-        report: Report,
-    ) -> impl Future<Output = Result<(), CalibrationsErr>> + Send;
+    fn send(&self, report: Report) -> impl Future<Output = Result<(), CalibrationsErr>> + Send;
 }
 
 /// Sends each report as one `POST /calibrations`, with no retry of its own:
@@ -44,8 +40,8 @@ impl<C: ClientI, T: TokenManagerExt> HttpSender<C, T> {
 }
 
 impl<C: ClientI, T: TokenManagerExt> Sender for HttpSender<C, T> {
-    async fn send(&self, report_id: Uuid, report: Report) -> Result<(), CalibrationsErr> {
-        let payload = new_request(report_id, report);
+    async fn send(&self, report: Report) -> Result<(), CalibrationsErr> {
+        let payload = new_request(report);
         let token = self.token_mngr.get_token().await?;
         let params = http::calibrations::CreateParams {
             payload: &payload,
@@ -64,16 +60,16 @@ impl<C: ClientI, T: TokenManagerExt> Sender for HttpSender<C, T> {
     }
 }
 
-/// The backend request for `report`, queued as `report_id`. It takes `report`
-/// by value so the data moves into the request instead of being copied.
-pub fn new_request(report_id: Uuid, report: Report) -> CreateCalibrationRequest {
+/// The backend request for `report`. It takes `report` by value so the data
+/// moves into the request instead of being copied.
+pub fn new_request(report: Report) -> CreateCalibrationRequest {
     let metadata = report.metadata;
     let content = InstanceContent {
         format: (&metadata.format).into(),
         data: report.data,
     };
     CreateCalibrationRequest {
-        report_id,
+        report_id: metadata.report_id,
         deployment_id: metadata.deployment_id,
         component: metadata.component,
         role: metadata.role,

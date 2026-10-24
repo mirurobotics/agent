@@ -119,8 +119,8 @@ impl Harness {
         self.uploader.as_ref().expect("spawned")
     }
 
-    async fn enqueue(&self, slug: &str) -> Uuid {
-        guard(self.uploader().enqueue(report(slug))).await.unwrap()
+    async fn enqueue(&self, slug: &str) {
+        guard(self.uploader().enqueue(report(slug))).await.unwrap();
     }
 
     async fn len(&self) -> usize {
@@ -279,7 +279,7 @@ async fn shutdown_mid_upload_keeps_the_report_for_replay() {
     let (_hold, hang) = oneshot::channel();
     h.sender.push(Step::Hang(hang));
     h.spawn().await;
-    let id = h.enqueue("a").await;
+    h.enqueue("a").await;
     h.await_started().await;
 
     h.stop().await;
@@ -289,6 +289,7 @@ async fn shutdown_mid_upload_keeps_the_report_for_replay() {
     // once
     h.spawn().await;
     h.await_drained(&["a", "a"]).await;
+    let id = report("a").metadata.report_id;
     assert_eq!(h.sender.report_ids(), [id, id]);
 }
 

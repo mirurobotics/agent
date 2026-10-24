@@ -28,7 +28,7 @@ pub enum Step {
 /// A scripted [`Sender`]. An empty script succeeds.
 pub struct MockCalibrationSender {
     script: Mutex<VecDeque<Step>>,
-    sent: Mutex<Vec<(Uuid, Report)>>,
+    sent: Mutex<Vec<Report>>,
     started_tx: mpsc::UnboundedSender<()>,
 }
 
@@ -52,21 +52,18 @@ impl MockCalibrationSender {
     /// The `component` of every report `send` was called with, in order.
     pub fn sent(&self) -> Vec<String> {
         let sent = self.sent.lock().unwrap();
-        sent.iter()
-            .map(|(_, r)| r.metadata.component.clone())
-            .collect()
+        sent.iter().map(|r| r.metadata.component.clone()).collect()
     }
 
-    /// The `report_id` of every `send` call, in order.
+    /// The `report_id` of every report `send` was called with, in order.
     pub fn report_ids(&self) -> Vec<Uuid> {
         let sent = self.sent.lock().unwrap();
-        sent.iter().map(|(id, _)| *id).collect()
+        sent.iter().map(|r| r.metadata.report_id).collect()
     }
 
     /// Every report `send` was called with, in order.
     pub fn reports(&self) -> Vec<Report> {
-        let sent = self.sent.lock().unwrap();
-        sent.iter().map(|(_, r)| r.clone()).collect()
+        self.sent.lock().unwrap().clone()
     }
 }
 
@@ -80,8 +77,8 @@ fn request_failed(status: u16) -> CalibrationsErr {
 }
 
 impl Sender for MockCalibrationSender {
-    async fn send(&self, report_id: Uuid, report: Report) -> Result<(), CalibrationsErr> {
-        self.sent.lock().unwrap().push((report_id, report));
+    async fn send(&self, report: Report) -> Result<(), CalibrationsErr> {
+        self.sent.lock().unwrap().push(report);
         let step = self.script.lock().unwrap().pop_front();
         // both guards are dropped: never hold a std Mutex across an await
         let _ = self.started_tx.send(());

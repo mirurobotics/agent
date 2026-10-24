@@ -18,7 +18,6 @@ use chrono::{DateTime, Utc};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{error, info};
-use uuid::Uuid;
 
 pub struct UploaderArgs<S, F, N> {
     /// Where the queue persists; `None` keeps it in memory only.
@@ -36,7 +35,7 @@ pub struct UploaderArgs<S, F, N> {
 enum Command {
     Enqueue {
         report: Box<Report>,
-        respond_to: oneshot::Sender<Result<Uuid, CalibrationsErr>>,
+        respond_to: oneshot::Sender<Result<(), CalibrationsErr>>,
     },
     Len {
         respond_to: oneshot::Sender<usize>,
@@ -133,7 +132,7 @@ where
         };
         match cmd {
             Command::Enqueue { report, respond_to } => {
-                let result = self.uploader.enqueue(*report).await;
+                let result = self.uploader.enqueue(*report).await.map(drop);
                 respond(respond_to, result, "enqueue");
             }
             Command::Len { respond_to } => respond(respond_to, self.uploader.len(), "len"),
@@ -191,7 +190,7 @@ impl Uploader {
     /// Queue `report` durably. A full queue is the 507
     /// [`CalibrationsErr::QueueFullErr`], and a report over the size cap the
     /// 413 [`CalibrationsErr::TooLargeErr`].
-    pub async fn enqueue(&self, report: Report) -> Result<Uuid, CalibrationsErr> {
+    pub async fn enqueue(&self, report: Report) -> Result<(), CalibrationsErr> {
         self.send_command("enqueue", |respond_to| Command::Enqueue {
             report: Box::new(report),
             respond_to,

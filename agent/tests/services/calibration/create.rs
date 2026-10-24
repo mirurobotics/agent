@@ -103,7 +103,7 @@ fn params() -> CreateParams {
 }
 
 #[tokio::test]
-async fn queues_the_report_stamped_with_the_time() {
+async fn queues_the_report_stamped_with_its_id_and_the_time() {
     let mut f = Fixture::new().await;
 
     let created = f.create(params()).await.unwrap();
@@ -111,6 +111,7 @@ async fn queues_the_report_stamped_with_the_time() {
     assert_eq!(created.reported_at, received_at());
     let expected = Report {
         metadata: ReportMetadata {
+            report_id: created.report_id,
             component: "arm".to_string(),
             format: InstanceFormat::Yaml,
             role: Some("left".to_string()),
@@ -122,16 +123,6 @@ async fn queues_the_report_stamped_with_the_time() {
         data: params().data,
     };
     assert_eq!(f.uploaded().await, expected);
-}
-
-#[tokio::test]
-async fn returns_the_id_the_report_is_uploaded_under() {
-    let mut f = Fixture::new().await;
-
-    let created = f.create(params()).await.unwrap();
-
-    f.uploaded().await;
-    assert_eq!(f.sender.report_ids(), [created.report_id]);
 }
 
 #[tokio::test]

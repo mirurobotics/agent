@@ -6,7 +6,7 @@ use std::sync::Arc;
 // internal crates
 use crate::mocks::http_client::{Call, MockClient};
 use crate::mocks::stub_token_manager::StubTokenManager;
-use crate::test_utils::calibrations::{received_at, report};
+use crate::test_utils::calibrations::{received_at, report, report_id};
 use backend_api::models::{
     Calibration, CreateCalibrationRequest, InstanceContent, InstanceFormat as BackendFormat,
 };
@@ -16,13 +16,6 @@ use miru_agent::errors::Error;
 use miru_agent::http::errors::{HTTPErr, MockErr, RequestFailed, UnmarshalJSONErr};
 use miru_agent::http::request::Params;
 use miru_agent::models::InstanceFormat;
-
-// external crates
-use uuid::Uuid;
-
-fn report_id() -> Uuid {
-    Uuid::from_u128(0x0b6f3c2e_6a51_4e0f_9a43_2f1d7c9e8b10)
-}
 
 fn full_report() -> Report {
     let mut report = report("arm");
@@ -54,7 +47,7 @@ pub mod new_request {
 
     #[test]
     fn maps_the_metadata() {
-        let request = new_request(report_id(), full_report());
+        let request = new_request(full_report());
 
         let expected = CreateCalibrationRequest {
             report_id: report_id(),
@@ -78,7 +71,7 @@ pub mod new_request {
         report.metadata.format = InstanceFormat::Yaml;
         report.data = "offset: [1, 2, 3]\n".to_string();
 
-        let request = new_request(report_id(), report);
+        let request = new_request(report);
 
         assert_eq!(
             *request.content,
@@ -98,7 +91,7 @@ pub mod send {
         let client = Arc::new(MockClient::default());
 
         sender(&client, StubTokenManager::ok("tok"))
-            .send(report_id(), report("arm"))
+            .send(report("arm"))
             .await
             .unwrap();
 
@@ -108,7 +101,7 @@ pub mod send {
         assert_eq!(requests[0].token.as_deref(), Some("tok"));
         let body = requests[0].body.as_deref().unwrap();
         let sent: CreateCalibrationRequest = serde_json::from_str(body).unwrap();
-        assert_eq!(sent, new_request(report_id(), report("arm")));
+        assert_eq!(sent, new_request(report("arm")));
     }
 
     #[tokio::test]
@@ -117,7 +110,7 @@ pub mod send {
         client.set_create_calibration(|| Err(request_failed(422)));
 
         let err = sender(&client, StubTokenManager::ok("tok"))
-            .send(report_id(), report("arm"))
+            .send(report("arm"))
             .await
             .unwrap_err();
 
@@ -140,7 +133,7 @@ pub mod send {
         });
 
         sender(&client, StubTokenManager::ok("tok"))
-            .send(report_id(), report("arm"))
+            .send(report("arm"))
             .await
             .unwrap();
 
@@ -157,7 +150,7 @@ pub mod send {
         });
 
         let err = sender(&client, StubTokenManager::ok("tok"))
-            .send(report_id(), report("arm"))
+            .send(report("arm"))
             .await
             .unwrap_err();
 
@@ -175,7 +168,7 @@ pub mod send {
         }));
 
         let err = sender(&client, tokens)
-            .send(report_id(), report("arm"))
+            .send(report("arm"))
             .await
             .unwrap_err();
 
@@ -197,7 +190,7 @@ pub mod send {
         let tokens = StubTokenManager::err(AuthnErr::HTTPErr(request_failed(403)));
 
         let err = sender(&client, tokens)
-            .send(report_id(), report("arm"))
+            .send(report("arm"))
             .await
             .unwrap_err();
 

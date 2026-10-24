@@ -14,16 +14,23 @@ use miru_agent::models::InstanceFormat;
 
 // external crates
 use chrono::{DateTime, Utc};
+use uuid::Uuid;
 
 /// When every fixture report was received.
 pub fn received_at() -> DateTime<Utc> {
     DateTime::from_timestamp(1000, 0).unwrap()
 }
 
+/// The `report_id` of every fixture report.
+pub fn report_id() -> Uuid {
+    Uuid::from_u128(0x0b6f3c2e_6a51_4e0f_9a43_2f1d7c9e8b10)
+}
+
 /// A sendable report told apart from others by its `component`.
 pub fn report(slug: &str) -> Report {
     Report {
         metadata: ReportMetadata {
+            report_id: report_id(),
             component: slug.to_string(),
             format: InstanceFormat::Json,
             role: None,

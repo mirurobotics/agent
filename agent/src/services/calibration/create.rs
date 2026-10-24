@@ -23,7 +23,7 @@ pub struct CreateParams {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Created {
-    /// The report's queue entry id, sent to Miru with every upload of it.
+    /// The report's id, sent to Miru with every upload of it.
     pub report_id: Uuid,
     /// When the agent received the report; Miru records it as `reported_at`.
     pub reported_at: DateTime<Utc>,
@@ -42,8 +42,10 @@ pub async fn create(
     let deployment_id = disk::deployments::find_deployed(deployments)
         .await?
         .map(|deployment| deployment.id);
+    let report_id = Uuid::new_v4();
     let report = Report {
         metadata: ReportMetadata {
+            report_id,
             component: params.component,
             format: params.format,
             role: params.role,
@@ -54,7 +56,7 @@ pub async fn create(
         },
         data: params.data,
     };
-    let report_id = uploader.enqueue(report).await?;
+    uploader.enqueue(report).await?;
     Ok(Created {
         report_id,
         reported_at: now,
