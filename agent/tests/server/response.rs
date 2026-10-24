@@ -4,6 +4,7 @@ use miru_agent::models::{
     Deployment, Device, DeviceStatus, DplActivity, DplErrStatus, DplTarget, FileRule,
     FileRuleRetention, FileRuleSource, FileRuleUpload, GitCommit, Release,
 };
+use miru_agent::services::calibration::Created;
 
 // external crates
 use chrono::{DateTime, TimeZone, Utc};
@@ -303,6 +304,7 @@ pub mod file_rule_response {
             bucket_id: "bkt-1".into(),
             bucket_name: "fleet-logs".into(),
             path: "robots/".into(),
+            bundle: Some(vec!["robot".into()]),
         }
     }
 
@@ -351,6 +353,7 @@ pub mod file_rule_response {
                 bucket_id: "bkt-1".into(),
                 bucket_name: "fleet-logs".into(),
                 path: "robots/".into(),
+                bundle: Some(vec!["robot".into()]),
             })),
             retention: Some(Box::new(openapi::FileRuleRetention {
                 require_upload: Some(true),
@@ -463,6 +466,23 @@ pub mod git_commit_response {
         };
 
         let sdk: openapi::GitCommit = (&gc).into();
+        assert_eq!(sdk, expected);
+    }
+}
+
+pub mod create_calibration_response {
+    use super::*;
+
+    #[test]
+    fn converts_created() {
+        let t = fixed_time();
+        let created = Created { reported_at: t };
+
+        let expected = openapi::CreateCalibrationResponse {
+            reported_at: t.to_rfc3339(),
+        };
+
+        let sdk: openapi::CreateCalibrationResponse = (&created).into();
         assert_eq!(sdk, expected);
     }
 }

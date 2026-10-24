@@ -32,7 +32,7 @@ pub struct BaseUpload {
     /// Destination-side details of where the file was uploaded.
     #[serde(rename = "destination")]
     pub destination: Box<models::UploadDestination>,
-    /// The digest of the uploaded file.
+    /// The SHA-256 digest of the uploaded file, formatted as `sha256:` followed by 64 lowercase hex characters.
     #[serde(rename = "digest")]
     pub digest: String,
     /// The size of the uploaded file in bytes.

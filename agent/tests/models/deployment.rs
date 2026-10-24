@@ -10,7 +10,10 @@ use chrono::{DateTime, TimeDelta, Utc};
 use serde_json::json;
 
 // harness
-use crate::models::harnesses::{serde_tests, ModelFixture, OptionalField, RequiredField};
+use crate::models::harnesses::{
+    serde_tests, status_enum_tests, ModelFixture, OptionalField, RequiredField, StatusCase,
+    StatusEnumFixture,
+};
 
 // ─── model tests ───────────────────────────────────────────────────────────
 
@@ -171,329 +174,185 @@ fn defaults() {
 
 // ─── target status enum tests ─────────────────────────────────────────────
 
-#[test]
-fn target_status_backend_conversions() {
-    struct TestCase {
-        storage: DplTarget,
-        backend: backend_client::DeploymentTargetStatus,
-    }
+impl StatusEnumFixture for DplTarget {
+    type Backend = backend_client::DeploymentTargetStatus;
+    type Agent = agent_server::DeploymentTargetStatus;
 
-    let test_cases = vec![
-        TestCase {
-            storage: DplTarget::Staged,
-            backend: backend_client::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_STAGED,
-        },
-        TestCase {
-            storage: DplTarget::Deployed,
-            backend: backend_client::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_DEPLOYED,
-        },
-        TestCase {
-            storage: DplTarget::Archived,
-            backend: backend_client::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_ARCHIVED,
-        },
-    ];
-
-    for test_case in test_cases {
-        assert_eq!(
-            Into::<DplTarget>::into(&test_case.backend),
-            test_case.storage
-        );
-        assert_eq!(
-            Into::<backend_client::DeploymentTargetStatus>::into(&test_case.storage),
-            test_case.backend
-        );
+    fn cases() -> Vec<StatusCase<Self>> {
+        vec![
+            StatusCase {
+                variant: DplTarget::Staged,
+                wire: "staged",
+                backend: backend_client::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_STAGED,
+                agent: agent_server::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_STAGED,
+            },
+            StatusCase {
+                variant: DplTarget::Deployed,
+                wire: "deployed",
+                backend: backend_client::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_DEPLOYED,
+                agent: agent_server::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_DEPLOYED,
+            },
+            StatusCase {
+                variant: DplTarget::Archived,
+                wire: "archived",
+                backend: backend_client::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_ARCHIVED,
+                agent: agent_server::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_ARCHIVED,
+            },
+        ]
     }
 }
 
-#[test]
-fn target_status_sdk_conversions() {
-    struct TestCase {
-        storage: DplTarget,
-        sdk: agent_server::DeploymentTargetStatus,
-    }
-
-    let test_cases = vec![
-        TestCase {
-            storage: DplTarget::Staged,
-            sdk: agent_server::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_STAGED,
-        },
-        TestCase {
-            storage: DplTarget::Deployed,
-            sdk: agent_server::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_DEPLOYED,
-        },
-        TestCase {
-            storage: DplTarget::Archived,
-            sdk: agent_server::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_ARCHIVED,
-        },
-    ];
-
-    for test_case in test_cases {
-        assert_eq!(
-            Into::<agent_server::DeploymentTargetStatus>::into(&test_case.storage),
-            test_case.sdk
-        );
-    }
-}
+status_enum_tests!(DplTarget, backend, agent);
 
 // ─── activity status enum tests ──────────────────────────────────────────────
 
-#[test]
-fn activity_status_backend_conversions() {
-    struct TestCase {
-        storage: DplActivity,
-        backend: backend_client::DeploymentActivityStatus,
-    }
+impl StatusEnumFixture for DplActivity {
+    type Backend = backend_client::DeploymentActivityStatus;
+    type Agent = agent_server::DeploymentActivityStatus;
 
-    let test_cases = vec![
-        TestCase {
-            storage: DplActivity::Drifted,
-            backend: backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DRIFTED,
-        },
-        TestCase {
-            storage: DplActivity::Staged,
-            backend: backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_STAGED,
-        },
-        TestCase {
-            storage: DplActivity::Queued,
-            backend: backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_QUEUED,
-        },
-        TestCase {
-            storage: DplActivity::Deployed,
-            backend: backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED,
-        },
-        TestCase {
-            storage: DplActivity::Removing,
-            backend: backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_REMOVING,
-        },
-        TestCase {
-            storage: DplActivity::Archived,
-            backend: backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_ARCHIVED,
-        },
-    ];
-
-    for test_case in test_cases {
-        assert_eq!(
-            Into::<DplActivity>::into(&test_case.backend),
-            test_case.storage
-        );
-        assert_eq!(
-            Into::<backend_client::DeploymentActivityStatus>::into(&test_case.storage),
-            test_case.backend
-        );
-    }
-}
-
-#[test]
-fn activity_status_sdk_conversions() {
-    struct TestCase {
-        storage: DplActivity,
-        sdk: agent_server::DeploymentActivityStatus,
-    }
-
-    let test_cases = vec![
-        TestCase {
-            storage: DplActivity::Drifted,
-            sdk: agent_server::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DRIFTED,
-        },
-        TestCase {
-            storage: DplActivity::Staged,
-            sdk: agent_server::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_STAGED,
-        },
-        TestCase {
-            storage: DplActivity::Queued,
-            sdk: agent_server::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_QUEUED,
-        },
-        TestCase {
-            storage: DplActivity::Deployed,
-            sdk: agent_server::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED,
-        },
-        TestCase {
-            storage: DplActivity::Removing,
-            sdk: agent_server::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_REMOVING,
-        },
-        TestCase {
-            storage: DplActivity::Archived,
-            sdk: agent_server::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_ARCHIVED,
-        },
-    ];
-
-    for test_case in test_cases {
-        assert_eq!(
-            Into::<agent_server::DeploymentActivityStatus>::into(&test_case.storage),
-            test_case.sdk
-        );
+    fn cases() -> Vec<StatusCase<Self>> {
+        vec![
+            StatusCase {
+                variant: DplActivity::Drifted,
+                wire: "drifted",
+                backend:
+                    backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DRIFTED,
+                agent: agent_server::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DRIFTED,
+            },
+            StatusCase {
+                variant: DplActivity::Staged,
+                wire: "staged",
+                backend:
+                    backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_STAGED,
+                agent: agent_server::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_STAGED,
+            },
+            StatusCase {
+                variant: DplActivity::Queued,
+                wire: "queued",
+                backend:
+                    backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_QUEUED,
+                agent: agent_server::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_QUEUED,
+            },
+            StatusCase {
+                variant: DplActivity::Deployed,
+                wire: "deployed",
+                backend:
+                    backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED,
+                agent: agent_server::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED,
+            },
+            StatusCase {
+                variant: DplActivity::Removing,
+                wire: "removing",
+                backend:
+                    backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_REMOVING,
+                agent: agent_server::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_REMOVING,
+            },
+            StatusCase {
+                variant: DplActivity::Archived,
+                wire: "archived",
+                backend:
+                    backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_ARCHIVED,
+                agent: agent_server::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_ARCHIVED,
+            },
+        ]
     }
 }
+
+status_enum_tests!(DplActivity, backend, agent);
 
 // ─── error status enum tests ──────────────────────────────────────────────
 
-#[test]
-fn error_status_backend_conversions() {
-    struct TestCase {
-        storage: DplErrStatus,
-        backend: backend_client::DeploymentErrorStatus,
-    }
+impl StatusEnumFixture for DplErrStatus {
+    type Backend = backend_client::DeploymentErrorStatus;
+    type Agent = agent_server::DeploymentErrorStatus;
 
-    let test_cases = vec![
-        TestCase {
-            storage: DplErrStatus::None,
-            backend: backend_client::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_NONE,
-        },
-        TestCase {
-            storage: DplErrStatus::Failed,
-            backend: backend_client::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_FAILED,
-        },
-        TestCase {
-            storage: DplErrStatus::Retrying,
-            backend: backend_client::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_RETRYING,
-        },
-    ];
-
-    for test_case in test_cases {
-        assert_eq!(
-            Into::<DplErrStatus>::into(&test_case.backend),
-            test_case.storage
-        );
-        assert_eq!(
-            Into::<backend_client::DeploymentErrorStatus>::into(&test_case.storage),
-            test_case.backend
-        );
+    fn cases() -> Vec<StatusCase<Self>> {
+        vec![
+            StatusCase {
+                variant: DplErrStatus::None,
+                wire: "none",
+                backend: backend_client::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_NONE,
+                agent: agent_server::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_NONE,
+            },
+            StatusCase {
+                variant: DplErrStatus::Failed,
+                wire: "failed",
+                backend: backend_client::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_FAILED,
+                agent: agent_server::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_FAILED,
+            },
+            StatusCase {
+                variant: DplErrStatus::Retrying,
+                wire: "retrying",
+                backend: backend_client::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_RETRYING,
+                agent: agent_server::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_RETRYING,
+            },
+        ]
     }
 }
 
-#[test]
-fn error_status_sdk_conversions() {
-    struct TestCase {
-        storage: DplErrStatus,
-        sdk: agent_server::DeploymentErrorStatus,
-    }
+status_enum_tests!(DplErrStatus, backend, agent);
 
-    let test_cases = vec![
-        TestCase {
-            storage: DplErrStatus::None,
-            sdk: agent_server::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_NONE,
-        },
-        TestCase {
-            storage: DplErrStatus::Failed,
-            sdk: agent_server::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_FAILED,
-        },
-        TestCase {
-            storage: DplErrStatus::Retrying,
-            sdk: agent_server::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_RETRYING,
-        },
-    ];
+// ─── status enum tests ───────────────────────────────────────────────────────
 
-    for test_case in test_cases {
-        assert_eq!(
-            Into::<agent_server::DeploymentErrorStatus>::into(&test_case.storage),
-            test_case.sdk
-        );
-    }
-}
+impl StatusEnumFixture for DplStatus {
+    type Backend = backend_client::DeploymentStatus;
+    type Agent = agent_server::DeploymentStatus;
 
-#[test]
-fn status_backend_conversion() {
-    struct TestCase {
-        storage: DplStatus,
-        backend: backend_client::DeploymentStatus,
-    }
-
-    let test_cases = vec![
-        TestCase {
-            storage: DplStatus::Drifted,
-            backend: backend_client::DeploymentStatus::DEPLOYMENT_STATUS_DRIFTED,
-        },
-        TestCase {
-            storage: DplStatus::Staged,
-            backend: backend_client::DeploymentStatus::DEPLOYMENT_STATUS_STAGED,
-        },
-        TestCase {
-            storage: DplStatus::Queued,
-            backend: backend_client::DeploymentStatus::DEPLOYMENT_STATUS_QUEUED,
-        },
-        TestCase {
-            storage: DplStatus::Deployed,
-            backend: backend_client::DeploymentStatus::DEPLOYMENT_STATUS_DEPLOYED,
-        },
-        TestCase {
-            storage: DplStatus::Removing,
-            backend: backend_client::DeploymentStatus::DEPLOYMENT_STATUS_REMOVING,
-        },
-        TestCase {
-            storage: DplStatus::Archived,
-            backend: backend_client::DeploymentStatus::DEPLOYMENT_STATUS_ARCHIVED,
-        },
-        TestCase {
-            storage: DplStatus::Failed,
-            backend: backend_client::DeploymentStatus::DEPLOYMENT_STATUS_FAILED,
-        },
-        TestCase {
-            storage: DplStatus::Retrying,
-            backend: backend_client::DeploymentStatus::DEPLOYMENT_STATUS_RETRYING,
-        },
-    ];
-
-    for test_case in test_cases {
-        assert_eq!(
-            Into::<DplStatus>::into(&test_case.backend),
-            test_case.storage
-        );
-        assert_eq!(
-            Into::<backend_client::DeploymentStatus>::into(&test_case.storage),
-            test_case.backend
-        );
+    fn cases() -> Vec<StatusCase<Self>> {
+        vec![
+            StatusCase {
+                variant: DplStatus::Drifted,
+                wire: "drifted",
+                backend: backend_client::DeploymentStatus::DEPLOYMENT_STATUS_DRIFTED,
+                agent: agent_server::DeploymentStatus::DEPLOYMENT_STATUS_DRIFTED,
+            },
+            StatusCase {
+                variant: DplStatus::Staged,
+                wire: "staged",
+                backend: backend_client::DeploymentStatus::DEPLOYMENT_STATUS_STAGED,
+                agent: agent_server::DeploymentStatus::DEPLOYMENT_STATUS_STAGED,
+            },
+            StatusCase {
+                variant: DplStatus::Queued,
+                wire: "queued",
+                backend: backend_client::DeploymentStatus::DEPLOYMENT_STATUS_QUEUED,
+                agent: agent_server::DeploymentStatus::DEPLOYMENT_STATUS_QUEUED,
+            },
+            StatusCase {
+                variant: DplStatus::Deployed,
+                wire: "deployed",
+                backend: backend_client::DeploymentStatus::DEPLOYMENT_STATUS_DEPLOYED,
+                agent: agent_server::DeploymentStatus::DEPLOYMENT_STATUS_DEPLOYED,
+            },
+            StatusCase {
+                variant: DplStatus::Removing,
+                wire: "removing",
+                backend: backend_client::DeploymentStatus::DEPLOYMENT_STATUS_REMOVING,
+                agent: agent_server::DeploymentStatus::DEPLOYMENT_STATUS_REMOVING,
+            },
+            StatusCase {
+                variant: DplStatus::Archived,
+                wire: "archived",
+                backend: backend_client::DeploymentStatus::DEPLOYMENT_STATUS_ARCHIVED,
+                agent: agent_server::DeploymentStatus::DEPLOYMENT_STATUS_ARCHIVED,
+            },
+            StatusCase {
+                variant: DplStatus::Failed,
+                wire: "failed",
+                backend: backend_client::DeploymentStatus::DEPLOYMENT_STATUS_FAILED,
+                agent: agent_server::DeploymentStatus::DEPLOYMENT_STATUS_FAILED,
+            },
+            StatusCase {
+                variant: DplStatus::Retrying,
+                wire: "retrying",
+                backend: backend_client::DeploymentStatus::DEPLOYMENT_STATUS_RETRYING,
+                agent: agent_server::DeploymentStatus::DEPLOYMENT_STATUS_RETRYING,
+            },
+        ]
     }
 }
 
-#[test]
-fn status_sdk_conversion() {
-    struct TestCase {
-        storage: DplStatus,
-        sdk: agent_server::DeploymentStatus,
-    }
-
-    let test_cases = vec![
-        TestCase {
-            storage: DplStatus::Drifted,
-            sdk: agent_server::DeploymentStatus::DEPLOYMENT_STATUS_DRIFTED,
-        },
-        TestCase {
-            storage: DplStatus::Staged,
-            sdk: agent_server::DeploymentStatus::DEPLOYMENT_STATUS_STAGED,
-        },
-        TestCase {
-            storage: DplStatus::Queued,
-            sdk: agent_server::DeploymentStatus::DEPLOYMENT_STATUS_QUEUED,
-        },
-        TestCase {
-            storage: DplStatus::Deployed,
-            sdk: agent_server::DeploymentStatus::DEPLOYMENT_STATUS_DEPLOYED,
-        },
-        TestCase {
-            storage: DplStatus::Removing,
-            sdk: agent_server::DeploymentStatus::DEPLOYMENT_STATUS_REMOVING,
-        },
-        TestCase {
-            storage: DplStatus::Archived,
-            sdk: agent_server::DeploymentStatus::DEPLOYMENT_STATUS_ARCHIVED,
-        },
-        TestCase {
-            storage: DplStatus::Failed,
-            sdk: agent_server::DeploymentStatus::DEPLOYMENT_STATUS_FAILED,
-        },
-        TestCase {
-            storage: DplStatus::Retrying,
-            sdk: agent_server::DeploymentStatus::DEPLOYMENT_STATUS_RETRYING,
-        },
-    ];
-
-    for test_case in test_cases {
-        assert_eq!(
-            Into::<agent_server::DeploymentStatus>::into(&test_case.storage),
-            test_case.sdk
-        );
-    }
-}
+status_enum_tests!(DplStatus, backend, agent);
 
 #[test]
 fn status_from_activity_and_error() {

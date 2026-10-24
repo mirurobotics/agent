@@ -2,7 +2,7 @@
 use std::collections::{HashMap, HashSet};
 
 // internal crates
-use crate::filesys::{state_file::SingleThreadStateFile, File};
+use crate::filesys::{state_file::StateFile, File};
 use crate::models::{Deployment, FileRule, FileRuleID, Patch};
 
 // external crates
@@ -149,7 +149,7 @@ impl Patch<ScannerSnapshot> for ScannerSnapshot {
     }
 }
 
-pub type ScanSnapshotFile = SingleThreadStateFile<ScannerSnapshot, ScannerSnapshot>;
+pub type ScanSnapshotFile = StateFile<ScannerSnapshot, ScannerSnapshot>;
 
 #[cfg(test)]
 mod tests {

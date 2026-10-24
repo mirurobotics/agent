@@ -116,6 +116,8 @@ fn backend_upload() -> backend_client::FileRuleUpload {
         bucket_id: "buck_123".to_string(),
         bucket_name: "my-bucket".to_string(),
         path: "{device_id}/logs".to_string(),
+        timezone: backend_client::FileRuleUploadTimezone::FILE_RULE_UPLOAD_TIMEZONE_UTC,
+        bundle: Some(vec!["camera".to_string()]),
     }
 }
 
@@ -172,6 +174,7 @@ fn from_backend() {
             bucket_id: "buck_123".to_string(),
             bucket_name: "my-bucket".to_string(),
             path: "{device_id}/logs".to_string(),
+            bundle: Some(vec!["camera".to_string()]),
         }),
         retention: Some(FileRuleRetention {
             require_upload: Some(true),
@@ -297,4 +300,15 @@ fn retention_default() {
             ttl_secs: 0,
         }
     );
+}
+
+#[test]
+fn requires_upload() {
+    for (require_upload, expected) in [(Some(true), true), (Some(false), false), (None, false)] {
+        let retention = FileRuleRetention {
+            require_upload,
+            ttl_secs: 0,
+        };
+        assert_eq!(retention.requires_upload(), expected, "{require_upload:?}");
+    }
 }

@@ -3,9 +3,9 @@ use std::sync::{Arc, Mutex};
 
 // internal crates
 use backend_api::models::{
-    BaseFileRule as BackendFileRule, Deployment as BackendDeployment, DeploymentList, Device,
-    Error as ApiError, ErrorResponse, GitCommit as BackendGitCommit, Release as BackendRelease,
-    TokenResponse, Upload, UploadCredentials, UploadWithCredentials,
+    BaseFileRule as BackendFileRule, Calibration, Deployment as BackendDeployment, DeploymentList,
+    Device, Error as ApiError, ErrorResponse, GitCommit as BackendGitCommit,
+    Release as BackendRelease, TokenResponse, Upload, UploadCredentials, UploadWithCredentials,
 };
 use miru_agent::http::{self, request::Params, HTTPErr};
 
@@ -37,6 +37,7 @@ pub enum Call {
     CreateUpload,
     VendUploadCredentials,
     ConfirmUpload,
+    CreateCalibration,
 }
 
 // ================================ CAPTURED REQUEST ================================ //
@@ -66,6 +67,7 @@ type CreateUploadFn = Mutex<Box<dyn Fn() -> Result<UploadWithCredentials, HTTPEr
 type VendUploadCredentialsFn =
     Mutex<Box<dyn Fn() -> Result<UploadCredentials, HTTPErr> + Send + Sync>>;
 type ConfirmUploadFn = Mutex<Box<dyn Fn() -> Result<Upload, HTTPErr> + Send + Sync>>;
+type CreateCalibrationFn = Mutex<Box<dyn Fn() -> Result<Calibration, HTTPErr> + Send + Sync>>;
 
 pub struct MockClient {
     pub provision_device_fn: Box<dyn Fn() -> Result<Device, HTTPErr> + Send + Sync>,
@@ -83,6 +85,7 @@ pub struct MockClient {
     pub create_upload_fn: CreateUploadFn,
     pub vend_upload_credentials_fn: VendUploadCredentialsFn,
     pub confirm_upload_fn: ConfirmUploadFn,
+    pub create_calibration_fn: CreateCalibrationFn,
     pub requests: Arc<Mutex<Vec<CapturedRequest>>>,
 }
 
@@ -104,6 +107,7 @@ impl Default for MockClient {
             create_upload_fn: Mutex::new(Box::new(|| Ok(UploadWithCredentials::default()))),
             vend_upload_credentials_fn: Mutex::new(Box::new(|| Ok(UploadCredentials::default()))),
             confirm_upload_fn: Mutex::new(Box::new(|| Ok(Upload::default()))),
+            create_calibration_fn: Mutex::new(Box::new(|| Ok(Calibration::default()))),
             requests: Arc::new(Mutex::new(Vec::new())),
         }
     }
@@ -201,6 +205,13 @@ impl MockClient {
         *self.confirm_upload_fn.lock().unwrap() = Box::new(f);
     }
 
+    pub fn set_create_calibration<F>(&self, f: F)
+    where
+        F: Fn() -> Result<Calibration, HTTPErr> + Send + Sync + 'static,
+    {
+        *self.create_calibration_fn.lock().unwrap() = Box::new(f);
+    }
+
     pub fn call_count(&self, target: Call) -> usize {
         self.requests
             .lock()
@@ -257,6 +268,7 @@ impl MockClient {
                 Call::ConfirmUpload
             }
             (m, p) if *m == Method::POST && p == "/uploads" => Call::CreateUpload,
+            (m, p) if *m == Method::POST && p == "/calibrations" => Call::CreateCalibration,
             _ => panic!("MockClient: unhandled route: {method} {path}"),
         }
     }
@@ -282,6 +294,7 @@ impl MockClient {
                 json(&(self.vend_upload_credentials_fn.lock().unwrap())()?)
             }
             Call::ConfirmUpload => json(&(self.confirm_upload_fn.lock().unwrap())()?),
+            Call::CreateCalibration => json(&(self.create_calibration_fn.lock().unwrap())()?),
             Call::GetConfigInstanceContent => {
                 // Extract ID from /config_instances/{id}/content
                 let id = path

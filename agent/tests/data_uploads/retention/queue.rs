@@ -1,10 +1,11 @@
 // internal crates
-use crate::data_uploads::queue::{enqueue, queue_suite, DEFAULT_CAPACITY};
+use crate::queue::file::{enqueue, queue_suite, DEFAULT_CAPACITY};
 use crate::test_utils::filesys::{abs_path, dirs as test_dirs};
 use miru_agent::data_uploads::retention::{
     DeleteQueueSnapshot, DeleteQueueSnapshotFile, Job, Queue,
 };
 use miru_agent::filesys::{files, File, WriteOptions};
+use miru_agent::queue::Persistence;
 
 // external crates
 use chrono::{DateTime, TimeDelta, Utc};
@@ -55,7 +56,7 @@ fn retention_job(name: &str) -> Job {
 
 queue_suite!(retention_job, "delete-generic-queue-test");
 
-/// The other state of the `due_at` hook: a retention job is not ready until
+/// The other state of the `ready_at` hook: a retention job is not ready until
 /// its TTL has elapsed, and `next_ready` / `count_ready` both honour it.
 #[tokio::test]
 async fn a_job_whose_ttl_has_not_elapsed_is_not_ready() {
@@ -63,7 +64,7 @@ async fn a_job_whose_ttl_has_not_elapsed_is_not_ready() {
     enqueue(&mut queue, retention_job_with_ttl("waiting", 5000)).await;
     enqueue(&mut queue, retention_job_with_ttl("due", 500)).await;
 
-    // due_at is inclusive: "due" is due at exactly `now`
+    // ready_at is inclusive: "due" is ready at exactly `now`
     assert_eq!(queue.count_ready(now()), 1);
     assert_eq!(
         queue.next_ready(now()).unwrap().job,
@@ -102,7 +103,7 @@ mod wire {
             .await
             .unwrap();
 
-        let queue = Queue::from_snapshot(8, open(&path).await);
+        let queue = Queue::from_snapshot(8, open(&path).await, Persistence::BestEffort);
 
         assert_eq!(queue.len(), 1);
         let entry = queue.next_ready(now()).unwrap();

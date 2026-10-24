@@ -1,22 +1,29 @@
 // internal crates
+use crate::errors::harnesses::{assert_error, Expected};
 use miru_agent::authn::errors::MockError as AuthnMockError;
 use miru_agent::authn::AuthnErr;
 use miru_agent::cache::errors::CacheElementNotFound;
 use miru_agent::cache::CacheErr;
+use miru_agent::calibrations::{CalibrationTooLargeErr, CalibrationsErr};
 use miru_agent::crypt::errors::InvalidJWTErr;
 use miru_agent::crypt::CryptErr;
 use miru_agent::data_uploads::scan::errors::InternalError as ScanInternalError;
 use miru_agent::data_uploads::scan::ScanErr;
 use miru_agent::disk::DiskErr;
+use miru_agent::errors::{Code, HTTPCode};
 use miru_agent::events::errors::{EventsErr, MalformedCursorErr};
 use miru_agent::filesys::errors::InvalidDirNameErr;
 use miru_agent::filesys::FileSysErr;
 use miru_agent::http::errors::MockErr as HTTPMockErr;
 use miru_agent::http::HTTPErr;
+use miru_agent::server::errors::{CalibrationRequestTooLargeErr, InvalidRequestErr};
 use miru_agent::server::ServerErr;
 use miru_agent::services::ServiceErr;
 use miru_agent::sync::errors::MockErr as SyncMockErr;
 use miru_agent::sync::SyncErr;
+
+// external crates
+use serde_json::json;
 
 fn authn_err() -> AuthnErr {
     AuthnErr::MockError(AuthnMockError {
@@ -28,6 +35,14 @@ fn authn_err() -> AuthnErr {
 fn cache_err() -> CacheErr {
     CacheErr::CacheElementNotFound(CacheElementNotFound {
         msg: "cache miss".to_string(),
+        trace: miru_agent::trace!(),
+    })
+}
+
+fn calibrations_err() -> CalibrationsErr {
+    CalibrationsErr::TooLargeErr(CalibrationTooLargeErr {
+        report_bytes: 200,
+        max_bytes: 100,
         trace: miru_agent::trace!(),
     })
 }
@@ -97,6 +112,12 @@ mod from_conversions {
     }
 
     #[test]
+    fn calibrations_err_maps_to_server_calibrations_err() {
+        let err: ServerErr = calibrations_err().into();
+        assert!(matches!(err, ServerErr::CalibrationsErr(_)));
+    }
+
+    #[test]
     fn crypt_err_maps_to_server_crypt_err() {
         let err: ServerErr = crypt_err().into();
         assert!(matches!(err, ServerErr::CryptErr(_)));
@@ -142,5 +163,34 @@ mod from_conversions {
     fn sync_err_maps_to_server_sync_err() {
         let err: ServerErr = sync_err().into();
         assert!(matches!(err, ServerErr::SyncErr(_)));
+    }
+}
+
+mod request_errors {
+    use super::*;
+
+    #[test]
+    fn an_invalid_request_is_422() {
+        let err = InvalidRequestErr {
+            msg: "missing field".to_string(),
+            trace: miru_agent::trace!(),
+        };
+
+        assert_error(
+            &err,
+            Expected::new(Code::InvalidRequest, HTTPCode::UNPROCESSABLE_ENTITY),
+        );
+    }
+
+    #[test]
+    fn an_oversized_calibration_request_is_413_with_its_cap() {
+        let err = CalibrationRequestTooLargeErr {
+            max_request_bytes: 100,
+            trace: miru_agent::trace!(),
+        };
+
+        let want = Expected::new(Code::CalibrationTooLarge, HTTPCode::PAYLOAD_TOO_LARGE)
+            .with_params(json!({ "max_request_bytes": 100 }));
+        assert_error(&err, want);
     }
 }

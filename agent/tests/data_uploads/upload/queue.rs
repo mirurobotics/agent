@@ -1,7 +1,7 @@
 //! The upload queue: the generic suite instantiated for `upload::Job`, plus
 //! the on-disk wire pin for `upload_queue.json`.
 //!
-//! Queue *behavior* is written once in `agent/tests/data_uploads/queue.rs` and
+//! Queue *behavior* is written once in `agent/tests/queue/file.rs` and
 //! run here via `queue_suite!` against this worker's job type. What cannot live
 //! there is the wire pin below: the generic suite is parameterized over the job
 //! type and so cannot spell a concrete payload, but the bytes on disk are a
@@ -9,11 +9,11 @@
 //! would wipe a real queue rather than fail.
 
 // internal crates
-use crate::data_uploads::queue::queue_suite;
+use crate::queue::file::queue_suite;
 use crate::test_utils::filesys::{abs_path, dirs as test_dirs};
-use miru_agent::data_uploads::queue::QueueJob;
 use miru_agent::data_uploads::upload::{Job, Queue, QueueEntry, QueueSnapshot, QueueSnapshotFile};
 use miru_agent::filesys::{files, File, WriteOptions};
+use miru_agent::queue::{Persistence, QueueJob};
 
 // external crates
 use chrono::{DateTime, Utc};
@@ -37,12 +37,12 @@ fn upload_job(name: &str) -> Job {
 
 queue_suite!(upload_job, "upload-generic-queue-test");
 
-/// An upload job is due the moment it arrives: `due_at` is `MIN_UTC`, so
+/// An upload job is ready the moment it arrives: `ready_at` is `MIN_UTC`, so
 /// readiness is decided by `next_attempt_at` alone.
 #[test]
-fn due_at_is_min_utc() {
+fn ready_at_is_min_utc() {
     assert_eq!(
-        QueueJob::due_at(&upload_job("a.log")),
+        QueueJob::ready_at(&upload_job("a.log")),
         DateTime::<Utc>::MIN_UTC
     );
 }
@@ -74,9 +74,9 @@ mod wire {
 
     /// Pins the persisted wire format on the read side: an entry is
     /// `{id, job, attempts, next_attempt_at}` with the job's fields nested
-    /// rather than flattened. `SingleThreadStateFile::new_with_default`
-    /// silently overwrites a snapshot it cannot parse, so a shape change would
-    /// wipe a live user's queue instead of erroring — this test is the guard.
+    /// rather than flattened. A snapshot that no longer parses is copied aside
+    /// and the queue starts empty, so a shape change would drop a live user's
+    /// queued jobs — this test is the guard.
     ///
     /// `upload_job` is deterministic, so the expected job comes from it. The
     /// raw `"file"` value is a plain host-rooted string rather than `File`'s
@@ -106,7 +106,7 @@ mod wire {
             .await
             .unwrap();
 
-        let queue = Queue::from_snapshot(8, open(&path).await);
+        let queue = Queue::from_snapshot(8, open(&path).await, Persistence::BestEffort);
 
         assert_eq!(queue.len(), 1);
         let entry = queue.next_ready(Utc::now()).unwrap();
@@ -124,7 +124,7 @@ mod wire {
         let path = dir.to_dir().file("upload_queue.json");
 
         {
-            let mut queue = Queue::from_snapshot(8, open(&path).await);
+            let mut queue = Queue::from_snapshot(8, open(&path).await, Persistence::BestEffort);
             queue.enqueue(make_job("a.log")).await.unwrap();
         }
 
@@ -181,9 +181,9 @@ mod wire {
             .await
             .unwrap();
 
-        // if deserialization failed, new_with_default would silently write an
-        // empty default snapshot and the pop below would find nothing
-        let queue = Queue::from_snapshot(8, open(&path).await);
+        // if deserialization failed, new_with_default would copy the file
+        // aside and start empty, and the pop below would find nothing
+        let queue = Queue::from_snapshot(8, open(&path).await, Persistence::BestEffort);
         let entry = queue.next_ready(Utc::now()).unwrap();
         assert_eq!(entry.attempts, 2);
         assert_eq!(entry.next_attempt_at, None);

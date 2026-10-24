@@ -1,7 +1,9 @@
 pub mod app;
 pub mod authn;
 pub mod cache;
+pub mod calibrations;
 pub mod cli;
+pub mod clock;
 pub mod cooldown;
 pub mod crypt;
 pub mod data_uploads;
@@ -20,6 +22,7 @@ pub mod platform;
 #[cfg(unix)]
 pub mod privilege;
 pub mod provisioning;
+pub mod queue;
 pub mod server;
 pub mod services;
 pub mod shutdown;

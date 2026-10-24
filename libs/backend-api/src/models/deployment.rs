@@ -34,10 +34,10 @@ pub struct Deployment {
     /// ID of the release.
     #[serde(rename = "release_id")]
     pub release_id: String,
-    /// Timestamp of when the device release was created.
+    /// Timestamp of when the deployment was created.
     #[serde(rename = "created_at")]
     pub created_at: String,
-    /// Timestamp of when the device release was last updated.
+    /// Timestamp of when the deployment was last updated.
     #[serde(rename = "updated_at")]
     pub updated_at: String,
     /// Expand the release using 'expand=release' in the query string.

@@ -1,5 +1,6 @@
 // internal crates
 use crate::cache;
+use crate::calibrations::CalibrationsErr;
 use crate::disk::DiskErr;
 use crate::events;
 use crate::filesys;
@@ -35,6 +36,8 @@ pub enum ServiceErr {
     SyncErr(sync::SyncErr),
     #[error(transparent)]
     FileRulesNotExpanded(FileRulesNotExpandedErr),
+    #[error(transparent)]
+    CalibrationsErr(CalibrationsErr),
 }
 
 impl From<cache::CacheErr> for ServiceErr {
@@ -85,6 +88,12 @@ impl From<FileRulesNotExpandedErr> for ServiceErr {
     }
 }
 
+impl From<CalibrationsErr> for ServiceErr {
+    fn from(e: CalibrationsErr) -> Self {
+        Self::CalibrationsErr(e)
+    }
+}
+
 crate::impl_error!(ServiceErr {
     CacheErr,
     EventsErr,
@@ -94,4 +103,5 @@ crate::impl_error!(ServiceErr {
     HTTPErr,
     SyncErr,
     FileRulesNotExpanded,
+    CalibrationsErr,
 });

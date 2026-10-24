@@ -375,6 +375,7 @@ async fn init_local_api_servers(
         app_state.syncer.clone(),
         app_state.token_mngr.clone(),
         app_state.event_hub.clone(),
+        app_state.calibration_uploader.clone(),
         shutdown_tx.clone(),
     ));
 

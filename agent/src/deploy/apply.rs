@@ -1,4 +1,5 @@
 // internal crates
+use crate::data_uploads::scan::validate_rules;
 use crate::deploy::{errors::*, filesys as dpl_filesys, fsm};
 use crate::disk;
 use crate::filesys;
@@ -21,6 +22,8 @@ pub struct Args<'a> {
 pub struct Storage<'a> {
     pub deployments: &'a disk::Deployments,
     pub cfg_insts: disk::CfgInstRef<'a>,
+    pub releases: &'a disk::Releases,
+    pub file_rules: &'a disk::FileRules,
 }
 
 pub struct Outcome {
@@ -248,7 +251,11 @@ async fn deploy(
 ) -> Outcome {
     debug_assert_eq!(fsm::next_action(&deployment), fsm::NextAction::Deploy);
 
-    match dpl_filesys::deploy(&storage.cfg_insts, &deployment).await {
+    let result = match validate_file_rules(storage, &deployment).await {
+        Ok(()) => dpl_filesys::deploy(&storage.cfg_insts, &deployment).await,
+        Err(e) => Err(e),
+    };
+    match result {
         Ok(()) => {
             let deployment = fsm::deploy(deployment);
             let error = store_dpl(storage.deployments, &deployment).await.err();
@@ -276,6 +283,23 @@ async fn deploy(
             }
         }
     }
+}
+
+/// Rejects a deployment whose release carries an invalid file rule set, before
+/// any config instance is written. The sync stores a deployment's release and
+/// rules before applying it, so a missing release is an error.
+async fn validate_file_rules(
+    storage: &Storage<'_>,
+    deployment: &models::Deployment,
+) -> Result<(), DeployErr> {
+    let rules =
+        disk::file_rules_for_deployment(storage.releases, storage.file_rules, deployment).await?;
+    validate_rules(&rules).map_err(|e| InvalidFileRulesErr {
+        deployment_id: deployment.id.clone(),
+        reason: e.to_string(),
+        trace: trace!(),
+    })?;
+    Ok(())
 }
 
 fn remaining_cooldown(deployment: &models::Deployment) -> Option<chrono::TimeDelta> {

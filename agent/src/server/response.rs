@@ -1,6 +1,7 @@
 // internal crates
 use crate::events;
 use crate::models;
+use crate::services::calibration;
 use device_api::models as device_server;
 
 impl From<&models::Device> for device_server::Device {
@@ -66,6 +67,7 @@ impl From<&models::FileRuleUpload> for device_server::FileRuleUpload {
             bucket_id: upload.bucket_id.clone(),
             bucket_name: upload.bucket_name.clone(),
             path: upload.path.clone(),
+            bundle: upload.bundle.clone(),
         }
     }
 }
@@ -115,6 +117,14 @@ impl From<&events::model::Event> for device_server::Event {
             r#type: event.event_type.clone(),
             occurred_at: event.occurred_at.to_rfc3339(),
             data: event.data.clone(),
+        }
+    }
+}
+
+impl From<&calibration::Created> for device_server::CreateCalibrationResponse {
+    fn from(created: &calibration::Created) -> Self {
+        device_server::CreateCalibrationResponse {
+            reported_at: created.reported_at.to_rfc3339(),
         }
     }
 }

@@ -1,7 +1,12 @@
 // internal crates
 use crate::s3::{
-    attempt_override, body, body_attempt_timeout, complete_attempt_timeout, errors,
-    errors::NoSuchUploadErr, Object, S3Err, Source, Store, ABORT_ATTEMPT_TIMEOUT, PART_SIZE,
+    body, errors,
+    errors::NoSuchUploadErr,
+    store::{
+        attempt_override, body_attempt_timeout, complete_attempt_timeout, WriteOutcome,
+        ABORT_ATTEMPT_TIMEOUT, PART_SIZE,
+    },
+    Object, S3Err, Source, Store,
 };
 
 // external crates
@@ -22,6 +27,12 @@ impl Store {
     /// A fresh upload is created every call: on any in-process failure the
     /// in-progress upload is aborted (best-effort) so S3 does not retain orphaned
     /// parts, then the error propagates.
+    ///
+    /// On GCS, object writes are create-only (see [`gcs`](crate::s3::gcs)). If
+    /// an earlier attempt already created the object, for example one whose
+    /// success response was lost, GCS refuses to complete this upload with 412.
+    /// The file counts as uploaded, but this upload was never completed and GCS
+    /// still holds its parts, so it is aborted too.
     pub async fn put_multipart(
         &self,
         mut src: Source,
@@ -31,18 +42,15 @@ impl Store {
         let started = Instant::now();
         let upload_id = self.create_multipart_upload(dst, metadata).await?;
 
-        match self
+        let written = self
             .exec_multipart_upload(&mut src, dst, &upload_id, started)
-            .await
-        {
-            Ok(()) => Ok(()),
-            Err(err) => {
-                // Best-effort cleanup: don't mask the original error if the abort
-                // itself fails.
-                let _ = self.abort_multipart_upload(dst, &upload_id).await;
-                Err(err)
-            }
+            .await;
+        if !matches!(written, Ok(WriteOutcome::Created)) {
+            // Best-effort cleanup: don't mask the original error if the abort
+            // itself fails.
+            let _ = self.abort_multipart_upload(dst, &upload_id).await;
         }
+        written.map(|_| ())
     }
 
     /// Resumes an existing multipart upload: lists the parts that already landed
@@ -62,6 +70,7 @@ impl Store {
         let parts = self.upload_parts(&mut src, dst, upload_id, &landed).await?;
         self.complete_multipart_upload(dst, upload_id, &parts, src.size, started)
             .await
+            .map(|_| ())
     }
 
     /// Walks [`Self::part_plan`] in order. For each part number present in
@@ -224,7 +233,7 @@ impl Store {
         dst: &Object,
         upload_id: &str,
         started: Instant,
-    ) -> Result<(), S3Err> {
+    ) -> Result<WriteOutcome, S3Err> {
         let parts = self
             .upload_parts(src, dst, upload_id, &std::collections::HashMap::new())
             .await?;
@@ -241,6 +250,7 @@ impl Store {
         part_number: i32,
         buf: Vec<u8>,
     ) -> Result<CompletedPart, S3Err> {
+        let content_md5 = self.content_md5(&buf);
         let len = buf.len() as u64;
         let body = body::chunked(Bytes::from(buf));
 
@@ -252,6 +262,7 @@ impl Store {
             .upload_id(upload_id)
             .part_number(part_number)
             .body(body)
+            .set_content_md5(content_md5)
             .customize()
             .config_override(attempt_override(body_attempt_timeout(len)))
             .send()
@@ -278,12 +289,13 @@ impl Store {
         parts: &[CompletedPart],
         size: u64,
         started: Instant,
-    ) -> Result<(), S3Err> {
+    ) -> Result<WriteOutcome, S3Err> {
         let completed = CompletedMultipartUpload::builder()
             .set_parts(Some(parts.to_vec()))
             .build();
         let limit = complete_attempt_timeout(size, started.elapsed());
-        self.client
+        let result = self
+            .client
             .complete_multipart_upload()
             .bucket(&obj.bucket)
             .key(&obj.key)
@@ -293,8 +305,8 @@ impl Store {
             .config_override(attempt_override(limit))
             .send()
             .await
-            .map_err(|e| errors::map_sdk_err("complete_multipart_upload", obj, e))?;
-        Ok(())
+            .map(|_| ());
+        self.finish_write("complete_multipart_upload", obj, result)
     }
 
     /// Aborts an in-progress multipart upload so S3 releases its parts. Returns a
@@ -322,7 +334,7 @@ mod tests {
 
     // internal crates
     use super::*;
-    use crate::s3::tests::{
+    use crate::s3::store::tests::{
         access_denied_resp, actual_shapes, obj, recorded_payload, req, resp, resp_xml, shape,
         store_expecting, store_on, store_with, temp_file_with, uri,
     };

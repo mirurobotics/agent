@@ -1,6 +1,7 @@
 // internal crates
 use miru_agent::cache::errors::CacheElementNotFound;
 use miru_agent::cache::CacheErr;
+use miru_agent::calibrations::{CalibrationTooLargeErr, CalibrationsErr};
 use miru_agent::disk::DiskErr;
 use miru_agent::filesys::errors::InvalidDirNameErr;
 use miru_agent::filesys::FileSysErr;
@@ -48,6 +49,14 @@ fn http_err() -> HTTPErr {
 fn sync_err() -> SyncErr {
     SyncErr::MockErr(SyncMockErr {
         is_network_conn_err: false,
+    })
+}
+
+fn calibrations_err() -> CalibrationsErr {
+    CalibrationsErr::TooLargeErr(CalibrationTooLargeErr {
+        report_bytes: 200,
+        max_bytes: 100,
+        trace: miru_agent::trace!(),
     })
 }
 
@@ -100,5 +109,11 @@ mod from_conversions {
     fn file_rules_not_expanded_err_maps_to_service_variant() {
         let err: ServiceErr = file_rules_not_expanded_err().into();
         assert!(matches!(err, ServiceErr::FileRulesNotExpanded(_)));
+    }
+
+    #[test]
+    fn calibrations_err_maps_to_service_calibrations_err() {
+        let err: ServiceErr = calibrations_err().into();
+        assert!(matches!(err, ServiceErr::CalibrationsErr(_)));
     }
 }

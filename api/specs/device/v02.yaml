@@ -1,47 +1,147 @@
 openapi: 3.0.3
 info:
   title: Miru Agent API
-  description: The API between the Miru Agent and any external client living on the
-    same device as the Miru Agent
+  description: 'The API between the Miru Agent and any external client living on the
+    same device as the Miru Agent. On Linux the agent serves it over the Unix socket
+    `/run/miru/miru.sock` with no authentication. Over loopback TCP, which is on by
+    default on Windows at `127.0.0.1:6478`, every route requires `Authorization: Bearer
+    <token>`. Clients read the port and token from the agent''s discovery file, `%ProgramData%\Miru\device-api\device-api.json`
+    on Windows; the token changes every time the agent starts.'
   version: v0.2
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
-  x-release-version: v0.2.2
+  x-release-version: v0.2.3-beta.1
   x-git-commit:
-    sha: 97aec4ae3541349ead148f90acedb59b0f543fdb
-    url: https://github.com/mirurobotics/openapi/commit/97aec4ae3541349ead148f90acedb59b0f543fdb
-    message: "docs(stlc): how to change SDK custom code (#307)\n\n## Why\n\nHand-written\
-      \ SDK code goes back to stlc's intended flow (upstream docs:\n\"Custom code\"\
-      \ and \"Branching and collaboration\"):\n1. Edit the code in a local checkout\
-      \ of the staging SDK repo.\n2. Seal it with `stlc build`.\n3. Merge the tracking\
-      \ file through a PR here.\n\nA tracking file shows only two commit IDs, so the\
-      \ code itself needs\nsomewhere to be reviewed. That's why we tried merging PRs\
-      \ into the\nstaging repos (mirurobotics/infra#294), which stlc doesn't support.\n\
-      mirurobotics/python-device-sdk-staging#3 needed a manual re-seal (#305),\nand\
-      \ mirurobotics/infra#299 turns those merges off again.\n\nThis PR documents\
-      \ the flow, with the review happening in a **review-only\nPR on the staging\
-      \ repo**.\n\n## What\n\nNew `docs/sdk-custom-code.md`, linked from the README:\n\
-      - **What custom code is:** what tracking files hold and how stlc applies\nthem.\n\
-      - **Rules:**\n  - nothing merges into staging `main`; PRs there are for review\
-      \ only;\n  - prefer config over code;\n  - put new code in `src/<package>/lib/`.\n\
-      - **Steps:**\n  1. `stlc build` to get the local checkout.\n2. Commit on a `custom-code/<topic>`\
-      \ branch from staging `origin/main`,\nso the diff is only the change.\n3. Open\
-      \ a review-only PR on the staging repo. GitHub shows the change\nand the AI\
-      \ review runs.\n4. Cherry-pick the commit onto local `main` and `stlc build`\
-      \ to seal it.\n5. Open the tracking-file PR here, linking the staging PR, and\
-      \ close the\nstaging PR after it lands.\n\nAn earlier version of this PR added\
-      \ a CI job that commented the\ncustom-code diff here. It's removed in favour\
-      \ of reviewing in the SDK\nrepo, so the PR is now docs only.\n\n## Depends on\n\
-      \nmirurobotics/infra#299. Until it's applied, a review PR on\n`python-device-sdk-staging`\
-      \ could still be merged, which is the\nsituation #305 had to repair.\n\n\U0001F916\
-      \ Generated with [Claude Code](https://claude.com/claude-code)\n\n---------\n\
-      \nCo-authored-by: Claude Opus 5.5 <noreply@anthropic.com>"
-    author: ben-miru
-    branch: main
+    sha: 0db74946ec71e50ae8fee685e3ccdd8eb1729c8d
+    url: https://github.com/mirurobotics/openapi/commit/0db74946ec71e50ae8fee685e3ccdd8eb1729c8d
+    message: 'feat(calibrations): rename component_slug to component in agent CreateCalibrationRequest
+      (#339)
+
+
+      <!-- claude-projects-attribution: {"github_login":"miru-agents"} -->
+
+      _Requested by **bens-agent** · [project
+
+      thread](https://claude.ai/code/project/chan_01RNCMaVSP1K69BTB8Xydgqo?thread=cmsg_01RNCMaVSP1K69BTB8Xydgqo5Gp6P8wHEHNyy5pva2AtoR)_
+
+
+      ## Summary
+
+
+      Renames `CreateCalibrationRequest.component_slug` to `component` in the
+
+      agent-facing backend spec for `POST /calibrations`, as asked in
+
+      https://github.com/mirurobotics/agent/pull/357#discussion_r4344008654.
+
+      The meaning is unchanged (the component''s slug) and the field is still
+
+      required. This matches `role` and `aspect`, which are slugs too and
+
+      carry no `_slug` suffix.
+
+
+      ## Changes
+
+
+      - `apis/apps/backend-server/agent/components/requests/calibration.yaml`:
+
+      field and `required` entry renamed; description now reads like `role`''s
+
+      and `aspect`''s ("Miru resolves it to the component, creating the
+
+      component the first time it is reported").
+
+      - `apis/apps/backend-server/agent/paths/calibrations.yaml`: operation
+
+      description refers to a new `component` slug.
+
+      - `apis/apps/backend-server/agent/openapi.gen.yaml`: regenerated.
+
+
+      There were no request examples mentioning `component_slug` to update.
+
+
+      ## Not in this PR
+
+
+      - The device API (`apis/apps/device-server`) still uses
+
+      `component_slug`; this PR only covers the backend agent audience.
+
+      - The backend must accept `component` before an agent build sends it;
+
+      that change is tracked in mirurobotics/backend separately.
+
+
+      ## Testing
+
+
+      `./scripts/regen.sh` and `./scripts/lint.sh` pass locally.
+
+
+      ---
+
+      _Generated by [Claude
+
+      Code](https://claude.ai/code/session_01P29BpFpdDZCQt9bERwL756)_
+
+
+      <!-- codesmith:footer -->
+
+      ---
+
+      <a
+
+      href="https://app.blacksmith.sh/mirurobotics/codesmith/openapi/pr/339?autoLogin=true&ref=codesmith_pr_footer"><picture><source
+
+      media="(prefers-color-scheme: dark)"
+
+      srcset="https://pr-comments-assets.blacksmith.sh/codesmith/view-with-codesmith-dark-v3.svg"><source
+
+      media="(prefers-color-scheme: light)"
+
+      srcset="https://pr-comments-assets.blacksmith.sh/codesmith/view-with-codesmith-light-v3.svg"><img
+
+      alt="View with [code]smith"
+
+      src="https://pr-comments-assets.blacksmith.sh/codesmith/view-with-codesmith-dark-v3-3x.png"
+
+      width="162" height="28"></picture></a> <a
+
+      href="https://backend.blacksmith.sh/track/enable-autofix?expires=1795228695&installation_model_id=425273&pr_number=339&ref=codesmith_pr_footer&repository=mirurobotics%2Fopenapi&return_to=https%3A%2F%2Fgithub.com%2Fmirurobotics%2Fopenapi%2Fpull%2F339&signature=8fe5da860f11a8e41b781795ae79bfa9df2fea93c0e4f2393f9ff13a30afd4e5"><picture><source
+
+      media="(prefers-color-scheme: dark)"
+
+      srcset="https://pr-comments-assets.blacksmith.sh/codesmith/autofix-with-codesmith-dark.svg"><source
+
+      media="(prefers-color-scheme: light)"
+
+      srcset="https://pr-comments-assets.blacksmith.sh/codesmith/autofix-with-codesmith-light.svg"><img
+
+      alt="Autofix with [code]smith"
+
+      src="https://pr-comments-assets.blacksmith.sh/codesmith/autofix-with-codesmith-dark-3x.png"
+
+      width="190" height="28"></picture></a>
+
+      <sup>Need help on this PR? Tag <code>@codesmith</code> with what you
+
+      need.</sup>
+
+
+      <!-- codesmith:autofix:disabled -->
+
+      <!-- /codesmith:footer -->
+
+
+      Co-authored-by: Claude <noreply@anthropic.com>'
+    author: Ben's Agent
+    branch: HEAD
     dirty: false
   x-build:
-    built_at: '2026-10-08T16:48:37.141271+00:00'
+    built_at: '2026-10-23T16:42:12.298857+00:00'
 servers:
 - url: http://localhost/v0.2
   description: localhost
@@ -77,6 +177,56 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/VersionResponse'
+  /calibrations:
+    post:
+      tags:
+      - Calibrations
+      summary: Create
+      operationId: createCalibration
+      description: 'Report a calibration to Miru. The agent checks the request,
+
+        saves the calibration on the device and returns right away,
+
+        without waiting for Miru. It uploads saved calibrations to Miru
+
+        in the order received and retries until Miru is reachable, so a
+
+        calibration survives network outages and agent restarts. The
+
+        agent checks the request against Miru''s rules before saving it,
+
+        so Miru rarely rejects one later; one it does reject, such as a
+
+        new component once the workspace holds 100, is set aside on the
+
+        device and does not hold up later ones. Content is at most 1 MiB
+
+        and a request is at most about 2 MiB (1 MiB of content plus JSON
+
+        escaping). Each request is a new calibration, so sending the
+
+        same calibration twice records it twice. If the agent loses
+
+        Miru''s response to an upload, for example to a timeout or a
+
+        restart, it uploads the calibration again, so on rare occasions
+
+        Miru records one twice.
+
+        '
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCalibrationRequest'
+      responses:
+        '200':
+          description: The agent saved the calibration and will upload it to Miru.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateCalibrationResponse'
   /deployments/{deployment_id}:
     get:
       tags:
@@ -254,12 +404,8 @@ paths:
         example: '42'
       responses:
         '200':
-          description: >-
-            SSE event stream. Each event is delivered as an SSE frame with
-            `id`, `event`, and `data` fields. A ": heartbeat" comment is sent
-            immediately when the connection opens, and again every 30 seconds
-            while the stream is idle. Comments carry no data and should be
-            ignored by clients.
+          description: SSE event stream. Each event is delivered as an SSE frame with
+            `id`, `event`, and `data` fields.
           content:
             text/event-stream:
               schema:
@@ -269,8 +415,9 @@ components:
     BearerAuth:
       type: http
       scheme: bearer
-      description: The token from the agent's discovery file. Required over loopback
-        TCP; not used over the Unix socket.
+      description: The token from the agent's discovery file (`%ProgramData%\Miru\device-api\device-api.json`
+        on Windows). Required over loopback TCP (`127.0.0.1:6478` by default on Windows)
+        and accepted by every route; not used over the Unix socket.
   schemas:
     ErrorResponse:
       type: object
@@ -289,14 +436,14 @@ components:
     ReleaseVersion:
       type: string
       enum:
-      - v0.2.2
+      - v0.2.3-beta.1
       x-enum-varnames:
       - RELEASE_VERSION
       x-stainless-const: true
     APIGitCommit:
       type: string
       enum:
-      - 97aec4ae3541349ead148f90acedb59b0f543fdb
+      - 0db74946ec71e50ae8fee685e3ccdd8eb1729c8d
       x-enum-varnames:
       - API_GIT_COMMIT
       x-stainless-const: true
@@ -427,7 +574,7 @@ components:
         api_version:
           type: string
           description: The API version of the agent.
-          example: v1-0
+          example: v0.2
         api_git_commit:
           type: string
           description: The git commit of the API.
@@ -435,7 +582,7 @@ components:
         api_release_version:
           type: string
           description: The API release version of the agent.
-          example: v0.2.0-beta.1
+          example: v0.2.3-beta.1
         rust_version:
           type: string
           description: The version of Rust.
@@ -456,13 +603,111 @@ components:
       example:
         version: v1.0.0
         git_commit: a1b2c3d4
-        api_version: v1-0
+        api_version: v0.2
         api_git_commit: a1b2c3d4
-        api_release_version: v0.2.0-beta.1
+        api_release_version: v0.2.3-beta.1
         rust_version: 1.93.0
         build_date: '2026-02-24T10:30:00Z'
         os: linux
         arch: aarch64
+    InstanceFormat:
+      title: Instance Format
+      type: string
+      description: 'The serialization format of config content. A config instance
+        is written to the device filesystem in this format.
+
+        - `json`: standard JSON.
+
+        - `yaml`: YAML 1.2.
+
+        - `jsonc`: JSON with comments (JSON plus `//` and `/* */` comment syntax).
+
+        - `xml`: XML.
+
+        - `text`: plain, unstructured text with no specific format.
+
+        '
+      enum:
+      - json
+      - yaml
+      - jsonc
+      - xml
+      - text
+      x-enum-varnames:
+      - INSTANCE_FORMAT_JSON
+      - INSTANCE_FORMAT_YAML
+      - INSTANCE_FORMAT_JSONC
+      - INSTANCE_FORMAT_XML
+      - INSTANCE_FORMAT_TEXT
+    InstanceContent:
+      title: Instance Content
+      type: object
+      required:
+      - format
+      - data
+      properties:
+        format:
+          $ref: '#/components/schemas/InstanceFormat'
+        data:
+          type: string
+          description: The content's values, serialized in `format`.
+          example: "{\n  \"enable_autonomy\": true,\n  \"enable_remote_control\":\
+            \ true,\n  \"max_payload_kg\": 10.0\n}\n"
+      example:
+        format: json
+        data: "{\n  \"enable_autonomy\": true,\n  \"enable_remote_control\": true,\n\
+          \  \"max_payload_kg\": 10.0\n}\n"
+    CreateCalibrationRequest:
+      title: Create Calibration Request
+      type: object
+      required:
+      - component_slug
+      - content
+      properties:
+        component_slug:
+          type: string
+          example: arm
+          description: Slug of the component the calibrated unit belongs to. A new
+            slug creates a component in Miru.
+        role:
+          type: string
+          example: aligner-1
+          description: Slug of the role the calibrated unit fills on the device, such
+            as `aligner-1` or `front-left`. Distinguishes several units of one component
+            on a device. Validated like a slug. Miru resolves it to one of the component's
+            `roles`, creating the role the first time it is reported.
+        serial_number:
+          type: string
+          maxLength: 255
+          example: M500-1234
+          description: Serial number of the physical unit that was calibrated, not
+            of the device, such as `M500-1234`. Free text, at most 255 characters.
+        aspect:
+          type: string
+          example: pose
+          description: Slug of the aspect of the unit that was calibrated, when it
+            has more than one, e.g. `intrinsics` vs `extrinsics`, or `pose` vs `home-offsets`.
+            Validated like a slug. Miru resolves it to one of the component's `aspects`,
+            creating the aspect the first time it is reported.
+        content:
+          allOf:
+          - $ref: '#/components/schemas/InstanceContent'
+          description: The calibration's content, at most 1 MiB. The agent uploads
+            it to Miru unchanged.
+    CreateCalibrationResponse:
+      title: Create Calibration Response
+      type: object
+      required:
+      - reported_at
+      properties:
+        reported_at:
+          type: string
+          format: date-time
+          example: '2026-03-10T12:00:00Z'
+          description: Timestamp of when the agent received the calibration. Miru
+            stores it as the time the calibration was reported.
+      example:
+        reported_at: '2026-03-10T12:00:00Z'
     DeploymentStatus:
       type: string
       description: 'This status merges the ''activity_status'' and ''error_status''
@@ -630,7 +875,7 @@ components:
           type: string
           format: date-time
           example: '2024-01-01T00:00:00Z'
-          description: Timestamp of when the device release was created.
+          description: Timestamp of when the deployment was created.
       example:
         object: deployment
         id: dpl_123
@@ -797,10 +1042,15 @@ components:
           pattern: ^(/|[A-Za-z]:[\\/])
           maxLength: 1024
           example: /var/log/robot/*.log
-          description: A glob pattern selecting the files this rule manages. Must
-            be absolute (start with `/` on Linux, or a drive letter followed by `:\`
-            or `:/` on Windows, e.g. `C:\logs\*.log`), at most 1024 bytes, and must
-            contain no `..` segments and no empty path segments.
+          description: Absolute glob of the files this rule manages (`/` on Linux,
+            `C:\…` or `C:/…` on Windows; max 1024 bytes; no `.`, `..` or empty segments).
+            A `{name}` capture matches like `*` within one segment and must be used
+            in `upload.bundle` or `upload.path`. Names match `[a-z][a-z0-9_]*`, are
+            unique, and must not reuse a built-in path variable. A segment holds at
+            most one capture, and the rest of that segment must be constant text (no
+            `*`, `?`, `[`, `\` or other braces). A capture may not have `**` segments
+            both before and after it. `{a,b}` is literal. Devices see each capture
+            as `*`.
         stability_window_secs:
           type: integer
           format: int64
@@ -846,12 +1096,28 @@ components:
           pattern: .*\{upload_id\}.*
           maxLength: 1024
           example: '{device_id}/{year}-{month}-{day}/{upload_id}/{file_name}'
-          description: The object-path template the collected file is written to.
-            Must contain `{upload_id}` so every upload lands on a distinct object
-            key, be at most 1024 bytes, have balanced braces, and contain no `..`
-            segments and no empty path segments. The supported variables are `{device_id}`,
-            `{device_name}`, `{file_name}`, `{upload_id}`, `{year}`, `{month}`, `{day}`,
-            `{hour}`, and `{minute}`.
+          description: 'Object-path template for the uploaded file. Contains `{upload_id}`,
+            is at most 1024 bytes, has balanced braces, and contains no `..` or empty
+            segments. Variables: `{device_id}`, `{device_name}`, `{file_name}`, `{upload_id}`,
+            `{bundle_id}`, `{year}`, `{month}`, `{day}`, `{hour}`, `{minute}`, plus
+            any `source.glob` capture. `{bundle_id}` requires `bundle`.'
+        bundle:
+          type: array
+          minItems: 1
+          maxItems: 16
+          uniqueItems: true
+          items:
+            type: string
+            pattern: ^[a-z][a-z0-9_]*$
+          example:
+          - recording
+          description: 'Names of the `source.glob` captures whose values group the
+            rule''s uploads into bundles: uploads from the same device and upload
+            collection that captured the same values, in the order listed, share a
+            bundle, across rules and over time. Capture names don''t affect matching,
+            so rules that name their captures differently still share a bundle when
+            they list them in the same order. Every name must be a `source.glob` capture,
+            listed once, with at most 16 names. Absent when the rule does not bundle.'
       example:
         upload_collection_id: upl_col_123
         upload_collection_name: Robot Logs
