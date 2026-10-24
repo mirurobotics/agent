@@ -560,8 +560,9 @@ pub(super) mod tests {
 
         #[tokio::test]
         async fn put_that_stops_sending_trips_stall_protection() {
+            let dst = obj("k");
             let tf = temp_file_with(&vec![0u8; 256 * 1024]).await;
-            let src = Source::open(tf.to_file(), &obj("k")).await.unwrap();
+            let src = Source::open(tf.to_file(), &dst).await.unwrap();
             // A 1 s grace and no SDK retries keep the test short.
             let fast_stall = StalledStreamProtectionConfig::enabled()
                 .grace_period(Duration::from_secs(1))
@@ -576,7 +577,8 @@ pub(super) mod tests {
 
             // Shorter than the call's time limit, so only stall protection can
             // end the call.
-            let put = store.put_singlepart(src, &obj("k"), &HashMap::new());
+            let metadata = HashMap::new();
+            let put = store.put_singlepart(src, &dst, &metadata);
             let result = tokio::time::timeout(Duration::from_secs(30), put)
                 .await
                 .expect("stall protection ends the call");
