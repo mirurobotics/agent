@@ -1,6 +1,6 @@
 // standard crates
 use std::collections::HashMap;
-use std::io::SeekFrom;
+use std::sync::Arc;
 
 // internal crates
 use crate::errors::HTTPCode;
@@ -10,8 +10,9 @@ use crate::trace;
 
 // external crates
 use aws_sdk_s3::error::SdkError;
+use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::Client;
-use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
 
 /// Objects larger than this stream through a multipart upload; objects at or
 /// below it go through a single `PutObject`. S3's own multipart part-size
@@ -40,10 +41,11 @@ impl std::fmt::Display for Object {
 
 /// A local file opened once for upload. Its size and every byte read come from
 /// the same open handle, so the upload stays bound to the opened file even if
-/// its path is replaced afterwards.
+/// its path is replaced afterwards. Reads are positional, so the handle can be
+/// shared by a retryable streaming body.
 pub struct Source {
     file: File,
-    handle: tokio::fs::File,
+    handle: Arc<std::fs::File>,
     pub(super) size: u64,
 }
 
@@ -67,30 +69,11 @@ impl Source {
             .await
             .map_err(|e| errors::map_body_io_err("open_source", dst, &file, e))?
             .len();
-        Ok(Self { file, handle, size })
-    }
-
-    /// Reads `[offset..offset+length]` into memory, mapping any seek/read failure
-    /// to [`S3Err::LocalIoErr`]. A file truncated below `offset + length` after
-    /// it was opened makes `read_exact` fail with `UnexpectedEof`, which maps to
-    /// the same error.
-    pub(super) async fn read(
-        &mut self,
-        operation: &str,
-        dst: &Object,
-        offset: u64,
-        length: u64,
-    ) -> Result<Vec<u8>, S3Err> {
-        self.handle
-            .seek(SeekFrom::Start(offset))
-            .await
-            .map_err(|e| errors::map_body_io_err(operation, dst, &self.file, e))?;
-        let mut buf = vec![0u8; length as usize];
-        self.handle
-            .read_exact(&mut buf)
-            .await
-            .map_err(|e| errors::map_body_io_err(operation, dst, &self.file, e))?;
-        Ok(buf)
+        Ok(Self {
+            file,
+            handle: Arc::new(handle.into_std().await),
+            size,
+        })
     }
 }
 
@@ -127,8 +110,8 @@ impl Store {
     ///
     /// Files at or below [`PART_SIZE`] go through one `PutObject`
     /// ([`Self::put_singlepart`]); larger files go part-by-part through a
-    /// stateless multipart upload ([`Self::put_multipart`]). Either way at most
-    /// one part's bytes are held in memory at a time.
+    /// stateless multipart upload ([`Self::put_multipart`]). Either way the
+    /// bytes stream from the opened file, one frame at a time.
     pub async fn put(
         &self,
         src: File,
@@ -143,36 +126,57 @@ impl Store {
         }
     }
 
-    /// Uploads `src` as a single `PutObject`. The body is buffered in memory, so
-    /// the SDK can replay it on a retry without reopening the path.
+    /// Uploads `src` as a single `PutObject`, streamed from the opened file.
     pub async fn put_singlepart(
         &self,
-        mut src: Source,
+        src: Source,
         dst: &Object,
         metadata: &HashMap<String, String>,
     ) -> Result<(), S3Err> {
-        let size = src.size;
-        let bytes = src.read("put_object", dst, 0, size).await?;
-        let content_md5 = self.content_md5(&bytes);
+        let (body, content_md5) = self.body(&src, "put_object", dst, 0, src.size).await?;
         let result = self
             .client
             .put_object()
             .bucket(&dst.bucket)
             .key(&dst.key)
-            .body(body::framed(bytes))
+            .body(body)
             .set_content_md5(content_md5)
             .set_metadata((!metadata.is_empty()).then(|| metadata.clone()))
             .customize()
-            .config_override(sdk::timeout(sdk::upload_timeout(size)))
+            .config_override(sdk::timeout(sdk::upload_timeout(src.size)))
             .send()
             .await
             .map(|_| ());
         self.finish_write("put_object", dst, result).map(|_| ())
     }
 
-    /// `Content-MD5` for a body, when this store sends one.
-    pub(super) fn content_md5(&self, bytes: &[u8]) -> Option<String> {
-        self.gcs.then(|| gcs::content_md5(bytes))
+    /// The request body that streams `len` bytes of `src` from `offset`, and
+    /// on GCS its `Content-MD5` (see [`Options::gcs`]), hashed in a separate
+    /// pass over the file. A file now shorter than the range is
+    /// [`S3Err::LocalIoErr`] before any request goes out.
+    pub(super) async fn body(
+        &self,
+        src: &Source,
+        operation: &str,
+        dst: &Object,
+        offset: u64,
+        len: u64,
+    ) -> Result<(ByteStream, Option<String>), S3Err> {
+        let (handle, is_gcs) = (src.handle.clone(), self.gcs);
+        let content_md5 = tokio::task::spawn_blocking(move || {
+            if handle.metadata()?.len() < offset + len {
+                let msg = format!("file is shorter than the range ending at {}", offset + len);
+                return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, msg));
+            }
+            is_gcs
+                .then(|| gcs::content_md5_of_range(&handle, offset, len))
+                .transpose()
+        })
+        .await
+        .unwrap_or_else(|e| Err(std::io::Error::other(e)))
+        .map_err(|e| errors::map_body_io_err(operation, dst, &src.file, e))?;
+        let body = body::file_range(src.handle.clone(), offset, len);
+        Ok((body, content_md5))
     }
 
     /// Finishes an object write (PutObject or CompleteMultipartUpload). On GCS
@@ -621,7 +625,7 @@ pub(super) mod tests {
                     requests[0].uri().to_string(),
                     uri("artifacts/hello.txt?x-id=PutObject")
                 );
-                assert_eq!(requests[0].body().bytes(), Some(&b"hello world"[..]));
+                assert_eq!(recorded_payload(requests[0]).await, b"hello world");
                 assert!(requests[0]
                     .headers()
                     .get("authorization")
@@ -656,7 +660,7 @@ pub(super) mod tests {
                     requests[0].uri().to_string(),
                     uri("artifacts/empty.txt?x-id=PutObject")
                 );
-                assert_eq!(requests[0].body().bytes(), Some(&b""[..]));
+                assert_eq!(recorded_payload(requests[0]).await, b"");
             }
 
             #[tokio::test]
@@ -707,7 +711,7 @@ pub(super) mod tests {
                     .unwrap();
 
                 let requests = replay.actual_requests().collect::<Vec<_>>();
-                assert_eq!(requests[0].body().bytes(), Some(&b"original"[..]));
+                assert_eq!(recorded_payload(requests[0]).await, b"original");
 
                 tokio::fs::remove_file(&moved).await.unwrap();
             }
