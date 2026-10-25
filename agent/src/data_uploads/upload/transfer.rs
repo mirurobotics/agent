@@ -176,27 +176,20 @@ async fn multipart_for(
     }))
 }
 
-/// Puts `file` at the upload's physical bucket and object key: one `PutObject`
-/// for a file of one part or less. A larger file resumes the multipart upload
-/// in `upload.multipart` if it was started for this version of the file, and
-/// otherwise runs a new one start to finish. Never aborts a resumed upload on
-/// failure, so the next attempt can resume it again.
-async fn put(store: &s3::Store, upload: &UploadCheckpoint, file: &File) -> Result<(), UploadErr> {
+/// Puts `file` at the upload's physical bucket and object key, resuming the
+/// multipart upload in `upload.multipart` if it was started for this version
+/// of the file.
+async fn put(store: &s3::Store, upload: &UploadCheckpoint, file: &File) -> Result<(), s3::S3Err> {
     let object = object(upload);
-    let src = s3::Source::open(file.clone(), &object)
-        .await
-        .map_err(classified_executor_err)?;
-    let saved = upload.multipart.as_ref().filter(|m| started_for(m, &src));
-    let result = if src.size <= s3::store::PART_SIZE {
-        store.put_singlepart(src, &object, &upload.metadata).await
-    } else if let Some(multipart) = saved {
-        let id = &multipart.multipart_upload_id;
-        info!("upload: resuming multipart upload {id} for {object}");
-        store.resume_multipart_upload(src, &object, id).await
-    } else {
-        store.put_multipart(src, &object, &upload.metadata).await
-    };
-    result.map_err(classified_executor_err)
+    let src = s3::Source::open(file.clone(), &object).await?;
+    match upload.multipart.as_ref().filter(|m| started_for(m, &src)) {
+        Some(multipart) => {
+            let id = &multipart.multipart_upload_id;
+            info!("upload: resuming multipart upload {id} for {object}");
+            store.resume_multipart_upload(src, &object, id).await
+        }
+        None => store.put(file.clone(), &object, &upload.metadata).await,
+    }
 }
 
 impl ObjectTransfer for SdkTransfer {
@@ -222,7 +215,9 @@ impl ObjectTransfer for SdkTransfer {
             "upload: transferring file {} via scheme {:?} to bucket {} key {}",
             file, credentials.scheme, upload.bucket_name, upload.object_key
         );
-        put(&self.store(credentials)?, upload, file).await
+        put(&self.store(credentials)?, upload, file)
+            .await
+            .map_err(classified_executor_err)
     }
 }
 
