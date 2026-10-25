@@ -9,8 +9,7 @@ use crate::mocks::{
     upload_executor::{MockStep, MockUploadExecutor},
 };
 use crate::test_utils::upload::{
-    idempotency_key, job_on_disk, make_job, pending_response, response_with_status,
-    token_manager,
+    idempotency_key, job_on_disk, make_job, pending_response, response_with_status, token_manager,
 };
 use backend_api::models::{
     CreateUploadRequest, MultipartUpload, UpdateUploadRequest, UploadSource, UploadStatus,

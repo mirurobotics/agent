@@ -145,7 +145,10 @@ async fn multipart_upload(
         if store.has_multipart_upload(&object, &recorded.id).await? {
             return Ok(recorded.clone());
         }
-        info!("upload: multipart upload {} for {object} is gone", recorded.id);
+        info!(
+            "upload: multipart upload {} for {object} is gone",
+            recorded.id
+        );
     }
     let id = store
         .create_multipart_upload(&object, &upload.metadata)
