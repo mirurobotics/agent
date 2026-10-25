@@ -1,28 +1,26 @@
-// standard crates
-use std::io::SeekFrom;
-
 // internal crates
 use crate::filesys::{errors::PathDoesNotExistErr, file::File, path::PathExt, FileSysErr};
-use crate::s3::{errors, Object, S3Err};
+use crate::s3::{errors, gcs, Object, S3Err};
 use crate::trace;
 
 // external crates
-use tokio::io::{AsyncReadExt, AsyncSeekExt};
+use aws_sdk_s3::primitives::{ByteStream, Length};
 
-/// A local file opened once for upload. Its size and every byte read come from
-/// the same open handle, so the upload stays bound to the opened file even if
-/// its path is replaced afterwards.
+/// Bytes per read and per frame sent. The SDK's default is 4 KiB.
+const READ_SIZE: usize = 32 * 1024;
+
+/// A local file to upload and its size when the upload started. The file is
+/// expected to stay unchanged until the upload is confirmed.
 pub struct Source {
     file: File,
-    handle: tokio::fs::File,
     pub(super) size: u64,
 }
 
 impl Source {
-    /// Opens `file` for reading. A missing file is [`S3Err::FileSysErr`]; any
-    /// other open or metadata failure is [`S3Err::LocalIoErr`].
+    /// Sizes `file` for upload. A missing file is [`S3Err::FileSysErr`]; any
+    /// other metadata failure is [`S3Err::LocalIoErr`].
     pub async fn open(file: File, dst: &Object) -> Result<Self, S3Err> {
-        let handle = tokio::fs::File::open(file.path()).await.map_err(|e| {
+        let metadata = tokio::fs::metadata(file.path()).await.map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
                 FileSysErr::PathDoesNotExistErr(PathDoesNotExistErr {
                     path: file.path().clone(),
@@ -33,34 +31,44 @@ impl Source {
                 errors::map_body_io_err("open_source", dst, &file, e)
             }
         })?;
-        let size = handle
-            .metadata()
-            .await
-            .map_err(|e| errors::map_body_io_err("open_source", dst, &file, e))?
-            .len();
-        Ok(Self { file, handle, size })
+        Ok(Self {
+            file,
+            size: metadata.len(),
+        })
     }
 
-    /// Reads `[offset..offset+length]` into memory, mapping any seek/read failure
-    /// to [`S3Err::LocalIoErr`]. A file truncated below `offset + length` after
-    /// it was opened makes `read_exact` fail with `UnexpectedEof`, which maps to
-    /// the same error.
+    /// A request body that streams `len` bytes from `offset`. A retry reopens
+    /// the file. A file now shorter than the range is [`S3Err::LocalIoErr`]
+    /// before anything is read.
     pub(super) async fn read(
-        &mut self,
+        &self,
         operation: &str,
         dst: &Object,
         offset: u64,
-        length: u64,
-    ) -> Result<Vec<u8>, S3Err> {
-        self.handle
-            .seek(SeekFrom::Start(offset))
+        len: u64,
+    ) -> Result<ByteStream, S3Err> {
+        ByteStream::read_from()
+            .path(self.file.path())
+            .offset(offset)
+            .length(Length::Exact(len))
+            .buffer_size(READ_SIZE)
+            .build()
             .await
-            .map_err(|e| errors::map_body_io_err(operation, dst, &self.file, e))?;
-        let mut buf = vec![0u8; length as usize];
-        self.handle
-            .read_exact(&mut buf)
+            .map_err(|e| errors::map_body_io_err(operation, dst, &self.file, e.into()))
+    }
+
+    /// The `Content-MD5` of `len` bytes from `offset` (see
+    /// [`gcs::content_md5`]), hashed in its own read of the range.
+    pub(super) async fn content_md5(
+        &self,
+        operation: &str,
+        dst: &Object,
+        offset: u64,
+        len: u64,
+    ) -> Result<String, S3Err> {
+        let range = self.read(operation, dst, offset, len).await?;
+        gcs::content_md5(range)
             .await
-            .map_err(|e| errors::map_body_io_err(operation, dst, &self.file, e))?;
-        Ok(buf)
+            .map_err(|e| errors::map_body_io_err(operation, dst, &self.file, e))
     }
 }
