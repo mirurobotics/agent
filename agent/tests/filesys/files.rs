@@ -487,6 +487,39 @@ pub mod sha256 {
     }
 }
 
+pub mod sha256_and_crc32c {
+    use super::*;
+
+    #[tokio::test]
+    async fn known_vector() {
+        // 0xE3069283 is CRC-32C's published check value for "123456789".
+        let dir = test_dirs::temp("testing").unwrap();
+        let file = dir.file("check");
+        files::write_string(&file, "123456789", WriteOptions::default())
+            .await
+            .unwrap();
+
+        let (digest, crc32c) = files::sha256_and_crc32c(&file).await.unwrap();
+        assert_eq!(crc32c, 0xE306_9283);
+        assert_eq!(digest, files::sha256(&file).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn checksum_spans_multiple_reads() {
+        // Larger than the 8 KiB streaming buffer, so the checksum spans multiple reads.
+        let dir = test_dirs::temp("testing").unwrap();
+        let file = dir.file("large");
+        let contents = "a".repeat(20 * 1024);
+        files::write_string(&file, &contents, WriteOptions::default())
+            .await
+            .unwrap();
+
+        let (digest, crc32c) = files::sha256_and_crc32c(&file).await.unwrap();
+        assert_eq!(crc32c, 0x2228_7E53);
+        assert_eq!(digest, files::sha256(&file).await.unwrap());
+    }
+}
+
 pub mod read_secret_bytes {
     use super::*;
 

@@ -14,6 +14,7 @@ use crate::trace;
 
 // external crates
 use atomicwrites::{AllowOverwrite, AtomicFile, DisallowOverwrite};
+use crc_fast::CrcAlgorithm;
 use secrecy::{ExposeSecretMut, SecretBox};
 use serde::de::DeserializeOwned;
 use sha2::{Digest, Sha256};
@@ -45,11 +46,33 @@ pub async fn read_bytes(file: &File) -> Result<Vec<u8>, FileSysErr> {
 /// CPU-heavy, so callers may wrap this in `tokio::task::spawn_blocking` for very
 /// large files to avoid stalling the async runtime.
 pub async fn sha256(file: &File) -> Result<String, FileSysErr> {
+    let mut hasher = Sha256::new();
+    read_chunks(file, |chunk| hasher.update(chunk)).await?;
+    let digest = hasher.finalize();
+    Ok(format!("sha256:{digest:x}"))
+}
+
+/// Computes `file`'s [`sha256`] digest and its CRC32C (Castagnoli) checksum in
+/// one read.
+pub async fn sha256_and_crc32c(file: &File) -> Result<(String, u32), FileSysErr> {
+    let mut hasher = Sha256::new();
+    let mut crc32c = crc_fast::Digest::new(CrcAlgorithm::Crc32Iscsi);
+    read_chunks(file, |chunk| {
+        hasher.update(chunk);
+        crc32c.update(chunk);
+    })
+    .await?;
+    let digest = hasher.finalize();
+    // CRC-32 values fit in the low 32 bits of crc-fast's u64
+    Ok((format!("sha256:{digest:x}"), crc32c.finalize() as u32))
+}
+
+/// Reads `file` through a fixed 8 KiB buffer, passing each chunk to `on_chunk`.
+async fn read_chunks(file: &File, mut on_chunk: impl FnMut(&[u8])) -> Result<(), FileSysErr> {
     let mut f = TokioFile::open(file.path())
         .await
         .map_err(|e| map_io_err_for_open(e, file))?;
 
-    let mut hasher = Sha256::new();
     let mut buf = [0u8; 8 * 1024];
     loop {
         let n = f.read(&mut buf).await.map_err(|e| {
@@ -62,11 +85,9 @@ pub async fn sha256(file: &File) -> Result<String, FileSysErr> {
         if n == 0 {
             break;
         }
-        hasher.update(&buf[..n]);
+        on_chunk(&buf[..n]);
     }
-
-    let digest = hasher.finalize();
-    Ok(format!("sha256:{digest:x}"))
+    Ok(())
 }
 
 pub async fn read_secret_bytes(file: &File) -> Result<SecretBox<Vec<u8>>, FileSysErr> {
