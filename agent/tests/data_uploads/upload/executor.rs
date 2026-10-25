@@ -480,6 +480,28 @@ async fn gone_upload_is_replaced_with_a_new_one() {
     }
 }
 
+// A transient confirm failure while checking a gone upload fails the attempt
+// instead of creating a new upload.
+#[tokio::test]
+async fn failed_check_of_a_gone_upload_keeps_it() {
+    let client = Arc::new(MockClient::default());
+    client.set_vend_upload_credentials(|| Err(request_failed_err(409)));
+    client.set_confirm_upload(|| Err(request_failed_err(500)));
+    let transfer = MockObjectTransfer::new();
+    let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone());
+
+    let err = executor
+        .prepare(&job_with(upload_checkpoint()))
+        .await
+        .unwrap_err();
+
+    assert!(!err.is_terminal());
+    assert_eq!(
+        calls(&client),
+        vec![Call::VendUploadCredentials, Call::ConfirmUpload]
+    );
+}
+
 // Any other credentials failure fails the attempt, so the job keeps its saved
 // upload for the next one.
 #[tokio::test]

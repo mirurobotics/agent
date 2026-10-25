@@ -10,8 +10,8 @@ use crate::data_uploads::upload::{
     transfer::ObjectTransfer,
 };
 use crate::errors::{Error, HTTPCode};
-use crate::http::{self, ClientI, HTTPErr};
-use backend_api::models::{CreateUploadRequest, Upload, UploadCredentials, UploadSource};
+use crate::http::{self, ClientI};
+use backend_api::models::{CreateUploadRequest, UploadCredentials, UploadSource};
 
 // external crates
 use chrono::{Local, TimeZone};
@@ -98,7 +98,8 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> LiveExecutor<C, T, X> {
         Ok((upload, *resp.credentials))
     }
 
-    /// Fresh credentials for an existing upload, or `None` if it is gone.
+    /// Fresh credentials for an existing upload, or `None` if it is gone:
+    /// deleted (404), or uploaded or failed (409).
     async fn vend_credentials(&self, id: &str) -> Result<Option<UploadCredentials>, UploadErr> {
         let token = self.token().await?;
         let result = http::with_retry(|| async {
@@ -109,24 +110,26 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> LiveExecutor<C, T, X> {
             http::uploads::vend_credentials(self.http_client.as_ref(), params).await
         })
         .await;
-        none_if_gone(result)
+        match result {
+            Ok(credentials) => Ok(Some(credentials)),
+            Err(e) if matches!(e.http_status(), HTTPCode::NOT_FOUND | HTTPCode::CONFLICT) => {
+                Ok(None)
+            }
+            Err(e) => Err(classified_executor_err(e)),
+        }
     }
 
-    /// Whether a gone upload was uploaded, rather than deleted or failed.
+    /// Whether a gone upload was uploaded: confirm rejects a deleted or failed one.
     async fn already_uploaded(&self, id: &str) -> Result<bool, UploadErr> {
-        let token = self.token().await?;
-        Ok(none_if_gone(self.confirm(&token, id).await)?.is_some())
+        match self.confirm_upload(id).await {
+            Ok(()) => Ok(true),
+            Err(err) if err.is_terminal() => Ok(false),
+            Err(err) => Err(err),
+        }
     }
 
     async fn confirm_upload(&self, id: &str) -> Result<(), UploadErr> {
         let token = self.token().await?;
-        self.confirm(&token, id)
-            .await
-            .map(|_| ())
-            .map_err(classified_executor_err)
-    }
-
-    async fn confirm(&self, token: &Token, id: &str) -> Result<Upload, HTTPErr> {
         http::with_retry(|| async {
             let params = http::uploads::ConfirmParams {
                 id,
@@ -135,15 +138,8 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> LiveExecutor<C, T, X> {
             http::uploads::confirm(self.http_client.as_ref(), params).await
         })
         .await
-    }
-}
-
-/// `None` for a gone upload: deleted (404), or uploaded or failed (409).
-fn none_if_gone<T>(result: Result<T, HTTPErr>) -> Result<Option<T>, UploadErr> {
-    match result {
-        Ok(value) => Ok(Some(value)),
-        Err(e) if matches!(e.http_status(), HTTPCode::NOT_FOUND | HTTPCode::CONFLICT) => Ok(None),
-        Err(e) => Err(classified_executor_err(e)),
+        .map(|_| ())
+        .map_err(classified_executor_err)
     }
 }
 
