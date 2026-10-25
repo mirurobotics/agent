@@ -34,12 +34,16 @@ pub struct UploaderOptions {
 impl Default for UploaderOptions {
     /// At most 1,000 reports of up to 1 MiB of data each (1 GiB at worst),
     /// the most calibration data Miru accepts, retried as the data uploads
-    /// are.
+    /// are but kept far longer: a calibration is costly to redo, and the cap
+    /// already bounds the storage it holds.
     fn default() -> Self {
         Self {
             capacity: 1000,
             max_report_bytes: 1024 * 1024,
-            retry: RetryPolicy::default(),
+            retry: RetryPolicy {
+                max_age: TimeDelta::days(90),
+                ..RetryPolicy::default()
+            },
         }
     }
 }
@@ -864,10 +868,23 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_report_offline_for_weeks_is_kept() {
+        let f = Fixture::new();
+        f.sender.push(Step::Network);
+        f.advance(TimeDelta::days(89));
+        let mut u = f.uploader().await;
+        u.enqueue(report("a")).await.unwrap();
+
+        run_next_attempt(&mut u).await;
+
+        assert_backoff(&mut u, 10).await;
+    }
+
+    #[tokio::test]
     async fn a_report_unsent_past_the_age_backstop_is_dropped() {
         let f = Fixture::new();
         f.sender.push(Step::Network);
-        f.advance(TimeDelta::days(7));
+        f.advance(TimeDelta::days(90));
         let mut u = f.uploader().await;
         u.enqueue(report("a")).await.unwrap();
 
@@ -880,7 +897,7 @@ mod tests {
     async fn a_failing_report_past_the_age_cap_is_dropped() {
         let f = Fixture::new();
         f.sender.push(Step::Server);
-        f.advance(TimeDelta::days(7));
+        f.advance(TimeDelta::days(90));
         let mut u = f.uploader().await;
         u.enqueue(report("a")).await.unwrap();
 
