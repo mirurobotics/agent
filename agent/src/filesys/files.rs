@@ -45,36 +45,26 @@ pub async fn read_bytes(file: &File) -> Result<Vec<u8>, FileSysErr> {
 /// regardless of file size (the whole file is never materialized). Hashing is
 /// CPU-heavy, so callers may wrap this in `tokio::task::spawn_blocking` for very
 /// large files to avoid stalling the async runtime.
-pub async fn hash(file: &File) -> Result<String, FileSysErr> {
+pub async fn sha256(file: &File) -> Result<String, FileSysErr> {
     let mut hasher = Sha256::new();
     read_chunks(file, |chunk| hasher.update(chunk)).await?;
     let digest = hasher.finalize();
     Ok(format!("sha256:{digest:x}"))
 }
 
-/// A file's SHA-256 digest and CRC32C checksum, computed from the same read.
-#[derive(Debug, PartialEq, Eq)]
-pub struct ContentHashes {
-    /// `sha256:<lowercase-hex>`, as [`hash`] returns it.
-    pub digest: String,
-    /// The CRC32C (Castagnoli) checksum, which S3 and GCS verify uploads against.
-    pub crc32c: u32,
-}
-
-/// Computes the [`ContentHashes`] of `file`, streaming it once as [`hash`] does.
-pub async fn content_hashes(file: &File) -> Result<ContentHashes, FileSysErr> {
-    let mut sha256 = Sha256::new();
+/// Computes `file`'s [`sha256`] digest and its CRC32C (Castagnoli) checksum,
+/// which S3 and GCS verify uploads against, in one read.
+pub async fn sha256_and_crc32c(file: &File) -> Result<(String, u32), FileSysErr> {
+    let mut hasher = Sha256::new();
     let mut crc32c = crc_fast::Digest::new(CrcAlgorithm::Crc32Iscsi);
     read_chunks(file, |chunk| {
-        sha256.update(chunk);
+        hasher.update(chunk);
         crc32c.update(chunk);
     })
     .await?;
-    Ok(ContentHashes {
-        digest: format!("sha256:{:x}", sha256.finalize()),
-        // CRC-32 values fit in the low 32 bits of crc-fast's u64
-        crc32c: crc32c.finalize() as u32,
-    })
+    let digest = hasher.finalize();
+    // CRC-32 values fit in the low 32 bits of crc-fast's u64
+    Ok((format!("sha256:{digest:x}"), crc32c.finalize() as u32))
 }
 
 /// Reads `file` through a fixed 8 KiB buffer, passing each chunk to `on_chunk`.

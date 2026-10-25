@@ -169,7 +169,8 @@ async fn temp_file_with(bytes: &[u8]) -> test_files::TempFile {
 
 /// The CRC32C the scanner records for `file`, which the agent uploads it with.
 async fn scan_crc32c(file: &test_files::TempFile) -> Option<u32> {
-    Some(files::content_hashes(file.file()).await.unwrap().crc32c)
+    let (_, crc32c) = files::sha256_and_crc32c(file.file()).await.unwrap();
+    Some(crc32c)
 }
 
 /// Single-part and multipart uploads store the exact bytes and the metadata,

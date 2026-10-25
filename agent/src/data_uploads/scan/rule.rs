@@ -275,9 +275,9 @@ async fn differs_from_previous(
     observation: &Observation,
 ) -> Result<Outcome, ScanErr> {
     // A new digest (or no prior ledger entry at all) is a new stable version.
-    let hashes = files::content_hashes(&candidate.file).await?;
+    let (digest, crc32c) = files::sha256_and_crc32c(&candidate.file).await?;
     if let Some(previous) = find_previous_stable_file(state, candidate) {
-        if hashes.digest == previous.digest {
+        if digest == previous.digest {
             // Content unchanged since the latest ledger entry.
             return Ok(Outcome::AlreadyInLedger {
                 mtime: observation.mtime,
@@ -287,21 +287,23 @@ async fn differs_from_previous(
     Ok(Outcome::Stable(build_stable_file(
         candidate,
         observation.timestamp,
-        hashes,
+        digest,
+        crc32c,
     )))
 }
 
 fn build_stable_file(
     candidate: &Candidate,
     last_observed_at: DateTime<Utc>,
-    hashes: files::ContentHashes,
+    digest: Digest,
+    crc32c: u32,
 ) -> StableFile {
     let first_obs = &candidate.first_obs;
     StableFile {
         file: candidate.file.clone(),
         size: first_obs.size,
-        digest: hashes.digest,
-        crc32c: Some(hashes.crc32c),
+        digest,
+        crc32c: Some(crc32c),
         mtime: first_obs.mtime.into(),
         mtime_aliases: vec![],
         first_observed_at: first_obs.timestamp,
@@ -310,6 +312,8 @@ fn build_stable_file(
         file_rule_id: first_obs.file_rule_id.clone(),
     }
 }
+
+type Digest = String;
 
 fn find_previous_stable_file<'a>(
     state: &'a RuleState,
@@ -337,18 +341,18 @@ mod tests {
 
     // ================================ FIXTURES =================================== //
 
-    /// SHA-256 of `b"aaaa"` — the digest `files::hash` returns for that content.
+    /// SHA-256 of `b"aaaa"` — the digest `files::sha256` returns for that content.
     const HASH_AAAA: &str =
         "sha256:61be55a8e2f6b4e172338bddf184d6dbee29c98853e0a0485ecee7f27b9af0b4";
 
-    /// SHA-256 of `b"bbbb"` — the digest `files::hash` returns for that content.
+    /// SHA-256 of `b"bbbb"` — the digest `files::sha256` returns for that content.
     const HASH_BBBB: &str =
         "sha256:81cc5b17018674b401b42f35ba07bb79e211239c23bffe658da1577e3e646877";
 
-    /// CRC32C of `b"aaaa"` — the checksum `files::content_hashes` returns for that content.
+    /// CRC32C of `b"aaaa"` — the checksum `files::sha256_and_crc32c` returns for that content.
     const CRC32C_AAAA: u32 = 0x6A52_EEB0;
 
-    /// CRC32C of `b"bbbb"` — the checksum `files::content_hashes` returns for that content.
+    /// CRC32C of `b"bbbb"` — the checksum `files::sha256_and_crc32c` returns for that content.
     const CRC32C_BBBB: u32 = 0xC5E9_FC97;
 
     /// A deployment with the given id.
@@ -1166,9 +1170,8 @@ mod tests {
 
             write_file(&c.file, b"bbbbbbbb").await;
             let changed = observation(&c.state, c.file.clone(), ts(1001)).await;
-            let hashes = files::content_hashes(&c.file).await.unwrap();
-            let expected =
-                stable_from_obs(&changed, &hashes.digest, hashes.crc32c, ts(1001), ts(1011));
+            let (digest, crc32c) = files::sha256_and_crc32c(&c.file).await.unwrap();
+            let expected = stable_from_obs(&changed, &digest, crc32c, ts(1001), ts(1011));
             track(&mut c.state, &c.file, changed);
             let file = c.file.clone();
             let mut scanner = RuleScanner::from_state(c.state, Options::default());
@@ -1246,7 +1249,7 @@ mod tests {
         // it does NOT short-circuit to Unstable); `observe_file`/`metadata`
         // succeeds (directories have metadata); `is_metadata_stable` passes
         // because first_obs was observed from the same directory; then
-        // `differs_from_previous` calls `files::content_hashes`, which opens the path and
+        // `differs_from_previous` calls `files::sha256_and_crc32c`, which opens the path and
         // reads it — reading a directory fails with EISDIR → ReadFileErr →
         // eval_candidate returns Err. No permissions trickery, so it holds even
         // when the suite runs as root.

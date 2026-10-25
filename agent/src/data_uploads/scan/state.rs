@@ -165,11 +165,11 @@ mod tests {
     // external crates
     use std::time::SystemTime;
 
-    /// SHA-256 of `b"aaaa"` — the digest `files::hash` returns for that content.
+    /// SHA-256 of `b"aaaa"` — the digest `files::sha256` returns for that content.
     const HASH_AAAA: &str =
         "sha256:61be55a8e2f6b4e172338bddf184d6dbee29c98853e0a0485ecee7f27b9af0b4";
 
-    /// CRC32C of `b"aaaa"` — the checksum `files::content_hashes` returns for that content.
+    /// CRC32C of `b"aaaa"` — the checksum `files::sha256_and_crc32c` returns for that content.
     const CRC32C_AAAA: u32 = 0x6A52_EEB0;
 
     fn deployment(id: &str) -> Deployment {
