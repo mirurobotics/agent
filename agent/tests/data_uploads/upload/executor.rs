@@ -384,6 +384,25 @@ async fn prepared_upload_carries_the_multipart_upload() {
     assert_eq!(prepared.upload, upload_mid_transfer());
 }
 
+// Failing to prepare the multipart upload doesn't fail the attempt: the upload
+// keeps its saved multipart upload, which the transfer checks again.
+#[tokio::test]
+async fn multipart_failure_keeps_the_saved_multipart_upload() {
+    let client = Arc::new(MockClient::default());
+    client.set_vend_upload_credentials(|| Ok(s3_credentials()));
+    let transfer = MockObjectTransfer::new();
+    transfer.fail_multipart();
+    let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone());
+
+    let prepared = executor
+        .prepare(&job_with(upload_mid_transfer()))
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(prepared.upload, upload_mid_transfer());
+}
+
 // A retry gets fresh credentials for the saved upload instead of creating a
 // new one, and hands its multipart upload to the transfer.
 #[tokio::test]

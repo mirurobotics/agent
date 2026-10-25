@@ -14,7 +14,7 @@ use backend_api::models::{S3UploadCredentials, UploadCredentials};
 // external crates
 use aws_sdk_s3::config::SharedHttpClient;
 use chrono::{DateTime, Utc};
-use tracing::{debug, info};
+use tracing::info;
 
 /// The seam between the upload executor and the concrete cloud-storage SDKs.
 /// Given the vended downscoped credentials and the server-authorized upload,
@@ -28,17 +28,15 @@ use tracing::{debug, info};
 /// Called from the upload actor, whose in-flight future may be dropped on
 /// shutdown, so implementations must tolerate cancellation at any await point.
 pub trait ObjectTransfer: Send + Sync {
-    /// Returns `upload` with the multipart upload [`Self::transfer`] resumes:
-    /// the one in `upload.multipart` if it was started for this version of the
-    /// file and still exists, otherwise a new one, or none for a file sent in
-    /// one go. If that fails, `upload` comes back unchanged, so its backend
-    /// upload is still saved.
-    fn prepare(
+    /// The multipart upload [`Self::transfer`] resumes for `file`: the one in
+    /// `upload.multipart` if it was started for this version of the file and
+    /// still exists, otherwise a new one. `None` for a file sent in one go.
+    fn prepare_multipart(
         &self,
         credentials: &UploadCredentials,
-        upload: UploadCheckpoint,
+        upload: &UploadCheckpoint,
         file: &File,
-    ) -> impl Future<Output = UploadCheckpoint> + Send;
+    ) -> impl Future<Output = Result<Option<MultipartCheckpoint>, UploadErr>> + Send;
 
     /// Transfers the file's bytes, resuming the multipart upload in
     /// `upload.multipart` if it was started for this version of the file.
@@ -122,19 +120,6 @@ impl SdkTransfer {
         let config = s3::gcs::config(token, self.http_client.clone());
         s3::Store::new(s3::Options { config, gcs: true })
     }
-
-    /// The multipart upload [`put`] resumes for `file`; see [`multipart_for`].
-    async fn prepare_multipart(
-        &self,
-        credentials: &UploadCredentials,
-        upload: &UploadCheckpoint,
-        file: &File,
-    ) -> Result<Option<MultipartCheckpoint>, UploadErr> {
-        let store = self.store(credentials)?;
-        multipart_for(&store, upload, file)
-            .await
-            .map_err(classified_executor_err)
-    }
 }
 
 /// The upload's physical bucket (`bucket_name`, not the Miru bucket id) and
@@ -215,18 +200,16 @@ async fn put(store: &s3::Store, upload: &UploadCheckpoint, file: &File) -> Resul
 }
 
 impl ObjectTransfer for SdkTransfer {
-    async fn prepare(
+    async fn prepare_multipart(
         &self,
         credentials: &UploadCredentials,
-        mut upload: UploadCheckpoint,
+        upload: &UploadCheckpoint,
         file: &File,
-    ) -> UploadCheckpoint {
-        // the backend upload must be saved even if this fails
-        match self.prepare_multipart(credentials, &upload, file).await {
-            Ok(multipart) => upload.multipart = multipart,
-            Err(err) => debug!("upload: can't prepare multipart upload for {file}: {err:?}"),
-        }
-        upload
+    ) -> Result<Option<MultipartCheckpoint>, UploadErr> {
+        let store = self.store(credentials)?;
+        multipart_for(&store, upload, file)
+            .await
+            .map_err(classified_executor_err)
     }
 
     async fn transfer(
@@ -749,18 +732,21 @@ mod tests {
                 .collect()
         }
 
-        /// Prepares then transfers `file` for `upload` over `replay`, as an
-        /// attempt does, returning the result and the prepared upload.
+        /// Prepares the multipart upload, keeping the saved one if that fails,
+        /// then transfers `file` over `replay`, as an attempt does. Returns the
+        /// transfer's result and the upload it used.
         async fn run(
             creds: &UploadCredentials,
             replay: &StaticReplayClient,
             file: &File,
-            upload: UploadCheckpoint,
+            mut upload: UploadCheckpoint,
         ) -> (Result<(), UploadErr>, UploadCheckpoint) {
             let transfer = SdkTransfer::with_http_client(replay.clone());
-            let prepared = transfer.prepare(creds, upload, file).await;
-            let result = transfer.transfer(creds, &prepared, file).await;
-            (result, prepared)
+            if let Ok(multipart) = transfer.prepare_multipart(creds, &upload, file).await {
+                upload.multipart = multipart;
+            }
+            let result = transfer.transfer(creds, &upload, file).await;
+            (result, upload)
         }
 
         #[tokio::test]
@@ -880,8 +866,8 @@ mod tests {
             );
         }
 
-        // If preparing can't check the saved upload, it keeps it, and the
-        // transfer's own part listing fails the attempt.
+        // If preparing can't check the saved upload, the attempt keeps it, and
+        // the transfer's own part listing fails the attempt.
         #[tokio::test]
         async fn failed_check_keeps_the_saved_upload() {
             let (tf, mtime) = two_part_file().await;

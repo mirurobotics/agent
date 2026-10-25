@@ -15,7 +15,7 @@ use backend_api::models::{CreateUploadRequest, Upload, UploadCredentials, Upload
 
 // external crates
 use chrono::{Local, TimeZone};
-use tracing::info;
+use tracing::{debug, info};
 
 /// The seam between the upload actor and the transfer mechanics.
 ///
@@ -169,7 +169,7 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> UploadExecutor for LiveE
     async fn prepare(&self, job: &Job) -> Result<Option<Prepared>, UploadErr> {
         // A retry reuses the job's upload with fresh credentials, unless the
         // backend no longer accepts it.
-        let (upload, credentials) = match &job.upload {
+        let (mut upload, credentials) = match &job.upload {
             None => self.create_upload(job).await?,
             Some(upload) => match self.vend_credentials(&upload.miru_upload_id).await? {
                 Some(credentials) => (upload.clone(), credentials),
@@ -189,7 +189,19 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> UploadExecutor for LiveE
                 }
             },
         };
-        let upload = self.transfer.prepare(&credentials, upload, &job.file).await;
+        // The Miru upload is saved even if this fails, and the transfer checks
+        // the old multipart upload against the file again.
+        match self
+            .transfer
+            .prepare_multipart(&credentials, &upload, &job.file)
+            .await
+        {
+            Ok(multipart) => upload.multipart = multipart,
+            Err(err) => debug!(
+                "upload: can't prepare multipart upload for {}: {err:?}",
+                job.file
+            ),
+        }
         Ok(Some(Prepared {
             upload,
             credentials,
