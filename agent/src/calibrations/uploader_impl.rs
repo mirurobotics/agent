@@ -117,7 +117,7 @@ where
         };
         let queued: HashSet<Uuid> = self.queue.iter().map(|entry| entry.id).collect();
         for file in listing {
-            if report_id(&file).is_some_and(|id| queued.contains(&id)) {
+            if entry_id(&file).is_some_and(|id| queued.contains(&id)) {
                 continue;
             }
             warn!("calibrations: deleting report file {file}, which is not queued");
@@ -125,9 +125,10 @@ where
         }
     }
 
-    /// Queue `report` and return its id. The queue entry is written before
-    /// the report file, so a crash between the two leaves an entry without a
-    /// file, which [`Self::attempt`] fails for good. On error nothing is queued.
+    /// Queue `report` and return its queue entry id. The entry is written
+    /// before the report file, so a crash between the two leaves an entry
+    /// without a file, which [`Self::attempt`] fails for good. On error nothing
+    /// is queued.
     pub(crate) async fn enqueue(&mut self, report: Report) -> Result<Uuid, CalibrationsErr> {
         let bytes = report.data.into_bytes();
         self.verify_size(bytes.len() as u64)?;
@@ -284,8 +285,9 @@ where
     }
 }
 
-/// The report id a report file is named after, or `None` for any other file.
-fn report_id(file: &File) -> Option<Uuid> {
+/// The queue entry id a report file is named after, or `None` for any other
+/// file.
+fn entry_id(file: &File) -> Option<Uuid> {
     file.name().ok().and_then(|name| Uuid::from_str(name).ok())
 }
 
@@ -641,6 +643,22 @@ mod tests {
     }
 
     // =============================== ATTEMPT ================================ //
+    #[tokio::test]
+    async fn every_attempt_sends_the_reports_own_report_id() {
+        let f = Fixture::new();
+        f.sender.push(Step::Server);
+        let mut u = f.uploader().await;
+        let report = report("a");
+        let id = report.metadata.report_id;
+        u.enqueue(report).await.unwrap();
+
+        run_next_attempt(&mut u).await;
+        f.advance_secs(10);
+        run_next_attempt(&mut u).await;
+
+        assert_eq!(f.sender.report_ids(), [id, id]);
+    }
+
     #[tokio::test]
     async fn a_report_whose_file_is_missing_is_dropped() {
         let f = Fixture::new();

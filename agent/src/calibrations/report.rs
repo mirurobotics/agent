@@ -5,6 +5,7 @@ use crate::queue;
 // external crates
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 /// A calibration report: what intake hands the uploader and what the uploader
 /// sends to Miru. The metadata is queued in `queue.json`; the data is kept in
@@ -22,6 +23,10 @@ pub struct Report {
 /// was taken under.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ReportMetadata {
+    /// Minted at intake and sent with every upload, so Miru records the
+    /// report once.
+    #[serde(default = "Uuid::new_v4")]
+    pub report_id: Uuid,
     pub component: String,
     /// The format [`Report::data`] is serialized in.
     pub format: InstanceFormat,

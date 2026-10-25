@@ -1,13 +1,19 @@
 // internal crates
 use backend_api::models as backend_client;
-use miru_agent::models::{FileRule, FileRuleRetention, FileRuleSource, FileRuleUpload, Os};
+use device_api::models as agent_server;
+use miru_agent::models::{
+    FileRule, FileRuleRetention, FileRuleSource, FileRuleUpload, Os, UploadTimezone,
+};
 
 // external crates
 use chrono::{DateTime, Utc};
 use serde_json::json;
 
 // harness
-use crate::models::harnesses::{serde_tests, ModelFixture, OptionalField, RequiredField};
+use crate::models::harnesses::{
+    serde_tests, status_enum_tests, ModelFixture, OptionalField, RequiredField, StatusCase,
+    StatusEnumFixture,
+};
 
 // ─── fixture ─────────────────────────────────────────────────────────────────
 
@@ -51,6 +57,7 @@ impl ModelFixture for FileRule {
                     "bucket_id": "buck_123",
                     "bucket_name": "my-bucket",
                     "path": "{device_id}/logs",
+                    "timezone": "device",
                 }),
                 default_value: json!(null),
             },
@@ -116,7 +123,7 @@ fn backend_upload() -> backend_client::FileRuleUpload {
         bucket_id: "buck_123".to_string(),
         bucket_name: "my-bucket".to_string(),
         path: "{device_id}/logs".to_string(),
-        timezone: backend_client::FileRuleUploadTimezone::FILE_RULE_UPLOAD_TIMEZONE_UTC,
+        timezone: backend_client::FileRuleUploadTimezone::FILE_RULE_UPLOAD_TIMEZONE_DEVICE,
         bundle: Some(vec!["camera".to_string()]),
     }
 }
@@ -174,6 +181,7 @@ fn from_backend() {
             bucket_id: "buck_123".to_string(),
             bucket_name: "my-bucket".to_string(),
             path: "{device_id}/logs".to_string(),
+            timezone: UploadTimezone::Device,
             bundle: Some(vec!["camera".to_string()]),
         }),
         retention: Some(FileRuleRetention {
@@ -311,4 +319,44 @@ fn requires_upload() {
         };
         assert_eq!(retention.requires_upload(), expected, "{require_upload:?}");
     }
+}
+
+// ─── upload timezone ────────────────────────────────────────────────────────
+
+impl StatusEnumFixture for UploadTimezone {
+    type Backend = backend_client::FileRuleUploadTimezone;
+    type Agent = agent_server::FileRuleUploadTimezone;
+
+    fn cases() -> Vec<StatusCase<Self>> {
+        vec![
+            StatusCase {
+                variant: UploadTimezone::Utc,
+                wire: "utc",
+                backend: backend_client::FileRuleUploadTimezone::FILE_RULE_UPLOAD_TIMEZONE_UTC,
+                agent: agent_server::FileRuleUploadTimezone::FILE_RULE_UPLOAD_TIMEZONE_UTC,
+            },
+            StatusCase {
+                variant: UploadTimezone::Device,
+                wire: "device",
+                backend: backend_client::FileRuleUploadTimezone::FILE_RULE_UPLOAD_TIMEZONE_DEVICE,
+                agent: agent_server::FileRuleUploadTimezone::FILE_RULE_UPLOAD_TIMEZONE_DEVICE,
+            },
+        ]
+    }
+}
+
+status_enum_tests!(UploadTimezone, backend, agent);
+
+#[test]
+fn an_upload_cached_without_a_timezone_is_utc() {
+    let upload: FileRuleUpload = serde_json::from_value(json!({
+        "upload_collection_id": "upl_col_123",
+        "upload_collection_name": "camera-logs",
+        "bucket_id": "buck_123",
+        "bucket_name": "my-bucket",
+        "path": "{device_id}/logs",
+    }))
+    .unwrap();
+
+    assert_eq!(upload.timezone, UploadTimezone::Utc);
 }

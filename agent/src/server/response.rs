@@ -67,6 +67,7 @@ impl From<&models::FileRuleUpload> for device_server::FileRuleUpload {
             bucket_id: upload.bucket_id.clone(),
             bucket_name: upload.bucket_name.clone(),
             path: upload.path.clone(),
+            timezone: (&upload.timezone).into(),
             bundle: upload.bundle.clone(),
         }
     }
@@ -124,6 +125,7 @@ impl From<&events::model::Event> for device_server::Event {
 impl From<&calibration::Created> for device_server::CreateCalibrationResponse {
     fn from(created: &calibration::Created) -> Self {
         device_server::CreateCalibrationResponse {
+            report_id: created.report_id,
             reported_at: created.reported_at.to_rfc3339(),
         }
     }

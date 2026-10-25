@@ -9,6 +9,7 @@ use miru_agent::http::request::Params;
 
 // external crates
 use tokio::sync::{mpsc, oneshot};
+use uuid::Uuid;
 
 /// One scripted result for a `MockCalibrationSender::send` call.
 pub enum Step {
@@ -52,6 +53,12 @@ impl MockCalibrationSender {
     pub fn sent(&self) -> Vec<String> {
         let sent = self.sent.lock().unwrap();
         sent.iter().map(|r| r.metadata.component.clone()).collect()
+    }
+
+    /// The `report_id` of every report `send` was called with, in order.
+    pub fn report_ids(&self) -> Vec<Uuid> {
+        let sent = self.sent.lock().unwrap();
+        sent.iter().map(|r| r.metadata.report_id).collect()
     }
 
     /// Every report `send` was called with, in order.

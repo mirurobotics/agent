@@ -278,6 +278,7 @@ mod tests {
     use aws_smithy_runtime_api::client::result::ConnectorError;
     use aws_smithy_runtime_api::client::runtime_components::RuntimeComponents;
     use aws_smithy_types::body::SdkBody;
+    use http_body_util::BodyExt;
     use serde_json::{json, Value};
 
     /// Extracts the transfer layer's typed precondition failure from the single
@@ -517,7 +518,10 @@ mod tests {
         let headers = requests[0].headers();
         assert_eq!(headers.get("authorization"), Some("Bearer vended-token"));
         assert_eq!(headers.get("x-goog-meta-device_id"), Some("dvc_1"));
-        assert_eq!(requests[0].body().bytes(), Some(&b"hello world"[..]));
+        // GCS sends the streamed body without aws-chunked framing.
+        let body = requests[0].body().try_clone().unwrap();
+        let sent = body.collect().await.unwrap().to_bytes();
+        assert_eq!(sent, &b"hello world"[..]);
     }
 
     #[tokio::test]

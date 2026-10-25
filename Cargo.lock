@@ -677,6 +677,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with",
+ "uuid",
 ]
 
 [[package]]
@@ -1215,6 +1216,7 @@ version = "0.11.2-beta.3"
 dependencies = [
  "serde",
  "serde_json",
+ "uuid",
 ]
 
 [[package]]
@@ -2281,13 +2283,11 @@ dependencies = [
  "axum 0.8.9",
  "backend-api",
  "base64 0.22.1",
- "bytes",
  "chrono",
  "device-api",
  "futures",
  "glob",
  "http 1.5.0",
- "http-body 1.1.0",
  "http-body-util",
  "md-5",
  "mockall",

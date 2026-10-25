@@ -1,17 +1,17 @@
 // standard crates
 use std::collections::HashMap;
-use std::io::SeekFrom;
 
 // internal crates
 use crate::errors::HTTPCode;
-use crate::filesys::{errors::PathDoesNotExistErr, file::File, path::PathExt, FileSysErr};
-use crate::s3::{body, errors, errors::ObjectNotFoundErr, gcs, sdk, S3Err};
+use crate::filesys::{file::File, path::PathExt};
+use crate::s3::{errors, errors::ObjectNotFoundErr, sdk, S3Err, Source};
 use crate::trace;
 
 // external crates
 use aws_sdk_s3::error::SdkError;
+use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::Client;
-use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
 
 /// Objects larger than this stream through a multipart upload; objects at or
 /// below it go through a single `PutObject`. S3's own multipart part-size
@@ -38,76 +38,14 @@ impl std::fmt::Display for Object {
     }
 }
 
-/// A local file opened once for upload. Its size and every byte read come from
-/// the same open handle, so the upload stays bound to the opened file even if
-/// its path is replaced afterwards.
-pub struct Source {
-    file: File,
-    handle: tokio::fs::File,
-    pub(crate) size: u64,
-    /// `None` if the platform doesn't report one.
-    pub(crate) mtime: Option<std::time::SystemTime>,
-}
-
-impl Source {
-    /// Opens `file` for reading. A missing file is [`S3Err::FileSysErr`]; any
-    /// other open or metadata failure is [`S3Err::LocalIoErr`].
-    pub async fn open(file: File, dst: &Object) -> Result<Self, S3Err> {
-        let handle = tokio::fs::File::open(file.path()).await.map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                FileSysErr::PathDoesNotExistErr(PathDoesNotExistErr {
-                    path: file.path().clone(),
-                    trace: trace!(),
-                })
-                .into()
-            } else {
-                errors::map_body_io_err("open_source", dst, &file, e)
-            }
-        })?;
-        let meta = handle
-            .metadata()
-            .await
-            .map_err(|e| errors::map_body_io_err("open_source", dst, &file, e))?;
-        Ok(Self {
-            file,
-            handle,
-            size: meta.len(),
-            mtime: meta.modified().ok(),
-        })
-    }
-
-    /// Reads `[offset..offset+length]` into memory, mapping any seek/read failure
-    /// to [`S3Err::LocalIoErr`]. A file truncated below `offset + length` after
-    /// it was opened makes `read_exact` fail with `UnexpectedEof`, which maps to
-    /// the same error.
-    pub(super) async fn read(
-        &mut self,
-        operation: &str,
-        dst: &Object,
-        offset: u64,
-        length: u64,
-    ) -> Result<Vec<u8>, S3Err> {
-        self.handle
-            .seek(SeekFrom::Start(offset))
-            .await
-            .map_err(|e| errors::map_body_io_err(operation, dst, &self.file, e))?;
-        let mut buf = vec![0u8; length as usize];
-        self.handle
-            .read_exact(&mut buf)
-            .await
-            .map_err(|e| errors::map_body_io_err(operation, dst, &self.file, e))?;
-        Ok(buf)
-    }
-}
-
 /// What a [`Store`] is built from.
 pub struct Options {
     /// The SDK config, from [`aws::config`](crate::s3::aws::config) or
-    /// [`gcs::config`].
+    /// [`gcs::config`](crate::s3::gcs::config).
     pub config: aws_sdk_s3::Config,
-    /// Set for a [`gcs::config`]. Bodies then carry a `Content-MD5` the store
-    /// computes, since the GCS client turns the SDK's own request checksums
-    /// off, and object writes are create-only.
+    /// Set for a [`gcs::config`](crate::s3::gcs::config). Bodies then carry a
+    /// `Content-MD5` the store computes, since the GCS client turns the SDK's
+    /// own request checksums off, and object writes are create-only.
     pub gcs: bool,
 }
 
@@ -127,14 +65,14 @@ impl Store {
         }
     }
 
-    /// Creates or overwrites an object from a local file, opened once as a
+    /// Creates or overwrites an object from a local file, sized once as a
     /// [`Source`]. GCS never overwrites: an existing object counts as written
-    /// (see [`gcs`]).
+    /// (see [`gcs`](crate::s3::gcs)).
     ///
     /// Files at or below [`PART_SIZE`] go through one `PutObject`
     /// ([`Self::put_singlepart`]); larger files go part-by-part through a
-    /// stateless multipart upload ([`Self::put_multipart`]). Either way at most
-    /// one part's bytes are held in memory at a time.
+    /// stateless multipart upload ([`Self::put_multipart`]). Either way the
+    /// bytes stream from the file.
     pub async fn put(
         &self,
         src: File,
@@ -149,40 +87,52 @@ impl Store {
         }
     }
 
-    /// Uploads `src` as a single `PutObject`. The body is buffered in memory, so
-    /// the SDK can replay it on a retry without reopening the path.
+    /// Uploads `src` as a single `PutObject`, streamed from the file.
     pub async fn put_singlepart(
         &self,
-        mut src: Source,
+        src: Source,
         dst: &Object,
         metadata: &HashMap<String, String>,
     ) -> Result<(), S3Err> {
-        let size = src.size;
-        let bytes = src.read("put_object", dst, 0, size).await?;
-        let content_md5 = self.content_md5(&bytes);
+        let (body, content_md5) = self.body(&src, "put_object", dst, 0, src.size).await?;
         let result = self
             .client
             .put_object()
             .bucket(&dst.bucket)
             .key(&dst.key)
-            .body(body::framed(bytes))
+            .body(body)
             .set_content_md5(content_md5)
             .set_metadata((!metadata.is_empty()).then(|| metadata.clone()))
             .customize()
-            .config_override(sdk::timeout(sdk::upload_timeout(size)))
+            .config_override(sdk::timeout(sdk::upload_timeout(src.size)))
             .send()
             .await
             .map(|_| ());
         self.finish_write("put_object", dst, result).map(|_| ())
     }
 
-    /// `Content-MD5` for a body, when this store sends one.
-    pub(super) fn content_md5(&self, bytes: &[u8]) -> Option<String> {
-        self.gcs.then(|| gcs::content_md5(bytes))
+    /// The request body that streams `len` bytes of `src` from `offset`, and
+    /// on GCS its `Content-MD5` (see [`Options::gcs`]). A file now shorter
+    /// than the range is [`S3Err::LocalIoErr`] before any request goes out.
+    pub(super) async fn body(
+        &self,
+        src: &Source,
+        operation: &str,
+        dst: &Object,
+        offset: u64,
+        len: u64,
+    ) -> Result<(ByteStream, Option<String>), S3Err> {
+        let content_md5 = if self.gcs {
+            Some(src.content_md5(operation, dst, offset, len).await?)
+        } else {
+            None
+        };
+        let body = src.read(operation, dst, offset, len).await?;
+        Ok((body, content_md5))
     }
 
     /// Finishes an object write (PutObject or CompleteMultipartUpload). On GCS
-    /// the client sends writes create-only (see [`gcs`]), so a 412 means an
+    /// the client sends writes create-only (see [`gcs`](crate::s3::gcs)), so a 412 means an
     /// earlier attempt already stored the object at this key, which counts as
     /// done.
     pub(super) fn finish_write<E>(
@@ -627,7 +577,7 @@ pub(super) mod tests {
                     requests[0].uri().to_string(),
                     uri("artifacts/hello.txt?x-id=PutObject")
                 );
-                assert_eq!(requests[0].body().bytes(), Some(&b"hello world"[..]));
+                assert_eq!(recorded_payload(requests[0]).await, b"hello world");
                 assert!(requests[0]
                     .headers()
                     .get("authorization")
@@ -662,7 +612,7 @@ pub(super) mod tests {
                     requests[0].uri().to_string(),
                     uri("artifacts/empty.txt?x-id=PutObject")
                 );
-                assert_eq!(requests[0].body().bytes(), Some(&b""[..]));
+                assert_eq!(recorded_payload(requests[0]).await, b"");
             }
 
             #[tokio::test]
@@ -687,35 +637,6 @@ pub(super) mod tests {
                 let header = |name: &str| requests[0].headers().get(name);
                 assert_eq!(header("x-amz-meta-device_id"), Some("dvc_1"));
                 assert_eq!(header("x-amz-meta-digest"), Some("sha256:abc"));
-            }
-
-            #[tokio::test]
-            async fn path_replaced_after_open_uploads_the_opened_file() {
-                let key = "artifacts/robot.log";
-                let src = temp_file_with(b"original").await;
-                let source = source_of(&src, key).await;
-
-                // Move the opened file away and put a longer, different file at
-                // the same path.
-                let path = src.file().path();
-                let moved = path.with_extension("1");
-                tokio::fs::rename(path, &moved).await.unwrap();
-                tokio::fs::write(path, b"replacement-bytes").await.unwrap();
-
-                let (store, replay) = store_expecting(
-                    req("PUT", "artifacts/robot.log?x-id=PutObject"),
-                    resp(200, &[]),
-                );
-
-                store
-                    .put_singlepart(source, &obj(key), &HashMap::new())
-                    .await
-                    .unwrap();
-
-                let requests = replay.actual_requests().collect::<Vec<_>>();
-                assert_eq!(requests[0].body().bytes(), Some(&b"original"[..]));
-
-                tokio::fs::remove_file(&moved).await.unwrap();
             }
         }
 

@@ -103,19 +103,15 @@ fn params() -> CreateParams {
 }
 
 #[tokio::test]
-async fn queues_the_report_stamped_with_the_time() {
+async fn queues_the_report_stamped_with_its_id_and_the_time() {
     let mut f = Fixture::new().await;
 
     let created = f.create(params()).await.unwrap();
 
-    assert_eq!(
-        created,
-        Created {
-            reported_at: received_at()
-        }
-    );
+    assert_eq!(created.reported_at, received_at());
     let expected = Report {
         metadata: ReportMetadata {
+            report_id: created.report_id,
             component: "arm".to_string(),
             format: InstanceFormat::Yaml,
             role: Some("left".to_string()),
