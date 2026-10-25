@@ -2313,6 +2313,7 @@ dependencies = [
  "backend-api",
  "base64 0.22.1",
  "chrono",
+ "crc-fast",
  "device-api",
  "futures",
  "glob",
