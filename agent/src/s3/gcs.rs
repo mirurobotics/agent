@@ -17,9 +17,8 @@
 //!   stores as object bytes while still answering 200. Integrity comes from the
 //!   `Content-MD5` the store sets instead (GCS rejects a mismatch with 400
 //!   `BadDigest`), and from the file's scan-time CRC32C when the upload has
-//!   one: GCS checks a single PUT against it, and since GCS takes no checksum
-//!   for a multipart object, the store checks the CRC32Cs GCS reports for the
-//!   parts before it completes the upload.
+//!   one: GCS checks a single PUT against it, and the store checks a multipart
+//!   upload's parts before completing it.
 //!
 //! These rely on how GCS treats aws-sdk-s3's requests, which Google doesn't
 //! document. The tests below pin the requests we send.
@@ -186,14 +185,12 @@ fn move_crc32c_to_goog_hash(headers: &mut Headers) -> Result<(), BoxError> {
     Ok(())
 }
 
-/// Copies the CRC32C in a response's `x-goog-hash` (`crc32c=<b64>,md5=<b64>`,
-/// possibly split across headers) to `x-amz-checksum-crc32c`, where the SDK
-/// reads a part's CRC32C.
+/// Copies the CRC32C from a response's `x-goog-hash: crc32c=<b64>` header to
+/// `x-amz-checksum-crc32c`, where the SDK reads a part's CRC32C.
 fn copy_goog_crc32c(headers: &mut Headers) -> Result<(), BoxError> {
     let crc32c = headers
         .get_all(GOOG_HASH)
-        .flat_map(|value| value.split(','))
-        .find_map(|hash| hash.trim().strip_prefix("crc32c="))
+        .find_map(|hash| hash.strip_prefix("crc32c="))
         .map(str::to_string);
     if let Some(crc32c) = crc32c {
         headers.try_insert(AMZ_CRC32C, crc32c)?;
@@ -812,17 +809,6 @@ mod tests {
                 .map(|r| r.method().to_string())
                 .collect();
             assert_eq!(methods, ["POST", "PUT", "PUT", "DELETE"]);
-        }
-
-        #[test]
-        fn reads_crc32c_from_joined_goog_hash() {
-            // GCS sends one x-goog-hash per hash, but a proxy may join them.
-            let mut headers = Headers::new();
-            headers.insert(GOOG_HASH, "md5=XrY7u+Ae7tCTyyK7j1rNww==, crc32c=yZRlqg==");
-
-            copy_goog_crc32c(&mut headers).unwrap();
-
-            assert_eq!(headers.get(AMZ_CRC32C), Some("yZRlqg=="));
         }
     }
 }

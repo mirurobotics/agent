@@ -240,10 +240,8 @@ impl Store {
             .await
     }
 
-    /// Whether S3 checks this upload against `src`'s scan-time CRC32C: each
-    /// part's CRC32C, then the whole object's on complete. GCS takes no
-    /// checksum for a multipart object, so there [`check_parts_crc32c`] checks
-    /// the parts before completing instead.
+    /// Whether S3 checks this upload against `src`'s CRC32C. GCS takes no
+    /// checksum for a multipart object, so [`check_parts_crc32c`] does there.
     fn s3_checks_crc32c(&self, src: &Source) -> bool {
         !self.gcs && src.crc32c.is_some()
     }
@@ -300,27 +298,27 @@ impl Store {
         upload_id: &str,
         parts: &[CompletedPart],
     ) -> Result<WriteOutcome, S3Err> {
-        let mut request = self
+        let mut parts = parts.to_vec();
+        if self.gcs {
+            check_parts_crc32c(src, obj, &parts)?;
+            // GCS documents a manifest of part numbers and ETags only.
+            for part in &mut parts {
+                part.checksum_crc32_c = None;
+            }
+        }
+        let checked = self.s3_checks_crc32c(src);
+        let completed = CompletedMultipartUpload::builder()
+            .set_parts(Some(parts))
+            .build();
+        let result = self
             .client
             .complete_multipart_upload()
             .bucket(&obj.bucket)
             .key(&obj.key)
-            .upload_id(upload_id);
-        if self.gcs {
-            if let Some(expected) = src.crc32c {
-                check_parts_crc32c(obj, expected, src.size, parts)?;
-            }
-            request = request.multipart_upload(gcs_manifest(parts));
-        } else {
-            let completed = CompletedMultipartUpload::builder()
-                .set_parts(Some(parts.to_vec()))
-                .build();
-            request = request
-                .multipart_upload(completed)
-                .set_checksum_type(src.crc32c.map(|_| ChecksumType::FullObject))
-                .set_checksum_crc32_c(src.crc32c_base64());
-        }
-        let result = request
+            .upload_id(upload_id)
+            .multipart_upload(completed)
+            .set_checksum_type(checked.then_some(ChecksumType::FullObject))
+            .set_checksum_crc32_c(src.crc32c_base64().filter(|_| checked))
             .customize()
             .config_override(sdk::timeout(sdk::COMPLETE_TIMEOUT))
             .send()
@@ -346,17 +344,15 @@ impl Store {
     }
 }
 
-/// Checks that the parts GCS stored make up the scanned file: their CRC32Cs,
-/// as GCS reported them, combined in part order must equal `expected`. A part
-/// without a CRC32C fails the check.
-fn check_parts_crc32c(
-    dst: &Object,
-    expected: u32,
-    size: u64,
-    parts: &[CompletedPart],
-) -> Result<(), S3Err> {
+/// Given `src`'s scan-time CRC32C, checks that the parts GCS stored make up
+/// the scanned file: the CRC32Cs GCS reported for them, combined in order, must
+/// equal it. A part without a CRC32C fails the check.
+fn check_parts_crc32c(src: &Source, dst: &Object, parts: &[CompletedPart]) -> Result<(), S3Err> {
+    let Some(expected) = src.crc32c else {
+        return Ok(());
+    };
     let mut composed = 0;
-    for (part, (number, _, len)) in parts.iter().zip(Store::part_plan(size)) {
+    for (part, (number, _, len)) in parts.iter().zip(Store::part_plan(src.size)) {
         let Some(crc32c) = part.checksum_crc32_c().and_then(decode_crc32c) else {
             let field = format!("a CRC32C for part {number}");
             return Err(errors::missing_response_field("upload_part", dst, &field));
@@ -380,23 +376,6 @@ fn decode_crc32c(value: &str) -> Option<u32> {
         .decode(value)
         .ok()?;
     Some(u32::from_be_bytes(bytes.try_into().ok()?))
-}
-
-/// The manifest GCS documents for completing an upload: each part's number
-/// and ETag, without the checksums S3 also takes.
-fn gcs_manifest(parts: &[CompletedPart]) -> CompletedMultipartUpload {
-    let parts = parts
-        .iter()
-        .map(|part| {
-            CompletedPart::builder()
-                .set_part_number(part.part_number())
-                .set_e_tag(part.e_tag().map(str::to_string))
-                .build()
-        })
-        .collect();
-    CompletedMultipartUpload::builder()
-        .set_parts(Some(parts))
-        .build()
 }
 
 #[cfg(test)]

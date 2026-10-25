@@ -12,8 +12,7 @@ const READ_SIZE: usize = 32 * 1024;
 
 /// A local file to upload, its size when the upload started, and the CRC32C
 /// it was scanned with. The file is expected to stay unchanged until the
-/// upload is confirmed; with a CRC32C, the store writes no object whose bytes
-/// differ from the scanned file.
+/// upload is confirmed.
 pub struct Source {
     file: File,
     pub(super) size: u64,

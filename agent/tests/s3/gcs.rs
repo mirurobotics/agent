@@ -201,13 +201,10 @@ async fn put_of_a_file_changed_since_its_scan_is_refused() {
         let file = temp_file_with(&test_bytes(len)).await;
         let scanned = scan_crc32c(&file).await;
         // Same size, other bytes.
-        files::write_bytes(
-            file.file(),
-            &vec![0; len],
-            WriteOptions::OVERWRITE_NONATOMIC,
-        )
-        .await
-        .unwrap();
+        let changed = vec![0; len];
+        files::write_bytes(file.file(), &changed, WriteOptions::OVERWRITE_NONATOMIC)
+            .await
+            .unwrap();
 
         let store = gcs.upload_store(&obj).await;
         let err = store

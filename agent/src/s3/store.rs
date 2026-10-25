@@ -156,7 +156,7 @@ impl Store {
                 Ok(WriteOutcome::AlreadyExists)
             }
             Err(e) if matches!(e.code(), Some("BadDigest" | "CrcMismatch")) => {
-                let msg = e.message().or_else(|| e.code()).unwrap_or_default();
+                let msg = e.message().unwrap_or_default();
                 Err(errors::checksum_mismatch(operation, dst, msg))
             }
             Err(e) => Err(errors::map_sdk_err(operation, dst, e)),

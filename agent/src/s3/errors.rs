@@ -92,10 +92,8 @@ pub struct InvalidResponseErr {
 
 impl crate::errors::Error for InvalidResponseErr {}
 
-/// The object's bytes don't match the checksum sent with them, or on GCS the
-/// parts don't compose to the file's scan-time CRC32C. The file is not the
-/// static file the upload assumes, and a retry would read it the same way, so
-/// this is terminal.
+/// The uploaded bytes don't match the file's checksum, so the file changed after
+/// it was hashed. A retry would read the same bytes, so this is terminal.
 #[derive(Debug, thiserror::Error)]
 #[error("checksum mismatch during {operation} for object '{object}': {msg}")]
 pub struct ChecksumMismatchErr {
