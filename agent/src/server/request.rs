@@ -18,7 +18,7 @@ impl TryFrom<device_server::CreateCalibrationRequest> for calibration::CreatePar
             });
         };
         Ok(calibration::CreateParams {
-            component: request.component_slug,
+            component: request.component,
             role: request.role,
             aspect: request.aspect,
             serial_number: request.serial_number,
