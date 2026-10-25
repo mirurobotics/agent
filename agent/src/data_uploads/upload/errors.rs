@@ -24,18 +24,6 @@ impl crate::errors::Error for ExecutorErr {
     }
 }
 
-/// A transfer that failed after its storage credentials expired. The next
-/// attempt gets fresh ones, so the uploader doesn't count this one.
-#[derive(Debug, thiserror::Error)]
-#[error("storage credentials expired before the transfer finished: {source}")]
-pub struct ExpiredCredentialsErr {
-    #[source]
-    pub source: Box<dyn std::error::Error + Send + Sync>,
-    pub trace: Box<Trace>,
-}
-
-impl crate::errors::Error for ExpiredCredentialsErr {}
-
 /// The transfer layer's own preconditions, as a type so tests and callers can
 /// tell them apart. Carried as the `source` of an [`ExecutorErr`];
 /// classification is unchanged (non-terminal, non-network) and the `Display`
@@ -61,8 +49,6 @@ pub enum UploadErr {
     #[error(transparent)]
     ExecutorErr(ExecutorErr),
     #[error(transparent)]
-    ExpiredCredentialsErr(ExpiredCredentialsErr),
-    #[error(transparent)]
     SendActorMessageErr(SendActorMessageErr),
     #[error(transparent)]
     ReceiveActorMessageErr(ReceiveActorMessageErr),
@@ -71,13 +57,12 @@ pub enum UploadErr {
 crate::impl_error!(UploadErr {
     EnqueueErr,
     ExecutorErr,
-    ExpiredCredentialsErr,
     SendActorMessageErr,
     ReceiveActorMessageErr
 });
 
-/// Wraps any concrete error as an [`UploadErr::ExecutorErr`], the error the
-/// actor sees for every executor and transfer failure but expired credentials.
+/// Wraps any concrete error as an [`UploadErr::ExecutorErr`], the single
+/// error surface the actor sees from executor and transfer failures.
 pub(crate) fn executor_err<E>(source: E) -> UploadErr
 where
     E: Into<Box<dyn std::error::Error + Send + Sync>>,

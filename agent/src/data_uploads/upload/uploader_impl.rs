@@ -1,6 +1,7 @@
 // standard crates
 use std::future::Future;
 use std::sync::Arc;
+use std::time::Duration;
 
 // internal crates
 use crate::data_uploads::{
@@ -18,6 +19,11 @@ use crate::queue::{NextAttempt, Persistence, RetryPolicy, Verdict};
 // external crates
 use chrono::{DateTime, TimeDelta, Utc};
 use tracing::{debug, error, info, warn};
+
+/// A non-terminal failure after an attempt this long doesn't count toward the
+/// attempt budget. Its likeliest cause is storage credentials that expired
+/// mid-transfer, and the retry resumes the upload with fresh ones.
+const LONG_ATTEMPT: Duration = Duration::from_secs(30 * 60);
 
 #[derive(Clone, Debug)]
 pub struct UploaderOptions {
@@ -111,12 +117,13 @@ where
         async move { executor.upload(&job).await }
     }
 
-    /// Settle `entry` with the result of its attempt: ack it on success or
-    /// when it is dropped, otherwise retry it at the tail.
+    /// Settle `entry` with the result of its attempt, which ran for `ran_for`:
+    /// ack it on success or when it is dropped, otherwise retry it at the tail.
     pub(crate) async fn finish_attempt(
         &mut self,
         mut entry: QueueEntry,
         result: Result<(), UploadErr>,
+        ran_for: Duration,
     ) {
         match result {
             Ok(()) => {
@@ -125,7 +132,7 @@ where
                 self.enqueue_delete_job(&entry).await;
                 self.queue.ack(entry.id).await;
             }
-            Err(err) => self.handle_failure(entry, err).await,
+            Err(err) => self.handle_failure(entry, err, ran_for).await,
         }
     }
 
@@ -162,12 +169,13 @@ where
     }
 
     /// Settle a failed attempt as the retry policy says. Network connection
-    /// errors and expired credentials are expected and don't count toward the
-    /// attempt budget; any other failure does.
-    async fn handle_failure(&mut self, mut entry: QueueEntry, err: UploadErr) {
+    /// errors, and non-terminal failures after a [`LONG_ATTEMPT`], don't count
+    /// toward the attempt budget; any other failure does.
+    async fn handle_failure(&mut self, mut entry: QueueEntry, err: UploadErr, ran_for: Duration) {
         let age = (self.now_fn)() - entry.job.first_observed_at;
         let retry = &self.options.retry;
-        let verdict = if matches!(err, UploadErr::ExpiredCredentialsErr(_)) {
+        let long_attempt = ran_for >= LONG_ATTEMPT && !err.is_terminal();
+        let verdict = if long_attempt {
             retry.on_uncounted_failure(entry.attempts, age)
         } else {
             retry.on_failure(&err, entry.attempts, age)
@@ -178,24 +186,24 @@ where
                 wait_secs,
             } => {
                 entry.attempts = attempts;
-                Self::log_failure(&entry, &err);
+                Self::log_failure(&entry, &err, long_attempt);
                 self.retry_after(&entry, wait_secs).await;
             }
             Verdict::Terminal { attempts } => {
                 entry.attempts = attempts;
-                Self::log_failure(&entry, &err);
+                Self::log_failure(&entry, &err, long_attempt);
                 Self::log_terminal_drop(&entry, &err);
                 self.queue.ack(entry.id).await;
             }
             Verdict::OutOfAttempts { attempts } => {
                 entry.attempts = attempts;
-                Self::log_failure(&entry, &err);
+                Self::log_failure(&entry, &err, long_attempt);
                 Self::log_dropped(&entry, &err);
                 self.queue.ack(entry.id).await;
             }
             Verdict::TooOld { attempts, age } => {
                 entry.attempts = attempts;
-                Self::log_failure(&entry, &err);
+                Self::log_failure(&entry, &err, long_attempt);
                 Self::log_age_drop(&entry, age, &err);
                 self.queue.ack(entry.id).await;
             }
@@ -216,13 +224,14 @@ where
     }
 
     /// A network error logs at debug, since it repeats every `base_secs` while
-    /// the device is offline. Expired credentials log at info, since a long
-    /// upload outlives them. Any other failure counts and logs at warn.
-    fn log_failure(entry: &QueueEntry, err: &UploadErr) {
+    /// the device is offline. A failure after a long attempt logs at info,
+    /// since a long upload outlives its credentials. Any other failure counts
+    /// and logs at warn.
+    fn log_failure(entry: &QueueEntry, err: &UploadErr, long_attempt: bool) {
         if err.is_network_conn_err() {
             Self::log_network_conn_err(entry, err);
-        } else if matches!(err, UploadErr::ExpiredCredentialsErr(_)) {
-            Self::log_expired_credentials(entry, err);
+        } else if long_attempt {
+            Self::log_long_attempt(entry, err);
         } else {
             Self::log_counted_failure(entry, err);
         }
@@ -235,9 +244,9 @@ where
         );
     }
 
-    fn log_expired_credentials(entry: &QueueEntry, err: &UploadErr) {
+    fn log_long_attempt(entry: &QueueEntry, err: &UploadErr) {
         info!(
-            "upload: credentials expired for file {}; not counting attempt: {err:?}",
+            "upload: long attempt for file {} failed; not counting it: {err:?}",
             entry.job.file
         );
     }

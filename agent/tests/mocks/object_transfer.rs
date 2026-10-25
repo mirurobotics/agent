@@ -4,13 +4,9 @@ use std::sync::{Arc, Mutex};
 
 // internal crates
 use backend_api::models::{UploadCredentials, UploadDestination};
-use miru_agent::clock::Clock;
 use miru_agent::data_uploads::upload::errors::ExecutorErr;
 use miru_agent::data_uploads::upload::{ObjectTransfer, UploadErr};
 use miru_agent::filesys::File;
-
-// external crates
-use chrono::{DateTime, Utc};
 
 /// One recorded `transfer` call's arguments.
 pub type TransferCall = (
@@ -19,9 +15,6 @@ pub type TransferCall = (
     File,
     HashMap<String, String>,
 );
-
-/// The clock a transfer moves, and the backend time it runs until on it.
-type RunsUntil = Option<(Clock, DateTime<Utc>)>;
 
 /// Scripted [`ObjectTransfer`] test double. Each `transfer` call pops the next
 /// scripted result (an empty script defaults to `Ok`) and records the call's
@@ -32,7 +25,6 @@ type RunsUntil = Option<(Clock, DateTime<Utc>)>;
 pub struct MockObjectTransfer {
     script: Arc<Mutex<VecDeque<Result<(), UploadErr>>>>,
     calls: Arc<Mutex<Vec<TransferCall>>>,
-    runs_until: Arc<Mutex<RunsUntil>>,
 }
 
 impl MockObjectTransfer {
@@ -50,12 +42,6 @@ impl MockObjectTransfer {
                 is_network_conn_err: false,
                 trace: miru_agent::trace!(),
             })));
-    }
-
-    /// Makes each transfer run until `clock` reads the backend's time as
-    /// `server_time`.
-    pub fn run_until(&self, clock: Clock, server_time: DateTime<Utc>) {
-        *self.runs_until.lock().unwrap() = Some((clock, server_time));
     }
 
     pub fn recorded_calls(&self) -> Vec<TransferCall> {
@@ -77,10 +63,6 @@ impl ObjectTransfer for MockObjectTransfer {
             file.clone(),
             metadata.clone(),
         ));
-        let runs_until = self.runs_until.lock().unwrap().clone();
-        if let Some((clock, server_time)) = runs_until {
-            clock.observe_server_time(server_time);
-        }
         let step = self.script.lock().unwrap().pop_front();
         step.unwrap_or(Ok(()))
     }

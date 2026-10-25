@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 // internal crates
-use miru_agent::data_uploads::upload::errors::{ExecutorErr, ExpiredCredentialsErr};
+use miru_agent::data_uploads::upload::errors::ExecutorErr;
 use miru_agent::data_uploads::upload::{Job, UploadErr, UploadExecutor};
 
 // external crates
@@ -17,8 +17,6 @@ pub enum MockStep {
     TerminalErr,
     /// Fail with an error classified as a network connection error
     NetworkErr,
-    /// Fail because the storage credentials expired
-    ExpiredCredentialsErr,
     /// Await the receiver and return the sent result (or `Ok(())` if the
     /// sender was dropped). The test holds the sender, so it controls when —
     /// and how — the in-flight upload finishes.
@@ -83,12 +81,6 @@ impl UploadExecutor for MockUploadExecutor {
                 is_network_conn_err: true,
                 trace: miru_agent::trace!(),
             })),
-            Some(MockStep::ExpiredCredentialsErr) => {
-                Err(UploadErr::ExpiredCredentialsErr(ExpiredCredentialsErr {
-                    source: Box::new(std::io::Error::other("scripted expired credentials")),
-                    trace: miru_agent::trace!(),
-                }))
-            }
             Some(MockStep::Hang(rx)) => rx.await.unwrap_or(Ok(())),
         }
     }

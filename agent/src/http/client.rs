@@ -37,9 +37,6 @@ pub struct Client {
 pub trait ClientI: Send + Sync {
     fn base_url(&self) -> &str;
 
-    /// The clock this client feeds with the backend's time.
-    fn clock(&self) -> &Clock;
-
     /// Build, send, handle response — returns body text and request metadata.
     fn execute(
         &self,
@@ -50,10 +47,6 @@ pub trait ClientI: Send + Sync {
 impl ClientI for Client {
     fn base_url(&self) -> &str {
         &self.base_url
-    }
-
-    fn clock(&self) -> &Clock {
-        &self.clock
     }
 
     async fn execute(
@@ -71,10 +64,6 @@ impl ClientI for Client {
 impl<T: ClientI> ClientI for Arc<T> {
     fn base_url(&self) -> &str {
         self.as_ref().base_url()
-    }
-
-    fn clock(&self) -> &Clock {
-        self.as_ref().clock()
     }
 
     async fn execute(
@@ -106,6 +95,11 @@ impl Client {
             headers: request::Headers::default(),
             clock,
         })
+    }
+
+    /// The clock this client feeds with the backend's time.
+    pub fn clock(&self) -> &Clock {
+        &self.clock
     }
 
     pub fn build_request(&self, params: request::Params) -> Result<request::Request, HTTPErr> {

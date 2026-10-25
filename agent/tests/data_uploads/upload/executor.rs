@@ -23,7 +23,7 @@ use miru_agent::http::errors::{HTTPErr, MockErr as HttpMockErr, RequestFailed};
 use miru_agent::http::request::Params;
 
 // external crates
-use chrono::{DateTime, FixedOffset, Local, TimeDelta, TimeZone, Utc};
+use chrono::{FixedOffset, Local, TimeZone, Utc};
 
 // ================================ HELPERS ======================================== //
 
@@ -195,29 +195,6 @@ async fn transfer_failure_propagates_and_skips_confirm() {
     assert!(
         matches!(result, Err(UploadErr::ExecutorErr(_))),
         "expected ExecutorErr, got: {result:?}"
-    );
-    assert_eq!(client.call_count(Call::ConfirmUpload), 0);
-}
-
-#[tokio::test]
-async fn transfer_failure_after_the_credentials_expire_is_expired_credentials_err() {
-    let client = Arc::new(MockClient::default());
-    client.set_create_upload(|| Ok(pending_response()));
-    // The credentials are vended an hour before they expire, and the transfer
-    // fails a minute after they do.
-    let expires_at: DateTime<Utc> = s3_credentials().expires_at.parse().unwrap();
-    let clock = client.clock.clone();
-    clock.observe_server_time(expires_at - TimeDelta::hours(1));
-    let transfer = MockObjectTransfer::new();
-    transfer.run_until(clock, expires_at + TimeDelta::minutes(1));
-    transfer.push_err();
-    let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone());
-
-    let result = executor.upload(&make_job("a.log")).await;
-
-    assert!(
-        matches!(result, Err(UploadErr::ExpiredCredentialsErr(_))),
-        "expected ExpiredCredentialsErr, got: {result:?}"
     );
     assert_eq!(client.call_count(Call::ConfirmUpload), 0);
 }

@@ -7,7 +7,6 @@ use backend_api::models::{
     Device, Error as ApiError, ErrorResponse, GitCommit as BackendGitCommit,
     Release as BackendRelease, TokenResponse, Upload, UploadCredentials, UploadWithCredentials,
 };
-use miru_agent::clock::Clock;
 use miru_agent::http::{self, request::Params, HTTPErr};
 
 // external crates
@@ -88,7 +87,6 @@ pub struct MockClient {
     pub confirm_upload_fn: ConfirmUploadFn,
     pub create_calibration_fn: CreateCalibrationFn,
     pub requests: Arc<Mutex<Vec<CapturedRequest>>>,
-    pub clock: Clock,
 }
 
 impl Default for MockClient {
@@ -111,7 +109,6 @@ impl Default for MockClient {
             confirm_upload_fn: Mutex::new(Box::new(|| Ok(Upload::default()))),
             create_calibration_fn: Mutex::new(Box::new(|| Ok(Calibration::default()))),
             requests: Arc::new(Mutex::new(Vec::new())),
-            clock: Clock::new(),
         }
     }
 }
@@ -317,10 +314,6 @@ fn json<T: Serialize>(val: &T) -> Result<String, HTTPErr> {
 impl http::ClientI for MockClient {
     fn base_url(&self) -> &str {
         "http://mock"
-    }
-
-    fn clock(&self) -> &Clock {
-        &self.clock
     }
 
     async fn execute(
