@@ -8,7 +8,7 @@ use crate::data_uploads::{
     retention::DeleterExt,
     upload::{
         errors::*,
-        executor::UploadExecutor,
+        executor::{PrepareOutcome, UploadExecutor},
         job::Job,
         queue::{QueueEntry, QueueSnapshotFile},
         uploader_impl::{UploaderImpl, UploaderOptions},
@@ -141,9 +141,8 @@ where
     async fn attempt(&mut self, entry: &QueueEntry) -> Option<Result<(), UploadErr>> {
         let prepare = self.uploader.prepare(entry);
         let prepared = match self.run_until_shutdown(prepare).await? {
-            Ok(Some(prepared)) => prepared,
-            // the upload was already confirmed
-            Ok(None) => return Some(Ok(())),
+            Ok(PrepareOutcome::Ready(prepared)) => prepared,
+            Ok(PrepareOutcome::AlreadyUploaded) => return Some(Ok(())),
             Err(err) => return Some(Err(err)),
         };
         self.uploader

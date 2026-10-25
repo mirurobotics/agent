@@ -8,7 +8,7 @@ pub mod uploader;
 mod uploader_impl;
 
 pub use self::errors::UploadErr;
-pub use self::executor::{LiveExecutor, PreparedUpload, UploadExecutor};
+pub use self::executor::{LiveExecutor, PrepareOutcome, PreparedUpload, UploadExecutor};
 pub use self::job::{Job, MultipartCheckpoint, UploadCheckpoint};
 pub use self::queue::{Queue, QueueEntry, QueueSnapshot, QueueSnapshotFile};
 pub use self::sink::UploadStableFileSink;

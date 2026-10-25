@@ -17,8 +17,8 @@ use miru_agent::authn::errors::MockError as AuthnMockError;
 use miru_agent::authn::AuthnErr;
 use miru_agent::data_uploads::upload::executor::new_upl_request;
 use miru_agent::data_uploads::upload::{
-    Job, LiveExecutor, MultipartCheckpoint, PreparedUpload, UploadCheckpoint, UploadErr,
-    UploadExecutor,
+    Job, LiveExecutor, MultipartCheckpoint, PrepareOutcome, PreparedUpload, UploadCheckpoint,
+    UploadErr, UploadExecutor,
 };
 use miru_agent::errors::Error;
 use miru_agent::filesys::File;
@@ -53,8 +53,8 @@ fn request_failed_err(status: u16) -> HTTPErr {
 /// was already confirmed.
 async fn attempt<E: UploadExecutor>(executor: &E, job: &Job) -> Result<(), UploadErr> {
     match executor.prepare(job).await? {
-        Some(prepared) => executor.upload(job, &prepared).await,
-        None => Ok(()),
+        PrepareOutcome::Ready(prepared) => executor.upload(job, &prepared).await,
+        PrepareOutcome::AlreadyUploaded => Ok(()),
     }
 }
 
@@ -346,6 +346,14 @@ fn upload_mid_transfer() -> UploadCheckpoint {
     }
 }
 
+/// What `prepare` returns for `checkpoint`, with the fixtures' credentials.
+fn ready(checkpoint: UploadCheckpoint) -> PrepareOutcome {
+    PrepareOutcome::Ready(PreparedUpload {
+        checkpoint,
+        credentials: s3_credentials(),
+    })
+}
+
 fn calls(client: &MockClient) -> Vec<Call> {
     client.requests().iter().map(|r| r.call.clone()).collect()
 }
@@ -361,11 +369,7 @@ async fn new_upload_is_prepared_before_the_transfer() {
 
     let prepared = executor.prepare(&make_job("a.log")).await.unwrap();
 
-    let expected = PreparedUpload {
-        checkpoint: upload_checkpoint(),
-        credentials: s3_credentials(),
-    };
-    assert_eq!(prepared, Some(expected));
+    assert_eq!(prepared, ready(upload_checkpoint()));
     assert_eq!(calls(&client), vec![Call::CreateUpload]);
     assert!(transfer.recorded_calls().is_empty());
 }
@@ -380,9 +384,9 @@ async fn prepared_checkpoint_carries_the_multipart_upload() {
     transfer.set_multipart(upload_mid_transfer().multipart.unwrap());
     let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone());
 
-    let prepared = executor.prepare(&make_job("a.log")).await.unwrap().unwrap();
+    let prepared = executor.prepare(&make_job("a.log")).await.unwrap();
 
-    assert_eq!(prepared.checkpoint, upload_mid_transfer());
+    assert_eq!(prepared, ready(upload_mid_transfer()));
 }
 
 // Failing to prepare the multipart upload doesn't fail the attempt: the
@@ -398,10 +402,9 @@ async fn multipart_failure_keeps_the_saved_multipart_upload() {
     let prepared = executor
         .prepare(&job_with(upload_mid_transfer()))
         .await
-        .unwrap()
         .unwrap();
 
-    assert_eq!(prepared.checkpoint, upload_mid_transfer());
+    assert_eq!(prepared, ready(upload_mid_transfer()));
 }
 
 // A retry gets fresh credentials for the saved upload instead of creating a
@@ -442,7 +445,7 @@ async fn already_uploaded_upload_is_done() {
         .await
         .unwrap();
 
-    assert_eq!(prepared, None);
+    assert_eq!(prepared, PrepareOutcome::AlreadyUploaded);
     assert_eq!(
         calls(&client),
         vec![Call::VendUploadCredentials, Call::ConfirmUpload]
@@ -465,7 +468,6 @@ async fn gone_upload_is_replaced_with_a_new_one() {
         let prepared = executor
             .prepare(&job_with(upload_mid_transfer()))
             .await
-            .unwrap()
             .unwrap();
 
         assert_eq!(
@@ -477,7 +479,7 @@ async fn gone_upload_is_replaced_with_a_new_one() {
             ],
             "status {status}"
         );
-        assert_eq!(prepared.checkpoint, upload_checkpoint(), "status {status}");
+        assert_eq!(prepared, ready(upload_checkpoint()), "status {status}");
     }
 }
 

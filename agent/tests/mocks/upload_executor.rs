@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use backend_api::models::UploadCredentials;
 use miru_agent::data_uploads::upload::errors::ExecutorErr;
 use miru_agent::data_uploads::upload::{
-    Job, PreparedUpload, UploadCheckpoint, UploadErr, UploadExecutor,
+    Job, PrepareOutcome, PreparedUpload, UploadCheckpoint, UploadErr, UploadExecutor,
 };
 
 // external crates
@@ -73,17 +73,17 @@ impl MockUploadExecutor {
 impl UploadExecutor for MockUploadExecutor {
     /// Runs the attempt's step. Any step but [`MockStep::PrepareThen`] ends
     /// the attempt here, as an already confirmed upload does.
-    async fn prepare(&self, job: &Job) -> Result<Option<PreparedUpload>, UploadErr> {
+    async fn prepare(&self, job: &Job) -> Result<PrepareOutcome, UploadErr> {
         self.calls.lock().unwrap().push(job.clone());
         match self.next_step() {
             Some(MockStep::PrepareThen(checkpoint, then)) => {
                 self.script.lock().unwrap().push_front(*then);
-                Ok(Some(PreparedUpload {
+                Ok(PrepareOutcome::Ready(PreparedUpload {
                     checkpoint,
                     credentials: UploadCredentials::default(),
                 }))
             }
-            step => play(step).await.map(|()| None),
+            step => play(step).await.map(|()| PrepareOutcome::AlreadyUploaded),
         }
     }
 

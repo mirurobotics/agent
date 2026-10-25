@@ -7,7 +7,7 @@ use crate::data_uploads::{
     retention::{DeleterExt, Job as DeleteJob},
     upload::{
         errors::*,
-        executor::{PreparedUpload, UploadExecutor},
+        executor::{PrepareOutcome, PreparedUpload, UploadExecutor},
         job::{Job, UploadCheckpoint},
         queue::{Queue, QueueEntry, QueueSnapshotFile},
     },
@@ -103,7 +103,7 @@ where
     pub(crate) fn prepare(
         &self,
         entry: &QueueEntry,
-    ) -> impl Future<Output = Result<Option<PreparedUpload>, UploadErr>> {
+    ) -> impl Future<Output = Result<PrepareOutcome, UploadErr>> {
         Self::log_attempt(entry);
         let executor = self.executor.clone();
         let job = entry.job.clone();
