@@ -20,6 +20,9 @@ pub type TransferCall = (
     HashMap<String, String>,
 );
 
+/// The clock a transfer moves, and the backend time it runs until on it.
+type RunsUntil = Option<(Clock, DateTime<Utc>)>;
+
 /// Scripted [`ObjectTransfer`] test double. Each `transfer` call pops the next
 /// scripted result (an empty script defaults to `Ok`) and records the call's
 /// arguments. Clones share the script and the recorded calls, so a test keeps
@@ -29,7 +32,7 @@ pub type TransferCall = (
 pub struct MockObjectTransfer {
     script: Arc<Mutex<VecDeque<Result<(), UploadErr>>>>,
     calls: Arc<Mutex<Vec<TransferCall>>>,
-    runs_until: Arc<Mutex<Option<(Clock, DateTime<Utc>)>>>,
+    runs_until: Arc<Mutex<RunsUntil>>,
 }
 
 impl MockObjectTransfer {

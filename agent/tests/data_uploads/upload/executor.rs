@@ -206,9 +206,10 @@ async fn transfer_failure_after_the_credentials_expire_is_expired_credentials_er
     // The credentials are vended an hour before they expire, and the transfer
     // fails a minute after they do.
     let expires_at: DateTime<Utc> = s3_credentials().expires_at.parse().unwrap();
-    client.clock.observe_server_time(expires_at - TimeDelta::hours(1));
+    let clock = client.clock.clone();
+    clock.observe_server_time(expires_at - TimeDelta::hours(1));
     let transfer = MockObjectTransfer::new();
-    transfer.run_until(client.clock.clone(), expires_at + TimeDelta::minutes(1));
+    transfer.run_until(clock, expires_at + TimeDelta::minutes(1));
     transfer.push_err();
     let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone());
 
