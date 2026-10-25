@@ -17,8 +17,7 @@
 //!   `BadDigest`).
 //!
 //! These rely on how GCS treats aws-sdk-s3's requests, which Google doesn't
-//! document. The tests below pin the requests we send, and integration tests
-//! check them against real GCS.
+//! document. The tests below pin the requests we send.
 
 // internal crates
 use crate::errors::HTTPCode;
@@ -64,8 +63,7 @@ impl Token {
     }
 }
 
-/// The SDK config for a GCS [`Store`](crate::s3::Store). Public so the
-/// real-GCS tests use this exact config.
+/// The SDK config for a GCS [`Store`](crate::s3::Store).
 pub fn config(token: Token, http_client: SharedHttpClient) -> aws_sdk_s3::Config {
     sdk::base_config(http_client)
         .endpoint_url(ENDPOINT)
