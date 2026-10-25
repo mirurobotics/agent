@@ -5,7 +5,7 @@ use miru_agent::services::calibration::CreateParams;
 
 fn calibration_request(format: openapi::InstanceFormat) -> openapi::CreateCalibrationRequest {
     openapi::CreateCalibrationRequest {
-        component_slug: "arm".into(),
+        component: "arm".into(),
         role: Some("left".into()),
         serial_number: Some("SN-1".into()),
         aspect: Some("pose".into()),

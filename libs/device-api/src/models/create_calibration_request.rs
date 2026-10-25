@@ -11,9 +11,9 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CreateCalibrationRequest {
-    /// Slug of the component the calibrated unit belongs to. A new slug creates a component in Miru.
-    #[serde(rename = "component_slug")]
-    pub component_slug: String,
+    /// Slug of the component the calibrated unit belongs to, such as `arm`. Miru resolves it to the component, creating the component the first time it is reported.
+    #[serde(rename = "component")]
+    pub component: String,
     /// Slug of the role the calibrated unit fills on the device, such as `aligner-1` or `front-left`. Distinguishes several units of one component on a device. Validated like a slug. Miru resolves it to one of the component's `roles`, creating the role the first time it is reported.
     #[serde(rename = "role", skip_serializing_if = "Option::is_none")]
     pub role: Option<String>,
@@ -29,9 +29,9 @@ pub struct CreateCalibrationRequest {
 }
 
 impl CreateCalibrationRequest {
-    pub fn new(component_slug: String, content: models::InstanceContent) -> CreateCalibrationRequest {
+    pub fn new(component: String, content: models::InstanceContent) -> CreateCalibrationRequest {
         CreateCalibrationRequest {
-            component_slug,
+            component,
             role: None,
             serial_number: None,
             aspect: None,

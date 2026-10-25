@@ -572,7 +572,7 @@ pub mod routes {
 
         fn request(format: &str, data: &str) -> String {
             json!({
-                "component_slug": "arm",
+                "component": "arm",
                 "role": "left",
                 "aspect": "pose",
                 "serial_number": "SN-1",
