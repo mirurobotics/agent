@@ -1,7 +1,6 @@
 // internal crates
 use crate::errors::Trace;
 pub use crate::queue::{EnqueueErr, QueueFullErr};
-use crate::s3::{errors::ExpiredCredentialsErr, S3Err};
 
 pub type SendActorMessageErr = crate::cache::errors::SendActorMessageErr;
 pub type ReceiveActorMessageErr = crate::cache::errors::ReceiveActorMessageErr;
@@ -24,6 +23,18 @@ impl crate::errors::Error for ExecutorErr {
         self.is_network_conn_err
     }
 }
+
+/// A transfer that failed after its storage credentials expired. The next
+/// attempt gets fresh ones, so the uploader doesn't count this one.
+#[derive(Debug, thiserror::Error)]
+#[error("storage credentials expired before the transfer finished: {source}")]
+pub struct ExpiredCredentialsErr {
+    #[source]
+    pub source: Box<dyn std::error::Error + Send + Sync>,
+    pub trace: Box<Trace>,
+}
+
+impl crate::errors::Error for ExpiredCredentialsErr {}
 
 /// The transfer layer's own preconditions, as a type so tests and callers can
 /// tell them apart. Carried as the `source` of an [`ExecutorErr`];
@@ -83,15 +94,6 @@ where
     let is_terminal = source.is_terminal();
     let is_network_conn_err = source.is_network_conn_err();
     wrap_executor_err(source, is_terminal, is_network_conn_err)
-}
-
-/// Wraps an object store failure. Expired credentials keep their own variant,
-/// which the uploader retries without counting the attempt.
-pub(crate) fn store_err(source: S3Err) -> UploadErr {
-    match source {
-        S3Err::ExpiredCredentialsErr(e) => UploadErr::ExpiredCredentialsErr(e),
-        source => classified_executor_err(source),
-    }
 }
 
 fn wrap_executor_err<E>(source: E, is_terminal: bool, is_network_conn_err: bool) -> UploadErr

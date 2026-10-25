@@ -567,26 +567,6 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn expired_token_maps_to_expired_credentials() {
-            // GCS rejects an expired bearer token with 401.
-            let replay = StaticReplayClient::new(vec![ReplayEvent::new(
-                req("PUT", "small.bin?x-id=PutObject"),
-                error_xml(401, "AuthenticationRequired"),
-            )]);
-            let src = temp_file_with(b"hello world").await;
-
-            let err = gcs_store(&replay)
-                .put(src.file().clone(), &obj("small.bin"), &HashMap::new())
-                .await
-                .unwrap_err();
-
-            assert!(
-                matches!(err, S3Err::ExpiredCredentialsErr(_)),
-                "got: {err:?}"
-            );
-        }
-
-        #[tokio::test]
         async fn complete_no_such_part_is_a_failed_request() {
             // GCS answers a bad part ETag on Complete with 404 NoSuchPart where S3
             // says 400 InvalidPart. It must stay a failed request, not read as the

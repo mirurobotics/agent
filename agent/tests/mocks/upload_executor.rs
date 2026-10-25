@@ -3,9 +3,8 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 // internal crates
-use miru_agent::data_uploads::upload::errors::ExecutorErr;
+use miru_agent::data_uploads::upload::errors::{ExecutorErr, ExpiredCredentialsErr};
 use miru_agent::data_uploads::upload::{Job, UploadErr, UploadExecutor};
-use miru_agent::s3::{errors::ExpiredCredentialsErr, Object};
 
 // external crates
 use tokio::sync::{mpsc, oneshot};
@@ -86,12 +85,7 @@ impl UploadExecutor for MockUploadExecutor {
             })),
             Some(MockStep::ExpiredCredentialsErr) => {
                 Err(UploadErr::ExpiredCredentialsErr(ExpiredCredentialsErr {
-                    operation: "put_object".to_string(),
-                    object: Object {
-                        bucket: "bucket".to_string(),
-                        key: "key".to_string(),
-                    },
-                    msg: "scripted expired credentials".to_string(),
+                    source: Box::new(std::io::Error::other("scripted expired credentials")),
                     trace: miru_agent::trace!(),
                 }))
             }

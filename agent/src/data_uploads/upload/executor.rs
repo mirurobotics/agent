@@ -4,8 +4,9 @@ use std::sync::Arc;
 
 // internal crates
 use crate::authn::{Token, TokenManagerExt};
+use crate::clock::SYNC_TOLERANCE;
 use crate::data_uploads::upload::{
-    errors::{classified_executor_err, UploadErr},
+    errors::{classified_executor_err, ExpiredCredentialsErr, UploadErr},
     job::Job,
     transfer::ObjectTransfer,
 };
@@ -13,7 +14,7 @@ use crate::http::{self, ClientI};
 use backend_api::models::{CreateUploadRequest, UploadSource, UploadWithCredentials};
 
 // external crates
-use chrono::{Local, TimeZone};
+use chrono::{DateTime, Local, TimeZone, Utc};
 use tracing::info;
 
 /// The seam between the upload actor and the transfer mechanics.
@@ -97,6 +98,7 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> UploadExecutor for LiveE
             "upload: transferring file {} to bucket {} key {}",
             job.file, resp.upload.destination.bucket_name, resp.upload.destination.object_key
         );
+        let started_at = self.http_client.clock().server_now();
         self.transfer
             .transfer(
                 &resp.credentials,
@@ -104,7 +106,18 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> UploadExecutor for LiveE
                 &job.file,
                 &resp.metadata,
             )
-            .await?;
+            .await
+            .map_err(|e| {
+                let failed_at = self.http_client.clock().server_now();
+                if outlived(&resp.credentials.expires_at, started_at, failed_at) {
+                    UploadErr::ExpiredCredentialsErr(ExpiredCredentialsErr {
+                        source: Box::new(e),
+                        trace: crate::trace!(),
+                    })
+                } else {
+                    e
+                }
+            })?;
 
         info!(
             "upload: confirming upload {} for file {}",
@@ -113,6 +126,24 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> UploadExecutor for LiveE
         self.confirm_upload(&resp.upload.id).await?;
         Ok(())
     }
+}
+
+/// Whether a transfer outlived its credentials, by the backend's clock: they
+/// had time left when it started and none when it failed, allowing
+/// [`SYNC_TOLERANCE`] for error in the backend's time. An unknown time or an
+/// unparseable `expires_at` says no, so the failure counts.
+fn outlived(
+    expires_at: &str,
+    started_at: Option<DateTime<Utc>>,
+    failed_at: Option<DateTime<Utc>>,
+) -> bool {
+    let (Some(started_at), Some(failed_at)) = (started_at, failed_at) else {
+        return false;
+    };
+    let Ok(expires_at) = expires_at.parse::<DateTime<Utc>>() else {
+        return false;
+    };
+    expires_at - started_at > SYNC_TOLERANCE && expires_at - failed_at <= SYNC_TOLERANCE
 }
 
 pub fn new_upl_request<Tz>(job: &Job, tz: &Tz) -> CreateUploadRequest
@@ -141,17 +172,20 @@ mod tests {
     use std::sync::Arc;
 
     // internal crates
+    use super::outlived;
     use crate::test_utils::{
         filesys::files as test_files,
         http_client::{Call, MockClient},
         upload::{make_job, pending_response, token_manager},
     };
+    use miru_agent::clock::SYNC_TOLERANCE;
     use miru_agent::data_uploads::upload::{LiveExecutor, SdkTransfer, UploadExecutor};
     use miru_agent::filesys::{files, WriteOptions};
 
     // external crates
     use aws_smithy_http_client::test_util::{ReplayEvent, StaticReplayClient};
     use aws_smithy_types::body::SdkBody;
+    use chrono::{DateTime, TimeDelta, Utc};
 
     /// The path-style PutObject URI for the upload fixture's bucket
     /// and key with the vended `us-east-1` region (see the transfer tests).
@@ -206,5 +240,29 @@ mod tests {
             Some("dvc_1")
         );
         assert_eq!(client.call_count(Call::ConfirmUpload), 1);
+    }
+
+    #[test]
+    fn outlived_only_when_the_credentials_run_out_mid_transfer() {
+        let expires_at = "2021-01-01T01:00:00Z";
+        let expiry = expires_at.parse::<DateTime<Utc>>().unwrap();
+        let run_out = expiry - SYNC_TOLERANCE;
+        let (hour, second) = (TimeDelta::hours(1), TimeDelta::seconds(1));
+        // (started_at, failed_at, outlived)
+        let cases = [
+            (expiry - hour, expiry, true),
+            (expiry - hour, run_out, true),
+            (expiry - hour, run_out - second, false),
+            (run_out - second, expiry + hour, true),
+            (run_out, expiry + hour, false),
+        ];
+        for (started_at, failed_at, want) in cases {
+            let got = outlived(expires_at, Some(started_at), Some(failed_at));
+            assert_eq!(got, want, "started {started_at}, failed {failed_at}");
+        }
+        let (started_at, failed_at) = (Some(expiry - hour), Some(expiry + hour));
+        assert!(!outlived(expires_at, None, failed_at));
+        assert!(!outlived(expires_at, started_at, None));
+        assert!(!outlived("not a time", started_at, failed_at));
     }
 }
