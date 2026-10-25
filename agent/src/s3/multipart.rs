@@ -125,6 +125,7 @@ impl Store {
                     CompletedPart::builder()
                         .part_number(number)
                         .e_tag(etag)
+                        // So a resume's manifest has each part's CRC32C, like a fresh upload's.
                         .set_checksum_crc32_c(part.checksum_crc32_c().map(str::to_string))
                         .build(),
                 );
@@ -240,8 +241,9 @@ impl Store {
             .await
     }
 
-    /// Whether S3 checks this upload against `src`'s CRC32C. GCS takes no
-    /// checksum for a multipart object, so [`check_parts_crc32c`] does there.
+    /// Whether S3 checks this upload against `src`'s CRC32C. GCS checks each
+    /// part's `Content-MD5` but takes no checksum for the whole object, so
+    /// [`check_parts_crc32c`] checks it there.
     fn s3_checks_crc32c(&self, src: &Source) -> bool {
         !self.gcs && src.crc32c.is_some()
     }
