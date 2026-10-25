@@ -100,6 +100,9 @@ integration suite in `agent/tests/mod.rs` and the separate `logs_init_smoke` and
 processes. Each integration target uses the ordinary library; integration
 fixture imports use direct paths such as `crate::test_utils::...`.
 
+The real-GCS upload tests need GCS credentials, which CI's test jobs set, and
+fail without them.
+
 Keep unit tests in inline `#[cfg(test)] mod tests` modules at the bottom of the
 source files they test, not in separate files or nested test directories.
 Shared fixtures stay in `agent/tests/test_utils/`. `agent/src/lib.rs` mounts the
