@@ -48,13 +48,10 @@ fn request_failed_err(status: u16) -> HTTPErr {
     })
 }
 
-/// Runs an attempt as the actor does: prepare, then upload unless the upload
-/// was already confirmed.
+/// Runs an attempt as the actor does: prepare, then upload.
 async fn attempt<E: UploadExecutor>(executor: &E, job: &Job) -> Result<(), UploadErr> {
-    match executor.prepare(job).await? {
-        Some(prepared) => executor.upload(job, &prepared).await,
-        None => Ok(()),
-    }
+    let prepared = executor.prepare(job).await?;
+    executor.upload(job, &prepared).await
 }
 
 // ============================ MockUploadExecutor ================================= //
@@ -364,7 +361,7 @@ async fn new_upload_is_prepared_before_the_transfer() {
         upload: upload_checkpoint(),
         credentials: s3_credentials(),
     };
-    assert_eq!(prepared, Some(expected));
+    assert_eq!(prepared, expected);
     assert_eq!(calls(&client), vec![Call::CreateUpload]);
     assert!(transfer.recorded_calls().is_empty());
 }
@@ -379,7 +376,7 @@ async fn prepared_upload_carries_the_multipart_upload() {
     transfer.set_multipart(upload_mid_transfer().multipart.unwrap());
     let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone());
 
-    let prepared = executor.prepare(&make_job("a.log")).await.unwrap().unwrap();
+    let prepared = executor.prepare(&make_job("a.log")).await.unwrap();
 
     assert_eq!(prepared.upload, upload_mid_transfer());
 }
@@ -397,7 +394,6 @@ async fn multipart_failure_keeps_the_saved_multipart_upload() {
     let prepared = executor
         .prepare(&job_with(upload_mid_transfer()))
         .await
-        .unwrap()
         .unwrap();
 
     assert_eq!(prepared.upload, upload_mid_transfer());
@@ -426,62 +422,8 @@ async fn retry_reuses_the_saved_upload() {
     );
 }
 
-// The backend no longer accepts the upload (409 on credentials), but confirm
-// succeeds: an earlier attempt already uploaded it.
-#[tokio::test]
-async fn already_uploaded_upload_is_done() {
-    let client = Arc::new(MockClient::default());
-    client.set_vend_upload_credentials(|| Err(request_failed_err(409)));
-    client.set_confirm_upload(|| Ok(*uploaded_response().upload));
-    let transfer = MockObjectTransfer::new();
-    let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone());
-
-    let prepared = executor
-        .prepare(&job_with(upload_checkpoint()))
-        .await
-        .unwrap();
-
-    assert_eq!(prepared, None);
-    assert_eq!(
-        calls(&client),
-        vec![Call::VendUploadCredentials, Call::ConfirmUpload]
-    );
-    assert!(transfer.recorded_calls().is_empty());
-}
-
-// A deleted (404) or failed (409) upload is replaced with a new one, which
-// starts without the old multipart upload.
-#[tokio::test]
-async fn gone_upload_is_replaced_with_a_new_one() {
-    for status in [404, 409] {
-        let client = Arc::new(MockClient::default());
-        client.set_vend_upload_credentials(move || Err(request_failed_err(status)));
-        client.set_confirm_upload(move || Err(request_failed_err(status)));
-        client.set_create_upload(|| Ok(pending_response()));
-        let transfer = MockObjectTransfer::new();
-        let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone());
-
-        let prepared = executor
-            .prepare(&job_with(upload_mid_transfer()))
-            .await
-            .unwrap()
-            .unwrap();
-
-        assert_eq!(
-            calls(&client),
-            vec![
-                Call::VendUploadCredentials,
-                Call::ConfirmUpload,
-                Call::CreateUpload
-            ],
-            "status {status}"
-        );
-        assert_eq!(prepared.upload, upload_checkpoint(), "status {status}");
-    }
-}
-
-// Any other credentials failure fails the attempt, so the job keeps its saved
-// upload for the next one.
+// A credentials failure fails the attempt, so the job keeps its saved upload
+// for the next one.
 #[tokio::test]
 async fn credentials_failure_keeps_the_upload() {
     let client = Arc::new(MockClient::default());
@@ -496,6 +438,23 @@ async fn credentials_failure_keeps_the_upload() {
 
     assert!(matches!(err, UploadErr::ExecutorErr(_)));
     assert!(!err.is_terminal());
+    assert_eq!(calls(&client), vec![Call::VendUploadCredentials]);
+    assert!(transfer.recorded_calls().is_empty());
+}
+
+// A deleted upload (404 on credentials) drops the job, as any 4xx does.
+#[tokio::test]
+async fn credentials_4xx_failure_is_terminal() {
+    let client = Arc::new(MockClient::default());
+    client.set_vend_upload_credentials(|| Err(request_failed_err(404)));
+    let transfer = MockObjectTransfer::new();
+    let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone());
+
+    let err = attempt(&executor, &job_with(upload_checkpoint()))
+        .await
+        .unwrap_err();
+
+    assert!(err.is_terminal());
     assert_eq!(calls(&client), vec![Call::VendUploadCredentials]);
     assert!(transfer.recorded_calls().is_empty());
 }

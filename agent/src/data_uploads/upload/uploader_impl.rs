@@ -104,7 +104,7 @@ where
     pub(crate) fn prepare(
         &self,
         entry: &QueueEntry,
-    ) -> impl Future<Output = Result<Option<Prepared>, UploadErr>> {
+    ) -> impl Future<Output = Result<Prepared, UploadErr>> {
         Self::log_attempt(entry);
         let executor = self.executor.clone();
         let job = entry.job.clone();

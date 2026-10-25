@@ -3,6 +3,7 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 // internal crates
+use crate::test_utils::upload::upload_checkpoint;
 use backend_api::models::UploadCredentials;
 use miru_agent::data_uploads::upload::errors::ExecutorErr;
 use miru_agent::data_uploads::upload::{
@@ -31,19 +32,23 @@ pub enum MockStep {
 
 pub struct MockUploadExecutor {
     script: Mutex<VecDeque<MockStep>>,
+    /// The inner step of the attempt's [`MockStep::PrepareThen`].
+    upload_step: Mutex<Option<MockStep>>,
     pub calls: Mutex<Vec<Job>>,
     started_tx: mpsc::UnboundedSender<()>,
 }
 
 impl MockUploadExecutor {
     /// Returns the mock plus the receiver notified at the start of every
-    /// `prepare` and `upload` call (after the call is recorded, before the
-    /// result is produced), for deterministic sequencing in tests.
+    /// `prepare`, and of every `upload` that runs a step (after the call is
+    /// recorded, before the result is produced), for deterministic sequencing
+    /// in tests.
     pub fn new() -> (Arc<Self>, mpsc::UnboundedReceiver<()>) {
         let (started_tx, started_rx) = mpsc::unbounded_channel();
         (
             Arc::new(Self {
                 script: Mutex::new(VecDeque::new()),
+                upload_step: Mutex::new(None),
                 calls: Mutex::new(Vec::new()),
                 started_tx,
             }),
@@ -71,24 +76,32 @@ impl MockUploadExecutor {
 }
 
 impl UploadExecutor for MockUploadExecutor {
-    /// Runs the attempt's step. Any step but [`MockStep::PrepareThen`] ends
-    /// the attempt here, as an already confirmed upload does.
-    async fn prepare(&self, job: &Job) -> Result<Option<Prepared>, UploadErr> {
+    /// Runs the attempt's step. Any step but [`MockStep::PrepareThen`] runs in
+    /// full here, so `upload` then succeeds without a step of its own.
+    async fn prepare(&self, job: &Job) -> Result<Prepared, UploadErr> {
         self.calls.lock().unwrap().push(job.clone());
-        match self.next_step() {
+        let upload = match self.next_step() {
             Some(MockStep::PrepareThen(upload, then)) => {
-                self.script.lock().unwrap().push_front(*then);
-                Ok(Some(Prepared {
-                    upload,
-                    credentials: UploadCredentials::default(),
-                }))
+                *self.upload_step.lock().unwrap() = Some(*then);
+                upload
             }
-            step => play(step).await.map(|()| None),
-        }
+            step => {
+                play(step).await?;
+                upload_checkpoint()
+            }
+        };
+        Ok(Prepared {
+            upload,
+            credentials: UploadCredentials::default(),
+        })
     }
 
     async fn upload(&self, _job: &Job, _prepared: &Prepared) -> Result<(), UploadErr> {
-        play(self.next_step()).await
+        let Some(step) = self.upload_step.lock().unwrap().take() else {
+            return Ok(());
+        };
+        let _ = self.started_tx.send(());
+        play(Some(step)).await
     }
 }
 
