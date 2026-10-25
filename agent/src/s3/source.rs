@@ -9,18 +9,16 @@ use aws_sdk_s3::primitives::{ByteStream, Length};
 /// Bytes per read and per frame sent. The SDK's default is 4 KiB.
 const READ_SIZE: usize = 32 * 1024;
 
-/// A local file to upload, with its size and mtime when the upload started.
-/// The file is expected to stay unchanged until the upload is confirmed.
+/// A local file to upload and its size when the upload started. The file is
+/// expected to stay unchanged until the upload is confirmed.
 pub struct Source {
     file: File,
-    pub(crate) size: u64,
-    /// `None` if the platform doesn't report one.
-    pub(crate) mtime: Option<std::time::SystemTime>,
+    pub(super) size: u64,
 }
 
 impl Source {
-    /// Reads `file`'s size and mtime. A missing file is [`S3Err::FileSysErr`];
-    /// any other metadata failure is [`S3Err::LocalIoErr`].
+    /// Sizes `file` for upload. A missing file is [`S3Err::FileSysErr`]; any
+    /// other metadata failure is [`S3Err::LocalIoErr`].
     pub async fn open(file: File, dst: &Object) -> Result<Self, S3Err> {
         let metadata = tokio::fs::metadata(file.path()).await.map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
@@ -36,7 +34,6 @@ impl Source {
         Ok(Self {
             file,
             size: metadata.len(),
-            mtime: metadata.modified().ok(),
         })
     }
 

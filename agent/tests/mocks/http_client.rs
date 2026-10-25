@@ -35,6 +35,7 @@ pub enum Call {
     GetGitCommit,
     GetFileRule,
     CreateUpload,
+    UpdateUpload,
     VendUploadCredentials,
     ConfirmUpload,
     CreateCalibration,
@@ -64,6 +65,7 @@ type GetCfgInstContentFn = Mutex<Box<dyn Fn(&str) -> Result<String, HTTPErr> + S
 type UpdateDeviceFn = Mutex<Box<dyn Fn() -> Result<Device, HTTPErr> + Send + Sync>>;
 type GetDeviceFn = Mutex<Box<dyn Fn() -> Result<Device, HTTPErr> + Send + Sync>>;
 type CreateUploadFn = Mutex<Box<dyn Fn() -> Result<UploadWithCredentials, HTTPErr> + Send + Sync>>;
+type UpdateUploadFn = Mutex<Box<dyn Fn() -> Result<Upload, HTTPErr> + Send + Sync>>;
 type VendUploadCredentialsFn =
     Mutex<Box<dyn Fn() -> Result<UploadCredentials, HTTPErr> + Send + Sync>>;
 type ConfirmUploadFn = Mutex<Box<dyn Fn() -> Result<Upload, HTTPErr> + Send + Sync>>;
@@ -83,6 +85,7 @@ pub struct MockClient {
     pub get_file_rule_fn: SingleFileRuleFn,
     pub get_cfg_inst_content_fn: GetCfgInstContentFn,
     pub create_upload_fn: CreateUploadFn,
+    pub update_upload_fn: UpdateUploadFn,
     pub vend_upload_credentials_fn: VendUploadCredentialsFn,
     pub confirm_upload_fn: ConfirmUploadFn,
     pub create_calibration_fn: CreateCalibrationFn,
@@ -105,6 +108,7 @@ impl Default for MockClient {
             get_file_rule_fn: Mutex::new(Box::new(|| Ok(BackendFileRule::default()))),
             get_cfg_inst_content_fn: Mutex::new(Box::new(|_id| Ok("{}".to_string()))),
             create_upload_fn: Mutex::new(Box::new(|| Ok(UploadWithCredentials::default()))),
+            update_upload_fn: Mutex::new(Box::new(|| Ok(Upload::default()))),
             vend_upload_credentials_fn: Mutex::new(Box::new(|| Ok(UploadCredentials::default()))),
             confirm_upload_fn: Mutex::new(Box::new(|| Ok(Upload::default()))),
             create_calibration_fn: Mutex::new(Box::new(|| Ok(Calibration::default()))),
@@ -198,11 +202,11 @@ impl MockClient {
         *self.create_upload_fn.lock().unwrap() = Box::new(f);
     }
 
-    pub fn set_vend_upload_credentials<F>(&self, f: F)
+    pub fn set_update_upload<F>(&self, f: F)
     where
-        F: Fn() -> Result<UploadCredentials, HTTPErr> + Send + Sync + 'static,
+        F: Fn() -> Result<Upload, HTTPErr> + Send + Sync + 'static,
     {
-        *self.vend_upload_credentials_fn.lock().unwrap() = Box::new(f);
+        *self.update_upload_fn.lock().unwrap() = Box::new(f);
     }
 
     pub fn set_confirm_upload<F>(&self, f: F)
@@ -275,6 +279,7 @@ impl MockClient {
                 Call::ConfirmUpload
             }
             (m, p) if *m == Method::POST && p == "/uploads" => Call::CreateUpload,
+            (m, p) if *m == Method::PATCH && p.starts_with("/uploads/") => Call::UpdateUpload,
             (m, p) if *m == Method::POST && p == "/calibrations" => Call::CreateCalibration,
             _ => panic!("MockClient: unhandled route: {method} {path}"),
         }
@@ -297,6 +302,7 @@ impl MockClient {
             Call::GetGitCommit => json(&(self.get_git_commit_fn.lock().unwrap())()?),
             Call::GetFileRule => json(&(self.get_file_rule_fn.lock().unwrap())()?),
             Call::CreateUpload => json(&(self.create_upload_fn.lock().unwrap())()?),
+            Call::UpdateUpload => json(&(self.update_upload_fn.lock().unwrap())()?),
             Call::VendUploadCredentials => {
                 json(&(self.vend_upload_credentials_fn.lock().unwrap())()?)
             }

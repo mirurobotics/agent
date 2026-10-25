@@ -7,8 +7,8 @@ use crate::data_uploads::{
     retention::{DeleterExt, Job as DeleteJob},
     upload::{
         errors::*,
-        executor::{Prepared, UploadExecutor},
-        job::{Job, UploadCheckpoint},
+        executor::UploadExecutor,
+        job::Job,
         queue::{Queue, QueueEntry, QueueSnapshotFile},
     },
 };
@@ -98,38 +98,17 @@ where
         self.queue.next_attempt(now, horizon).await
     }
 
-    /// Build the first step of an attempt on `entry`, which prepares its
-    /// upload. The future is built from clones so it borrows nothing from
-    /// `self`, leaving the worker free to serve commands while it runs.
-    pub(crate) fn prepare(
+    /// Build one executor attempt on `entry`. The future is built from clones
+    /// so it borrows nothing from `self`, leaving the worker free to serve
+    /// commands while it runs.
+    pub(crate) fn attempt(
         &self,
         entry: &QueueEntry,
-    ) -> impl Future<Output = Result<Option<Prepared>, UploadErr>> {
+    ) -> impl Future<Output = Result<(), UploadErr>> {
         Self::log_attempt(entry);
         let executor = self.executor.clone();
         let job = entry.job.clone();
-        async move { executor.prepare(&job).await }
-    }
-
-    /// Build the second step, which uploads what [`Self::prepare`] prepared,
-    /// from clones too.
-    pub(crate) fn upload(
-        &self,
-        entry: &QueueEntry,
-        prepared: Prepared,
-    ) -> impl Future<Output = Result<(), UploadErr>> {
-        let executor = self.executor.clone();
-        let job = entry.job.clone();
-        async move { executor.upload(&job, &prepared).await }
-    }
-
-    /// Save an in-flight attempt's `upload` on its queued job, so the next
-    /// attempt (or process) continues from it.
-    pub(crate) async fn save_upload(&mut self, entry: &QueueEntry, upload: &UploadCheckpoint) {
-        debug!("upload: saving upload for {}: {upload:?}", entry.job.file);
-        self.queue
-            .update_job(entry.id, |job| job.upload = Some(upload.clone()))
-            .await;
+        async move { executor.upload(&job).await }
     }
 
     /// Settle `entry` with the result of its attempt: ack it on success or

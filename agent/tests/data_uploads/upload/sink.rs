@@ -128,6 +128,7 @@ async fn stable_file_becomes_upload_job() {
 
     let jobs = harness.await_uploads(1).await;
     assert_eq!(jobs.len(), 1);
+    assert!(!jobs[0].idempotency_key.is_nil());
     // retention comes from the rule, not the (retention-less) stable file
     let expected = Job {
         file: stable.file,
@@ -139,7 +140,7 @@ async fn stable_file_becomes_upload_job() {
         file_rule_id: stable.file_rule_id,
         deployment_id: stable.deployment_id,
         retention: rule.retention,
-        upload: None,
+        idempotency_key: jobs[0].idempotency_key,
     };
     assert_eq!(expected, jobs[0]);
 
@@ -182,6 +183,8 @@ async fn each_stable_file_becomes_a_job_in_order() {
     let jobs = harness.await_uploads(2).await;
     let files: Vec<_> = jobs.iter().map(|j| j.file.clone()).collect();
     assert_eq!(files, vec![a.file, b.file]);
+    // each job gets its own upload
+    assert_ne!(jobs[0].idempotency_key, jobs[1].idempotency_key);
 
     harness.shutdown().await;
 }

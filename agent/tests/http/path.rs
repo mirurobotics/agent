@@ -1,6 +1,8 @@
 // internal crates
 use crate::mocks::http_client::{Call, MockClient};
-use backend_api::models::{UpdateDeploymentRequest, UpdateDeviceFromAgentRequest};
+use backend_api::models::{
+    UpdateDeploymentRequest, UpdateDeviceFromAgentRequest, UpdateUploadRequest,
+};
 use miru_agent::http::{
     config_instances, deployments, devices, file_rules, git_commits, path, releases, uploads,
     HTTPErr,
@@ -81,6 +83,7 @@ pub mod request {
         let (id, token) = ("..", "token");
         let dpl_updates = UpdateDeploymentRequest::default();
         let dvc_payload = UpdateDeviceFromAgentRequest::default();
+        let upl_payload = UpdateUploadRequest::default();
 
         let errs = [
             git_commits::get(&mock, id, &[], token).await.err(),
@@ -92,6 +95,16 @@ pub mod request {
                 deployments::UpdateParams {
                     id,
                     updates: &dpl_updates,
+                    token,
+                },
+            )
+            .await
+            .err(),
+            uploads::update(
+                &mock,
+                uploads::UpdateParams {
+                    id,
+                    payload: &upl_payload,
                     token,
                 },
             )

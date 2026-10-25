@@ -1,5 +1,6 @@
 // internal crates
 use crate::errors::Trace;
+use crate::filesys::File;
 pub use crate::queue::{EnqueueErr, QueueFullErr};
 
 pub type SendActorMessageErr = crate::cache::errors::SendActorMessageErr;
@@ -41,6 +42,21 @@ pub enum TransferErr {
 }
 
 impl crate::errors::Error for TransferErr {}
+
+/// The job's file no longer holds the bytes the scanner hashed, so the job is
+/// dropped. The scanner reports the new version as a new job.
+#[derive(Debug, thiserror::Error)]
+#[error("{file} changed after it was scanned")]
+pub struct FileChangedErr {
+    pub file: File,
+    pub trace: Box<Trace>,
+}
+
+impl crate::errors::Error for FileChangedErr {
+    fn is_terminal(&self) -> bool {
+        true
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum UploadErr {

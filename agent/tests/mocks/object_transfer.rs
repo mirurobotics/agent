@@ -3,36 +3,30 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 // internal crates
-use backend_api::models::UploadCredentials;
+use backend_api::models::{MultipartUpload, UploadWithCredentials};
 use miru_agent::data_uploads::upload::errors::ExecutorErr;
-use miru_agent::data_uploads::upload::{
-    MultipartCheckpoint, ObjectTransfer, UploadCheckpoint, UploadErr,
-};
+use miru_agent::data_uploads::upload::{ObjectTransfer, UploadErr};
 use miru_agent::filesys::File;
 
 /// One recorded `transfer` call's arguments.
-pub type TransferCall = (UploadCredentials, UploadCheckpoint, File);
+pub type TransferCall = (UploadWithCredentials, File, Option<MultipartUpload>);
 
-/// Scripted [`ObjectTransfer`] test double. `prepare` returns the upload with
-/// the multipart upload given to [`Self::set_multipart`], if any. Each
-/// `transfer` call pops the next scripted result (an empty script defaults to
-/// `Ok`) and records the call's arguments. Clones share the script and the
-/// recorded calls, so a test keeps one clone for assertions after moving the
-/// other into a `LiveExecutor` (which owns its transfer).
+/// Scripted [`ObjectTransfer`] test double. Each `transfer` call pops the next
+/// scripted result (an empty script defaults to `Ok`) and records the call's
+/// arguments. `multipart_upload` returns the one recorded on the upload, unless
+/// [`Self::start_multipart_upload`] set a new one. Clones share the script and
+/// the recorded calls, so a test keeps one clone for assertions after moving
+/// the other into a `LiveExecutor` (which owns its transfer).
 #[derive(Clone, Default)]
 pub struct MockObjectTransfer {
-    multipart: Arc<Mutex<Option<MultipartCheckpoint>>>,
     script: Arc<Mutex<VecDeque<Result<(), UploadErr>>>>,
+    started: Arc<Mutex<Option<MultipartUpload>>>,
     calls: Arc<Mutex<Vec<TransferCall>>>,
 }
 
 impl MockObjectTransfer {
     pub fn new() -> Self {
         Self::default()
-    }
-
-    pub fn set_multipart(&self, multipart: MultipartCheckpoint) {
-        *self.multipart.lock().unwrap() = Some(multipart);
     }
 
     pub fn push_err(&self) {
@@ -47,34 +41,36 @@ impl MockObjectTransfer {
             })));
     }
 
+    /// Makes `multipart_upload` return `multipart`, as if it started a new one.
+    pub fn start_multipart_upload(&self, multipart: MultipartUpload) {
+        *self.started.lock().unwrap() = Some(multipart);
+    }
+
     pub fn recorded_calls(&self) -> Vec<TransferCall> {
         self.calls.lock().unwrap().clone()
     }
 }
 
 impl ObjectTransfer for MockObjectTransfer {
-    async fn prepare(
+    async fn multipart_upload(
         &self,
-        _credentials: &UploadCredentials,
-        mut upload: UploadCheckpoint,
-        _file: &File,
-    ) -> UploadCheckpoint {
-        if let Some(multipart) = self.multipart.lock().unwrap().clone() {
-            upload.multipart = Some(multipart);
-        }
-        upload
+        upload: &UploadWithCredentials,
+        _size: u64,
+    ) -> Result<Option<MultipartUpload>, UploadErr> {
+        let started = self.started.lock().unwrap().clone();
+        Ok(started.or_else(|| upload.upload.multipart_upload.as_deref().cloned()))
     }
 
     async fn transfer(
         &self,
-        credentials: &UploadCredentials,
-        upload: &UploadCheckpoint,
+        upload: &UploadWithCredentials,
         file: &File,
+        multipart: Option<&MultipartUpload>,
     ) -> Result<(), UploadErr> {
         self.calls
             .lock()
             .unwrap()
-            .push((credentials.clone(), upload.clone(), file.clone()));
+            .push((upload.clone(), file.clone(), multipart.cloned()));
         let step = self.script.lock().unwrap().pop_front();
         step.unwrap_or(Ok(()))
     }

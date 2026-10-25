@@ -12,6 +12,7 @@ use crate::models::FileRule;
 
 // external crates
 use tracing::{debug, warn};
+use uuid::Uuid;
 
 /// The upload policy over the scanner's stable-file stream: an upload-bearing
 /// rule's stable file becomes an enqueued upload [`Job`]; a retention-only
@@ -51,7 +52,7 @@ impl StableFileSink for UploadStableFileSink {
                 file_rule_id: file.file_rule_id,
                 deployment_id: file.deployment_id,
                 retention: rule.retention.clone(),
-                upload: None,
+                idempotency_key: Uuid::new_v4(),
             };
 
             if let Err(e) = self.uploader.enqueue(job).await {

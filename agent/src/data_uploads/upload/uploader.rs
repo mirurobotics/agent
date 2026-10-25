@@ -52,7 +52,7 @@ pub trait UploaderExt: Send + Sync {
 // ================================== WORKER ======================================= //
 pub(crate) enum Command {
     Enqueue {
-        job: Box<Job>,
+        job: Job,
         respond_to: oneshot::Sender<Result<(), UploadErr>>,
     },
     Len {
@@ -125,7 +125,8 @@ where
     /// Drive one executor attempt on `entry` to completion while staying
     /// responsive to commands, then resolve the entry with its result.
     async fn run_attempt(&mut self, entry: QueueEntry) -> Flow {
-        match self.attempt(&entry).await {
+        let attempt = self.uploader.attempt(&entry);
+        match self.run_until_shutdown(attempt).await {
             // the attempt was cancelled -> leave the entry in the queue so the next
             // boot picks it up rather than losing it
             None => Flow::Shutdown,
@@ -134,22 +135,6 @@ where
                 Flow::Continue
             }
         }
-    }
-
-    /// Prepare `entry`'s upload, save it on the queued job, then upload it, so
-    /// a retry or a restart continues the same upload. `None` if a shutdown
-    /// cancelled the attempt.
-    async fn attempt(&mut self, entry: &QueueEntry) -> Option<Result<(), UploadErr>> {
-        let prepare = self.uploader.prepare(entry);
-        let prepared = match self.run_until_shutdown(prepare).await? {
-            Ok(Some(prepared)) => prepared,
-            // the upload was already confirmed
-            Ok(None) => return Some(Ok(())),
-            Err(err) => return Some(Err(err)),
-        };
-        self.uploader.save_upload(entry, &prepared.upload).await;
-        let upload = self.uploader.upload(entry, prepared);
-        self.run_until_shutdown(upload).await
     }
 
     /// Sleep for `wait`, staying responsive to commands. Deliberately NOT
@@ -201,7 +186,7 @@ where
             }
             Command::Enqueue { job, respond_to } => {
                 dispatch!(
-                    self.uploader.enqueue(*job).await,
+                    self.uploader.enqueue(job).await,
                     respond_to,
                     "Actor failed to send enqueue response"
                 );
@@ -278,7 +263,7 @@ impl Uploader {
 impl UploaderExt for Uploader {
     async fn enqueue(&self, job: Job) -> Result<(), UploadErr> {
         self.send_command("enqueue", |tx| Command::Enqueue {
-            job: Box::new(job),
+            job,
             respond_to: tx,
         })
         .await?
