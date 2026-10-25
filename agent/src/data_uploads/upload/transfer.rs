@@ -13,7 +13,6 @@ use backend_api::models::{S3UploadCredentials, UploadCredentials};
 
 // external crates
 use aws_sdk_s3::config::SharedHttpClient;
-use chrono::{DateTime, Utc};
 use tracing::info;
 
 /// Transfers a file to the checkpoint's object in cloud storage.
@@ -23,13 +22,14 @@ use tracing::info;
 /// Either future may be dropped at any await point.
 pub trait ObjectTransfer: Send + Sync {
     /// The multipart upload [`Self::transfer`] resumes: the saved one if it
-    /// still matches `file`, else a new one. `None` for a single-part file.
+    /// still matches `file`, else a new one, or [`TransferPlan::SinglePart`]
+    /// for a single-part file.
     fn reuse_or_create_multipart(
         &self,
         credentials: &UploadCredentials,
         checkpoint: &UploadCheckpoint,
         file: &File,
-    ) -> impl Future<Output = Result<Option<MultipartCheckpoint>, UploadErr>> + Send;
+    ) -> impl Future<Output = Result<TransferPlan, UploadErr>> + Send;
 
     /// Transfers the file, resuming `checkpoint.multipart` if it matches the file.
     fn transfer(
@@ -38,6 +38,15 @@ pub trait ObjectTransfer: Send + Sync {
         checkpoint: &UploadCheckpoint,
         file: &File,
     ) -> impl Future<Output = Result<(), UploadErr>> + Send;
+}
+
+/// How [`ObjectTransfer::transfer`] sends a file.
+#[derive(Debug, PartialEq)]
+pub enum TransferPlan {
+    /// In parts, through this multipart upload.
+    Multipart(MultipartCheckpoint),
+    /// In one request, since the file fits in one part.
+    SinglePart,
 }
 
 /// Production [`ObjectTransfer`] built on aws-sdk-s3 for both schemes: S3 with
@@ -110,66 +119,13 @@ impl SdkTransfer {
     }
 }
 
-/// See [`ObjectTransfer::reuse_or_create_multipart`].
-async fn reuse_or_create_multipart(
-    store: &s3::Store,
-    checkpoint: &UploadCheckpoint,
-    file: &File,
-) -> Result<Option<MultipartCheckpoint>, s3::S3Err> {
-    let object = checkpoint.object();
-    let src = s3::Source::open(file.clone(), &object).await?;
-    if src.size <= s3::store::PART_SIZE {
-        return Ok(None);
-    }
-    let Some(mtime) = src.mtime.map(DateTime::<Utc>::from) else {
-        // without an mtime, the upload can't be pinned to this file version
-        return Ok(None);
-    };
-    if let Some(saved) = checkpoint.resumable_multipart(&src) {
-        let id = &saved.multipart_upload_id;
-        if store.has_multipart_upload(&object, id).await? {
-            return Ok(Some(saved.clone()));
-        }
-        info!("upload: multipart upload {id} for {object} is gone");
-    }
-    let id = store
-        .create_multipart_upload(&object, &checkpoint.metadata)
-        .await?;
-    info!("upload: started multipart upload {id} for {object}");
-    Ok(Some(MultipartCheckpoint {
-        multipart_upload_id: id,
-        size: src.size,
-        mtime,
-        part_size: s3::Store::part_size_for(src.size),
-    }))
-}
-
-/// Puts `file` at the upload's object, resuming `checkpoint.multipart` if it
-/// matches the file.
-async fn resume_or_put(
-    store: &s3::Store,
-    checkpoint: &UploadCheckpoint,
-    file: &File,
-) -> Result<(), s3::S3Err> {
-    let object = checkpoint.object();
-    let src = s3::Source::open(file.clone(), &object).await?;
-    match checkpoint.resumable_multipart(&src) {
-        Some(multipart) => {
-            let id = &multipart.multipart_upload_id;
-            info!("upload: resuming multipart upload {id} for {object}");
-            store.resume_multipart_upload(src, &object, id).await
-        }
-        None => store.put(file.clone(), &object, &checkpoint.metadata).await,
-    }
-}
-
 impl ObjectTransfer for SdkTransfer {
     async fn reuse_or_create_multipart(
         &self,
         credentials: &UploadCredentials,
         checkpoint: &UploadCheckpoint,
         file: &File,
-    ) -> Result<Option<MultipartCheckpoint>, UploadErr> {
+    ) -> Result<TransferPlan, UploadErr> {
         let store = self.store_for(credentials)?;
         reuse_or_create_multipart(&store, checkpoint, file)
             .await
@@ -190,6 +146,54 @@ impl ObjectTransfer for SdkTransfer {
         resume_or_put(&store, checkpoint, file)
             .await
             .map_err(classified_executor_err)
+    }
+}
+
+/// See [`ObjectTransfer::reuse_or_create_multipart`].
+async fn reuse_or_create_multipart(
+    store: &s3::Store,
+    checkpoint: &UploadCheckpoint,
+    file: &File,
+) -> Result<TransferPlan, s3::S3Err> {
+    let object = checkpoint.object();
+    let src = s3::Source::open(file.clone(), &object).await?;
+    if src.size <= s3::store::PART_SIZE {
+        return Ok(TransferPlan::SinglePart);
+    }
+    if let Some(saved) = checkpoint.resumable_multipart(&src) {
+        let id = &saved.multipart_upload_id;
+        if store.has_multipart_upload(&object, id).await? {
+            return Ok(TransferPlan::Multipart(saved.clone()));
+        }
+        info!("upload: multipart upload {id} for {object} is gone");
+    }
+    let id = store
+        .create_multipart_upload(&object, &checkpoint.metadata)
+        .await?;
+    info!("upload: started multipart upload {id} for {object}");
+    Ok(TransferPlan::Multipart(MultipartCheckpoint {
+        multipart_upload_id: id,
+        size: src.size,
+        part_size: s3::Store::part_size_for(src.size),
+    }))
+}
+
+/// Puts `file` at the upload's object, resuming `checkpoint.multipart` if it
+/// matches the file.
+async fn resume_or_put(
+    store: &s3::Store,
+    checkpoint: &UploadCheckpoint,
+    file: &File,
+) -> Result<(), s3::S3Err> {
+    let object = checkpoint.object();
+    let src = s3::Source::open(file.clone(), &object).await?;
+    match checkpoint.resumable_multipart(&src) {
+        Some(multipart) => {
+            let id = &multipart.multipart_upload_id;
+            info!("upload: resuming multipart upload {id} for {object}");
+            store.resume_multipart_upload(src, &object, id).await
+        }
+        None => store.put(file.clone(), &object, &checkpoint.metadata).await,
     }
 }
 
@@ -566,35 +570,27 @@ mod tests {
         // internal crates
         use super::*;
         use crate::s3::store::PART_SIZE;
-        use miru_agent::data_uploads::upload::{MultipartCheckpoint, UploadCheckpoint};
-        use miru_agent::filesys::path::PathExt;
-
-        // external crates
-        use chrono::{DateTime, TimeDelta, Utc};
+        use miru_agent::data_uploads::upload::{
+            MultipartCheckpoint, TransferPlan, UploadCheckpoint,
+        };
 
         /// One part plus 1 KiB, so the file splits into two parts.
         const SIZE: u64 = PART_SIZE + 1024;
         const S3_BASE: &str = "https://s3.us-east-1.amazonaws.com/my-bucket/logs/a.log";
         const GCS_BASE: &str = "https://storage.googleapis.com/my-bucket/logs/a.log";
 
-        /// A file of [`SIZE`] bytes and its mtime.
-        async fn two_part_file() -> (test_files::TempFile, DateTime<Utc>) {
-            let tf = temp_file_with(&vec![7u8; SIZE as usize]).await;
-            let mtime = std::fs::metadata(tf.file().path())
-                .unwrap()
-                .modified()
-                .unwrap();
-            (tf, DateTime::<Utc>::from(mtime))
+        /// A file of [`SIZE`] bytes.
+        async fn two_part_file() -> test_files::TempFile {
+            temp_file_with(&vec![7u8; SIZE as usize]).await
         }
 
         /// The checkpoint with multipart upload `id` saved for a file of `size`
-        /// bytes last modified at `mtime`, cut into [`PART_SIZE`] parts.
-        fn saved(id: &str, size: u64, mtime: DateTime<Utc>) -> UploadCheckpoint {
+        /// bytes, cut into [`PART_SIZE`] parts.
+        fn saved(id: &str, size: u64) -> UploadCheckpoint {
             UploadCheckpoint {
                 multipart: Some(MultipartCheckpoint {
                     multipart_upload_id: id.to_string(),
                     size,
-                    mtime,
                     part_size: PART_SIZE,
                 }),
                 ..upload_checkpoint()
@@ -708,11 +704,11 @@ mod tests {
             mut checkpoint: UploadCheckpoint,
         ) -> (Result<(), UploadErr>, UploadCheckpoint) {
             let transfer = SdkTransfer::with_http_client(replay.clone());
-            if let Ok(multipart) = transfer
+            if let Ok(TransferPlan::Multipart(multipart)) = transfer
                 .reuse_or_create_multipart(creds, &checkpoint, file)
                 .await
             {
-                checkpoint.multipart = multipart;
+                checkpoint.multipart = Some(multipart);
             }
             let result = transfer.transfer(creds, &checkpoint, file).await;
             (result, checkpoint)
@@ -720,13 +716,13 @@ mod tests {
 
         #[tokio::test]
         async fn new_upload_is_prepared_then_uploaded() {
-            let (tf, mtime) = two_part_file().await;
+            let tf = two_part_file().await;
             let replay = replay(new_upload_resps("mpu_new"));
 
             let (result, prepared) = run(&s3(), &replay, tf.file(), upload_checkpoint()).await;
 
             result.unwrap();
-            assert_eq!(prepared, saved("mpu_new", SIZE, mtime));
+            assert_eq!(prepared, saved("mpu_new", SIZE));
             assert_eq!(
                 sent(&replay),
                 [
@@ -742,7 +738,7 @@ mod tests {
         // S3 and GCS share the multipart path, so both upload only missing parts.
         #[tokio::test]
         async fn saved_upload_resumes_and_skips_landed_parts() {
-            let (tf, mtime) = two_part_file().await;
+            let tf = two_part_file().await;
             for creds in [s3(), gcs()] {
                 let replay = replay(vec![
                     list_resp(&[(1, "\"e1\"")]),
@@ -751,7 +747,7 @@ mod tests {
                     complete_resp(),
                 ]);
 
-                let checkpoint = saved("mpu_old", SIZE, mtime);
+                let checkpoint = saved("mpu_old", SIZE);
                 let (result, prepared) = run(&creds, &replay, tf.file(), checkpoint.clone()).await;
 
                 result.unwrap();
@@ -770,7 +766,7 @@ mod tests {
 
         #[tokio::test]
         async fn gone_upload_starts_a_new_one_on_the_same_key() {
-            let (tf, mtime) = two_part_file().await;
+            let tf = two_part_file().await;
             let mut resps = vec![xml(
                 404,
                 "<Error><Code>NoSuchUpload</Code><Message>gone</Message></Error>",
@@ -778,32 +774,28 @@ mod tests {
             resps.extend(new_upload_resps("mpu_new"));
             let replay = replay(resps);
 
-            let checkpoint = saved("mpu_old", SIZE, mtime);
+            let checkpoint = saved("mpu_old", SIZE);
             let (result, prepared) = run(&s3(), &replay, tf.file(), checkpoint).await;
 
             result.unwrap();
-            assert_eq!(prepared, saved("mpu_new", SIZE, mtime));
+            assert_eq!(prepared, saved("mpu_new", SIZE));
             assert_eq!(sent(&replay)[1], "POST ?uploads");
         }
 
-        // A saved upload for another version of the file (size or mtime), or one
-        // cut into another part size, starts a new one without listing its parts.
+        // A saved upload for a file of another size, or one cut into another
+        // part size, starts a new one without listing its parts.
         #[tokio::test]
-        async fn changed_file_or_part_size_starts_a_new_upload() {
-            let (tf, mtime) = two_part_file().await;
-            let mut other_part_size = saved("mpu_old", SIZE, mtime);
+        async fn changed_size_or_part_size_starts_a_new_upload() {
+            let tf = two_part_file().await;
+            let mut other_part_size = saved("mpu_old", SIZE);
             other_part_size.multipart.as_mut().unwrap().part_size = 2 * PART_SIZE;
-            for checkpoint in [
-                saved("mpu_old", SIZE + 1, mtime),
-                saved("mpu_old", SIZE, mtime + TimeDelta::seconds(1)),
-                other_part_size,
-            ] {
+            for checkpoint in [saved("mpu_old", SIZE + 1), other_part_size] {
                 let replay = replay(new_upload_resps("mpu_new"));
 
                 let (result, prepared) = run(&s3(), &replay, tf.file(), checkpoint).await;
 
                 result.unwrap();
-                assert_eq!(prepared, saved("mpu_new", SIZE, mtime));
+                assert_eq!(prepared, saved("mpu_new", SIZE));
                 assert_eq!(sent(&replay)[0], "POST ?uploads");
             }
         }
@@ -812,7 +804,7 @@ mod tests {
         // abort is sent.
         #[tokio::test]
         async fn failed_part_does_not_abort() {
-            let (tf, mtime) = two_part_file().await;
+            let tf = two_part_file().await;
             let replay = replay(vec![
                 create_resp("mpu_new"),
                 list_resp(&[]),
@@ -822,7 +814,7 @@ mod tests {
             let (result, prepared) = run(&s3(), &replay, tf.file(), upload_checkpoint()).await;
 
             result.unwrap_err();
-            assert_eq!(prepared, saved("mpu_new", SIZE, mtime));
+            assert_eq!(prepared, saved("mpu_new", SIZE));
             assert_eq!(
                 sent(&replay),
                 [
@@ -837,10 +829,10 @@ mod tests {
         // the transfer's own part listing fails the attempt.
         #[tokio::test]
         async fn failed_check_keeps_the_saved_upload() {
-            let (tf, mtime) = two_part_file().await;
+            let tf = two_part_file().await;
             let replay = replay(vec![s3_access_denied_resp(), s3_access_denied_resp()]);
 
-            let checkpoint = saved("mpu_old", SIZE, mtime);
+            let checkpoint = saved("mpu_old", SIZE);
             let (result, prepared) = run(&s3(), &replay, tf.file(), checkpoint.clone()).await;
 
             result.unwrap_err();
@@ -858,7 +850,7 @@ mod tests {
         // and runs it start to finish, without saving it.
         #[tokio::test]
         async fn failed_start_uploads_in_one_run() {
-            let (tf, _) = two_part_file().await;
+            let tf = two_part_file().await;
             let replay = replay(vec![
                 s3_access_denied_resp(),
                 create_resp("mpu_2"),

@@ -7,7 +7,7 @@ use crate::authn::{Token, TokenManagerExt};
 use crate::data_uploads::upload::{
     errors::{classified_executor_err, UploadErr},
     job::{Job, UploadCheckpoint},
-    transfer::ObjectTransfer,
+    transfer::{ObjectTransfer, TransferPlan},
 };
 use crate::errors::{Error, HTTPCode};
 use crate::http::{self, ClientI};
@@ -194,7 +194,10 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> UploadExecutor for LiveE
             .reuse_or_create_multipart(&prepared.credentials, &prepared.checkpoint, &job.file)
             .await
         {
-            Ok(multipart) => prepared.checkpoint.multipart = multipart,
+            Ok(TransferPlan::Multipart(multipart)) => {
+                prepared.checkpoint.multipart = Some(multipart);
+            }
+            Ok(TransferPlan::SinglePart) => prepared.checkpoint.multipart = None,
             Err(err) => debug!(
                 "upload: can't prepare multipart upload for {}: {err:?}",
                 job.file

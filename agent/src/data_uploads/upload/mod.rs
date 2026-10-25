@@ -12,6 +12,6 @@ pub use self::executor::{LiveExecutor, PrepareOutcome, PreparedUpload, UploadExe
 pub use self::job::{Job, MultipartCheckpoint, UploadCheckpoint};
 pub use self::queue::{Queue, QueueEntry, QueueSnapshot, QueueSnapshotFile};
 pub use self::sink::UploadStableFileSink;
-pub use self::transfer::{ObjectTransfer, SdkTransfer};
+pub use self::transfer::{ObjectTransfer, SdkTransfer, TransferPlan};
 pub use self::uploader::{Uploader, UploaderExt};
 pub use self::uploader_impl::UploaderOptions;

@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use backend_api::models::UploadCredentials;
 use miru_agent::data_uploads::upload::errors::ExecutorErr;
 use miru_agent::data_uploads::upload::{
-    MultipartCheckpoint, ObjectTransfer, UploadCheckpoint, UploadErr,
+    MultipartCheckpoint, ObjectTransfer, TransferPlan, UploadCheckpoint, UploadErr,
 };
 use miru_agent::filesys::File;
 
@@ -15,11 +15,12 @@ pub type TransferCall = (UploadCredentials, UploadCheckpoint, File);
 
 /// Scripted [`ObjectTransfer`] test double. `reuse_or_create_multipart` returns
 /// the multipart upload given to [`Self::set_multipart`], or else the one on the
-/// checkpoint, and fails after [`Self::fail_multipart`]. Each `transfer` call pops
-/// the next scripted result (an empty script defaults to `Ok`) and records the
-/// call's arguments. Clones share the script and the recorded calls, so a test
-/// keeps one clone for assertions after moving the other into a `LiveExecutor`
-/// (which owns its transfer).
+/// checkpoint, or else [`TransferPlan::SinglePart`], and fails after
+/// [`Self::fail_multipart`]. Each `transfer` call pops the next scripted result
+/// (an empty script defaults to `Ok`) and records the call's arguments. Clones
+/// share the script and the recorded calls, so a test keeps one clone for
+/// assertions after moving the other into a `LiveExecutor` (which owns its
+/// transfer).
 #[derive(Clone, Default)]
 pub struct MockObjectTransfer {
     multipart: Arc<Mutex<Option<MultipartCheckpoint>>>,
@@ -56,12 +57,15 @@ impl ObjectTransfer for MockObjectTransfer {
         _credentials: &UploadCredentials,
         checkpoint: &UploadCheckpoint,
         _file: &File,
-    ) -> Result<Option<MultipartCheckpoint>, UploadErr> {
+    ) -> Result<TransferPlan, UploadErr> {
         if *self.fail_multipart.lock().unwrap() {
             return Err(scripted_err());
         }
         let started = self.multipart.lock().unwrap().clone();
-        Ok(started.or_else(|| checkpoint.multipart.clone()))
+        Ok(match started.or_else(|| checkpoint.multipart.clone()) {
+            Some(multipart) => TransferPlan::Multipart(multipart),
+            None => TransferPlan::SinglePart,
+        })
     }
 
     async fn transfer(

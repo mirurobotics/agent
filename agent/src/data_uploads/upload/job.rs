@@ -46,13 +46,12 @@ impl UploadCheckpoint {
         }
     }
 
-    /// The saved multipart upload, if it was started for this version of `src`
+    /// The saved multipart upload, if it was started for a file of `src`'s size
     /// with the part size this agent picks.
     pub(crate) fn resumable_multipart(&self, src: &s3::Source) -> Option<&MultipartCheckpoint> {
         let multipart = self.multipart.as_ref()?;
-        let resumable = src.mtime.map(DateTime::<Utc>::from) == Some(multipart.mtime)
-            && src.size == multipart.size
-            && s3::Store::part_size_for(src.size) == multipart.part_size;
+        let part_size = s3::Store::part_size_for(src.size);
+        let resumable = src.size == multipart.size && part_size == multipart.part_size;
         resumable.then_some(multipart)
     }
 }
@@ -61,6 +60,5 @@ impl UploadCheckpoint {
 pub struct MultipartCheckpoint {
     pub multipart_upload_id: String,
     pub size: u64,
-    pub mtime: DateTime<Utc>,
     pub part_size: u64,
 }
