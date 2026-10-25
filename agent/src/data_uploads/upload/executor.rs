@@ -109,13 +109,13 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> LiveExecutor<C, T, X> {
             http::uploads::vend_credentials(self.http_client.as_ref(), params).await
         })
         .await;
-        unless_gone(result)
+        none_if_gone(result)
     }
 
     /// Whether a gone upload was uploaded, rather than deleted or failed.
     async fn already_uploaded(&self, id: &str) -> Result<bool, UploadErr> {
         let token = self.token().await?;
-        Ok(unless_gone(self.confirm(&token, id).await)?.is_some())
+        Ok(none_if_gone(self.confirm(&token, id).await)?.is_some())
     }
 
     async fn confirm_upload(&self, id: &str) -> Result<(), UploadErr> {
@@ -139,7 +139,7 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> LiveExecutor<C, T, X> {
 }
 
 /// `None` for a gone upload: deleted (404), or uploaded or failed (409).
-fn unless_gone<T>(result: Result<T, HTTPErr>) -> Result<Option<T>, UploadErr> {
+fn none_if_gone<T>(result: Result<T, HTTPErr>) -> Result<Option<T>, UploadErr> {
     match result {
         Ok(value) => Ok(Some(value)),
         Err(e) if matches!(e.http_status(), HTTPCode::NOT_FOUND | HTTPCode::CONFLICT) => Ok(None),
