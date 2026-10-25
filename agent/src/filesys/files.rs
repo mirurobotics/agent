@@ -14,6 +14,7 @@ use crate::trace;
 
 // external crates
 use atomicwrites::{AllowOverwrite, AtomicFile, DisallowOverwrite};
+use crc_fast::CrcAlgorithm;
 use secrecy::{ExposeSecretMut, SecretBox};
 use serde::de::DeserializeOwned;
 use sha2::{Digest, Sha256};
@@ -39,17 +40,32 @@ pub async fn read_bytes(file: &File) -> Result<Vec<u8>, FileSysErr> {
 }
 
 /// Computes the SHA-256 content digest of `file`, returned as `sha256:<lowercase-hex>`.
+pub async fn hash(file: &File) -> Result<String, FileSysErr> {
+    Ok(content_hashes(file).await?.digest)
+}
+
+/// A file's SHA-256 digest and CRC32C checksum, computed from the same read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContentHashes {
+    /// `sha256:<lowercase-hex>`, as [`hash`] returns it.
+    pub digest: String,
+    /// The CRC32C (Castagnoli) checksum, which S3 and GCS verify uploads against.
+    pub crc32c: u32,
+}
+
+/// Computes the [`ContentHashes`] of `file` in one pass.
 ///
 /// Streams the file through a fixed 8 KiB buffer, so memory use is constant
 /// regardless of file size (the whole file is never materialized). Hashing is
 /// CPU-heavy, so callers may wrap this in `tokio::task::spawn_blocking` for very
 /// large files to avoid stalling the async runtime.
-pub async fn hash(file: &File) -> Result<String, FileSysErr> {
+pub async fn content_hashes(file: &File) -> Result<ContentHashes, FileSysErr> {
     let mut f = TokioFile::open(file.path())
         .await
         .map_err(|e| map_io_err_for_open(e, file))?;
 
-    let mut hasher = Sha256::new();
+    let mut sha256 = Sha256::new();
+    let mut crc32c = crc_fast::Digest::new(CrcAlgorithm::Crc32Iscsi);
     let mut buf = [0u8; 8 * 1024];
     loop {
         let n = f.read(&mut buf).await.map_err(|e| {
@@ -62,11 +78,15 @@ pub async fn hash(file: &File) -> Result<String, FileSysErr> {
         if n == 0 {
             break;
         }
-        hasher.update(&buf[..n]);
+        sha256.update(&buf[..n]);
+        crc32c.update(&buf[..n]);
     }
 
-    let digest = hasher.finalize();
-    Ok(format!("sha256:{digest:x}"))
+    Ok(ContentHashes {
+        digest: format!("sha256:{:x}", sha256.finalize()),
+        // CRC-32 values fit in the low 32 bits of crc-fast's u64
+        crc32c: crc32c.finalize() as u32,
+    })
 }
 
 pub async fn read_secret_bytes(file: &File) -> Result<SecretBox<Vec<u8>>, FileSysErr> {

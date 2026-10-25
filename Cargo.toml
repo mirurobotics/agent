@@ -34,6 +34,7 @@ axum = { version = "0.8.3" }
 base64 = "0.22.1"
 chrono = { version = "0.4.40", features = ["serde"] }
 config-agent = { path = "apps/agent" }
+crc-fast = "1.10"
 futures = "0.3.31"
 glob = "0.3.3"
 http = "1"

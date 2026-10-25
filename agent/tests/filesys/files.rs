@@ -487,6 +487,43 @@ pub mod hash {
     }
 }
 
+pub mod content_hashes {
+    use super::*;
+
+    #[tokio::test]
+    async fn known_vector() {
+        // 0xE3069283 is CRC-32C's published check value for "123456789".
+        let dir = test_dirs::temp("testing").unwrap();
+        let file = dir.file("check");
+        files::write_string(&file, "123456789", WriteOptions::default())
+            .await
+            .unwrap();
+        assert_eq!(
+            files::content_hashes(&file).await.unwrap(),
+            files::ContentHashes {
+                digest: "sha256:15e2b0d3c33891ebb0f1ef609ec419420c20e320ce94c65fbc8c3312448eb225"
+                    .to_string(),
+                crc32c: 0xE306_9283,
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn checksum_spans_multiple_reads() {
+        // Larger than the 8 KiB streaming buffer, so the checksum spans multiple reads.
+        let dir = test_dirs::temp("testing").unwrap();
+        let file = dir.file("large");
+        let contents = "a".repeat(20 * 1024);
+        files::write_string(&file, &contents, WriteOptions::default())
+            .await
+            .unwrap();
+
+        let hashes = files::content_hashes(&file).await.unwrap();
+        assert_eq!(hashes.crc32c, 0x2228_7E53);
+        assert_eq!(hashes.digest, files::hash(&file).await.unwrap());
+    }
+}
+
 pub mod read_secret_bytes {
     use super::*;
 
