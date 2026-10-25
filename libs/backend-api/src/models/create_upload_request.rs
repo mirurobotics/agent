@@ -29,6 +29,9 @@ pub struct CreateUploadRequest {
     /// ID of the deployment the device is currently on.
     #[serde(rename = "deployment_id")]
     pub deployment_id: String,
+    /// A UUID the agent mints once for each file it queues and sends on every attempt to upload that file. If this device already created an upload with the key, Miru returns that upload, with fresh credentials, instead of creating another, whatever the rest of the request says. Without a key, every call creates a new upload.
+    #[serde(rename = "idempotency_key", skip_serializing_if = "Option::is_none")]
+    pub idempotency_key: Option<uuid::Uuid>,
 }
 
 impl CreateUploadRequest {
@@ -40,6 +43,7 @@ impl CreateUploadRequest {
             size,
             incomplete: None,
             deployment_id,
+            idempotency_key: None,
         }
     }
 }

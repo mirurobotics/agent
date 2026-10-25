@@ -61,6 +61,9 @@ pub struct Upload {
     /// ID of the workspace that owns the upload.
     #[serde(rename = "workspace_id")]
     pub workspace_id: String,
+    /// The multipart upload the device recorded for the upload's object with `PATCH /uploads/{upload_id}`. Absent until the device records one.
+    #[serde(rename = "multipart_upload", skip_serializing_if = "Option::is_none")]
+    pub multipart_upload: Option<Box<models::MultipartUpload>>,
 }
 
 impl Upload {
@@ -83,6 +86,7 @@ impl Upload {
             created_at,
             updated_at,
             workspace_id,
+            multipart_upload: None,
         }
     }
 }
