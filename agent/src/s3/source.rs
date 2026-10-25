@@ -6,6 +6,9 @@ use crate::trace;
 // external crates
 use aws_sdk_s3::primitives::{ByteStream, Length};
 
+/// Bytes per read and per frame sent. The SDK's default is 4 KiB.
+const READ_SIZE: usize = 32 * 1024;
+
 /// A local file to upload and its size when the upload started. The file is
 /// expected to stay unchanged until the upload is confirmed.
 pub struct Source {
@@ -48,6 +51,7 @@ impl Source {
             .path(self.file.path())
             .offset(offset)
             .length(Length::Exact(len))
+            .buffer_size(READ_SIZE)
             .build()
             .await
             .map_err(|e| errors::map_body_io_err(operation, dst, &self.file, e.into()))
