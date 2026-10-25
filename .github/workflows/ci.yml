@@ -73,7 +73,7 @@ jobs:
           cache-on-failure: true
           env-vars: AWS_LC_SYS
 
-      # Credentials for the real-GCS upload tests.
+      # Credentials for the real-GCS and real-S3 upload tests.
       - name: Authenticate to Google Cloud
         id: gcs
         if: github.actor != 'dependabot[bot]' && !github.event.pull_request.head.repo.fork
@@ -84,11 +84,20 @@ jobs:
           token_format: access_token
           create_credentials_file: false
 
+      - name: Authenticate to AWS
+        if: github.actor != 'dependabot[bot]' && !github.event.pull_request.head.repo.fork
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_IT_ROLE }}
+          aws-region: ${{ vars.AWS_IT_REGION }}
+
       - name: Run Windows Tests
         env:
           RUST_LOG: "off"
           GCS_IT_SOURCE_TOKEN: ${{ steps.gcs.outputs.access_token }}
           GCS_IT_BUCKET: ${{ vars.GCS_IT_BUCKET }}
+          AWS_IT_BUCKET: ${{ vars.AWS_IT_BUCKET }}
+          AWS_IT_UPLOAD_ROLE: ${{ vars.AWS_IT_UPLOAD_ROLE }}
         run: cargo test --package miru-agent --locked
 
   windows_package_scope:
@@ -200,8 +209,9 @@ jobs:
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@21eb0b6228fa6252dafdd9c82e7516ad2328c775 # cargo-llvm-cov
 
-      # Credentials for the real-GCS upload tests. Fork and Dependabot PRs get
-      # no OIDC token, so this step skips there and those tests fail.
+      # Credentials for the real-GCS and real-S3 upload tests. Fork and
+      # Dependabot PRs get no OIDC token, so these steps skip there and those
+      # tests fail.
       - name: Authenticate to Google Cloud
         id: gcs
         if: github.actor != 'dependabot[bot]' && !github.event.pull_request.head.repo.fork
@@ -212,10 +222,19 @@ jobs:
           token_format: access_token
           create_credentials_file: false
 
+      - name: Authenticate to AWS
+        if: github.actor != 'dependabot[bot]' && !github.event.pull_request.head.repo.fork
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_IT_ROLE }}
+          aws-region: ${{ vars.AWS_IT_REGION }}
+
       - name: Run Tests and Coverage Gates
         env:
           GCS_IT_SOURCE_TOKEN: ${{ steps.gcs.outputs.access_token }}
           GCS_IT_BUCKET: ${{ vars.GCS_IT_BUCKET }}
+          AWS_IT_BUCKET: ${{ vars.AWS_IT_BUCKET }}
+          AWS_IT_UPLOAD_ROLE: ${{ vars.AWS_IT_UPLOAD_ROLE }}
         run: ./scripts/covgate.sh
 
   tools:

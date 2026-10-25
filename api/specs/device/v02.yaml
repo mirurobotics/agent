@@ -11,152 +11,121 @@ info:
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
-  x-release-version: v0.2.3-beta.2
+  x-release-version: v0.2.3
   x-git-commit:
-    sha: 2a3eb728f10b95f12a0c8f96183727d5b9fd7047
-    url: https://github.com/mirurobotics/openapi/commit/2a3eb728f10b95f12a0c8f96183727d5b9fd7047
-    message: 'feat(calibrations): report_id on calibration reports (#352)
+    sha: 850e23bf5fc36a890d36b5a2d9156f68d141f645
+    url: https://github.com/mirurobotics/openapi/commit/850e23bf5fc36a890d36b5a2d9156f68d141f645
+    message: 'feat(device): rename component_slug to component in CreateCalibrationRequest
+      (#359)
 
 
       <!-- claude-projects-attribution: {"github_login":"miru-agents"} -->
 
       _Requested by **bens-agent** · [project
 
-      thread](https://claude.ai/code/project/chan_015imaa8aZrnubYZcZCvjeHx?thread=cmsg_015imaa8aZrnubYZcZCvjeHxRRaVTdwX2TA7u3cf9PHGg5)_
+      thread](https://claude.ai/code/project/chan_015imaa8aZrnubYZcZCvjeHx?thread=cmsg_015imaa8aZrnubYZcZCvjeHxMkwTnPSSvfAHZA9NT4YaSe)_
 
 
-      Before: the Device API''s `POST /calibrations` returns only
-
-      `reported_at`, so the caller has no handle to find the calibration in
-
-      Miru later. If the agent loses Miru''s response to an upload, it uploads
-
-      again and Miru records the calibration twice. (#327 dropped `report_id`
-
-      as out of scope; it is now approved end to end.)
+      ## Summary
 
 
-      After:
+      Renames `CreateCalibrationRequest.component_slug` to `component` in the
 
-      - **Device API**: `CreateCalibrationResponse` gains required `report_id`
+      Device API''s `POST /calibrations`. #339 already renamed it this way in
 
-      (uuid), next to `reported_at`. Still a plain 200 response with no
+      the agent API. The field is still required and still holds the
 
-      `object`/`id`, since there is no route to fetch a report. The path
+      component''s slug, so it now matches `role` and `aspect`, which are slugs
 
-      description now says the agent sends `report_id` with every upload, so a
+      without a `_slug` suffix. The description uses the same wording as the
 
-      retried upload does not record the calibration twice.
-
-      - **Agent API**: `CreateCalibrationRequest` gains required `report_id`
-
-      (uuid). If the device already reported a calibration with that
-
-      `report_id`, Miru returns that calibration and records nothing new.
-
-      - **Shared `BaseCalibration`** (agent and frontend audiences): gains
-
-      required, non-nullable `report_id`. The backend migration backfills a
-
-      random UUID for calibrations recorded before this change.
-
-      - **Frontend `GET /calibrations`**: can filter by `report_id`
-
-      (`CAL_SEARCH_REPORT_ID` + `calibration_search_report_id`, the same shape
-
-      as `serial_number`).
+      agent API''s.
 
 
-      How: source edits and `./scripts/regen.sh` output are in separate
+      The published `device/v0.2.3` release is being removed, so it can be
 
-      commits (agent, frontend, and device bundles). Stainless configs are
-
-      unchanged because no routes were added or removed (MIRU018).
+      re-released from this change.
 
 
-      ## Compatibility
-
-      - Device API and frontend: additive (a new response field, a new
-
-      optional query parameter and search enum value).
-
-      - Agent API: **not additive**. `report_id` is required on `POST
-
-      /calibrations`
-
-      ([review](https://github.com/mirurobotics/openapi/pull/352#discussion_r4367712303)).
-
-      No stable agent uploads calibrations; only the betas `v0.11.2-beta.1` to
-
-      `beta.3` do, and they send no `report_id`. Once the backend enforces
-
-      this, those betas'' uploads are rejected, so devices on them need the
-
-      next agent build.
+      ## Changes
 
 
-      ## Plan
+      - `apis/apps/device-server/components/requests/calibration.yaml`: the
 
-      1. Merge this, then release the touched audiences the way the repo does:
+      field and its `required` entry are renamed, with a new description.
 
-      `agent/` (after `agent/v0.5.10`), `device/` (after
-
-      `device/v0.2.3-beta.1`), and `frontend/` (after `frontend/v0.9.14`).
-
-      2. Backend PR (`mirurobotics/backend`): store `report_id` on
-
-      calibrations (backfilling existing rows) with a unique index per device,
-
-      return the existing calibration when a `report_id` repeats, and support
-
-      the `report_id` list filter.
-
-      3. Agent PR (`mirurobotics/agent`): generate `report_id` when it
-
-      receives a calibration, return it from the Device API, and send it on
-
-      every upload.
-
-      4. docs#269: its owner updates it to cover `report_id`.
+      - `apis/apps/device-server/openapi.gen.yaml`: regenerated.
 
 
-      ## Precedent
+      ## Not in this PR
 
-      - `calibration_search_report_id` follows
 
-      `calibration_search_serial_number` (array of strings, `form`, `explode:
+      - The agent''s Device API handler must accept `component` before an agent
 
-      false`, example).
+      release serves this version.
 
-      - `format: uuid` has no precedent in this repo. Every other ID is a
-
-      prefixed string like `cal_123`. Here the agent generates the ID on the
-
-      device before Miru knows about the calibration, so it is not a Miru
-
-      resource ID. The `uuid` format states what the agent sends and what the
-
-      backend can index. The filter parameter''s items stay plain `type:
-
-      string`, like the sibling filters.
+      - The docs follow in mirurobotics/docs#269.
 
 
       ## Test plan
 
-      - Regenerated bundles are committed. CI runs lint (Redocly + MIRU rules,
 
-      including MIRU005 search parity and `no-invalid-schema-examples`),
-
-      stale-specs, and tool tests.
+      - `./scripts/regen.sh` and `./scripts/lint.sh` pass.
 
 
-      🤖 Generated with [Claude Code](https://claude.com/claude-code)
+      ---
+
+      _Generated by [Claude
+
+      Code](https://claude.ai/code/session_01XYr7RpV2F8ueBW98eeY8W5)_
 
 
-      https://claude.ai/code/session_01BPXgUTxFBwzqZRogmg7o8X
+      <!-- codesmith:footer -->
+
+      ---
+
+      <a
+
+      href="https://app.blacksmith.sh/mirurobotics/codesmith/openapi/pr/359?autoLogin=true&ref=codesmith_pr_footer"><picture><source
+
+      media="(prefers-color-scheme: dark)"
+
+      srcset="https://pr-comments-assets.blacksmith.sh/codesmith/view-with-codesmith-dark-v3.svg"><source
+
+      media="(prefers-color-scheme: light)"
+
+      srcset="https://pr-comments-assets.blacksmith.sh/codesmith/view-with-codesmith-light-v3.svg"><img
+
+      alt="View with [code]smith"
+
+      src="https://pr-comments-assets.blacksmith.sh/codesmith/view-with-codesmith-dark-v3-3x.png"
+
+      width="162" height="28"></picture></a> <a
+
+      href="https://backend.blacksmith.sh/track/enable-autofix?expires=1795553366&installation_model_id=425273&pr_number=359&ref=codesmith_pr_footer&repository=mirurobotics%2Fopenapi&return_to=https%3A%2F%2Fgithub.com%2Fmirurobotics%2Fopenapi%2Fpull%2F359&signature=7d015e17b40f373fb20324d3a368781ae9e6a82f33b83aba22187488d6c5826f"><picture><source
+
+      media="(prefers-color-scheme: dark)"
+
+      srcset="https://pr-comments-assets.blacksmith.sh/codesmith/autofix-with-codesmith-dark.svg"><source
+
+      media="(prefers-color-scheme: light)"
+
+      srcset="https://pr-comments-assets.blacksmith.sh/codesmith/autofix-with-codesmith-light.svg"><img
+
+      alt="Autofix with [code]smith"
+
+      src="https://pr-comments-assets.blacksmith.sh/codesmith/autofix-with-codesmith-dark-3x.png"
+
+      width="190" height="28"></picture></a>
+
+      <sup>Need help on this PR? Tag <code>@codesmith</code> with what you
+
+      need.</sup>
 
 
-      ---------
+      <!-- codesmith:autofix:disabled -->
+
+      <!-- /codesmith:footer -->
 
 
       Co-authored-by: Claude <noreply@anthropic.com>'
@@ -164,7 +133,7 @@ info:
     branch: HEAD
     dirty: false
   x-build:
-    built_at: '2026-10-24T17:59:20.068834+00:00'
+    built_at: '2026-10-25T21:22:34.230221+00:00'
 servers:
 - url: http://localhost/v0.2
   description: localhost
@@ -206,35 +175,7 @@ paths:
       - Calibrations
       summary: Create
       operationId: createCalibration
-      description: 'Report a calibration to Miru. The agent checks the request,
-
-        saves the calibration on the device and returns right away,
-
-        without waiting for Miru. It uploads saved calibrations to Miru
-
-        in the order received and retries until Miru is reachable, so a
-
-        calibration survives network outages and agent restarts. The
-
-        agent checks the request against Miru''s rules before saving it,
-
-        so Miru rarely rejects one later; one it does reject, such as a
-
-        new component once the workspace holds 100, is set aside on the
-
-        device and does not hold up later ones. Content is at most 1 MiB
-
-        and a request is at most about 2 MiB (1 MiB of content plus JSON
-
-        escaping). Each request is a new calibration, so sending the
-
-        same calibration twice records it twice. The agent sends the
-
-        report''s `report_id` with every upload, so a retried upload does
-
-        not record the calibration twice.
-
-        '
+      description: Report a calibration to Miru.
       requestBody:
         required: true
         content:
@@ -459,14 +400,14 @@ components:
     ReleaseVersion:
       type: string
       enum:
-      - v0.2.3-beta.2
+      - v0.2.3
       x-enum-varnames:
       - RELEASE_VERSION
       x-stainless-const: true
     APIGitCommit:
       type: string
       enum:
-      - 2a3eb728f10b95f12a0c8f96183727d5b9fd7047
+      - 850e23bf5fc36a890d36b5a2d9156f68d141f645
       x-enum-varnames:
       - API_GIT_COMMIT
       x-stainless-const: true
@@ -605,7 +546,7 @@ components:
         api_release_version:
           type: string
           description: The API release version of the agent.
-          example: v0.2.3-beta.2
+          example: v0.2.3
         rust_version:
           type: string
           description: The version of Rust.
@@ -628,7 +569,7 @@ components:
         git_commit: a1b2c3d4
         api_version: v0.2
         api_git_commit: a1b2c3d4
-        api_release_version: v0.2.3-beta.2
+        api_release_version: v0.2.3
         rust_version: 1.93.0
         build_date: '2026-02-24T10:30:00Z'
         os: linux
@@ -684,14 +625,15 @@ components:
       title: Create Calibration Request
       type: object
       required:
-      - component_slug
+      - component
       - content
       properties:
-        component_slug:
+        component:
           type: string
           example: arm
-          description: Slug of the component the calibrated unit belongs to. A new
-            slug creates a component in Miru.
+          description: Slug of the component the calibrated unit belongs to, such
+            as `arm`. Miru resolves it to the component, creating the component the
+            first time it is reported.
         role:
           type: string
           example: aligner-1
