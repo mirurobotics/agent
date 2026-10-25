@@ -16,9 +16,9 @@
 //!   body the default is `aws-chunked` with a trailing checksum, which GCS
 //!   stores as object bytes while still answering 200. Integrity comes from the
 //!   `Content-MD5` the store sets instead (GCS rejects a mismatch with 400
-//!   `BadDigest`), and from the file's scan-time CRC32C when the upload has
-//!   one: GCS checks a single PUT against it, and the store checks a multipart
-//!   upload's parts before completing it.
+//!   `BadDigest`), and from the upload's CRC32C when it has one: GCS checks a
+//!   single PUT against it, and the store checks a multipart upload's parts
+//!   before completing it.
 //!
 //! These rely on how GCS treats aws-sdk-s3's requests, which Google doesn't
 //! document. The tests below pin the requests we send.
@@ -687,7 +687,7 @@ mod tests {
         }
     }
 
-    // How an upload is checked against the file's scan-time CRC32C.
+    // How an upload is checked against its CRC32C.
     mod crc32c {
         use super::*;
 
@@ -713,7 +713,7 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn multipart_completes_when_parts_make_up_the_scanned_file() {
+        async fn multipart_completes_when_parts_match_the_crc32c() {
             let bytes: Vec<u8> = (0..PART_SIZE + 1024).map(|i| (i % 251) as u8).collect();
             let (part1, part2) = bytes.split_at(PART_SIZE as usize);
             let replay = StaticReplayClient::new(vec![
@@ -747,9 +747,9 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn multipart_parts_that_differ_from_the_scan_are_aborted() {
-            // The file changed after its scan, so the parts GCS stored don't make
-            // up the scanned file.
+        async fn multipart_parts_that_dont_match_the_crc32c_are_aborted() {
+            // The file no longer matches its CRC32C, so neither do the parts GCS
+            // stored.
             let bytes = vec![3u8; PART_SIZE as usize + 1];
             let (part1, part2) = bytes.split_at(PART_SIZE as usize);
             let replay = StaticReplayClient::new(vec![
@@ -763,7 +763,7 @@ mod tests {
             let err = gcs_store(&replay)
                 .put(
                     src.file().clone(),
-                    Some(crc32c_of(b"the file at scan time")),
+                    Some(crc32c_of(b"the file before it changed")),
                     &obj("big.bin"),
                     &HashMap::new(),
                 )

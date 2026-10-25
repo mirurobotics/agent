@@ -11,8 +11,8 @@ use base64::Engine;
 const READ_SIZE: usize = 32 * 1024;
 
 /// A local file to upload, its size when the upload started, and the CRC32C
-/// it was scanned with. The file is expected to stay unchanged until the
-/// upload is confirmed.
+/// the uploaded bytes must match. The file is expected to stay unchanged until
+/// the upload is confirmed.
 pub struct Source {
     file: File,
     pub(super) size: u64,
@@ -42,8 +42,8 @@ impl Source {
         })
     }
 
-    /// The scan-time CRC32C as S3 and GCS headers carry it: the base64 of its
-    /// big-endian bytes.
+    /// The CRC32C as S3 and GCS headers carry it: the base64 of its big-endian
+    /// bytes.
     pub(super) fn crc32c_base64(&self) -> Option<String> {
         let crc32c = self.crc32c?;
         Some(base64::engine::general_purpose::STANDARD.encode(crc32c.to_be_bytes()))

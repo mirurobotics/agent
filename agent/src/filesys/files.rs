@@ -52,8 +52,8 @@ pub async fn sha256(file: &File) -> Result<String, FileSysErr> {
     Ok(format!("sha256:{digest:x}"))
 }
 
-/// Computes `file`'s [`sha256`] digest and its CRC32C (Castagnoli) checksum,
-/// which S3 and GCS verify uploads against, in one read.
+/// Computes `file`'s [`sha256`] digest and its CRC32C (Castagnoli) checksum in
+/// one read.
 pub async fn sha256_and_crc32c(file: &File) -> Result<(String, u32), FileSysErr> {
     let mut hasher = Sha256::new();
     let mut crc32c = crc_fast::Digest::new(CrcAlgorithm::Crc32Iscsi);

@@ -67,8 +67,8 @@ impl Store {
 
     /// Creates or overwrites an object from a local file, sized once as a
     /// [`Source`]. GCS never overwrites: an existing object counts as written
-    /// (see [`gcs`](crate::s3::gcs)). Given the file's scan-time `crc32c`, no
-    /// object is written whose bytes don't match it.
+    /// (see [`gcs`](crate::s3::gcs)). Given a `crc32c`, no object is written
+    /// whose bytes don't match it.
     ///
     /// Files at or below [`PART_SIZE`] go through one `PutObject`
     /// ([`Self::put_singlepart`]); larger files go part-by-part through a
@@ -652,7 +652,7 @@ pub(super) mod tests {
             }
 
             #[tokio::test]
-            async fn put_sends_scan_crc32c() {
+            async fn put_sends_crc32c() {
                 let key = "artifacts/hello.txt";
                 let src = temp_file_with(b"hello world").await;
                 let source = Source::open(src.to_file(), Some(HELLO_WORLD_CRC32C), &obj(key))
@@ -686,7 +686,7 @@ pub(super) mod tests {
 
             #[tokio::test]
             async fn put_bad_digest_maps_to_terminal_checksum_mismatch() {
-                // The file changed after it was scanned, so S3 refuses its bytes.
+                // The file no longer matches its CRC32C, so S3 refuses its bytes.
                 let src = temp_file_with(b"hello world, changed").await;
                 let (store, _replay) = store_expecting(
                     req("PUT", "changed.txt?x-id=PutObject"),

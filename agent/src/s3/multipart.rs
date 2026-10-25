@@ -54,7 +54,7 @@ impl Store {
     ///
     /// `NoSuchUploadErr` if S3 no longer knows the upload. The caller must resume
     /// against the same file bytes the upload was started for. GCS lists parts
-    /// without their CRC32Cs, so on GCS a source with a scan-time CRC32C fails
+    /// without their CRC32Cs, so on GCS a source with a CRC32C fails
     /// [`check_parts_crc32c`] if any part had already landed.
     pub async fn resume_multipart_upload(
         &self,
@@ -288,9 +288,9 @@ impl Store {
             .build())
     }
 
-    /// Completes a multipart upload from the landed parts. Given `src`'s
-    /// scan-time CRC32C, S3 checks the object against it, and on GCS the parts
-    /// must pass [`check_parts_crc32c`] before the object is created.
+    /// Completes a multipart upload from the landed parts. Given `src`'s CRC32C,
+    /// S3 checks the object against it, and on GCS the parts must pass
+    /// [`check_parts_crc32c`] before the object is created.
     async fn complete_multipart_upload(
         &self,
         src: &Source,
@@ -344,9 +344,9 @@ impl Store {
     }
 }
 
-/// Given `src`'s scan-time CRC32C, checks that the parts GCS stored make up
-/// the scanned file: the CRC32Cs GCS reported for them, combined in order, must
-/// equal it. A part without a CRC32C fails the check.
+/// Given `src`'s CRC32C, checks the parts GCS stored against it: the CRC32Cs
+/// GCS reported for them, combined in order, must equal it. A part without a
+/// CRC32C fails the check.
 fn check_parts_crc32c(src: &Source, dst: &Object, parts: &[CompletedPart]) -> Result<(), S3Err> {
     let Some(expected) = src.crc32c else {
         return Ok(());
@@ -360,7 +360,7 @@ fn check_parts_crc32c(src: &Source, dst: &Object, parts: &[CompletedPart]) -> Re
         composed = checksum_combine(CrcAlgorithm::Crc32Iscsi, composed, crc32c.into(), len);
     }
     if composed != u64::from(expected) {
-        let msg = format!("parts compose to CRC32C {composed:08x}, not the scan's {expected:08x}");
+        let msg = format!("parts compose to CRC32C {composed:08x}, expected {expected:08x}");
         return Err(errors::checksum_mismatch(
             "complete_multipart_upload",
             dst,
@@ -653,7 +653,7 @@ mod tests {
                 .unwrap();
 
             // S3 checks the part against the CRC32C the SDK sends with it, and
-            // the object against the scanned one.
+            // the object against the source's.
             let requests = replay.actual_requests().collect::<Vec<_>>();
             let header = |i: usize, name: &str| requests[i].headers().get(name);
             assert_eq!(header(0, "x-amz-checksum-algorithm"), Some("CRC32C"));

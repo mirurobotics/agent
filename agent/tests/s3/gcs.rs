@@ -167,14 +167,14 @@ async fn temp_file_with(bytes: &[u8]) -> test_files::TempFile {
     tf
 }
 
-/// The CRC32C the scanner records for `file`, which the agent uploads it with.
-async fn scan_crc32c(file: &test_files::TempFile) -> Option<u32> {
+/// The CRC32C the agent uploads `file` with.
+async fn crc32c_of(file: &test_files::TempFile) -> Option<u32> {
     let (_, crc32c) = files::sha256_and_crc32c(file.file()).await.unwrap();
     Some(crc32c)
 }
 
 /// Single-part and multipart uploads store the exact bytes and the metadata,
-/// and pass GCS's checks against the file's scan-time CRC32C.
+/// and pass GCS's checks against the file's CRC32C.
 #[tokio::test]
 async fn put_stores_exact_bytes_and_metadata() {
     let gcs = Gcs::load();
@@ -185,22 +185,22 @@ async fn put_stores_exact_bytes_and_metadata() {
 
         let store = gcs.upload_store(&obj).await;
         store
-            .put(file.to_file(), scan_crc32c(&file).await, &obj, &metadata())
+            .put(file.to_file(), crc32c_of(&file).await, &obj, &metadata())
             .await
             .expect(name);
         gcs.assert_stored(&obj, &bytes).await;
     }
 }
 
-/// A file that changed after its scan is refused, single-part and multipart,
-/// so GCS never holds bytes other than the ones scanned.
+/// A file that no longer matches its CRC32C is refused, single-part and
+/// multipart, so GCS never stores the changed bytes.
 #[tokio::test]
-async fn put_of_a_file_changed_since_its_scan_is_refused() {
+async fn put_of_a_file_changed_since_its_crc32c_is_refused() {
     let gcs = Gcs::load();
     for (name, len) in [("stale-single.bin", SMALL), ("stale-multi.bin", LARGE)] {
         let obj = gcs.object(name);
         let file = temp_file_with(&test_bytes(len)).await;
-        let scanned = scan_crc32c(&file).await;
+        let crc32c = crc32c_of(&file).await;
         // Same size, other bytes.
         let changed = vec![0; len];
         files::write_bytes(file.file(), &changed, WriteOptions::OVERWRITE_NONATOMIC)
@@ -209,7 +209,7 @@ async fn put_of_a_file_changed_since_its_scan_is_refused() {
 
         let store = gcs.upload_store(&obj).await;
         let err = store
-            .put(file.to_file(), scanned, &obj, &metadata())
+            .put(file.to_file(), crc32c, &obj, &metadata())
             .await
             .expect_err(name);
         assert!(matches!(err, S3Err::ChecksumMismatchErr(_)), "{err:?}");
@@ -325,7 +325,7 @@ async fn put_of_an_existing_object_succeeds() {
         for _ in 0..2 {
             let store = gcs.upload_store(&obj).await;
             store
-                .put(file.to_file(), scan_crc32c(&file).await, &obj, &metadata())
+                .put(file.to_file(), crc32c_of(&file).await, &obj, &metadata())
                 .await
                 .expect(name);
         }
