@@ -44,6 +44,9 @@ jobs:
   windows-check:
     runs-on: blacksmith-4vcpu-windows-2025
     timeout-minutes: 60
+    permissions:
+      contents: read
+      id-token: write
     # No toolchain or NASM install steps on the Windows jobs. rustup installs
     # the toolchain pinned in rust-toolchain.toml on first use (an install of
     # `stable` would go unused), and the runner image already has NASM on
@@ -67,9 +70,22 @@ jobs:
           cache-on-failure: true
           env-vars: AWS_LC_SYS
 
+      # Credentials for the real-GCS upload tests, as in the test job.
+      - name: Authenticate to Google Cloud
+        id: gcs
+        if: github.actor != 'dependabot[bot]' && !github.event.pull_request.head.repo.fork
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ vars.GCS_IT_WIF_PROVIDER }}
+          service_account: ${{ vars.GCS_IT_SERVICE_ACCOUNT }}
+          token_format: access_token
+          create_credentials_file: false
+
       - name: Run Windows Tests
         env:
           RUST_LOG: "off"
+          GCS_IT_SOURCE_TOKEN: ${{ steps.gcs.outputs.access_token }}
+          GCS_IT_BUCKET: ${{ vars.GCS_IT_BUCKET }}
         run: cargo test --package miru-agent --locked
 
   windows_package_scope:
@@ -183,10 +199,11 @@ jobs:
 
       # Credentials for the real-GCS upload tests (agent/tests/s3/gcs.rs), from
       # the GCS_IT_* repo variables. Fork and Dependabot PRs can't get an OIDC
-      # token, so those tests skip there.
+      # token, so this step skips there: the rest of the suite still runs and
+      # those tests fail.
       - name: Authenticate to Google Cloud
         id: gcs
-        if: vars.GCS_IT_WIF_PROVIDER != '' && !github.event.pull_request.head.repo.fork && github.actor != 'dependabot[bot]'
+        if: github.actor != 'dependabot[bot]' && !github.event.pull_request.head.repo.fork
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
         with:
           workload_identity_provider: ${{ vars.GCS_IT_WIF_PROVIDER }}

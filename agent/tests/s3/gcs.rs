@@ -4,10 +4,11 @@
 //! and still answers 200. So these tests upload the way the agent does, with a
 //! token downscoped like the backend's, and read each object back.
 //!
-//! They skip unless `GCS_IT_SOURCE_TOKEN` (an access token with
-//! `roles/storage.objectAdmin` on the bucket) and `GCS_IT_BUCKET` are set.
-//! CI's `test` job sets both whenever it can authenticate. The tests don't
-//! delete what they write; the bucket's lifecycle rule does.
+//! They need `GCS_IT_SOURCE_TOKEN` (an access token with
+//! `roles/storage.objectAdmin` on the bucket) and `GCS_IT_BUCKET`, and fail
+//! without them rather than skip, so CI can't silently stop checking GCS. CI's
+//! test jobs set both. The tests don't delete what they write; the bucket's
+//! lifecycle rule does.
 
 // standard crates
 use std::collections::HashMap;
@@ -47,18 +48,18 @@ struct Gcs {
 }
 
 impl Gcs {
-    /// `None`, so the test skips, unless the token and bucket are set. CI sets
-    /// the token to an empty string when it can't authenticate.
-    fn load() -> Option<Self> {
-        let var = |name: &str| std::env::var(name).ok().filter(|v| !v.is_empty());
-        let source_token = var("GCS_IT_SOURCE_TOKEN")?;
-        let bucket = var("GCS_IT_BUCKET")?;
-        let prefix = format!("agent-ci/gcs-xml/{}", Uuid::new_v4());
-        Some(Self {
-            bucket,
-            source_token,
-            prefix,
-        })
+    /// The token and bucket from the environment. Panics if either is unset or
+    /// empty, as the token is when CI can't authenticate.
+    fn load() -> Self {
+        let var = |name: &str| match std::env::var(name) {
+            Ok(value) if !value.is_empty() => value,
+            _ => panic!("{name} must be set: these tests run against real GCS"),
+        };
+        Self {
+            source_token: var("GCS_IT_SOURCE_TOKEN"),
+            bucket: var("GCS_IT_BUCKET"),
+            prefix: format!("agent-ci/gcs-xml/{}", Uuid::new_v4()),
+        }
     }
 
     fn object(&self, name: &str) -> Object {
@@ -172,7 +173,7 @@ async fn temp_file_with(bytes: &[u8]) -> test_files::TempFile {
 /// Single-part and multipart uploads store the exact bytes and the metadata.
 #[tokio::test]
 async fn put_stores_exact_bytes_and_metadata() {
-    let Some(gcs) = Gcs::load() else { return };
+    let gcs = Gcs::load();
     for (name, len) in [("single.bin", SMALL), ("multi.bin", LARGE)] {
         let obj = gcs.object(name);
         let bytes = test_bytes(len);
@@ -191,7 +192,7 @@ async fn put_stores_exact_bytes_and_metadata() {
 /// agent restart, completes it with the exact bytes.
 #[tokio::test]
 async fn resume_completes_a_started_upload() {
-    let Some(gcs) = Gcs::load() else { return };
+    let gcs = Gcs::load();
     let obj = gcs.object("resume.bin");
     let bytes = test_bytes(LARGE);
     let file = temp_file_with(&bytes).await;
@@ -232,7 +233,7 @@ async fn resume_completes_a_started_upload() {
 /// checksums off, that is what catches a corrupted body.
 #[tokio::test]
 async fn wrong_content_md5_is_rejected() {
-    let Some(gcs) = Gcs::load() else { return };
+    let gcs = Gcs::load();
     let obj = gcs.object("bad-digest.bin");
     let client = gcs.upload_client(&obj).await;
 
@@ -251,7 +252,7 @@ async fn wrong_content_md5_is_rejected() {
 /// Resuming an upload GCS no longer has fails with `NoSuchUploadErr`.
 #[tokio::test]
 async fn resuming_an_aborted_upload_fails_with_no_such_upload() {
-    let Some(gcs) = Gcs::load() else { return };
+    let gcs = Gcs::load();
     let obj = gcs.object("aborted.bin");
     let file = temp_file_with(&test_bytes(LARGE)).await;
 
@@ -287,7 +288,7 @@ async fn resuming_an_aborted_upload_fails_with_no_such_upload() {
 /// create-only and the store counts GCS's 412 as done.
 #[tokio::test]
 async fn put_of_an_existing_object_succeeds() {
-    let Some(gcs) = Gcs::load() else { return };
+    let gcs = Gcs::load();
     for (name, len) in [("exists-single.bin", SMALL), ("exists-multi.bin", LARGE)] {
         let obj = gcs.object(name);
         let bytes = test_bytes(len);
