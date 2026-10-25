@@ -29,7 +29,7 @@ async fn make_job(file: &File) -> Job {
     Job {
         file: file.clone(),
         size: files::size(file).await.unwrap(),
-        digest: files::hash(file).await.unwrap(),
+        digest: files::sha256(file).await.unwrap(),
         mtime: DateTime::<Utc>::from(files::last_modified(file).await.unwrap()),
         first_observed_at: now,
         last_observed_at: now,

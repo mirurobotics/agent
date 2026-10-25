@@ -18,7 +18,7 @@ pub struct Credentials {
 }
 
 /// The SDK config for an AWS S3 [`Store`](crate::s3::Store).
-pub(crate) fn config(
+pub fn config(
     cfg: Config,
     http_client: SharedHttpClient,
     force_path_style: bool,
