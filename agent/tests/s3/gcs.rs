@@ -1,14 +1,12 @@
-//! Real-GCS checks for uploads, which go through GCS's XML API with aws-sdk-s3
-//! (see `agent/src/s3/gcs.rs`). Google doesn't document how GCS treats the
-//! SDK's requests, and the worst break is silent: GCS stores the wrong bytes
-//! and still answers 200. So these tests upload the way the agent does, with a
-//! token downscoped like the backend's, and read each object back.
+//! Real-GCS checks for uploads, which go through GCS's XML API with aws-sdk-s3.
+//! Google doesn't document how GCS treats the SDK's requests, and the worst
+//! break is silent: GCS stores the wrong bytes and still answers 200. So these
+//! tests upload the way the agent does, with a token downscoped like the
+//! backend's, and read each object back.
 //!
-//! They need `GCS_IT_SOURCE_TOKEN` (an access token with
-//! `roles/storage.objectAdmin` on the bucket) and `GCS_IT_BUCKET`, and fail
-//! without them rather than skip, so CI can't silently stop checking GCS. CI's
-//! test jobs set both. The tests don't delete what they write; the bucket's
-//! lifecycle rule does.
+//! Without credentials they fail rather than skip, so CI can't silently stop
+//! checking GCS. The tests don't delete what they write; the bucket's lifecycle
+//! rule does.
 
 // standard crates
 use std::collections::HashMap;
@@ -32,14 +30,14 @@ const GCS_URL: &str = "https://storage.googleapis.com";
 const STS_URL: &str = "https://sts.googleapis.com/v1/token";
 const TOKEN_EXCHANGE: &str = "urn:ietf:params:oauth:grant-type:token-exchange";
 const ACCESS_TOKEN: &str = "urn:ietf:params:oauth:token-type:access_token";
-/// The store's multipart part size (`s3::PART_SIZE`).
+/// The store's multipart part size.
 const PART: usize = 8 * 1024 * 1024;
 /// Uploads with one `PutObject`.
 const SMALL: usize = 64 * 1024;
 /// Uploads in two parts.
 const LARGE: usize = PART + 1024;
 
-/// The test bucket, and a token with `roles/storage.objectAdmin` on it.
+/// The test bucket, and a token that can read and write objects in it.
 struct Gcs {
     bucket: String,
     source_token: String,
@@ -87,7 +85,7 @@ impl Gcs {
     }
 
     /// Downscopes the source token to creating `obj` alone, as the backend
-    /// does for each upload (`backend/internal/pkg/gcp/creds/gcs.go`).
+    /// does for each upload.
     async fn upload_token(&self, obj: &Object) -> String {
         let bucket = format!("projects/_/buckets/{}", obj.bucket);
         let rule = json!({
@@ -144,8 +142,7 @@ impl Gcs {
     }
 }
 
-/// The metadata every test object carries. GCS returns it as
-/// `x-goog-meta-miru-ci`.
+/// The metadata every test object carries.
 fn metadata() -> HashMap<String, String> {
     HashMap::from([("miru-ci".to_string(), "gcs-xml".to_string())])
 }
@@ -249,7 +246,7 @@ async fn wrong_content_md5_is_rejected() {
     assert_eq!(err.code(), Some("BadDigest"), "{err:?}");
 }
 
-/// Resuming an upload GCS no longer has fails with `NoSuchUploadErr`.
+/// Resuming an upload GCS no longer has fails with a no-such-upload error.
 #[tokio::test]
 async fn resuming_an_aborted_upload_fails_with_no_such_upload() {
     let gcs = Gcs::load();

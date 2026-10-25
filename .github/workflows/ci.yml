@@ -73,7 +73,7 @@ jobs:
           cache-on-failure: true
           env-vars: AWS_LC_SYS
 
-      # Credentials for the real-GCS upload tests, as in the test job.
+      # Credentials for the real-GCS upload tests.
       - name: Authenticate to Google Cloud
         id: gcs
         if: github.actor != 'dependabot[bot]' && !github.event.pull_request.head.repo.fork
@@ -200,10 +200,8 @@ jobs:
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@21eb0b6228fa6252dafdd9c82e7516ad2328c775 # cargo-llvm-cov
 
-      # Credentials for the real-GCS upload tests (agent/tests/s3/gcs.rs), from
-      # the GCS_IT_* repo variables. Fork and Dependabot PRs can't get an OIDC
-      # token, so this step skips there: the rest of the suite still runs and
-      # those tests fail.
+      # Credentials for the real-GCS upload tests. Fork and Dependabot PRs get
+      # no OIDC token, so this step skips there and those tests fail.
       - name: Authenticate to Google Cloud
         id: gcs
         if: github.actor != 'dependabot[bot]' && !github.event.pull_request.head.repo.fork

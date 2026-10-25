@@ -47,8 +47,6 @@ jobs:
   ci:
     needs: check-main
     if: needs.check-main.outputs.on_main == 'true'
-    # A called workflow gets at most these. ci.yml's test jobs need id-token
-    # for the real-GCS tests.
     permissions:
       contents: read
       pull-requests: read
