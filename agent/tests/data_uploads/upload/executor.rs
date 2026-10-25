@@ -267,6 +267,7 @@ fn create_request_maps_job_fields() {
         file,
         size: 42,
         digest: "sha256:abc".to_string(),
+        crc32c: None,
         mtime: Utc.with_ymd_and_hms(2021, 1, 1, 0, 0, 0).unwrap(),
         first_observed_at: Utc.with_ymd_and_hms(2021, 1, 1, 0, 1, 0).unwrap(),
         last_observed_at: Utc.with_ymd_and_hms(2021, 1, 1, 0, 2, 0).unwrap(),
@@ -298,6 +299,7 @@ fn new_upl_request_sends_mtime_with_device_offset() {
         file,
         size: 42,
         digest: "sha256:abc".to_string(),
+        crc32c: None,
         // 01:30 UTC is 20:30 the evening before in New York (EST)
         mtime: Utc.with_ymd_and_hms(2026, 1, 15, 1, 30, 0).unwrap(),
         first_observed_at: Utc.with_ymd_and_hms(2026, 1, 15, 1, 31, 0).unwrap(),

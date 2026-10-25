@@ -11,6 +11,10 @@ pub struct Job {
     pub file: File,
     pub size: u64,
     pub digest: String,
+    /// The scan-time CRC32C that the object store checks the upload against.
+    /// `None` for jobs queued before uploads carried a checksum.
+    #[serde(default)]
+    pub crc32c: Option<u32>,
     pub mtime: DateTime<Utc>,
     pub first_observed_at: DateTime<Utc>,
     pub last_observed_at: DateTime<Utc>,

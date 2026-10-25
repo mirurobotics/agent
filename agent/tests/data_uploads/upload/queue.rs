@@ -26,6 +26,7 @@ fn upload_job(name: &str) -> Job {
         file: File::new(format!("/data/{name}")),
         size: 42,
         digest: format!("sha256:{name}"),
+        crc32c: None,
         mtime: DateTime::from_timestamp(900, 0).unwrap(),
         first_observed_at: DateTime::from_timestamp(1000, 0).unwrap(),
         last_observed_at: DateTime::from_timestamp(1000, 0).unwrap(),
@@ -52,6 +53,7 @@ fn make_job(name: &str) -> Job {
         file: File::new(format!("/data/{name}")),
         size: 42,
         digest: format!("sha256:{name}"),
+        crc32c: None,
         mtime: Utc::now(),
         first_observed_at: Utc::now(),
         last_observed_at: Utc::now(),
@@ -81,7 +83,8 @@ mod wire {
     /// `upload_job` is deterministic, so the expected job comes from it. The
     /// raw `"file"` value is a plain host-rooted string rather than `File`'s
     /// own serializer, so the test also pins that `File` serializes as a bare
-    /// string.
+    /// string. The raw job has no `"crc32c"`, as agents before upload checksums
+    /// wrote it.
     #[tokio::test]
     async fn raw_json_snapshot_loads() {
         let dir = test_dirs::temp("upload_queue_test").unwrap();
