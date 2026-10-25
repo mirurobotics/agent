@@ -9,8 +9,9 @@ use crate::data_uploads::upload::{
     job::{Job, UploadCheckpoint},
     transfer::ObjectTransfer,
 };
-use crate::http::{self, ClientI};
-use backend_api::models::{CreateUploadRequest, UploadCredentials, UploadSource};
+use crate::errors::{Error, HTTPCode};
+use crate::http::{self, ClientI, HTTPErr};
+use backend_api::models::{CreateUploadRequest, Upload, UploadCredentials, UploadSource};
 
 // external crates
 use chrono::{Local, TimeZone};
@@ -37,11 +38,12 @@ use tracing::{debug, info};
 /// was reported, not that it was uploaded.
 pub trait UploadExecutor: Send + Sync {
     /// Reuses or creates the job's backend upload and, for a file of more than
-    /// one part, the multipart upload the transfer resumes.
+    /// one part, the multipart upload the transfer resumes. `None` if the
+    /// backend upload was already confirmed.
     fn prepare(
         &self,
         job: &Job,
-    ) -> impl std::future::Future<Output = Result<Prepared, UploadErr>> + Send;
+    ) -> impl std::future::Future<Output = Result<Option<Prepared>, UploadErr>> + Send;
 
     /// Transfers the file and confirms the upload.
     fn upload(
@@ -111,21 +113,37 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> LiveExecutor<C, T, X> {
         Ok((upload, *resp.credentials))
     }
 
-    async fn vend_credentials(&self, id: &str) -> Result<UploadCredentials, UploadErr> {
+    /// Fresh credentials for an existing upload, or `None` if it is gone.
+    async fn vend_credentials(&self, id: &str) -> Result<Option<UploadCredentials>, UploadErr> {
         let token = self.token().await?;
-        http::with_retry(|| async {
+        let result = http::with_retry(|| async {
             let params = http::uploads::VendCredentialsParams {
                 id,
                 token: &token.token,
             };
             http::uploads::vend_credentials(self.http_client.as_ref(), params).await
         })
-        .await
-        .map_err(classified_executor_err)
+        .await;
+        unless_gone(result)
+    }
+
+    /// Whether a gone upload is gone because it was already uploaded. Confirm
+    /// is idempotent: it succeeds on an uploaded upload and fails with 404 or
+    /// 409 on a deleted or failed one.
+    async fn already_uploaded(&self, id: &str) -> Result<bool, UploadErr> {
+        let token = self.token().await?;
+        Ok(unless_gone(self.confirm(&token, id).await)?.is_some())
     }
 
     async fn confirm_upload(&self, id: &str) -> Result<(), UploadErr> {
         let token = self.token().await?;
+        self.confirm(&token, id)
+            .await
+            .map(|_| ())
+            .map_err(classified_executor_err)
+    }
+
+    async fn confirm(&self, token: &Token, id: &str) -> Result<Upload, HTTPErr> {
         http::with_retry(|| async {
             let params = http::uploads::ConfirmParams {
                 id,
@@ -134,20 +152,42 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> LiveExecutor<C, T, X> {
             http::uploads::confirm(self.http_client.as_ref(), params).await
         })
         .await
-        .map(|_| ())
-        .map_err(classified_executor_err)
+    }
+}
+
+/// `None` if the upload is gone: the backend deleted it (404), or it is no
+/// longer pending because it was uploaded or failed (409).
+fn unless_gone<T>(result: Result<T, HTTPErr>) -> Result<Option<T>, UploadErr> {
+    match result {
+        Ok(value) => Ok(Some(value)),
+        Err(e) if matches!(e.http_status(), HTTPCode::NOT_FOUND | HTTPCode::CONFLICT) => Ok(None),
+        Err(e) => Err(classified_executor_err(e)),
     }
 }
 
 impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> UploadExecutor for LiveExecutor<C, T, X> {
-    async fn prepare(&self, job: &Job) -> Result<Prepared, UploadErr> {
-        // a retry reuses the job's upload with fresh credentials
+    async fn prepare(&self, job: &Job) -> Result<Option<Prepared>, UploadErr> {
+        // A retry reuses the job's upload with fresh credentials, unless the
+        // backend no longer accepts it.
         let (mut upload, credentials) = match &job.upload {
             None => self.create_upload(job).await?,
-            Some(upload) => {
-                let credentials = self.vend_credentials(&upload.miru_upload_id).await?;
-                (upload.clone(), credentials)
-            }
+            Some(upload) => match self.vend_credentials(&upload.miru_upload_id).await? {
+                Some(credentials) => (upload.clone(), credentials),
+                None if self.already_uploaded(&upload.miru_upload_id).await? => {
+                    info!(
+                        "upload: upload {} was already confirmed",
+                        upload.miru_upload_id
+                    );
+                    return Ok(None);
+                }
+                None => {
+                    info!(
+                        "upload: upload {} is gone; creating a new one for file {}",
+                        upload.miru_upload_id, job.file
+                    );
+                    self.create_upload(job).await?
+                }
+            },
         };
         // The Miru upload is saved even if this fails, and the transfer checks
         // the old multipart upload against the file again.
@@ -162,10 +202,10 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> UploadExecutor for LiveE
                 job.file
             ),
         }
-        Ok(Prepared {
+        Ok(Some(Prepared {
             upload,
             credentials,
-        })
+        }))
     }
 
     async fn upload(&self, job: &Job, prepared: &Prepared) -> Result<(), UploadErr> {
@@ -263,7 +303,7 @@ mod tests {
             SdkTransfer::with_http_client(replay.clone()),
         );
 
-        let prepared = executor.prepare(&job).await.unwrap();
+        let prepared = executor.prepare(&job).await.unwrap().unwrap();
         executor.upload(&job, &prepared).await.unwrap();
 
         // The replay client saw exactly one PUT at the expected URI — the create

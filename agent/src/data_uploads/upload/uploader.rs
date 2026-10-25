@@ -142,7 +142,9 @@ where
     async fn attempt(&mut self, entry: &QueueEntry) -> Option<Result<(), UploadErr>> {
         let prepare = self.uploader.prepare(entry);
         let prepared = match self.run_until_shutdown(prepare).await? {
-            Ok(prepared) => prepared,
+            Ok(Some(prepared)) => prepared,
+            // the upload was already confirmed
+            Ok(None) => return Some(Ok(())),
             Err(err) => return Some(Err(err)),
         };
         self.uploader.save_upload(entry, &prepared.upload).await;
