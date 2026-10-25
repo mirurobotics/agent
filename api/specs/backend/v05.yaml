@@ -6,21 +6,160 @@ info:
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
-  x-release-version: v0.5.11-next
+  x-release-version: v0.5.11
   x-git-commit:
-    sha: 47ef4da0efbea6a66971036045efba5792ca6aad
-    url: https://github.com/mirurobotics/openapi/commit/47ef4da0efbea6a66971036045efba5792ca6aad
-    message: 'chore(specs): regenerate the agent bundle
+    sha: 2a3eb728f10b95f12a0c8f96183727d5b9fd7047
+    url: https://github.com/mirurobotics/openapi/commit/2a3eb728f10b95f12a0c8f96183727d5b9fd7047
+    message: 'feat(calibrations): report_id on calibration reports (#352)
 
 
-      Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+      <!-- claude-projects-attribution: {"github_login":"miru-agents"} -->
 
-      Claude-Session: https://claude.ai/code/session_01WkebNBjRQoPYZuQa4YQDgG'
-    author: miru-agents
-    branch: feat/eng-1312-resume-uploads
+      _Requested by **bens-agent** · [project
+
+      thread](https://claude.ai/code/project/chan_015imaa8aZrnubYZcZCvjeHx?thread=cmsg_015imaa8aZrnubYZcZCvjeHxRRaVTdwX2TA7u3cf9PHGg5)_
+
+
+      Before: the Device API''s `POST /calibrations` returns only
+
+      `reported_at`, so the caller has no handle to find the calibration in
+
+      Miru later. If the agent loses Miru''s response to an upload, it uploads
+
+      again and Miru records the calibration twice. (#327 dropped `report_id`
+
+      as out of scope; it is now approved end to end.)
+
+
+      After:
+
+      - **Device API**: `CreateCalibrationResponse` gains required `report_id`
+
+      (uuid), next to `reported_at`. Still a plain 200 response with no
+
+      `object`/`id`, since there is no route to fetch a report. The path
+
+      description now says the agent sends `report_id` with every upload, so a
+
+      retried upload does not record the calibration twice.
+
+      - **Agent API**: `CreateCalibrationRequest` gains required `report_id`
+
+      (uuid). If the device already reported a calibration with that
+
+      `report_id`, Miru returns that calibration and records nothing new.
+
+      - **Shared `BaseCalibration`** (agent and frontend audiences): gains
+
+      required, non-nullable `report_id`. The backend migration backfills a
+
+      random UUID for calibrations recorded before this change.
+
+      - **Frontend `GET /calibrations`**: can filter by `report_id`
+
+      (`CAL_SEARCH_REPORT_ID` + `calibration_search_report_id`, the same shape
+
+      as `serial_number`).
+
+
+      How: source edits and `./scripts/regen.sh` output are in separate
+
+      commits (agent, frontend, and device bundles). Stainless configs are
+
+      unchanged because no routes were added or removed (MIRU018).
+
+
+      ## Compatibility
+
+      - Device API and frontend: additive (a new response field, a new
+
+      optional query parameter and search enum value).
+
+      - Agent API: **not additive**. `report_id` is required on `POST
+
+      /calibrations`
+
+      ([review](https://github.com/mirurobotics/openapi/pull/352#discussion_r4367712303)).
+
+      No stable agent uploads calibrations; only the betas `v0.11.2-beta.1` to
+
+      `beta.3` do, and they send no `report_id`. Once the backend enforces
+
+      this, those betas'' uploads are rejected, so devices on them need the
+
+      next agent build.
+
+
+      ## Plan
+
+      1. Merge this, then release the touched audiences the way the repo does:
+
+      `agent/` (after `agent/v0.5.10`), `device/` (after
+
+      `device/v0.2.3-beta.1`), and `frontend/` (after `frontend/v0.9.14`).
+
+      2. Backend PR (`mirurobotics/backend`): store `report_id` on
+
+      calibrations (backfilling existing rows) with a unique index per device,
+
+      return the existing calibration when a `report_id` repeats, and support
+
+      the `report_id` list filter.
+
+      3. Agent PR (`mirurobotics/agent`): generate `report_id` when it
+
+      receives a calibration, return it from the Device API, and send it on
+
+      every upload.
+
+      4. docs#269: its owner updates it to cover `report_id`.
+
+
+      ## Precedent
+
+      - `calibration_search_report_id` follows
+
+      `calibration_search_serial_number` (array of strings, `form`, `explode:
+
+      false`, example).
+
+      - `format: uuid` has no precedent in this repo. Every other ID is a
+
+      prefixed string like `cal_123`. Here the agent generates the ID on the
+
+      device before Miru knows about the calibration, so it is not a Miru
+
+      resource ID. The `uuid` format states what the agent sends and what the
+
+      backend can index. The filter parameter''s items stay plain `type:
+
+      string`, like the sibling filters.
+
+
+      ## Test plan
+
+      - Regenerated bundles are committed. CI runs lint (Redocly + MIRU rules,
+
+      including MIRU005 search parity and `no-invalid-schema-examples`),
+
+      stale-specs, and tool tests.
+
+
+      🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+
+      https://claude.ai/code/session_01BPXgUTxFBwzqZRogmg7o8X
+
+
+      ---------
+
+
+      Co-authored-by: Claude <noreply@anthropic.com>'
+    author: Ben's Agent
+    branch: HEAD
     dirty: false
   x-build:
-    built_at: '2026-10-25T18:12:49.153099+00:00'
+    built_at: '2026-10-24T17:59:02.442093+00:00'
 servers:
 - url: https://staging.api.mirurobotics.com/agent/v1
   description: Staging
@@ -174,24 +313,15 @@ paths:
 
         device from its session token, creates a ledger entry, authorizes the exact
 
-        `object_key` and provenance, and vends short-lived downscoped cloud
+        `object_key` and provenance, performs digest dedup, and vends short-lived
 
-        credentials scoped to that one object key. The device uploads the file
+        downscoped cloud credentials scoped to that one object key. The device
 
-        directly via the native cloud SDK, then calls
+        uploads the file directly via the native cloud SDK (S3 multipart / GCS
 
-        `POST /uploads/{upload_id}/confirm`. The device''s identity is derived from
+        resumable), then calls `POST /uploads/{upload_id}/confirm`. The device''s
 
-        the token and is never read from the request body.
-
-
-        A request with an `idempotency_key` this device already used returns that
-
-        upload, with fresh credentials, instead of creating another. Together with
-
-        the `multipart_upload` the device records on the upload, this lets the
-
-        device resume an upload after a restart.
+        identity is derived from the token and is never read from the request body.
 
         '
       requestBody:
@@ -208,31 +338,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/UploadWithCredentials'
-  /uploads/{upload_id}:
-    parameters:
-    - $ref: '#/components/parameters/MiruVersion'
-    patch:
-      tags:
-      - Uploads
-      summary: Update
-      operationId: updateUpload
-      description: Record the multipart upload the device started for the upload's
-        object, so that a later attempt can resume it instead of starting over.
-      parameters:
-      - $ref: '#/components/parameters/upload_id'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/UpdateUploadRequest'
-      responses:
-        '200':
-          description: Successfully updated the upload.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Upload'
   /uploads/{upload_id}/credentials:
     parameters:
     - $ref: '#/components/parameters/MiruVersion'
@@ -614,14 +719,14 @@ components:
     ReleaseVersion:
       type: string
       enum:
-      - v0.5.11-next
+      - v0.5.11
       x-enum-varnames:
       - RELEASE_VERSION
       x-stainless-const: true
     APIGitCommit:
       type: string
       enum:
-      - 47ef4da0efbea6a66971036045efba5792ca6aad
+      - 2a3eb728f10b95f12a0c8f96183727d5b9fd7047
       x-enum-varnames:
       - API_GIT_COMMIT
       x-stainless-const: true
@@ -1712,15 +1817,6 @@ components:
           type: string
           example: dpl_123
           description: ID of the deployment the device is currently on.
-        idempotency_key:
-          type: string
-          format: uuid
-          example: 3f6c2b1e-8a4d-4c7f-9e2a-5b1d7c0e4a96
-          description: A UUID the agent mints once for each file it queues and sends
-            on every attempt to upload that file. If this device already created an
-            upload with the key, Miru returns that upload, with fresh credentials,
-            instead of creating another, whatever the rest of the request says. Without
-            a key, every call creates a new upload.
     UploadDestination:
       title: Upload Destination
       type: object
@@ -1868,49 +1964,10 @@ components:
           type: string
           example: wksp_123
           description: ID of the workspace that owns the upload.
-    MultipartUpload:
-      title: Multipart Upload
-      type: object
-      description: 'A multipart upload the device started in the destination bucket
-        for an
-
-        upload''s object. The device records it on the upload so that a later
-
-        attempt, even after a restart, can list the parts that already landed and
-
-        send only the rest.
-
-        '
-      required:
-      - id
-      - part_size
-      properties:
-        id:
-          type: string
-          example: VXBsb2FkIElEIGZvciBlbHZpbmcncyBteS1tb3ZpZS5tMnRzIHVwbG9hZA
-          description: The upload ID S3 or GCS returned when the device started the
-            multipart upload. It is the provider's ID, not a Miru ID.
-        part_size:
-          type: integer
-          format: int64
-          example: 8388608
-          description: The size in bytes of every part except the last, which can
-            be smaller.
-      example:
-        id: VXBsb2FkIElEIGZvciBlbHZpbmcncyBteS1tb3ZpZS5tMnRzIHVwbG9hZA
-        part_size: 8388608
     Upload:
       title: Upload
       allOf:
       - $ref: '#/components/schemas/BaseUpload'
-      - type: object
-        properties:
-          multipart_upload:
-            allOf:
-            - $ref: '#/components/schemas/MultipartUpload'
-            description: The multipart upload the device recorded for the upload's
-              object with `PATCH /uploads/{upload_id}`. Absent until the device records
-              one.
       example:
         object: upload
         id: upl_123
@@ -1936,9 +1993,6 @@ components:
         created_at: '2021-01-01T00:00:00Z'
         updated_at: '2021-01-01T00:00:00Z'
         workspace_id: wksp_123
-        multipart_upload:
-          id: VXBsb2FkIElEIGZvciBlbHZpbmcncyBteS1tb3ZpZS5tMnRzIHVwbG9hZA
-          part_size: 8388608
     S3UploadCredentials:
       title: S3 Upload Credentials
       type: object
@@ -2047,11 +2101,13 @@ components:
       description: 'Response to a broker upload request. The backend verified the
         calling
 
-        device and vended short-lived downscoped cloud credentials bound to the
+        device, created the upload ledger entry, authorized the exact `object_key`
 
-        upload''s object key. The device uploads directly via the native cloud SDK,
+        and provenance, performed digest dedup, and vended short-lived downscoped
 
-        then calls `POST /uploads/{upload_id}/confirm`.
+        cloud credentials bound to that one object key. The device uploads directly
+
+        via the native cloud SDK, then calls `POST /uploads/{upload_id}/confirm`.
 
         '
       required:
@@ -2106,15 +2162,13 @@ components:
       description: 'Response to a broker upload request. The backend verified the
         calling
 
-        device, created the upload ledger entry (or found the one an earlier
+        device, created the upload ledger entry, authorized the exact `object_key`
 
-        request with the same `idempotency_key` created), authorized the exact
+        and provenance, performed digest dedup, and vended short-lived downscoped
 
-        `object_key` and provenance, and vended short-lived downscoped cloud
+        cloud credentials bound to that one object key. The device uploads directly
 
-        credentials bound to that one object key. The device uploads directly via
-
-        the native cloud SDK, then calls `POST /uploads/{upload_id}/confirm`.
+        via the native cloud SDK, then calls `POST /uploads/{upload_id}/confirm`.
 
         '
       required:
@@ -2202,17 +2256,6 @@ components:
           deployment_id: dpl_123
           digest: sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
           mtime: '2021-01-01T00:00:00Z'
-    UpdateUploadRequest:
-      title: Update Upload Request
-      type: object
-      required:
-      - multipart_upload
-      properties:
-        multipart_upload:
-          allOf:
-          - $ref: '#/components/schemas/MultipartUpload'
-          description: The multipart upload the device started for the upload's object.
-            Replaces the one recorded before, if any.
     CreateCalibrationRequest:
       title: Create Calibration Request
       type: object

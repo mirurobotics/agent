@@ -9,7 +9,7 @@
 use crate::models;
 use serde::{Deserialize, Serialize};
 
-/// UploadCredentials : Response to a broker upload request. The backend verified the calling device and vended short-lived downscoped cloud credentials bound to the upload's object key. The device uploads directly via the native cloud SDK, then calls `POST /uploads/{upload_id}/confirm`. 
+/// UploadCredentials : Response to a broker upload request. The backend verified the calling device, created the upload ledger entry, authorized the exact `object_key` and provenance, performed digest dedup, and vended short-lived downscoped cloud credentials bound to that one object key. The device uploads directly via the native cloud SDK, then calls `POST /uploads/{upload_id}/confirm`. 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct UploadCredentials {
     /// The storage access scheme. Mirrors the `credentials.scheme` discriminator so the device can select its SDK before parsing `credentials`.
@@ -27,7 +27,7 @@ pub struct UploadCredentials {
 }
 
 impl UploadCredentials {
-    /// Response to a broker upload request. The backend verified the calling device and vended short-lived downscoped cloud credentials bound to the upload's object key. The device uploads directly via the native cloud SDK, then calls `POST /uploads/{upload_id}/confirm`. 
+    /// Response to a broker upload request. The backend verified the calling device, created the upload ledger entry, authorized the exact `object_key` and provenance, performed digest dedup, and vended short-lived downscoped cloud credentials bound to that one object key. The device uploads directly via the native cloud SDK, then calls `POST /uploads/{upload_id}/confirm`. 
     pub fn new(scheme: Scheme, s3_credentials: Option<models::S3UploadCredentials>, gcs_credentials: Option<models::GcsUploadCredentials>, expires_at: String) -> UploadCredentials {
         UploadCredentials {
             scheme,

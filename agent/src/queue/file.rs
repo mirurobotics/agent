@@ -202,6 +202,22 @@ impl<J: QueueJob> FileQueue<J> {
         true
     }
 
+    /// Change the job of the entry with `id` in place, keeping its position,
+    /// and persist. Records an in-flight job's progress. Returns `false` for
+    /// an unknown id, so an entry acked meanwhile is not revived.
+    pub async fn update_job(&mut self, id: Uuid, update: impl FnOnce(&mut J)) -> bool {
+        let Some(entry) = self.find(id) else {
+            return false;
+        };
+        update(&mut entry.job);
+        let _ = self.persist().await;
+        true
+    }
+
+    fn find(&mut self, id: Uuid) -> Option<&mut QueueEntry<J>> {
+        self.entries.iter_mut().find(|entry| entry.id == id)
+    }
+
     fn take(&mut self, id: Uuid) -> Option<QueueEntry<J>> {
         let idx = self.entries.iter().position(|entry| entry.id == id)?;
         self.entries.remove(idx)

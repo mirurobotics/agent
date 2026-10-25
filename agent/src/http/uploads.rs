@@ -1,19 +1,11 @@
 // internal crates
 use crate::http::{errors::HTTPErr, path, request, ClientI};
-use backend_api::models::{
-    CreateUploadRequest, UpdateUploadRequest, Upload, UploadCredentials, UploadWithCredentials,
-};
+use backend_api::models::{CreateUploadRequest, Upload, UploadCredentials, UploadWithCredentials};
 
 // ================================ PARAM STRUCTS ================================== //
 
 pub struct CreateParams<'a> {
     pub payload: &'a CreateUploadRequest,
-    pub token: &'a str,
-}
-
-pub struct UpdateParams<'a> {
-    pub id: &'a str,
-    pub payload: &'a UpdateUploadRequest,
     pub token: &'a str,
 }
 
@@ -34,13 +26,6 @@ pub async fn create(
 ) -> Result<UploadWithCredentials, HTTPErr> {
     let url = format!("{}/uploads", client.base_url());
     let request = request::Params::post(&url, request::marshal_json(params.payload)?)
-        .with_token(params.token);
-    super::client::fetch(client, request).await
-}
-
-pub async fn update(client: &impl ClientI, params: UpdateParams<'_>) -> Result<Upload, HTTPErr> {
-    let url = path::url(client.base_url(), &["uploads", params.id])?;
-    let request = request::Params::patch(&url, request::marshal_json(params.payload)?)
         .with_token(params.token);
     super::client::fetch(client, request).await
 }

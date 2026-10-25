@@ -11,7 +11,6 @@
 // internal crates
 use crate::queue::file::queue_suite;
 use crate::test_utils::filesys::{abs_path, dirs as test_dirs};
-use crate::test_utils::upload::idempotency_key;
 use miru_agent::data_uploads::upload::{Job, Queue, QueueEntry, QueueSnapshot, QueueSnapshotFile};
 use miru_agent::filesys::{files, File, WriteOptions};
 use miru_agent::queue::{Persistence, QueueJob};
@@ -33,7 +32,7 @@ fn upload_job(name: &str) -> Job {
         file_rule_id: "rule_1".to_string(),
         deployment_id: "dpl_1".to_string(),
         retention: None,
-        idempotency_key: idempotency_key(name),
+        upload: None,
     }
 }
 
@@ -60,7 +59,7 @@ fn make_job(name: &str) -> Job {
         file_rule_id: "rule_1".to_string(),
         deployment_id: "dpl_1".to_string(),
         retention: None,
-        idempotency_key: idempotency_key(name),
+        upload: None,
     }
 }
 
@@ -100,12 +99,10 @@ mod wire {
                 r#""first_observed_at":"1970-01-01T00:16:40Z","#,
                 r#""last_observed_at":"1970-01-01T00:16:40Z","#,
                 r#""file_rule_id":"rule_1","deployment_id":"dpl_1","#,
-                r#""retention":null,"idempotency_key":"{key}"}},"#,
-                r#""attempts":0,"next_attempt_at":null}}]}}"#,
+                r#""retention":null}},"attempts":0,"next_attempt_at":null}}]}}"#,
             ),
             id = id,
             file = file_json,
-            key = idempotency_key("a.log"),
         );
         files::write_string(&path, &raw, WriteOptions::OVERWRITE_ATOMIC)
             .await
@@ -162,40 +159,6 @@ mod wire {
         );
         assert_eq!(entry["attempts"], 0, "{raw}");
         assert_eq!(entry["next_attempt_at"], serde_json::Value::Null, "{raw}");
-    }
-
-    /// Jobs queued before `idempotency_key` was part of the job are minted
-    /// one on load.
-    #[tokio::test]
-    async fn a_missing_idempotency_key_is_minted() {
-        let dir = test_dirs::temp("upload_queue_test").unwrap();
-        let path = dir.to_dir().file("upload_queue.json");
-        let mut value = serde_json::to_value(QueueSnapshot {
-            entries: vec![QueueEntry {
-                id: Uuid::new_v4(),
-                job: upload_job("a.log"),
-                attempts: 0,
-                next_attempt_at: None,
-            }],
-        })
-        .unwrap();
-        value["entries"][0]["job"]
-            .as_object_mut()
-            .unwrap()
-            .remove("idempotency_key");
-        files::write_string(&path, &value.to_string(), WriteOptions::OVERWRITE_ATOMIC)
-            .await
-            .unwrap();
-
-        let queue = Queue::from_snapshot(8, open(&path).await, Persistence::BestEffort);
-
-        let found = queue.next_ready(Utc::now()).unwrap().job;
-        assert!(!found.idempotency_key.is_nil());
-        let expected = Job {
-            idempotency_key: found.idempotency_key,
-            ..upload_job("a.log")
-        };
-        assert_eq!(found, expected);
     }
 
     #[tokio::test]

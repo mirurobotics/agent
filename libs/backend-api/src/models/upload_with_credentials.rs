@@ -9,7 +9,7 @@
 use crate::models;
 use serde::{Deserialize, Serialize};
 
-/// UploadWithCredentials : Response to a broker upload request. The backend verified the calling device, created the upload ledger entry (or found the one an earlier request with the same `idempotency_key` created), authorized the exact `object_key` and provenance, and vended short-lived downscoped cloud credentials bound to that one object key. The device uploads directly via the native cloud SDK, then calls `POST /uploads/{upload_id}/confirm`. 
+/// UploadWithCredentials : Response to a broker upload request. The backend verified the calling device, created the upload ledger entry, authorized the exact `object_key` and provenance, performed digest dedup, and vended short-lived downscoped cloud credentials bound to that one object key. The device uploads directly via the native cloud SDK, then calls `POST /uploads/{upload_id}/confirm`. 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct UploadWithCredentials {
     #[serde(rename = "upload")]
@@ -22,7 +22,7 @@ pub struct UploadWithCredentials {
 }
 
 impl UploadWithCredentials {
-    /// Response to a broker upload request. The backend verified the calling device, created the upload ledger entry (or found the one an earlier request with the same `idempotency_key` created), authorized the exact `object_key` and provenance, and vended short-lived downscoped cloud credentials bound to that one object key. The device uploads directly via the native cloud SDK, then calls `POST /uploads/{upload_id}/confirm`. 
+    /// Response to a broker upload request. The backend verified the calling device, created the upload ledger entry, authorized the exact `object_key` and provenance, performed digest dedup, and vended short-lived downscoped cloud credentials bound to that one object key. The device uploads directly via the native cloud SDK, then calls `POST /uploads/{upload_id}/confirm`. 
     pub fn new(upload: models::Upload, credentials: models::UploadCredentials, metadata: std::collections::HashMap<String, String>) -> UploadWithCredentials {
         UploadWithCredentials {
             upload: Box::new(upload),
