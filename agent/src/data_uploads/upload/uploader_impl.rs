@@ -174,8 +174,7 @@ where
     async fn handle_failure(&mut self, mut entry: QueueEntry, err: UploadErr, ran_for: Duration) {
         let age = (self.now_fn)() - entry.job.first_observed_at;
         let retry = &self.options.retry;
-        let long_attempt = ran_for >= LONG_ATTEMPT && !err.is_terminal();
-        let verdict = if long_attempt {
+        let verdict = if ran_for >= LONG_ATTEMPT && !err.is_terminal() {
             retry.on_uncounted_failure(entry.attempts, age)
         } else {
             retry.on_failure(&err, entry.attempts, age)
@@ -186,24 +185,24 @@ where
                 wait_secs,
             } => {
                 entry.attempts = attempts;
-                Self::log_failure(&entry, &err, long_attempt);
+                Self::log_failure(&entry, &err);
                 self.retry_after(&entry, wait_secs).await;
             }
             Verdict::Terminal { attempts } => {
                 entry.attempts = attempts;
-                Self::log_failure(&entry, &err, long_attempt);
+                Self::log_failure(&entry, &err);
                 Self::log_terminal_drop(&entry, &err);
                 self.queue.ack(entry.id).await;
             }
             Verdict::OutOfAttempts { attempts } => {
                 entry.attempts = attempts;
-                Self::log_failure(&entry, &err, long_attempt);
+                Self::log_failure(&entry, &err);
                 Self::log_dropped(&entry, &err);
                 self.queue.ack(entry.id).await;
             }
             Verdict::TooOld { attempts, age } => {
                 entry.attempts = attempts;
-                Self::log_failure(&entry, &err, long_attempt);
+                Self::log_failure(&entry, &err);
                 Self::log_age_drop(&entry, age, &err);
                 self.queue.ack(entry.id).await;
             }
@@ -224,14 +223,10 @@ where
     }
 
     /// A network error logs at debug, since it repeats every `base_secs` while
-    /// the device is offline. A failure after a long attempt logs at info,
-    /// since a long upload outlives its credentials. Any other failure counts
-    /// and logs at warn.
-    fn log_failure(entry: &QueueEntry, err: &UploadErr, long_attempt: bool) {
+    /// the device is offline; any other failure logs at warn.
+    fn log_failure(entry: &QueueEntry, err: &UploadErr) {
         if err.is_network_conn_err() {
             Self::log_network_conn_err(entry, err);
-        } else if long_attempt {
-            Self::log_long_attempt(entry, err);
         } else {
             Self::log_counted_failure(entry, err);
         }
@@ -240,13 +235,6 @@ where
     fn log_network_conn_err(entry: &QueueEntry, err: &UploadErr) {
         debug!(
             "upload: network connection error for file {}; not counting attempt: {err:?}",
-            entry.job.file
-        );
-    }
-
-    fn log_long_attempt(entry: &QueueEntry, err: &UploadErr) {
-        info!(
-            "upload: long attempt for file {} failed; not counting it: {err:?}",
             entry.job.file
         );
     }
