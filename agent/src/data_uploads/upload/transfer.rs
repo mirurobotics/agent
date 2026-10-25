@@ -28,15 +28,15 @@ pub trait ObjectTransfer: Send + Sync {
     fn prepare_multipart(
         &self,
         credentials: &UploadCredentials,
-        upload: &UploadCheckpoint,
+        checkpoint: &UploadCheckpoint,
         file: &File,
     ) -> impl Future<Output = Result<Option<MultipartCheckpoint>, UploadErr>> + Send;
 
-    /// Transfers the file, resuming `upload.multipart` if it matches the file.
+    /// Transfers the file, resuming `checkpoint.multipart` if it matches the file.
     fn transfer(
         &self,
         credentials: &UploadCredentials,
-        upload: &UploadCheckpoint,
+        checkpoint: &UploadCheckpoint,
         file: &File,
     ) -> impl Future<Output = Result<(), UploadErr>> + Send;
 }
@@ -112,29 +112,13 @@ impl SdkTransfer {
     }
 }
 
-/// The upload's physical bucket and object key.
-fn object(upload: &UploadCheckpoint) -> s3::Object {
-    s3::Object {
-        bucket: upload.bucket_name.clone(),
-        key: upload.object_key.clone(),
-    }
-}
-
-/// Whether `multipart` was started for this version of `src`, with the part
-/// size this agent picks.
-fn started_for(multipart: &MultipartCheckpoint, src: &s3::Source) -> bool {
-    src.mtime.map(DateTime::<Utc>::from) == Some(multipart.mtime)
-        && src.size == multipart.size
-        && s3::Store::part_size_for(src.size) == multipart.part_size
-}
-
 /// See [`ObjectTransfer::prepare_multipart`].
 async fn multipart_for(
     store: &s3::Store,
-    upload: &UploadCheckpoint,
+    checkpoint: &UploadCheckpoint,
     file: &File,
 ) -> Result<Option<MultipartCheckpoint>, s3::S3Err> {
-    let object = object(upload);
+    let object = checkpoint.object();
     let src = s3::Source::open(file.clone(), &object).await?;
     if src.size <= s3::store::PART_SIZE {
         return Ok(None);
@@ -143,7 +127,7 @@ async fn multipart_for(
         // without an mtime, the upload can't be pinned to this file version
         return Ok(None);
     };
-    if let Some(saved) = upload.multipart.as_ref().filter(|m| started_for(m, &src)) {
+    if let Some(saved) = checkpoint.resumable_multipart(&src) {
         let id = &saved.multipart_upload_id;
         if store.has_multipart_upload(&object, id).await? {
             return Ok(Some(saved.clone()));
@@ -151,7 +135,7 @@ async fn multipart_for(
         info!("upload: multipart upload {id} for {object} is gone");
     }
     let id = store
-        .create_multipart_upload(&object, &upload.metadata)
+        .create_multipart_upload(&object, &checkpoint.metadata)
         .await?;
     info!("upload: started multipart upload {id} for {object}");
     Ok(Some(MultipartCheckpoint {
@@ -162,18 +146,22 @@ async fn multipart_for(
     }))
 }
 
-/// Puts `file` at the upload's object, resuming `upload.multipart` if it
+/// Puts `file` at the upload's object, resuming `checkpoint.multipart` if it
 /// matches the file.
-async fn put(store: &s3::Store, upload: &UploadCheckpoint, file: &File) -> Result<(), s3::S3Err> {
-    let object = object(upload);
+async fn put(
+    store: &s3::Store,
+    checkpoint: &UploadCheckpoint,
+    file: &File,
+) -> Result<(), s3::S3Err> {
+    let object = checkpoint.object();
     let src = s3::Source::open(file.clone(), &object).await?;
-    match upload.multipart.as_ref().filter(|m| started_for(m, &src)) {
+    match checkpoint.resumable_multipart(&src) {
         Some(multipart) => {
             let id = &multipart.multipart_upload_id;
             info!("upload: resuming multipart upload {id} for {object}");
             store.resume_multipart_upload(src, &object, id).await
         }
-        None => store.put(file.clone(), &object, &upload.metadata).await,
+        None => store.put(file.clone(), &object, &checkpoint.metadata).await,
     }
 }
 
@@ -181,11 +169,11 @@ impl ObjectTransfer for SdkTransfer {
     async fn prepare_multipart(
         &self,
         credentials: &UploadCredentials,
-        upload: &UploadCheckpoint,
+        checkpoint: &UploadCheckpoint,
         file: &File,
     ) -> Result<Option<MultipartCheckpoint>, UploadErr> {
         let store = self.store(credentials)?;
-        multipart_for(&store, upload, file)
+        multipart_for(&store, checkpoint, file)
             .await
             .map_err(classified_executor_err)
     }
@@ -193,14 +181,14 @@ impl ObjectTransfer for SdkTransfer {
     async fn transfer(
         &self,
         credentials: &UploadCredentials,
-        upload: &UploadCheckpoint,
+        checkpoint: &UploadCheckpoint,
         file: &File,
     ) -> Result<(), UploadErr> {
         info!(
             "upload: transferring file {} via scheme {:?} to bucket {} key {}",
-            file, credentials.scheme, upload.bucket_name, upload.object_key
+            file, credentials.scheme, checkpoint.bucket_name, checkpoint.object_key
         );
-        put(&self.store(credentials)?, upload, file)
+        put(&self.store(credentials)?, checkpoint, file)
             .await
             .map_err(classified_executor_err)
     }
@@ -600,8 +588,8 @@ mod tests {
             (tf, DateTime::<Utc>::from(mtime))
         }
 
-        /// The upload with multipart upload `id` saved for a file of `size` bytes
-        /// last modified at `mtime`, cut into [`PART_SIZE`] parts.
+        /// The checkpoint with multipart upload `id` saved for a file of `size`
+        /// bytes last modified at `mtime`, cut into [`PART_SIZE`] parts.
         fn saved(id: &str, size: u64, mtime: DateTime<Utc>) -> UploadCheckpoint {
             UploadCheckpoint {
                 multipart: Some(MultipartCheckpoint {
@@ -713,19 +701,19 @@ mod tests {
         }
 
         /// Prepares and transfers `file` over `replay` as an attempt does,
-        /// returning the result and the upload it used.
+        /// returning the result and the checkpoint it used.
         async fn run(
             creds: &UploadCredentials,
             replay: &StaticReplayClient,
             file: &File,
-            mut upload: UploadCheckpoint,
+            mut checkpoint: UploadCheckpoint,
         ) -> (Result<(), UploadErr>, UploadCheckpoint) {
             let transfer = SdkTransfer::with_http_client(replay.clone());
-            if let Ok(multipart) = transfer.prepare_multipart(creds, &upload, file).await {
-                upload.multipart = multipart;
+            if let Ok(multipart) = transfer.prepare_multipart(creds, &checkpoint, file).await {
+                checkpoint.multipart = multipart;
             }
-            let result = transfer.transfer(creds, &upload, file).await;
-            (result, upload)
+            let result = transfer.transfer(creds, &checkpoint, file).await;
+            (result, checkpoint)
         }
 
         #[tokio::test]
@@ -761,11 +749,11 @@ mod tests {
                     complete_resp(),
                 ]);
 
-                let upload = saved("mpu_old", SIZE, mtime);
-                let (result, prepared) = run(&creds, &replay, tf.file(), upload.clone()).await;
+                let checkpoint = saved("mpu_old", SIZE, mtime);
+                let (result, prepared) = run(&creds, &replay, tf.file(), checkpoint.clone()).await;
 
                 result.unwrap();
-                assert_eq!(prepared, upload);
+                assert_eq!(prepared, checkpoint);
                 assert_eq!(
                     sent(&replay),
                     [
@@ -788,8 +776,8 @@ mod tests {
             resps.extend(new_upload_resps("mpu_new"));
             let replay = replay(resps);
 
-            let upload = saved("mpu_old", SIZE, mtime);
-            let (result, prepared) = run(&s3(), &replay, tf.file(), upload).await;
+            let checkpoint = saved("mpu_old", SIZE, mtime);
+            let (result, prepared) = run(&s3(), &replay, tf.file(), checkpoint).await;
 
             result.unwrap();
             assert_eq!(prepared, saved("mpu_new", SIZE, mtime));
@@ -803,14 +791,14 @@ mod tests {
             let (tf, mtime) = two_part_file().await;
             let mut other_part_size = saved("mpu_old", SIZE, mtime);
             other_part_size.multipart.as_mut().unwrap().part_size = 2 * PART_SIZE;
-            for upload in [
+            for checkpoint in [
                 saved("mpu_old", SIZE + 1, mtime),
                 saved("mpu_old", SIZE, mtime + TimeDelta::seconds(1)),
                 other_part_size,
             ] {
                 let replay = replay(new_upload_resps("mpu_new"));
 
-                let (result, prepared) = run(&s3(), &replay, tf.file(), upload).await;
+                let (result, prepared) = run(&s3(), &replay, tf.file(), checkpoint).await;
 
                 result.unwrap();
                 assert_eq!(prepared, saved("mpu_new", SIZE, mtime));
@@ -850,11 +838,11 @@ mod tests {
             let (tf, mtime) = two_part_file().await;
             let replay = replay(vec![s3_access_denied_resp(), s3_access_denied_resp()]);
 
-            let upload = saved("mpu_old", SIZE, mtime);
-            let (result, prepared) = run(&s3(), &replay, tf.file(), upload.clone()).await;
+            let checkpoint = saved("mpu_old", SIZE, mtime);
+            let (result, prepared) = run(&s3(), &replay, tf.file(), checkpoint.clone()).await;
 
             result.unwrap_err();
-            assert_eq!(prepared, upload);
+            assert_eq!(prepared, checkpoint);
             assert_eq!(
                 sent(&replay),
                 [

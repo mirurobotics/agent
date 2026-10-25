@@ -18,7 +18,7 @@ use chrono::{Local, TimeZone};
 use tracing::{debug, info};
 
 /// The seam between the upload actor and the transfer mechanics. The actor
-/// saves the upload [`Self::prepare`] returns on the job, then calls
+/// saves the checkpoint [`Self::prepare`] returns on the job, then calls
 /// [`Self::upload`].
 ///
 /// # Cancel safety
@@ -43,7 +43,7 @@ pub trait UploadExecutor: Send + Sync {
 /// What [`UploadExecutor::prepare`] hands to [`UploadExecutor::upload`].
 #[derive(Debug, PartialEq)]
 pub struct Prepared {
-    pub upload: UploadCheckpoint,
+    pub checkpoint: UploadCheckpoint,
     pub credentials: UploadCredentials,
 }
 
@@ -69,6 +69,30 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> LiveExecutor<C, T, X> {
             .map_err(classified_executor_err)
     }
 
+    /// The job's upload with fresh credentials, or a new upload if the backend
+    /// no longer accepts it. `None` if it was already uploaded.
+    async fn reuse_or_create_upload(
+        &self,
+        job: &Job,
+    ) -> Result<Option<(UploadCheckpoint, UploadCredentials)>, UploadErr> {
+        let Some(checkpoint) = &job.checkpoint else {
+            return self.create_upload(job).await.map(Some);
+        };
+        let id = &checkpoint.miru_upload_id;
+        if let Some(credentials) = self.vend_credentials(id).await? {
+            return Ok(Some((checkpoint.clone(), credentials)));
+        }
+        if self.was_uploaded(id).await? {
+            info!("upload: upload {id} was already confirmed");
+            return Ok(None);
+        }
+        info!(
+            "upload: upload {id} is gone; creating a new one for file {}",
+            job.file
+        );
+        self.create_upload(job).await.map(Some)
+    }
+
     async fn create_upload(
         &self,
         job: &Job,
@@ -88,14 +112,14 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> LiveExecutor<C, T, X> {
             "upload: created upload {} for file {} (scheme {:?})",
             resp.upload.id, job.file, resp.credentials.scheme
         );
-        let upload = UploadCheckpoint {
+        let checkpoint = UploadCheckpoint {
             miru_upload_id: resp.upload.id,
             bucket_name: resp.upload.destination.bucket_name,
             object_key: resp.upload.destination.object_key,
             metadata: resp.metadata,
             multipart: None,
         };
-        Ok((upload, *resp.credentials))
+        Ok((checkpoint, *resp.credentials))
     }
 
     /// Fresh credentials for an existing upload, or `None` if it is gone:
@@ -120,7 +144,7 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> LiveExecutor<C, T, X> {
     }
 
     /// Whether a gone upload was uploaded: confirm rejects a deleted or failed one.
-    async fn already_uploaded(&self, id: &str) -> Result<bool, UploadErr> {
+    async fn was_uploaded(&self, id: &str) -> Result<bool, UploadErr> {
         match self.confirm_upload(id).await {
             Ok(()) => Ok(true),
             Err(err) if err.is_terminal() => Ok(false),
@@ -145,60 +169,42 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> LiveExecutor<C, T, X> {
 
 impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> UploadExecutor for LiveExecutor<C, T, X> {
     async fn prepare(&self, job: &Job) -> Result<Option<Prepared>, UploadErr> {
-        // A retry reuses the job's upload, unless the backend no longer accepts it.
-        let (mut upload, credentials) = match &job.upload {
-            None => self.create_upload(job).await?,
-            Some(upload) => match self.vend_credentials(&upload.miru_upload_id).await? {
-                Some(credentials) => (upload.clone(), credentials),
-                None if self.already_uploaded(&upload.miru_upload_id).await? => {
-                    info!(
-                        "upload: upload {} was already confirmed",
-                        upload.miru_upload_id
-                    );
-                    return Ok(None);
-                }
-                None => {
-                    info!(
-                        "upload: upload {} is gone; creating a new one for file {}",
-                        upload.miru_upload_id, job.file
-                    );
-                    self.create_upload(job).await?
-                }
-            },
+        let Some((mut checkpoint, credentials)) = self.reuse_or_create_upload(job).await? else {
+            return Ok(None);
         };
         // Best effort: on failure, the transfer rechecks the saved multipart upload.
         match self
             .transfer
-            .prepare_multipart(&credentials, &upload, &job.file)
+            .prepare_multipart(&credentials, &checkpoint, &job.file)
             .await
         {
-            Ok(multipart) => upload.multipart = multipart,
+            Ok(multipart) => checkpoint.multipart = multipart,
             Err(err) => debug!(
                 "upload: can't prepare multipart upload for {}: {err:?}",
                 job.file
             ),
         }
         Ok(Some(Prepared {
-            upload,
+            checkpoint,
             credentials,
         }))
     }
 
     async fn upload(&self, job: &Job, prepared: &Prepared) -> Result<(), UploadErr> {
-        let upload = &prepared.upload;
+        let checkpoint = &prepared.checkpoint;
         info!(
             "upload: transferring file {} to bucket {} key {}",
-            job.file, upload.bucket_name, upload.object_key
+            job.file, checkpoint.bucket_name, checkpoint.object_key
         );
         self.transfer
-            .transfer(&prepared.credentials, upload, &job.file)
+            .transfer(&prepared.credentials, checkpoint, &job.file)
             .await?;
 
         info!(
             "upload: confirming upload {} for file {}",
-            upload.miru_upload_id, job.file
+            checkpoint.miru_upload_id, job.file
         );
-        self.confirm_upload(&upload.miru_upload_id).await
+        self.confirm_upload(&checkpoint.miru_upload_id).await
     }
 }
 

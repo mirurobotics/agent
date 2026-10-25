@@ -1153,7 +1153,7 @@ mod durability {
         timed(started_rx.recv()).await.unwrap();
         timed(started_rx.recv()).await.unwrap();
 
-        let saved = open(&path).await.read().entries[0].job.upload.clone();
+        let saved = open(&path).await.read().entries[0].job.checkpoint.clone();
         assert_eq!(saved, Some(upload_checkpoint()));
 
         timed(uploader.shutdown()).await.unwrap();
@@ -1180,7 +1180,7 @@ mod durability {
         await_drained(&uploader).await;
 
         let mut expected = job.clone();
-        expected.upload = Some(upload_checkpoint());
+        expected.checkpoint = Some(upload_checkpoint());
         assert_eq!(mock.recorded_calls(), vec![job, expected]);
 
         timed(uploader.shutdown()).await.unwrap();

@@ -4,6 +4,7 @@ use std::collections::HashMap;
 // internal crates
 use crate::filesys::File;
 use crate::models::FileRuleRetention;
+use crate::s3;
 
 // external crates
 use chrono::{DateTime, Utc};
@@ -22,7 +23,7 @@ pub struct Job {
     #[serde(default)]
     pub retention: Option<FileRuleRetention>,
     #[serde(default)]
-    pub upload: Option<UploadCheckpoint>,
+    pub checkpoint: Option<UploadCheckpoint>,
 }
 
 /// Holds the destination and metadata too, since
@@ -34,6 +35,26 @@ pub struct UploadCheckpoint {
     pub object_key: String,
     pub metadata: HashMap<String, String>,
     pub multipart: Option<MultipartCheckpoint>,
+}
+
+impl UploadCheckpoint {
+    /// The upload's physical bucket and object key.
+    pub(crate) fn object(&self) -> s3::Object {
+        s3::Object {
+            bucket: self.bucket_name.clone(),
+            key: self.object_key.clone(),
+        }
+    }
+
+    /// The saved multipart upload, if it was started for this version of `src`
+    /// with the part size this agent picks.
+    pub(crate) fn resumable_multipart(&self, src: &s3::Source) -> Option<&MultipartCheckpoint> {
+        let multipart = self.multipart.as_ref()?;
+        let resumable = src.mtime.map(DateTime::<Utc>::from) == Some(multipart.mtime)
+            && src.size == multipart.size
+            && s3::Store::part_size_for(src.size) == multipart.part_size;
+        resumable.then_some(multipart)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

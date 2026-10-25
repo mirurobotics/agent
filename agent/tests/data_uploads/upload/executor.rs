@@ -280,7 +280,7 @@ fn create_request_maps_job_fields() {
         file_rule_id: "rule_1".to_string(),
         deployment_id: "dpl_1".to_string(),
         retention: None,
-        upload: None,
+        checkpoint: None,
     };
 
     let expected = CreateUploadRequest {
@@ -313,7 +313,7 @@ fn new_upl_request_sends_mtime_with_device_offset() {
         file_rule_id: "rule_1".to_string(),
         deployment_id: "dpl_1".to_string(),
         retention: None,
-        upload: None,
+        checkpoint: None,
     };
     let est = FixedOffset::west_opt(5 * 3600).unwrap();
 
@@ -325,14 +325,14 @@ fn new_upl_request_sends_mtime_with_device_offset() {
 
 // =========================== Reusing the upload ================================= //
 
-/// A job an earlier attempt already saved `upload` on.
-fn job_with(upload: UploadCheckpoint) -> Job {
+/// A job an earlier attempt already saved `checkpoint` on.
+fn job_with(checkpoint: UploadCheckpoint) -> Job {
     let mut job = make_job("a.log");
-    job.upload = Some(upload);
+    job.checkpoint = Some(checkpoint);
     job
 }
 
-/// The upload with a multipart upload in progress.
+/// The checkpoint of an upload with a multipart upload in progress.
 fn upload_mid_transfer() -> UploadCheckpoint {
     UploadCheckpoint {
         multipart: Some(MultipartCheckpoint {
@@ -361,7 +361,7 @@ async fn new_upload_is_prepared_before_the_transfer() {
     let prepared = executor.prepare(&make_job("a.log")).await.unwrap();
 
     let expected = Prepared {
-        upload: upload_checkpoint(),
+        checkpoint: upload_checkpoint(),
         credentials: s3_credentials(),
     };
     assert_eq!(prepared, Some(expected));
@@ -369,10 +369,10 @@ async fn new_upload_is_prepared_before_the_transfer() {
     assert!(transfer.recorded_calls().is_empty());
 }
 
-// The prepared upload carries the multipart upload the transfer started, so
-// the actor saves it before any part is sent.
+// The prepared checkpoint carries the multipart upload the transfer started,
+// so the actor saves it before any part is sent.
 #[tokio::test]
-async fn prepared_upload_carries_the_multipart_upload() {
+async fn prepared_checkpoint_carries_the_multipart_upload() {
     let client = Arc::new(MockClient::default());
     client.set_create_upload(|| Ok(pending_response()));
     let transfer = MockObjectTransfer::new();
@@ -381,11 +381,11 @@ async fn prepared_upload_carries_the_multipart_upload() {
 
     let prepared = executor.prepare(&make_job("a.log")).await.unwrap().unwrap();
 
-    assert_eq!(prepared.upload, upload_mid_transfer());
+    assert_eq!(prepared.checkpoint, upload_mid_transfer());
 }
 
-// Failing to prepare the multipart upload doesn't fail the attempt: the upload
-// keeps its saved multipart upload, which the transfer checks again.
+// Failing to prepare the multipart upload doesn't fail the attempt: the
+// checkpoint keeps its saved multipart upload, which the transfer checks again.
 #[tokio::test]
 async fn multipart_failure_keeps_the_saved_multipart_upload() {
     let client = Arc::new(MockClient::default());
@@ -400,7 +400,7 @@ async fn multipart_failure_keeps_the_saved_multipart_upload() {
         .unwrap()
         .unwrap();
 
-    assert_eq!(prepared.upload, upload_mid_transfer());
+    assert_eq!(prepared.checkpoint, upload_mid_transfer());
 }
 
 // A retry gets fresh credentials for the saved upload instead of creating a
@@ -476,7 +476,7 @@ async fn gone_upload_is_replaced_with_a_new_one() {
             ],
             "status {status}"
         );
-        assert_eq!(prepared.upload, upload_checkpoint(), "status {status}");
+        assert_eq!(prepared.checkpoint, upload_checkpoint(), "status {status}");
     }
 }
 

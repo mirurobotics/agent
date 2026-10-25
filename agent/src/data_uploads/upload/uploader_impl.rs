@@ -121,11 +121,18 @@ where
         async move { executor.upload(&job, &prepared).await }
     }
 
-    /// Saves `upload` on the queued job, for the next attempt to continue.
-    pub(crate) async fn save_upload(&mut self, entry: &QueueEntry, upload: &UploadCheckpoint) {
-        debug!("upload: saving upload for {}: {upload:?}", entry.job.file);
+    /// Saves `checkpoint` on the queued job, for the next attempt to continue.
+    pub(crate) async fn save_checkpoint(
+        &mut self,
+        entry: &QueueEntry,
+        checkpoint: &UploadCheckpoint,
+    ) {
+        debug!(
+            "upload: saving checkpoint for {}: {checkpoint:?}",
+            entry.job.file
+        );
         self.queue
-            .update_job(entry.id, |job| job.upload = Some(upload.clone()))
+            .update_job(entry.id, |job| job.checkpoint = Some(checkpoint.clone()))
             .await;
     }
 

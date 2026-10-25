@@ -24,8 +24,8 @@ pub enum MockStep {
     /// sender was dropped). The test holds the sender, so it controls when —
     /// and how — the in-flight upload finishes.
     Hang(oneshot::Receiver<Result<(), UploadErr>>),
-    /// Return this upload from `prepare` for the actor to save, then run the
-    /// inner step in `upload`.
+    /// Return this checkpoint from `prepare` for the actor to save, then run
+    /// the inner step in `upload`.
     PrepareThen(UploadCheckpoint, Box<MockStep>),
 }
 
@@ -76,10 +76,10 @@ impl UploadExecutor for MockUploadExecutor {
     async fn prepare(&self, job: &Job) -> Result<Option<Prepared>, UploadErr> {
         self.calls.lock().unwrap().push(job.clone());
         match self.next_step() {
-            Some(MockStep::PrepareThen(upload, then)) => {
+            Some(MockStep::PrepareThen(checkpoint, then)) => {
                 self.script.lock().unwrap().push_front(*then);
                 Ok(Some(Prepared {
-                    upload,
+                    checkpoint,
                     credentials: UploadCredentials::default(),
                 }))
             }

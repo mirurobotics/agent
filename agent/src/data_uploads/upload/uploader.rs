@@ -136,8 +136,8 @@ where
         }
     }
 
-    /// Prepares `entry`'s upload, saves it on the job, then uploads it. `None`
-    /// if a shutdown cancelled the attempt.
+    /// Prepares `entry`'s upload, saves its checkpoint on the job, then uploads
+    /// it. `None` if a shutdown cancelled the attempt.
     async fn attempt(&mut self, entry: &QueueEntry) -> Option<Result<(), UploadErr>> {
         let prepare = self.uploader.prepare(entry);
         let prepared = match self.run_until_shutdown(prepare).await? {
@@ -146,7 +146,9 @@ where
             Ok(None) => return Some(Ok(())),
             Err(err) => return Some(Err(err)),
         };
-        self.uploader.save_upload(entry, &prepared.upload).await;
+        self.uploader
+            .save_checkpoint(entry, &prepared.checkpoint)
+            .await;
         let upload = self.uploader.upload(entry, prepared);
         self.run_until_shutdown(upload).await
     }
