@@ -17,7 +17,8 @@ use miru_agent::authn::errors::MockError as AuthnMockError;
 use miru_agent::authn::AuthnErr;
 use miru_agent::data_uploads::upload::executor::new_upl_request;
 use miru_agent::data_uploads::upload::{
-    Job, LiveExecutor, MultipartCheckpoint, Prepared, UploadCheckpoint, UploadErr, UploadExecutor,
+    Job, LiveExecutor, MultipartCheckpoint, PreparedUpload, UploadCheckpoint, UploadErr,
+    UploadExecutor,
 };
 use miru_agent::errors::Error;
 use miru_agent::filesys::File;
@@ -360,7 +361,7 @@ async fn new_upload_is_prepared_before_the_transfer() {
 
     let prepared = executor.prepare(&make_job("a.log")).await.unwrap();
 
-    let expected = Prepared {
+    let expected = PreparedUpload {
         checkpoint: upload_checkpoint(),
         credentials: s3_credentials(),
     };

@@ -30,19 +30,19 @@ pub trait UploadExecutor: Send + Sync {
     fn prepare(
         &self,
         job: &Job,
-    ) -> impl std::future::Future<Output = Result<Option<Prepared>, UploadErr>> + Send;
+    ) -> impl std::future::Future<Output = Result<Option<PreparedUpload>, UploadErr>> + Send;
 
     /// Transfers the file and confirms the upload.
     fn upload(
         &self,
         job: &Job,
-        prepared: &Prepared,
+        prepared: &PreparedUpload,
     ) -> impl std::future::Future<Output = Result<(), UploadErr>> + Send;
 }
 
 /// What [`UploadExecutor::prepare`] hands to [`UploadExecutor::upload`].
 #[derive(Debug, PartialEq)]
-pub struct Prepared {
+pub struct PreparedUpload {
     pub checkpoint: UploadCheckpoint,
     pub credentials: UploadCredentials,
 }
@@ -168,14 +168,14 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> LiveExecutor<C, T, X> {
 }
 
 impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> UploadExecutor for LiveExecutor<C, T, X> {
-    async fn prepare(&self, job: &Job) -> Result<Option<Prepared>, UploadErr> {
+    async fn prepare(&self, job: &Job) -> Result<Option<PreparedUpload>, UploadErr> {
         let Some((mut checkpoint, credentials)) = self.reuse_or_create_upload(job).await? else {
             return Ok(None);
         };
         // Best effort: on failure, the transfer rechecks the saved multipart upload.
         match self
             .transfer
-            .prepare_multipart(&credentials, &checkpoint, &job.file)
+            .reuse_or_create_multipart(&credentials, &checkpoint, &job.file)
             .await
         {
             Ok(multipart) => checkpoint.multipart = multipart,
@@ -184,13 +184,13 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> UploadExecutor for LiveE
                 job.file
             ),
         }
-        Ok(Some(Prepared {
+        Ok(Some(PreparedUpload {
             checkpoint,
             credentials,
         }))
     }
 
-    async fn upload(&self, job: &Job, prepared: &Prepared) -> Result<(), UploadErr> {
+    async fn upload(&self, job: &Job, prepared: &PreparedUpload) -> Result<(), UploadErr> {
         let checkpoint = &prepared.checkpoint;
         info!(
             "upload: transferring file {} to bucket {} key {}",

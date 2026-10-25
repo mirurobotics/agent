@@ -25,7 +25,7 @@ use tracing::info;
 pub trait ObjectTransfer: Send + Sync {
     /// The multipart upload [`Self::transfer`] resumes: the saved one if it
     /// still matches `file`, else a new one. `None` for a single-part file.
-    fn prepare_multipart(
+    fn reuse_or_create_multipart(
         &self,
         credentials: &UploadCredentials,
         checkpoint: &UploadCheckpoint,
@@ -44,8 +44,7 @@ pub trait ObjectTransfer: Send + Sync {
 /// Production [`ObjectTransfer`] built on aws-sdk-s3 for both schemes: S3 with
 /// the vended SigV4 session credentials, and GCS through its S3-compatible XML
 /// API with the vended OAuth2 bearer token (see [`s3::gcs`]). Both go through
-/// [`put`]: one `PutObject` or a resumable multipart upload, by size. Tests can
-/// replace the HTTP client of both stores.
+/// [`resume_or_put`]. Tests can replace the HTTP client of both stores.
 pub struct SdkTransfer {
     http_client: SharedHttpClient,
     s3_force_path_style: bool,
@@ -77,7 +76,7 @@ impl SdkTransfer {
     }
 
     /// The S3 or GCS store for the vended credentials.
-    fn store(&self, credentials: &UploadCredentials) -> Result<s3::Store, UploadErr> {
+    fn store_for(&self, credentials: &UploadCredentials) -> Result<s3::Store, UploadErr> {
         match credentials.scheme {
             Scheme::S3 => {
                 let creds = credentials
@@ -112,8 +111,8 @@ impl SdkTransfer {
     }
 }
 
-/// See [`ObjectTransfer::prepare_multipart`].
-async fn multipart_for(
+/// See [`ObjectTransfer::reuse_or_create_multipart`].
+async fn reuse_or_create_multipart(
     store: &s3::Store,
     checkpoint: &UploadCheckpoint,
     file: &File,
@@ -148,7 +147,7 @@ async fn multipart_for(
 
 /// Puts `file` at the upload's object, resuming `checkpoint.multipart` if it
 /// matches the file.
-async fn put(
+async fn resume_or_put(
     store: &s3::Store,
     checkpoint: &UploadCheckpoint,
     file: &File,
@@ -166,14 +165,14 @@ async fn put(
 }
 
 impl ObjectTransfer for SdkTransfer {
-    async fn prepare_multipart(
+    async fn reuse_or_create_multipart(
         &self,
         credentials: &UploadCredentials,
         checkpoint: &UploadCheckpoint,
         file: &File,
     ) -> Result<Option<MultipartCheckpoint>, UploadErr> {
-        let store = self.store(credentials)?;
-        multipart_for(&store, checkpoint, file)
+        let store = self.store_for(credentials)?;
+        reuse_or_create_multipart(&store, checkpoint, file)
             .await
             .map_err(classified_executor_err)
     }
@@ -188,7 +187,8 @@ impl ObjectTransfer for SdkTransfer {
             "upload: transferring file {} via scheme {:?} to bucket {} key {}",
             file, credentials.scheme, checkpoint.bucket_name, checkpoint.object_key
         );
-        put(&self.store(credentials)?, checkpoint, file)
+        let store = self.store_for(credentials)?;
+        resume_or_put(&store, checkpoint, file)
             .await
             .map_err(classified_executor_err)
     }
@@ -709,7 +709,10 @@ mod tests {
             mut checkpoint: UploadCheckpoint,
         ) -> (Result<(), UploadErr>, UploadCheckpoint) {
             let transfer = SdkTransfer::with_http_client(replay.clone());
-            if let Ok(multipart) = transfer.prepare_multipart(creds, &checkpoint, file).await {
+            if let Ok(multipart) = transfer
+                .reuse_or_create_multipart(creds, &checkpoint, file)
+                .await
+            {
                 checkpoint.multipart = multipart;
             }
             let result = transfer.transfer(creds, &checkpoint, file).await;

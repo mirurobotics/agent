@@ -13,8 +13,8 @@ use miru_agent::filesys::File;
 /// One recorded `transfer` call's arguments.
 pub type TransferCall = (UploadCredentials, UploadCheckpoint, File);
 
-/// Scripted [`ObjectTransfer`] test double. `prepare_multipart` returns the
-/// multipart upload given to [`Self::set_multipart`], or else the one on the
+/// Scripted [`ObjectTransfer`] test double. `reuse_or_create_multipart` returns
+/// the multipart upload given to [`Self::set_multipart`], or else the one on the
 /// checkpoint, and fails after [`Self::fail_multipart`]. Each `transfer` call pops
 /// the next scripted result (an empty script defaults to `Ok`) and records the
 /// call's arguments. Clones share the script and the recorded calls, so a test
@@ -51,7 +51,7 @@ impl MockObjectTransfer {
 }
 
 impl ObjectTransfer for MockObjectTransfer {
-    async fn prepare_multipart(
+    async fn reuse_or_create_multipart(
         &self,
         _credentials: &UploadCredentials,
         checkpoint: &UploadCheckpoint,
