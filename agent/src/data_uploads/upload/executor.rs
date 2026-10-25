@@ -104,7 +104,7 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> LiveExecutor<C, T, X> {
             resp.upload.id, job.file, resp.credentials.scheme
         );
         let upload = UploadCheckpoint {
-            id: resp.upload.id,
+            miru_upload_id: resp.upload.id,
             bucket_name: resp.upload.destination.bucket_name,
             object_key: resp.upload.destination.object_key,
             metadata: resp.metadata,
@@ -171,16 +171,19 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> UploadExecutor for LiveE
         // backend no longer accepts it.
         let (upload, credentials) = match &job.upload {
             None => self.create_upload(job).await?,
-            Some(upload) => match self.vend_credentials(&upload.id).await? {
+            Some(upload) => match self.vend_credentials(&upload.miru_upload_id).await? {
                 Some(credentials) => (upload.clone(), credentials),
-                None if self.already_uploaded(&upload.id).await? => {
-                    info!("upload: upload {} was already confirmed", upload.id);
+                None if self.already_uploaded(&upload.miru_upload_id).await? => {
+                    info!(
+                        "upload: upload {} was already confirmed",
+                        upload.miru_upload_id
+                    );
                     return Ok(None);
                 }
                 None => {
                     info!(
                         "upload: upload {} is gone; creating a new one for file {}",
-                        upload.id, job.file
+                        upload.miru_upload_id, job.file
                     );
                     self.create_upload(job).await?
                 }
@@ -205,9 +208,9 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> UploadExecutor for LiveE
 
         info!(
             "upload: confirming upload {} for file {}",
-            upload.id, job.file
+            upload.miru_upload_id, job.file
         );
-        self.confirm_upload(&upload.id).await
+        self.confirm_upload(&upload.miru_upload_id).await
     }
 }
 

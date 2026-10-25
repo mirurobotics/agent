@@ -336,7 +336,7 @@ fn job_with(upload: UploadCheckpoint) -> Job {
 fn upload_mid_transfer() -> UploadCheckpoint {
     UploadCheckpoint {
         multipart: Some(MultipartCheckpoint {
-            id: "mpu_1".to_string(),
+            multipart_upload_id: "mpu_1".to_string(),
             size: 42,
             mtime: Utc.timestamp_opt(1_700_000_000, 0).unwrap(),
             part_size: 32,

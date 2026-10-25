@@ -173,17 +173,18 @@ async fn multipart_for(
         return Ok(None);
     };
     if let Some(saved) = upload.multipart.as_ref().filter(|m| started_for(m, &src)) {
-        if store.has_multipart_upload(&object, &saved.id).await? {
+        let id = &saved.multipart_upload_id;
+        if store.has_multipart_upload(&object, id).await? {
             return Ok(Some(saved.clone()));
         }
-        info!("upload: multipart upload {} for {object} is gone", saved.id);
+        info!("upload: multipart upload {id} for {object} is gone");
     }
     let id = store
         .create_multipart_upload(&object, &upload.metadata)
         .await?;
     info!("upload: started multipart upload {id} for {object}");
     Ok(Some(MultipartCheckpoint {
-        id,
+        multipart_upload_id: id,
         size: src.size,
         mtime,
         part_size: s3::Store::part_size_for(src.size),
@@ -204,7 +205,7 @@ async fn put(store: &s3::Store, upload: &UploadCheckpoint, file: &File) -> Resul
     let result = if src.size <= s3::store::PART_SIZE {
         store.put_singlepart(src, &object, &upload.metadata).await
     } else if let Some(multipart) = saved {
-        let id = &multipart.id;
+        let id = &multipart.multipart_upload_id;
         info!("upload: resuming multipart upload {id} for {object}");
         store.resume_multipart_upload(src, &object, id).await
     } else {
@@ -641,7 +642,7 @@ mod tests {
         fn saved(id: &str, size: u64, mtime: DateTime<Utc>) -> UploadCheckpoint {
             UploadCheckpoint {
                 multipart: Some(MultipartCheckpoint {
-                    id: id.to_string(),
+                    multipart_upload_id: id.to_string(),
                     size,
                     mtime,
                     part_size: PART_SIZE,
