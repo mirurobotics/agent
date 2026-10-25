@@ -16,12 +16,11 @@ use aws_sdk_s3::config::SharedHttpClient;
 use chrono::{DateTime, Utc};
 use tracing::info;
 
-/// The seam between the upload executor and the cloud storage SDKs, so the
-/// executor is testable without an object store.
+/// Transfers a file to the checkpoint's object in cloud storage.
 ///
 /// # Cancel safety
 ///
-/// The upload actor may drop either future at any await point.
+/// Either future may be dropped at any await point.
 pub trait ObjectTransfer: Send + Sync {
     /// The multipart upload [`Self::transfer`] resumes: the saved one if it
     /// still matches `file`, else a new one. `None` for a single-part file.

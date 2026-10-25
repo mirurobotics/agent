@@ -17,14 +17,12 @@ use backend_api::models::{CreateUploadRequest, UploadCredentials, UploadSource};
 use chrono::{Local, TimeZone};
 use tracing::{debug, info};
 
-/// The seam between the upload actor and the transfer mechanics. The actor
-/// saves the checkpoint [`Self::prepare`] returns on the job, then calls
-/// [`Self::upload`].
+/// Uploads a job's file and confirms the upload with Miru.
 ///
 /// # Cancel safety
 ///
-/// The actor drops either future on shutdown, and the next process continues
-/// from the job's saved upload.
+/// Either future may be dropped at any await point. [`Self::prepare`] resumes
+/// from the job's checkpoint.
 pub trait UploadExecutor: Send + Sync {
     /// Reuses or creates the job's upload. `None` if it was already confirmed.
     fn prepare(
