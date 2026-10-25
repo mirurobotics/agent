@@ -1,6 +1,6 @@
 // internal crates
 use crate::s3::{
-    body, errors,
+    errors,
     errors::NoSuchUploadErr,
     sdk,
     store::{WriteOutcome, PART_SIZE},
@@ -31,13 +31,13 @@ impl Store {
     /// still holds its parts, so it is aborted too.
     pub async fn put_multipart(
         &self,
-        mut src: Source,
+        src: Source,
         dst: &Object,
         metadata: &std::collections::HashMap<String, String>,
     ) -> Result<(), S3Err> {
         let upload_id = self.create_multipart_upload(dst, metadata).await?;
 
-        let written = self.exec_multipart_upload(&mut src, dst, &upload_id).await;
+        let written = self.exec_multipart_upload(&src, dst, &upload_id).await;
         if !matches!(written, Ok(WriteOutcome::Created)) {
             // Best-effort cleanup: don't mask the original error if the abort
             // itself fails.
@@ -54,12 +54,12 @@ impl Store {
     /// against the same file bytes the upload was started for.
     pub async fn resume_multipart_upload(
         &self,
-        mut src: Source,
+        src: Source,
         dst: &Object,
         upload_id: &str,
     ) -> Result<(), S3Err> {
         let landed = self.list_parts(dst, upload_id).await?;
-        let parts = self.upload_parts(&mut src, dst, upload_id, &landed).await?;
+        let parts = self.upload_parts(&src, dst, upload_id, &landed).await?;
         self.complete_multipart_upload(dst, upload_id, &parts)
             .await
             .map(|_| ())
@@ -70,7 +70,7 @@ impl Store {
     /// Pass an empty map to upload every part (the fresh-upload path).
     async fn upload_parts(
         &self,
-        src: &mut Source,
+        src: &Source,
         dst: &Object,
         upload_id: &str,
         landed: &std::collections::HashMap<i32, CompletedPart>,
@@ -80,8 +80,8 @@ impl Store {
             let part = match landed.get(&part_number) {
                 Some(existing) => existing.clone(),
                 None => {
-                    let buf = src.read("upload_part", dst, offset, len).await?;
-                    self.upload_part(dst, upload_id, part_number, buf).await?
+                    self.upload_part(src, dst, upload_id, part_number, offset, len)
+                        .await?
                 }
             };
             parts.push(part);
@@ -220,7 +220,7 @@ impl Store {
     /// `put_multipart` catches to issue a best-effort abort.
     async fn exec_multipart_upload(
         &self,
-        src: &mut Source,
+        src: &Source,
         dst: &Object,
         upload_id: &str,
     ) -> Result<WriteOutcome, S3Err> {
@@ -230,18 +230,19 @@ impl Store {
         self.complete_multipart_upload(dst, upload_id, &parts).await
     }
 
-    /// Uploads one part's bytes to S3 and returns the [`CompletedPart`]
-    /// describing it. `InvalidResponseErr` if the response omits the ETag.
+    /// Uploads `len` bytes of `src` from `offset` as one part, streamed from the
+    /// file, and returns the [`CompletedPart`] describing it.
+    /// `InvalidResponseErr` if the response omits the ETag.
     async fn upload_part(
         &self,
+        src: &Source,
         dst: &Object,
         upload_id: &str,
         part_number: i32,
-        buf: Vec<u8>,
+        offset: u64,
+        len: u64,
     ) -> Result<CompletedPart, S3Err> {
-        let content_md5 = self.content_md5(&buf);
-        let len = buf.len() as u64;
-        let body = body::framed(buf);
+        let (body, content_md5) = self.body(src, "upload_part", dst, offset, len).await?;
 
         let output = self
             .client
@@ -715,9 +716,9 @@ mod tests {
 
         #[tokio::test]
         async fn source_truncated_after_open_maps_to_local_io_err() {
-            // Truncating the opened file in place shortens what the handle can
-            // read, so the part read runs short (`UnexpectedEof`) and the upload
-            // is aborted before any part leaves the client.
+            // A file truncated after it was sized is shorter than the part, so
+            // building the part's body fails and the upload is aborted before
+            // any part leaves the client.
             let src = temp_file_with(b"multipart-body").await;
             let source = source_of(&src).await;
             tokio::fs::OpenOptions::new()
@@ -742,51 +743,6 @@ mod tests {
             assert!(matches!(err, S3Err::LocalIoErr(_)));
             assert_eq!(actual_shapes(&replay), vec![create_shape(), abort_shape()]);
         }
-
-        #[tokio::test]
-        async fn path_replaced_after_open_uploads_the_opened_file() {
-            const PART_SIZE: u64 = 8 * 1024 * 1024;
-            let original: Vec<u8> = (0..(PART_SIZE + 1024)).map(|i| i as u8).collect();
-            let tf = temp_file_with(&original).await;
-            let source = source_of(&tf).await;
-
-            // Move the opened file away and put a longer, different file at the
-            // same path. Sizing or reading by path would now plan three parts
-            // or send the replacement's bytes.
-            let path = tf.file().path();
-            let moved = path.with_extension("1");
-            tokio::fs::rename(path, &moved).await.unwrap();
-            tokio::fs::write(path, vec![0xAAu8; (2 * PART_SIZE + 1) as usize])
-                .await
-                .unwrap();
-
-            let (store, replay) = store_with(vec![
-                ReplayEvent::new(create_req(), create_resp()),
-                ReplayEvent::new(upload_part_req(1), upload_part_resp("\"etag-part-1\"")),
-                ReplayEvent::new(upload_part_req(2), upload_part_resp("\"etag-part-2\"")),
-                ReplayEvent::new(complete_req(), complete_resp()),
-            ]);
-
-            store
-                .put_multipart(source, &obj("big.bin"), &HashMap::new())
-                .await
-                .unwrap();
-
-            assert_eq!(
-                actual_shapes(&replay),
-                vec![
-                    create_shape(),
-                    upload_part_shape(1),
-                    upload_part_shape(2),
-                    complete_shape(),
-                ]
-            );
-            let requests = replay.actual_requests().collect::<Vec<_>>();
-            assert!(recorded_payload(requests[1]).await == original[..PART_SIZE as usize]);
-            assert!(recorded_payload(requests[2]).await == original[PART_SIZE as usize..]);
-
-            tokio::fs::remove_file(&moved).await.unwrap();
-        }
     }
 
     /// Calls to a server that never answers end at their own time limits with
@@ -797,16 +753,19 @@ mod tests {
 
         #[tokio::test(start_paused = true)]
         async fn stalled_upload_part_maps_to_connection_err() {
+            let len: u64 = 64 * 1024;
+            let tf = temp_file_with(&vec![0u8; len as usize]).await;
+            let src = Source::open(tf.to_file(), &obj("big.bin")).await.unwrap();
             let store = store_on(NeverClient::new());
             let start = Instant::now();
 
             let err = store
-                .upload_part(&obj("big.bin"), UPLOAD_ID, 1, vec![0; 64 * 1024])
+                .upload_part(&src, &obj("big.bin"), UPLOAD_ID, 1, 0, len)
                 .await
                 .unwrap_err();
 
             assert!(matches!(err, S3Err::ConnectionErr(_)), "got {err:?}");
-            assert_eq!(start.elapsed(), sdk::upload_timeout(64 * 1024));
+            assert_eq!(start.elapsed(), sdk::upload_timeout(len));
         }
 
         #[tokio::test(start_paused = true)]

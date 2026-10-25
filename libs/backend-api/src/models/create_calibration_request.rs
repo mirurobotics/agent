@@ -11,6 +11,9 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CreateCalibrationRequest {
+    /// ID the agent gave the report when it received it. If the device already reported a calibration with this `report_id`, Miru returns that calibration and records nothing new.
+    #[serde(rename = "report_id")]
+    pub report_id: uuid::Uuid,
     /// ID of the deployment the device is on. Omitted if the device is on no deployment.
     #[serde(rename = "deployment_id", skip_serializing_if = "Option::is_none")]
     pub deployment_id: Option<String>,
@@ -35,8 +38,9 @@ pub struct CreateCalibrationRequest {
 }
 
 impl CreateCalibrationRequest {
-    pub fn new(component: String, content: models::InstanceContent, reported_at: String) -> CreateCalibrationRequest {
+    pub fn new(report_id: uuid::Uuid, component: String, content: models::InstanceContent, reported_at: String) -> CreateCalibrationRequest {
         CreateCalibrationRequest {
+            report_id,
             deployment_id: None,
             component,
             role: None,

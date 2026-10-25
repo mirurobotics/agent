@@ -3,6 +3,7 @@
 
 // internal crates
 use crate::queue::file::queue_suite;
+use crate::test_utils::calibrations::report_id;
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::calibrations::{Queue, QueueSnapshot, QueueSnapshotFile, ReportMetadata};
 use miru_agent::filesys::{files, File, WriteOptions};
@@ -16,6 +17,7 @@ use uuid::Uuid;
 /// Deterministic report metadata, ready the moment it arrives.
 fn metadata(name: &str) -> ReportMetadata {
     ReportMetadata {
+        report_id: report_id(name),
         component: name.to_string(),
         format: InstanceFormat::Yaml,
         role: Some("aligner-1".to_string()),
@@ -78,12 +80,13 @@ mod wire {
         let raw = format!(
             concat!(
                 r#"{{"entries":[{{"id":"{id}","job":{{"#,
-                r#""component":"arm","format":"yaml","#,
+                r#""report_id":"{report_id}","component":"arm","format":"yaml","#,
                 r#""role":"aligner-1","aspect":"pose","serial_number":"SN-1","#,
                 r#""deployment_id":"dpl_1","reported_at":"1970-01-01T00:16:40Z""#,
                 r#"}},"attempts":0,"next_attempt_at":null}}]}}"#,
             ),
             id = id,
+            report_id = report_id("arm"),
         );
         files::write_string(&path, &raw, WriteOptions::OVERWRITE_ATOMIC)
             .await
@@ -102,11 +105,15 @@ mod wire {
     async fn optional_fields_default_to_none() {
         let dir = test_dirs::temp("calibration_queue_test").unwrap();
         let path = dir.to_dir().file("queue.json");
-        let raw = concat!(
-            r#"{"entries":[{"job":{"component":"arm","format":"yaml","#,
-            r#""reported_at":"1970-01-01T00:16:40Z"}}]}"#,
+        let raw = format!(
+            concat!(
+                r#"{{"entries":[{{"job":{{"report_id":"{report_id}","#,
+                r#""component":"arm","format":"yaml","#,
+                r#""reported_at":"1970-01-01T00:16:40Z"}}}}]}}"#,
+            ),
+            report_id = report_id("arm"),
         );
-        files::write_string(&path, raw, WriteOptions::OVERWRITE_ATOMIC)
+        files::write_string(&path, &raw, WriteOptions::OVERWRITE_ATOMIC)
             .await
             .unwrap();
 
@@ -118,6 +125,32 @@ mod wire {
             aspect: None,
             serial_number: None,
             deployment_id: None,
+            ..metadata("arm")
+        };
+        assert_eq!(found, expected);
+    }
+
+    /// Reports queued before `report_id` was part of the metadata are minted
+    /// one on load.
+    #[tokio::test]
+    async fn a_missing_report_id_is_minted() {
+        let dir = test_dirs::temp("calibration_queue_test").unwrap();
+        let path = dir.to_dir().file("queue.json");
+        let raw = concat!(
+            r#"{"entries":[{"job":{"component":"arm","format":"yaml","#,
+            r#""role":"aligner-1","aspect":"pose","serial_number":"SN-1","#,
+            r#""deployment_id":"dpl_1","reported_at":"1970-01-01T00:16:40Z"}}]}"#,
+        );
+        files::write_string(&path, raw, WriteOptions::OVERWRITE_ATOMIC)
+            .await
+            .unwrap();
+
+        let queue = Queue::from_snapshot(8, open(&path).await, Persistence::BestEffort);
+
+        let found = queue.next_ready(Utc::now()).unwrap().job;
+        assert!(!found.report_id.is_nil());
+        let expected = ReportMetadata {
+            report_id: found.report_id,
             ..metadata("arm")
         };
         assert_eq!(found, expected);
