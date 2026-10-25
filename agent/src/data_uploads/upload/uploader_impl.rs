@@ -269,7 +269,7 @@ where
 
     fn log_terminal_drop(entry: &QueueEntry, err: &UploadErr) {
         error!(
-            "dropping upload job: backend rejected the upload attempt \
+            "dropping upload job: the upload attempt failed in a way a retry can't fix \
              (rule {}, file {}, digest {}, attempt {}); the backend will not learn this \
              upload died: {err:?}",
             entry.job.file_rule_id, entry.job.file, entry.job.digest, entry.attempts

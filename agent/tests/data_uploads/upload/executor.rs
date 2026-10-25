@@ -82,19 +82,23 @@ async fn happy_path_creates_transfers_confirms() {
     client.set_create_upload(|| Ok(pending_response()));
     client.set_confirm_upload(|| Ok(*uploaded_response().upload));
     let transfer = MockObjectTransfer::new();
-    let job = make_job("a.log");
+    let job = Job {
+        crc32c: Some(42),
+        ..make_job("a.log")
+    };
     let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone());
 
     executor.upload(&job).await.unwrap();
 
     // Exactly one transfer, carrying the create response's credentials,
-    // destination, and metadata plus the job's file.
+    // destination, and metadata plus the job's file and CRC32C.
     assert_eq!(
         transfer.recorded_calls(),
         vec![(
             s3_credentials(),
             destination(),
             job.file.clone(),
+            Some(42),
             response_metadata()
         )]
     );

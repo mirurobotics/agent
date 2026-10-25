@@ -9,7 +9,9 @@ use crate::s3::{
 
 // external crates
 use aws_sdk_s3::operation::list_parts::ListPartsOutput;
-use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart};
+use aws_sdk_s3::types::{ChecksumAlgorithm, ChecksumType, CompletedMultipartUpload, CompletedPart};
+use base64::Engine;
+use crc_fast::{checksum_combine, CrcAlgorithm};
 
 type UploadID = String;
 
@@ -35,7 +37,7 @@ impl Store {
         dst: &Object,
         metadata: &std::collections::HashMap<String, String>,
     ) -> Result<(), S3Err> {
-        let upload_id = self.create_multipart_upload(dst, metadata).await?;
+        let upload_id = self.create_multipart_upload(&src, dst, metadata).await?;
 
         let written = self.exec_multipart_upload(&src, dst, &upload_id).await;
         if !matches!(written, Ok(WriteOutcome::Created)) {
@@ -51,7 +53,9 @@ impl Store {
     /// resume is safe to retry.
     ///
     /// `NoSuchUploadErr` if S3 no longer knows the upload. The caller must resume
-    /// against the same file bytes the upload was started for.
+    /// against the same file bytes the upload was started for. GCS lists parts
+    /// without their CRC32Cs, so on GCS a source with a scan-time CRC32C fails
+    /// [`check_parts_crc32c`] if any part had already landed.
     pub async fn resume_multipart_upload(
         &self,
         src: Source,
@@ -60,7 +64,7 @@ impl Store {
     ) -> Result<(), S3Err> {
         let landed = self.list_parts(dst, upload_id).await?;
         let parts = self.upload_parts(&src, dst, upload_id, &landed).await?;
-        self.complete_multipart_upload(dst, upload_id, &parts)
+        self.complete_multipart_upload(&src, dst, upload_id, &parts)
             .await
             .map(|_| ())
     }
@@ -121,6 +125,7 @@ impl Store {
                     CompletedPart::builder()
                         .part_number(number)
                         .e_tag(etag)
+                        .set_checksum_crc32_c(part.checksum_crc32_c().map(str::to_string))
                         .build(),
                 );
             }
@@ -193,15 +198,19 @@ impl Store {
     /// Starts a multipart upload and returns its `upload_id`.
     async fn create_multipart_upload(
         &self,
+        src: &Source,
         dst: &Object,
         metadata: &std::collections::HashMap<String, String>,
     ) -> Result<UploadID, S3Err> {
+        let checked = self.s3_checks_crc32c(src);
         let created = self
             .client
             .create_multipart_upload()
             .bucket(&dst.bucket)
             .key(&dst.key)
             .set_metadata((!metadata.is_empty()).then(|| metadata.clone()))
+            .set_checksum_algorithm(checked.then_some(ChecksumAlgorithm::Crc32C))
+            .set_checksum_type(checked.then_some(ChecksumType::FullObject))
             .send()
             .await
             .map_err(|e| errors::map_sdk_err("create_multipart_upload", dst, e))?;
@@ -227,12 +236,22 @@ impl Store {
         let parts = self
             .upload_parts(src, dst, upload_id, &std::collections::HashMap::new())
             .await?;
-        self.complete_multipart_upload(dst, upload_id, &parts).await
+        self.complete_multipart_upload(src, dst, upload_id, &parts)
+            .await
+    }
+
+    /// Whether S3 checks this upload against `src`'s scan-time CRC32C: each
+    /// part's CRC32C, then the whole object's on complete. GCS takes no
+    /// checksum for a multipart object, so there [`check_parts_crc32c`] checks
+    /// the parts before completing instead.
+    fn s3_checks_crc32c(&self, src: &Source) -> bool {
+        !self.gcs && src.crc32c.is_some()
     }
 
     /// Uploads `len` bytes of `src` from `offset` as one part, streamed from the
-    /// file, and returns the [`CompletedPart`] describing it.
-    /// `InvalidResponseErr` if the response omits the ETag.
+    /// file, and returns the [`CompletedPart`] describing it, with the part's
+    /// CRC32C if the store reported one. `InvalidResponseErr` if the response
+    /// omits the ETag.
     async fn upload_part(
         &self,
         src: &Source,
@@ -243,6 +262,7 @@ impl Store {
         len: u64,
     ) -> Result<CompletedPart, S3Err> {
         let (body, content_md5) = self.body(src, "upload_part", dst, offset, len).await?;
+        let checked = self.s3_checks_crc32c(src);
 
         let output = self
             .client
@@ -253,6 +273,7 @@ impl Store {
             .part_number(part_number)
             .body(body)
             .set_content_md5(content_md5)
+            .set_checksum_algorithm(checked.then_some(ChecksumAlgorithm::Crc32C))
             .customize()
             .config_override(sdk::timeout(sdk::upload_timeout(len)))
             .send()
@@ -265,27 +286,41 @@ impl Store {
         Ok(CompletedPart::builder()
             .part_number(part_number)
             .e_tag(etag)
+            .set_checksum_crc32_c(output.checksum_crc32_c().map(str::to_string))
             .build())
     }
 
-    /// Completes a multipart upload from the `(part_number, etag)` pairs of the
-    /// landed parts.
+    /// Completes a multipart upload from the landed parts. Given `src`'s
+    /// scan-time CRC32C, S3 checks the object against it, and on GCS the parts
+    /// must pass [`check_parts_crc32c`] before the object is created.
     async fn complete_multipart_upload(
         &self,
+        src: &Source,
         obj: &Object,
         upload_id: &str,
         parts: &[CompletedPart],
     ) -> Result<WriteOutcome, S3Err> {
-        let completed = CompletedMultipartUpload::builder()
-            .set_parts(Some(parts.to_vec()))
-            .build();
-        let result = self
+        let mut request = self
             .client
             .complete_multipart_upload()
             .bucket(&obj.bucket)
             .key(&obj.key)
-            .upload_id(upload_id)
-            .multipart_upload(completed)
+            .upload_id(upload_id);
+        if self.gcs {
+            if let Some(expected) = src.crc32c {
+                check_parts_crc32c(obj, expected, src.size, parts)?;
+            }
+            request = request.multipart_upload(gcs_manifest(parts));
+        } else {
+            let completed = CompletedMultipartUpload::builder()
+                .set_parts(Some(parts.to_vec()))
+                .build();
+            request = request
+                .multipart_upload(completed)
+                .set_checksum_type(src.crc32c.map(|_| ChecksumType::FullObject))
+                .set_checksum_crc32_c(src.crc32c_base64());
+        }
+        let result = request
             .customize()
             .config_override(sdk::timeout(sdk::COMPLETE_TIMEOUT))
             .send()
@@ -309,6 +344,59 @@ impl Store {
             .map_err(|e| errors::map_sdk_err("abort_multipart_upload", obj, e))?;
         Ok(())
     }
+}
+
+/// Checks that the parts GCS stored make up the scanned file: their CRC32Cs,
+/// as GCS reported them, combined in part order must equal `expected`. A part
+/// without a CRC32C fails the check.
+fn check_parts_crc32c(
+    dst: &Object,
+    expected: u32,
+    size: u64,
+    parts: &[CompletedPart],
+) -> Result<(), S3Err> {
+    let mut composed = 0;
+    for (part, (number, _, len)) in parts.iter().zip(Store::part_plan(size)) {
+        let Some(crc32c) = part.checksum_crc32_c().and_then(decode_crc32c) else {
+            let field = format!("a CRC32C for part {number}");
+            return Err(errors::missing_response_field("upload_part", dst, &field));
+        };
+        composed = checksum_combine(CrcAlgorithm::Crc32Iscsi, composed, crc32c.into(), len);
+    }
+    if composed != u64::from(expected) {
+        let msg = format!("parts compose to CRC32C {composed:08x}, not the scan's {expected:08x}");
+        return Err(errors::checksum_mismatch(
+            "complete_multipart_upload",
+            dst,
+            &msg,
+        ));
+    }
+    Ok(())
+}
+
+/// Decodes a CRC32C header value: the base64 of its big-endian bytes.
+fn decode_crc32c(value: &str) -> Option<u32> {
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(value)
+        .ok()?;
+    Some(u32::from_be_bytes(bytes.try_into().ok()?))
+}
+
+/// The manifest GCS documents for completing an upload: each part's number
+/// and ETag, without the checksums S3 also takes.
+fn gcs_manifest(parts: &[CompletedPart]) -> CompletedMultipartUpload {
+    let parts = parts
+        .iter()
+        .map(|part| {
+            CompletedPart::builder()
+                .set_part_number(part.part_number())
+                .set_e_tag(part.e_tag().map(str::to_string))
+                .build()
+        })
+        .collect();
+    CompletedMultipartUpload::builder()
+        .set_parts(Some(parts))
+        .build()
 }
 
 #[cfg(test)]
@@ -412,7 +500,9 @@ mod tests {
     const UPLOAD_ID: &str = "test-upload-id";
 
     async fn source_of(tf: &test_files::TempFile) -> Source {
-        Source::open(tf.to_file(), &obj("big.bin")).await.unwrap()
+        Source::open(tf.to_file(), None, &obj("big.bin"))
+            .await
+            .unwrap()
     }
 
     fn create_resp() -> http::Response<SdkBody> {
@@ -556,6 +646,44 @@ mod tests {
                 requests[0].headers().get("x-amz-meta-device_id"),
                 Some("dvc_1")
             );
+        }
+
+        #[tokio::test]
+        async fn crc32c_is_checked_for_the_full_object() {
+            let tf = temp_file_with(b"multipart-body").await;
+            // The CRC32C of b"multipart-body", base64 `NVLsaw==` on the wire.
+            let src = Source::open(tf.to_file(), Some(0x3552_EC6B), &obj("big.bin"))
+                .await
+                .unwrap();
+            // One part, so S3 reports the file's CRC32C for it.
+            let part_resp = http::Response::builder()
+                .status(200)
+                .header("ETag", "\"etag-part-1\"")
+                .header("x-amz-checksum-crc32c", "NVLsaw==")
+                .body(SdkBody::empty())
+                .unwrap();
+            let (store, replay) = store_with(vec![
+                ReplayEvent::new(create_req(), create_resp()),
+                ReplayEvent::new(upload_part_req(1), part_resp),
+                ReplayEvent::new(complete_req(), complete_resp()),
+            ]);
+
+            store
+                .put_multipart(src, &obj("big.bin"), &HashMap::new())
+                .await
+                .unwrap();
+
+            // S3 checks the part against the CRC32C the SDK sends with it, and
+            // the object against the scanned one.
+            let requests = replay.actual_requests().collect::<Vec<_>>();
+            let header = |i: usize, name: &str| requests[i].headers().get(name);
+            assert_eq!(header(0, "x-amz-checksum-algorithm"), Some("CRC32C"));
+            assert_eq!(header(0, "x-amz-checksum-type"), Some("FULL_OBJECT"));
+            assert_eq!(header(1, "x-amz-sdk-checksum-algorithm"), Some("CRC32C"));
+            assert_eq!(header(2, "x-amz-checksum-type"), Some("FULL_OBJECT"));
+            assert_eq!(header(2, "x-amz-checksum-crc32c"), Some("NVLsaw=="));
+            let manifest = std::str::from_utf8(requests[2].body().bytes().unwrap()).unwrap();
+            assert!(manifest.contains("<ChecksumCRC32C>NVLsaw==</ChecksumCRC32C>"));
         }
 
         #[tokio::test]
@@ -755,7 +883,9 @@ mod tests {
         async fn stalled_upload_part_maps_to_connection_err() {
             let len: u64 = 64 * 1024;
             let tf = temp_file_with(&vec![0u8; len as usize]).await;
-            let src = Source::open(tf.to_file(), &obj("big.bin")).await.unwrap();
+            let src = Source::open(tf.to_file(), None, &obj("big.bin"))
+                .await
+                .unwrap();
             let store = store_on(NeverClient::new());
             let start = Instant::now();
 
@@ -770,6 +900,8 @@ mod tests {
 
         #[tokio::test(start_paused = true)]
         async fn stalled_complete_maps_to_connection_err() {
+            let tf = temp_file_with(b"multipart-body").await;
+            let src = source_of(&tf).await;
             let store = store_on(NeverClient::new());
             let part = CompletedPart::builder()
                 .part_number(1)
@@ -778,7 +910,7 @@ mod tests {
             let start = Instant::now();
 
             let err = store
-                .complete_multipart_upload(&obj("big.bin"), UPLOAD_ID, &[part])
+                .complete_multipart_upload(&src, &obj("big.bin"), UPLOAD_ID, &[part])
                 .await
                 .unwrap_err();
 
@@ -1096,7 +1228,7 @@ mod tests {
                 store_expecting(req("PUT", "small.bin?x-id=PutObject"), resp(200, &[]));
 
             store
-                .put(src.to_file(), &obj("small.bin"), &HashMap::new())
+                .put(src.to_file(), None, &obj("small.bin"), &HashMap::new())
                 .await
                 .unwrap();
 
@@ -1124,7 +1256,7 @@ mod tests {
             ]);
 
             store
-                .put(src.to_file(), &obj("big.bin"), &HashMap::new())
+                .put(src.to_file(), None, &obj("big.bin"), &HashMap::new())
                 .await
                 .unwrap();
 

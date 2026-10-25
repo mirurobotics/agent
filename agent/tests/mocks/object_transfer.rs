@@ -13,6 +13,7 @@ pub type TransferCall = (
     UploadCredentials,
     UploadDestination,
     File,
+    Option<u32>,
     HashMap<String, String>,
 );
 
@@ -55,12 +56,14 @@ impl ObjectTransfer for MockObjectTransfer {
         credentials: &UploadCredentials,
         destination: &UploadDestination,
         file: &File,
+        crc32c: Option<u32>,
         metadata: &HashMap<String, String>,
     ) -> Result<(), UploadErr> {
         self.calls.lock().unwrap().push((
             credentials.clone(),
             destination.clone(),
             file.clone(),
+            crc32c,
             metadata.clone(),
         ));
         let step = self.script.lock().unwrap().pop_front();

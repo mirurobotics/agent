@@ -5,21 +5,26 @@ use crate::trace;
 
 // external crates
 use aws_sdk_s3::primitives::{ByteStream, Length};
+use base64::Engine;
 
 /// Bytes per read and per frame sent. The SDK's default is 4 KiB.
 const READ_SIZE: usize = 32 * 1024;
 
-/// A local file to upload and its size when the upload started. The file is
-/// expected to stay unchanged until the upload is confirmed.
+/// A local file to upload, its size when the upload started, and the CRC32C
+/// it was scanned with. The file is expected to stay unchanged until the
+/// upload is confirmed; with a CRC32C, the store writes no object whose bytes
+/// differ from the scanned file.
 pub struct Source {
     file: File,
     pub(super) size: u64,
+    pub(super) crc32c: Option<u32>,
 }
 
 impl Source {
-    /// Sizes `file` for upload. A missing file is [`S3Err::FileSysErr`]; any
-    /// other metadata failure is [`S3Err::LocalIoErr`].
-    pub async fn open(file: File, dst: &Object) -> Result<Self, S3Err> {
+    /// Sizes `file` for upload, checked against `crc32c` when there is one. A
+    /// missing file is [`S3Err::FileSysErr`]; any other metadata failure is
+    /// [`S3Err::LocalIoErr`].
+    pub async fn open(file: File, crc32c: Option<u32>, dst: &Object) -> Result<Self, S3Err> {
         let metadata = tokio::fs::metadata(file.path()).await.map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
                 FileSysErr::PathDoesNotExistErr(PathDoesNotExistErr {
@@ -34,7 +39,15 @@ impl Source {
         Ok(Self {
             file,
             size: metadata.len(),
+            crc32c,
         })
+    }
+
+    /// The scan-time CRC32C as S3 and GCS headers carry it: the base64 of its
+    /// big-endian bytes.
+    pub(super) fn crc32c_base64(&self) -> Option<String> {
+        let crc32c = self.crc32c?;
+        Some(base64::engine::general_purpose::STANDARD.encode(crc32c.to_be_bytes()))
     }
 
     /// A request body that streams `len` bytes from `offset`. A retry reopens

@@ -17,9 +17,10 @@ use tracing::info;
 
 /// The seam between the upload executor and the concrete cloud-storage SDKs.
 /// Given the vended downscoped credentials and the server-authorized
-/// destination, transfer the file's bytes to the object store. Kept separate
-/// from the executor so its orchestration (create, dedup, confirm) is
-/// unit-testable without a live object store.
+/// destination, transfer the file's bytes to the object store, which refuses
+/// them if they don't match the file's scan-time `crc32c`. Kept separate from
+/// the executor so its orchestration (create, dedup, confirm) is unit-testable
+/// without a live object store.
 ///
 /// # Cancel safety
 ///
@@ -31,6 +32,7 @@ pub trait ObjectTransfer: Send + Sync {
         credentials: &UploadCredentials,
         destination: &UploadDestination,
         file: &File,
+        crc32c: Option<u32>,
         metadata: &HashMap<String, String>,
     ) -> impl Future<Output = Result<(), UploadErr>> + Send;
 }
@@ -78,6 +80,7 @@ impl SdkTransfer {
         credentials: &UploadCredentials,
         destination: &UploadDestination,
         file: &File,
+        crc32c: Option<u32>,
         metadata: &HashMap<String, String>,
     ) -> Result<(), UploadErr> {
         let creds = credentials
@@ -85,7 +88,7 @@ impl SdkTransfer {
             .as_deref()
             .ok_or_else(|| executor_err(TransferErr::MissingS3Credentials))?;
         let store = self.s3_store(s3_config(creds));
-        put(&store, destination, file, metadata).await
+        put(&store, destination, file, crc32c, metadata).await
     }
 
     /// Uploads `file` to GCS using the vended downscoped OAuth2 bearer token,
@@ -95,6 +98,7 @@ impl SdkTransfer {
         credentials: &UploadCredentials,
         destination: &UploadDestination,
         file: &File,
+        crc32c: Option<u32>,
         metadata: &HashMap<String, String>,
     ) -> Result<(), UploadErr> {
         let creds = credentials
@@ -103,7 +107,7 @@ impl SdkTransfer {
             .ok_or_else(|| executor_err(TransferErr::MissingGcsCredentials))?;
         let token = s3::gcs::Token::new(creds.access_token.clone())
             .ok_or_else(|| executor_err(TransferErr::InvalidGcsToken))?;
-        put(&self.gcs_store(token), destination, file, metadata).await
+        put(&self.gcs_store(token), destination, file, crc32c, metadata).await
     }
 
     /// Builds the S3 store with this transfer's transport settings.
@@ -125,6 +129,7 @@ async fn put(
     store: &s3::Store,
     destination: &UploadDestination,
     file: &File,
+    crc32c: Option<u32>,
     metadata: &HashMap<String, String>,
 ) -> Result<(), UploadErr> {
     let object = s3::Object {
@@ -132,7 +137,7 @@ async fn put(
         key: destination.object_key.clone(),
     };
     store
-        .put(file.clone(), &object, metadata)
+        .put(file.clone(), crc32c, &object, metadata)
         .await
         .map_err(classified_executor_err)
 }
@@ -143,6 +148,7 @@ impl ObjectTransfer for SdkTransfer {
         credentials: &UploadCredentials,
         destination: &UploadDestination,
         file: &File,
+        crc32c: Option<u32>,
         metadata: &HashMap<String, String>,
     ) -> Result<(), UploadErr> {
         info!(
@@ -151,11 +157,11 @@ impl ObjectTransfer for SdkTransfer {
         );
         match credentials.scheme {
             Scheme::S3 => {
-                self.transfer_s3(credentials, destination, file, metadata)
+                self.transfer_s3(credentials, destination, file, crc32c, metadata)
                     .await
             }
             Scheme::Gcs => {
-                self.transfer_gcs(credentials, destination, file, metadata)
+                self.transfer_gcs(credentials, destination, file, crc32c, metadata)
                     .await
             }
             Scheme::SchemeUnknown => Err(executor_err(TransferErr::UnrecognizedScheme)),
@@ -289,6 +295,9 @@ mod tests {
     /// bucket and key.
     const GCS_PUT_URI: &str = "https://storage.googleapis.com/my-bucket/logs/a.log?x-id=PutObject";
 
+    /// CRC32C of `b"hello world"`, base64 `yZRlqg==` on the wire.
+    const HELLO_WORLD_CRC32C: u32 = 0xC994_65AA;
+
     #[tokio::test]
     async fn unknown_scheme_is_unsupported() {
         let creds = credentials("something-new", s3_credentials_json(), Value::Null);
@@ -297,6 +306,7 @@ mod tests {
                 &creds,
                 &destination(),
                 &File::new("/data/a.log"),
+                None,
                 &HashMap::new(),
             )
             .await
@@ -316,6 +326,7 @@ mod tests {
                 &creds,
                 &destination(),
                 &File::new("/data/a.log"),
+                None,
                 &HashMap::new(),
             )
             .await
@@ -337,7 +348,13 @@ mod tests {
         let creds = credentials("s3", s3_credentials_json(), Value::Null);
 
         SdkTransfer::with_http_client(replay.clone())
-            .transfer(&creds, &destination(), src.file(), &response_metadata())
+            .transfer(
+                &creds,
+                &destination(),
+                src.file(),
+                Some(HELLO_WORLD_CRC32C),
+                &response_metadata(),
+            )
             .await
             .unwrap();
 
@@ -351,11 +368,11 @@ mod tests {
         assert_eq!(requests.len(), 1);
         assert_eq!(requests[0].method(), "PUT");
         assert_eq!(requests[0].uri().to_string(), S3_PUT_URI);
-        // The vended metadata map is stamped as user-defined object metadata.
-        assert_eq!(
-            requests[0].headers().get("x-amz-meta-device_id"),
-            Some("dvc_1")
-        );
+        // The vended metadata map is stamped as user-defined object metadata,
+        // and S3 checks the body against the scan-time CRC32C.
+        let header = |name: &str| requests[0].headers().get(name);
+        assert_eq!(header("x-amz-meta-device_id"), Some("dvc_1"));
+        assert_eq!(header("x-amz-checksum-crc32c"), Some("yZRlqg=="));
         assert!(requests[0]
             .headers()
             .get("authorization")
@@ -377,7 +394,7 @@ mod tests {
         let creds = credentials("s3", s3_credentials_json(), Value::Null);
 
         let err = SdkTransfer::with_http_client(replay.clone())
-            .transfer(&creds, &destination(), src.file(), &HashMap::new())
+            .transfer(&creds, &destination(), src.file(), None, &HashMap::new())
             .await
             .unwrap_err();
 
@@ -395,7 +412,7 @@ mod tests {
         let missing = missing_file();
 
         let err = SdkTransfer::default()
-            .transfer(&creds, &destination(), &missing, &HashMap::new())
+            .transfer(&creds, &destination(), &missing, None, &HashMap::new())
             .await
             .unwrap_err();
 
@@ -410,6 +427,7 @@ mod tests {
                 &creds,
                 &destination(),
                 &File::new("/data/a.log"),
+                None,
                 &HashMap::new(),
             )
             .await
@@ -431,6 +449,7 @@ mod tests {
                 &creds,
                 &destination(),
                 &File::new("/data/a.log"),
+                None,
                 &HashMap::new(),
             )
             .await
@@ -451,7 +470,13 @@ mod tests {
         let creds = credentials("gcs", Value::Null, gcs_credentials_json("vended-token"));
 
         SdkTransfer::with_http_client(replay.clone())
-            .transfer(&creds, &destination(), src.file(), &response_metadata())
+            .transfer(
+                &creds,
+                &destination(),
+                src.file(),
+                Some(HELLO_WORLD_CRC32C),
+                &response_metadata(),
+            )
             .await
             .unwrap();
 
@@ -464,6 +489,7 @@ mod tests {
         let headers = requests[0].headers();
         assert_eq!(headers.get("authorization"), Some("Bearer vended-token"));
         assert_eq!(headers.get("x-goog-meta-device_id"), Some("dvc_1"));
+        assert_eq!(headers.get("x-goog-hash"), Some("crc32c=yZRlqg=="));
         // GCS sends the streamed body without aws-chunked framing.
         let body = requests[0].body().try_clone().unwrap();
         let sent = body.collect().await.unwrap().to_bytes();
@@ -480,7 +506,7 @@ mod tests {
         let creds = credentials("gcs", Value::Null, gcs_credentials_json("vended-token"));
 
         let err = SdkTransfer::with_http_client(replay)
-            .transfer(&creds, &destination(), src.file(), &HashMap::new())
+            .transfer(&creds, &destination(), src.file(), None, &HashMap::new())
             .await
             .unwrap_err();
 
@@ -498,7 +524,7 @@ mod tests {
         let missing = missing_file();
 
         let err = SdkTransfer::default()
-            .transfer(&creds, &destination(), &missing, &HashMap::new())
+            .transfer(&creds, &destination(), &missing, None, &HashMap::new())
             .await
             .unwrap_err();
 
@@ -547,7 +573,7 @@ mod tests {
         let creds = credentials("gcs", Value::Null, gcs_credentials_json("vended-token"));
 
         let err = SdkTransfer::with_http_client(Refused)
-            .transfer(&creds, &destination(), src.file(), &HashMap::new())
+            .transfer(&creds, &destination(), src.file(), None, &HashMap::new())
             .await
             .unwrap_err();
 

@@ -8,7 +8,7 @@ use crate::s3::{errors, errors::ObjectNotFoundErr, sdk, S3Err, Source};
 use crate::trace;
 
 // external crates
-use aws_sdk_s3::error::SdkError;
+use aws_sdk_s3::error::{ProvideErrorMetadata, SdkError};
 use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::Client;
 use tokio::io::AsyncWriteExt;
@@ -52,7 +52,7 @@ pub struct Options {
 pub struct Store {
     pub(super) client: Client,
     /// See [`Options::gcs`].
-    gcs: bool,
+    pub(super) gcs: bool,
 }
 
 impl Store {
@@ -67,7 +67,8 @@ impl Store {
 
     /// Creates or overwrites an object from a local file, sized once as a
     /// [`Source`]. GCS never overwrites: an existing object counts as written
-    /// (see [`gcs`](crate::s3::gcs)).
+    /// (see [`gcs`](crate::s3::gcs)). Given the file's scan-time `crc32c`, no
+    /// object is written whose bytes don't match it.
     ///
     /// Files at or below [`PART_SIZE`] go through one `PutObject`
     /// ([`Self::put_singlepart`]); larger files go part-by-part through a
@@ -76,10 +77,11 @@ impl Store {
     pub async fn put(
         &self,
         src: File,
+        crc32c: Option<u32>,
         dst: &Object,
         metadata: &HashMap<String, String>,
     ) -> Result<(), S3Err> {
-        let src = Source::open(src, dst).await?;
+        let src = Source::open(src, crc32c, dst).await?;
         if src.size > PART_SIZE {
             self.put_multipart(src, dst, metadata).await
         } else {
@@ -102,6 +104,7 @@ impl Store {
             .key(&dst.key)
             .body(body)
             .set_content_md5(content_md5)
+            .set_checksum_crc32_c(src.crc32c_base64())
             .set_metadata((!metadata.is_empty()).then(|| metadata.clone()))
             .customize()
             .config_override(sdk::timeout(sdk::upload_timeout(src.size)))
@@ -134,7 +137,9 @@ impl Store {
     /// Finishes an object write (PutObject or CompleteMultipartUpload). On GCS
     /// the client sends writes create-only (see [`gcs`](crate::s3::gcs)), so a 412 means an
     /// earlier attempt already stored the object at this key, which counts as
-    /// done.
+    /// done. A `BadDigest`, or GCS's `CrcMismatch` for a CRC32C, means the bytes
+    /// didn't match a checksum the request carried, which is
+    /// [`S3Err::ChecksumMismatchErr`].
     pub(super) fn finish_write<E>(
         &self,
         operation: &str,
@@ -142,13 +147,17 @@ impl Store {
         result: Result<(), SdkError<E>>,
     ) -> Result<WriteOutcome, S3Err>
     where
-        E: std::error::Error + 'static,
+        E: std::error::Error + ProvideErrorMetadata + 'static,
     {
         match result {
             Ok(()) => Ok(WriteOutcome::Created),
             Err(e) if self.gcs && errors::status(&e) == Some(HTTPCode::PRECONDITION_FAILED) => {
                 tracing::info!("upload: {dst} already exists, so an earlier {operation} landed");
                 Ok(WriteOutcome::AlreadyExists)
+            }
+            Err(e) if matches!(e.code(), Some("BadDigest" | "CrcMismatch")) => {
+                let msg = e.message().or_else(|| e.code()).unwrap_or_default();
+                Err(errors::checksum_mismatch(operation, dst, msg))
             }
             Err(e) => Err(errors::map_sdk_err(operation, dst, e)),
         }
@@ -277,6 +286,9 @@ pub(super) mod tests {
 
     const REGION: &str = "us-east-1";
     const BUCKET: &str = "test-bucket";
+
+    /// CRC32C of `b"hello world"`, base64 `yZRlqg==` on the wire.
+    pub(crate) const HELLO_WORLD_CRC32C: u32 = 0xC994_65AA;
 
     fn test_credentials() -> Credentials {
         Credentials {
@@ -499,7 +511,7 @@ pub(super) mod tests {
         async fn stalled_put_maps_to_connection_err() {
             let len = 1024 * 1024;
             let tf = temp_file_with(&vec![0u8; len]).await;
-            let src = Source::open(tf.to_file(), &obj("k")).await.unwrap();
+            let src = Source::open(tf.to_file(), None, &obj("k")).await.unwrap();
             let store = store_on(NeverClient::new());
             let start = Instant::now();
 
@@ -518,7 +530,7 @@ pub(super) mod tests {
         async fn put_that_stops_sending_trips_stall_protection() {
             let dst = obj("k");
             let tf = temp_file_with(&vec![0u8; 256 * 1024]).await;
-            let src = Source::open(tf.to_file(), &dst).await.unwrap();
+            let src = Source::open(tf.to_file(), None, &dst).await.unwrap();
             // A 1 s grace and no SDK retries keep the test short.
             let fast_stall = StalledStreamProtectionConfig::enabled()
                 .grace_period(Duration::from_secs(1))
@@ -553,7 +565,7 @@ pub(super) mod tests {
             use super::*;
 
             async fn source_of(tf: &test_files::TempFile, key: &str) -> Source {
-                Source::open(tf.to_file(), &obj(key)).await.unwrap()
+                Source::open(tf.to_file(), None, &obj(key)).await.unwrap()
             }
 
             #[tokio::test]
@@ -638,6 +650,69 @@ pub(super) mod tests {
                 assert_eq!(header("x-amz-meta-device_id"), Some("dvc_1"));
                 assert_eq!(header("x-amz-meta-digest"), Some("sha256:abc"));
             }
+
+            #[tokio::test]
+            async fn put_sends_scan_crc32c() {
+                let key = "artifacts/hello.txt";
+                let src = temp_file_with(b"hello world").await;
+                let source = Source::open(src.to_file(), Some(HELLO_WORLD_CRC32C), &obj(key))
+                    .await
+                    .unwrap();
+                let (store, replay) = store_expecting(
+                    req("PUT", "artifacts/hello.txt?x-id=PutObject"),
+                    resp(200, &[]),
+                );
+
+                store
+                    .put_singlepart(source, &obj(key), &HashMap::new())
+                    .await
+                    .unwrap();
+
+                // S3 checks the body against this header, and the SDK then
+                // adds no aws-chunked checksum of its own.
+                let requests = replay.actual_requests().collect::<Vec<_>>();
+                let header = |name: &str| requests[0].headers().get(name);
+                assert_eq!(header("x-amz-checksum-crc32c"), Some("yZRlqg=="));
+                assert_eq!(header("content-encoding"), None);
+                assert_eq!(recorded_payload(requests[0]).await, b"hello world");
+            }
+        }
+
+        pub mod checksum_mismatch {
+            use super::*;
+
+            const BAD_DIGEST_XML: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>BadDigest</Code><Message>The CRC32C you specified did not match the calculated checksum.</Message><RequestId>REQ400</RequestId></Error>"#;
+
+            #[tokio::test]
+            async fn put_bad_digest_maps_to_terminal_checksum_mismatch() {
+                // The file changed after it was scanned, so S3 refuses its bytes.
+                let src = temp_file_with(b"hello world, changed").await;
+                let (store, _replay) = store_expecting(
+                    req("PUT", "changed.txt?x-id=PutObject"),
+                    resp_xml(400, BAD_DIGEST_XML),
+                );
+
+                let err = store
+                    .put(
+                        src.to_file(),
+                        Some(HELLO_WORLD_CRC32C),
+                        &obj("changed.txt"),
+                        &HashMap::new(),
+                    )
+                    .await
+                    .unwrap_err();
+
+                let S3Err::ChecksumMismatchErr(inner) = &err else {
+                    panic!("expected ChecksumMismatchErr, got {err:?}");
+                };
+                assert_eq!(
+                    (inner.operation.as_str(), &inner.object),
+                    ("put_object", &obj("changed.txt"))
+                );
+                assert!(inner.msg.contains("did not match"), "{}", inner.msg);
+                assert!(err.is_terminal());
+            }
         }
 
         pub mod access_denied {
@@ -652,7 +727,7 @@ pub(super) mod tests {
                 );
 
                 let err = store
-                    .put(src.to_file(), &obj("denied.txt"), &HashMap::new())
+                    .put(src.to_file(), None, &obj("denied.txt"), &HashMap::new())
                     .await
                     .unwrap_err();
 
@@ -681,7 +756,7 @@ pub(super) mod tests {
                 let missing = missing_file();
 
                 let err = store
-                    .put(missing, &obj("k"), &HashMap::new())
+                    .put(missing, None, &obj("k"), &HashMap::new())
                     .await
                     .unwrap_err();
 
@@ -701,7 +776,7 @@ pub(super) mod tests {
                 let (store, replay) = store_with(vec![]);
 
                 let err = store
-                    .put(src, &obj("k"), &HashMap::new())
+                    .put(src, None, &obj("k"), &HashMap::new())
                     .await
                     .unwrap_err();
 

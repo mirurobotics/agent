@@ -102,6 +102,7 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> UploadExecutor for LiveE
                 &resp.credentials,
                 &resp.upload.destination,
                 &job.file,
+                job.crc32c,
                 &resp.metadata,
             )
             .await?;
