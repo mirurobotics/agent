@@ -431,7 +431,7 @@ pub mod read_bytes {
     }
 }
 
-pub mod hash {
+pub mod sha256 {
     use super::*;
 
     #[tokio::test]
@@ -442,7 +442,7 @@ pub mod hash {
             .await
             .unwrap();
         assert_eq!(
-            files::hash(&file).await.unwrap(),
+            files::sha256(&file).await.unwrap(),
             "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
         );
     }
@@ -455,7 +455,7 @@ pub mod hash {
             .await
             .unwrap();
         assert_eq!(
-            files::hash(&file).await.unwrap(),
+            files::sha256(&file).await.unwrap(),
             "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
         );
     }
@@ -470,8 +470,8 @@ pub mod hash {
             .await
             .unwrap();
 
-        let first = files::hash(&file).await.unwrap();
-        let second = files::hash(&file).await.unwrap();
+        let first = files::sha256(&file).await.unwrap();
+        let second = files::sha256(&file).await.unwrap();
         assert!(first.starts_with("sha256:"));
         assert_eq!(first, second);
     }
@@ -481,7 +481,7 @@ pub mod hash {
         let dir = test_dirs::temp("testing").unwrap();
         let file = dir.file("nonexistent-file");
         assert!(matches!(
-            files::hash(&file).await.unwrap_err(),
+            files::sha256(&file).await.unwrap_err(),
             FileSysErr::PathDoesNotExistErr { .. }
         ));
     }

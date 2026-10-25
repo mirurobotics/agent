@@ -44,7 +44,7 @@ pub async fn read_bytes(file: &File) -> Result<Vec<u8>, FileSysErr> {
 /// regardless of file size (the whole file is never materialized). Hashing is
 /// CPU-heavy, so callers may wrap this in `tokio::task::spawn_blocking` for very
 /// large files to avoid stalling the async runtime.
-pub async fn hash(file: &File) -> Result<String, FileSysErr> {
+pub async fn sha256(file: &File) -> Result<String, FileSysErr> {
     let mut f = TokioFile::open(file.path())
         .await
         .map_err(|e| map_io_err_for_open(e, file))?;
