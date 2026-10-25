@@ -15,13 +15,15 @@ use std::collections::HashMap;
 // internal crates
 use crate::test_utils::filesys::files as test_files;
 use miru_agent::filesys::{files, WriteOptions};
-use miru_agent::s3::gcs::{self, content_md5, Token};
+use miru_agent::s3::gcs::{self, Token};
 use miru_agent::s3::{sdk, Object, Options, S3Err, Source, Store};
 
 // external crates
 use aws_sdk_s3::error::ProvideErrorMetadata;
 use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::Client;
+use base64::Engine;
+use md5::{Digest, Md5};
 use serde_json::json;
 use uuid::Uuid;
 
@@ -153,6 +155,11 @@ fn test_bytes(len: usize) -> Vec<u8> {
     (0..len).map(|i| (i % 251) as u8).collect()
 }
 
+/// Base64 MD5 of `bytes`, for a `Content-MD5` header.
+fn md5_of(bytes: &[u8]) -> String {
+    base64::engine::general_purpose::STANDARD.encode(Md5::digest(bytes))
+}
+
 /// A temp file holding `bytes`, deleted when dropped.
 async fn temp_file_with(bytes: &[u8]) -> test_files::TempFile {
     let tf = test_files::temp("gcs-xml").unwrap();
@@ -206,7 +213,7 @@ async fn resume_completes_a_started_upload() {
         .key(&obj.key)
         .upload_id(upload_id)
         .part_number(1)
-        .content_md5(content_md5(part))
+        .content_md5(md5_of(part))
         .body(ByteStream::from(part.to_vec()))
         .send()
         .await
@@ -233,7 +240,7 @@ async fn wrong_content_md5_is_rejected() {
         .put_object()
         .bucket(&obj.bucket)
         .key(&obj.key)
-        .content_md5(content_md5(b"not the body"))
+        .content_md5(md5_of(b"not the body"))
         .body(ByteStream::from(test_bytes(SMALL)))
         .send()
         .await

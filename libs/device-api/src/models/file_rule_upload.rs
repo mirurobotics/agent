@@ -23,22 +23,26 @@ pub struct FileRuleUpload {
     /// Name of the bucket this rule uploads to.
     #[serde(rename = "bucket_name")]
     pub bucket_name: String,
-    /// Object-path template for the uploaded file. Contains `{upload_id}`, is at most 1024 bytes, has balanced braces, and contains no `..` or empty segments. Variables: `{device_id}`, `{device_name}`, `{file_name}`, `{upload_id}`, `{bundle_id}`, `{year}`, `{month}`, `{day}`, `{hour}`, `{minute}`, plus any `source.glob` capture. `{bundle_id}` requires `bundle`.
+    /// Object-path template for the uploaded file. Contains `{upload_id}`, is at most 1024 bytes, has balanced braces, and contains no `..` or empty segments. Variables: `{device_id}`, `{device_name}`, `{file_name}`, `{upload_id}`, `{bundle_id}`, `{year}`, `{month}`, `{day}`, `{hour}`, `{minute}`, `{timezone}`, plus any `source.glob` capture. `{bundle_id}` requires `bundle`. The time variables are zero-padded and rendered from the file's mtime (its last-modified time, from the device clock) in `timezone`; `{timezone}` is that instant's UTC offset in ISO 8601 basic format (`+0000`, `-0500`).
     #[serde(rename = "path")]
     pub path: String,
+    /// The time zone the time variables in `path` are rendered in: `utc`, or `device` for the device's local time zone. `utc` for a rule created without one.
+    #[serde(rename = "timezone")]
+    pub timezone: models::FileRuleUploadTimezone,
     /// Names of the `source.glob` captures whose values group the rule's uploads into bundles: uploads from the same device and upload collection that captured the same values, in the order listed, share a bundle, across rules and over time. Capture names don't affect matching, so rules that name their captures differently still share a bundle when they list them in the same order. Every name must be a `source.glob` capture, listed once, with at most 16 names. Absent when the rule does not bundle.
     #[serde(rename = "bundle", skip_serializing_if = "Option::is_none")]
     pub bundle: Option<Vec<String>>,
 }
 
 impl FileRuleUpload {
-    pub fn new(upload_collection_id: String, upload_collection_name: String, bucket_id: String, bucket_name: String, path: String) -> FileRuleUpload {
+    pub fn new(upload_collection_id: String, upload_collection_name: String, bucket_id: String, bucket_name: String, path: String, timezone: models::FileRuleUploadTimezone) -> FileRuleUpload {
         FileRuleUpload {
             upload_collection_id,
             upload_collection_name,
             bucket_id,
             bucket_name,
             path,
+            timezone,
             bundle: None,
         }
     }

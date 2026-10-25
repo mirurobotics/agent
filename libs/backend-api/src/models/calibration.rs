@@ -39,6 +39,9 @@ pub struct Calibration {
     /// ID of the deployment the device was on when it reported the calibration; null if it had none or the deployment was deleted.
     #[serde(rename = "deployment_id", deserialize_with = "Option::deserialize")]
     pub deployment_id: Option<String>,
+    /// ID the agent gave the report this calibration came from.
+    #[serde(rename = "report_id")]
+    pub report_id: uuid::Uuid,
     /// Timestamp of when the calibration was reported to the agent on the device. The agent may upload it much later, for example after an outage, so this can be well before `created_at`.
     #[serde(rename = "reported_at")]
     pub reported_at: String,
@@ -49,7 +52,7 @@ pub struct Calibration {
 
 impl Calibration {
     /// A calibration recorded by Miru.
-    pub fn new(object: Object, id: String, device_id: String, component_id: String, role_id: Option<String>, aspect_id: Option<String>, serial_number: Option<String>, digest: String, deployment_id: Option<String>, reported_at: String, created_at: String) -> Calibration {
+    pub fn new(object: Object, id: String, device_id: String, component_id: String, role_id: Option<String>, aspect_id: Option<String>, serial_number: Option<String>, digest: String, deployment_id: Option<String>, report_id: uuid::Uuid, reported_at: String, created_at: String) -> Calibration {
         Calibration {
             object,
             id,
@@ -60,6 +63,7 @@ impl Calibration {
             serial_number,
             digest,
             deployment_id,
+            report_id,
             reported_at,
             created_at,
         }

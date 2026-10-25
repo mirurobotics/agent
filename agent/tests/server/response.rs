@@ -2,12 +2,13 @@
 use device_api::models as openapi;
 use miru_agent::models::{
     Deployment, Device, DeviceStatus, DplActivity, DplErrStatus, DplTarget, FileRule,
-    FileRuleRetention, FileRuleSource, FileRuleUpload, GitCommit, Release,
+    FileRuleRetention, FileRuleSource, FileRuleUpload, GitCommit, Release, UploadTimezone,
 };
 use miru_agent::services::calibration::Created;
 
 // external crates
 use chrono::{DateTime, TimeZone, Utc};
+use uuid::Uuid;
 
 fn fixed_time() -> DateTime<Utc> {
     Utc.with_ymd_and_hms(2025, 6, 15, 12, 0, 0).unwrap()
@@ -304,6 +305,7 @@ pub mod file_rule_response {
             bucket_id: "bkt-1".into(),
             bucket_name: "fleet-logs".into(),
             path: "robots/".into(),
+            timezone: UploadTimezone::Device,
             bundle: Some(vec!["robot".into()]),
         }
     }
@@ -353,6 +355,7 @@ pub mod file_rule_response {
                 bucket_id: "bkt-1".into(),
                 bucket_name: "fleet-logs".into(),
                 path: "robots/".into(),
+                timezone: openapi::FileRuleUploadTimezone::FILE_RULE_UPLOAD_TIMEZONE_DEVICE,
                 bundle: Some(vec!["robot".into()]),
             })),
             retention: Some(Box::new(openapi::FileRuleRetention {
@@ -476,9 +479,14 @@ pub mod create_calibration_response {
     #[test]
     fn converts_created() {
         let t = fixed_time();
-        let created = Created { reported_at: t };
+        let report_id = Uuid::new_v4();
+        let created = Created {
+            report_id,
+            reported_at: t,
+        };
 
         let expected = openapi::CreateCalibrationResponse {
+            report_id,
             reported_at: t.to_rfc3339(),
         };
 

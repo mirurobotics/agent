@@ -1,18 +1,17 @@
 // standard crates
 use std::collections::HashMap;
-use std::io::SeekFrom;
 
 // internal crates
 use crate::errors::HTTPCode;
-use crate::filesys::{errors::PathDoesNotExistErr, file::File, path::PathExt, FileSysErr};
-use crate::s3::{errors, errors::ObjectNotFoundErr, gcs, S3Err};
+use crate::filesys::{file::File, path::PathExt};
+use crate::s3::{errors, errors::ObjectNotFoundErr, sdk, S3Err, Source};
 use crate::trace;
 
 // external crates
 use aws_sdk_s3::error::SdkError;
 use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::Client;
-use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
 
 /// Objects larger than this stream through a multipart upload; objects at or
 /// below it go through a single `PutObject`. S3's own multipart part-size
@@ -39,70 +38,14 @@ impl std::fmt::Display for Object {
     }
 }
 
-/// A local file opened once for upload. Its size and every byte read come from
-/// the same open handle, so the upload stays bound to the opened file even if
-/// its path is replaced afterwards.
-pub struct Source {
-    file: File,
-    handle: tokio::fs::File,
-    pub(super) size: u64,
-}
-
-impl Source {
-    /// Opens `file` for reading. A missing file is [`S3Err::FileSysErr`]; any
-    /// other open or metadata failure is [`S3Err::LocalIoErr`].
-    pub async fn open(file: File, dst: &Object) -> Result<Self, S3Err> {
-        let handle = tokio::fs::File::open(file.path()).await.map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                FileSysErr::PathDoesNotExistErr(PathDoesNotExistErr {
-                    path: file.path().clone(),
-                    trace: trace!(),
-                })
-                .into()
-            } else {
-                errors::map_body_io_err("open_source", dst, &file, e)
-            }
-        })?;
-        let size = handle
-            .metadata()
-            .await
-            .map_err(|e| errors::map_body_io_err("open_source", dst, &file, e))?
-            .len();
-        Ok(Self { file, handle, size })
-    }
-
-    /// Reads `[offset..offset+length]` into memory, mapping any seek/read failure
-    /// to [`S3Err::LocalIoErr`]. A file truncated below `offset + length` after
-    /// it was opened makes `read_exact` fail with `UnexpectedEof`, which maps to
-    /// the same error.
-    pub(super) async fn read(
-        &mut self,
-        operation: &str,
-        dst: &Object,
-        offset: u64,
-        length: u64,
-    ) -> Result<Vec<u8>, S3Err> {
-        self.handle
-            .seek(SeekFrom::Start(offset))
-            .await
-            .map_err(|e| errors::map_body_io_err(operation, dst, &self.file, e))?;
-        let mut buf = vec![0u8; length as usize];
-        self.handle
-            .read_exact(&mut buf)
-            .await
-            .map_err(|e| errors::map_body_io_err(operation, dst, &self.file, e))?;
-        Ok(buf)
-    }
-}
-
 /// What a [`Store`] is built from.
 pub struct Options {
     /// The SDK config, from [`aws::config`](crate::s3::aws::config) or
-    /// [`gcs::config`].
+    /// [`gcs::config`](crate::s3::gcs::config).
     pub config: aws_sdk_s3::Config,
-    /// Set for a [`gcs::config`]. Bodies then carry a `Content-MD5` the store
-    /// computes, since the GCS client turns the SDK's own request checksums
-    /// off, and object writes are create-only.
+    /// Set for a [`gcs::config`](crate::s3::gcs::config). Bodies then carry a
+    /// `Content-MD5` the store computes, since the GCS client turns the SDK's
+    /// own request checksums off, and object writes are create-only.
     pub gcs: bool,
 }
 
@@ -122,14 +65,14 @@ impl Store {
         }
     }
 
-    /// Creates or overwrites an object from a local file, opened once as a
+    /// Creates or overwrites an object from a local file, sized once as a
     /// [`Source`]. GCS never overwrites: an existing object counts as written
-    /// (see [`gcs`]).
+    /// (see [`gcs`](crate::s3::gcs)).
     ///
     /// Files at or below [`PART_SIZE`] go through one `PutObject`
     /// ([`Self::put_singlepart`]); larger files go part-by-part through a
-    /// stateless multipart upload ([`Self::put_multipart`]). Either way at most
-    /// one part's bytes are held in memory at a time.
+    /// stateless multipart upload ([`Self::put_multipart`]). Either way the
+    /// bytes stream from the file.
     pub async fn put(
         &self,
         src: File,
@@ -144,38 +87,52 @@ impl Store {
         }
     }
 
-    /// Uploads `src` as a single `PutObject`. The body is buffered in memory, so
-    /// the SDK can replay it on a retry without reopening the path.
+    /// Uploads `src` as a single `PutObject`, streamed from the file.
     pub async fn put_singlepart(
         &self,
-        mut src: Source,
+        src: Source,
         dst: &Object,
         metadata: &HashMap<String, String>,
     ) -> Result<(), S3Err> {
-        let size = src.size;
-        let bytes = src.read("put_object", dst, 0, size).await?;
-        let content_md5 = self.content_md5(&bytes);
+        let (body, content_md5) = self.body(&src, "put_object", dst, 0, src.size).await?;
         let result = self
             .client
             .put_object()
             .bucket(&dst.bucket)
             .key(&dst.key)
-            .body(ByteStream::from(bytes))
+            .body(body)
             .set_content_md5(content_md5)
             .set_metadata((!metadata.is_empty()).then(|| metadata.clone()))
+            .customize()
+            .config_override(sdk::timeout(sdk::upload_timeout(src.size)))
             .send()
             .await
             .map(|_| ());
         self.finish_write("put_object", dst, result).map(|_| ())
     }
 
-    /// `Content-MD5` for a body, when this store sends one.
-    pub(super) fn content_md5(&self, bytes: &[u8]) -> Option<String> {
-        self.gcs.then(|| gcs::content_md5(bytes))
+    /// The request body that streams `len` bytes of `src` from `offset`, and
+    /// on GCS its `Content-MD5` (see [`Options::gcs`]). A file now shorter
+    /// than the range is [`S3Err::LocalIoErr`] before any request goes out.
+    pub(super) async fn body(
+        &self,
+        src: &Source,
+        operation: &str,
+        dst: &Object,
+        offset: u64,
+        len: u64,
+    ) -> Result<(ByteStream, Option<String>), S3Err> {
+        let content_md5 = if self.gcs {
+            Some(src.content_md5(operation, dst, offset, len).await?)
+        } else {
+            None
+        };
+        let body = src.read(operation, dst, offset, len).await?;
+        Ok((body, content_md5))
     }
 
     /// Finishes an object write (PutObject or CompleteMultipartUpload). On GCS
-    /// the client sends writes create-only (see [`gcs`]), so a 412 means an
+    /// the client sends writes create-only (see [`gcs`](crate::s3::gcs)), so a 412 means an
     /// earlier attempt already stored the object at this key, which counts as
     /// done.
     pub(super) fn finish_write<E>(
@@ -291,6 +248,7 @@ impl Store {
 pub(super) mod tests {
     // standard crates
     use std::collections::HashMap;
+    use std::time::Duration;
 
     // internal crates
     use crate::test_utils::{
@@ -304,9 +262,18 @@ pub(super) mod tests {
     use miru_agent::s3::{aws, sdk, Config, Credentials, Object, Options, S3Err, Source, Store};
 
     // external crates
-    use aws_sdk_s3::config::SharedHttpClient;
-    use aws_smithy_http_client::test_util::{ReplayEvent, StaticReplayClient};
+    use aws_sdk_s3::config::retry::RetryConfig;
+    use aws_sdk_s3::config::{SharedHttpClient, StalledStreamProtectionConfig};
+    use aws_smithy_http_client::test_util::{NeverClient, ReplayEvent, StaticReplayClient};
+    use aws_smithy_runtime_api::client::http::{
+        HttpClient, HttpConnector, HttpConnectorFuture, HttpConnectorSettings, SharedHttpConnector,
+    };
+    use aws_smithy_runtime_api::client::orchestrator::{HttpRequest, HttpResponse};
+    use aws_smithy_runtime_api::client::result::ConnectorError;
+    use aws_smithy_runtime_api::client::runtime_components::RuntimeComponents;
     use aws_smithy_types::body::SdkBody;
+    use http_body_util::BodyExt;
+    use tokio::time::Instant;
 
     const REGION: &str = "us-east-1";
     const BUCKET: &str = "test-bucket";
@@ -349,20 +316,26 @@ pub(super) mod tests {
         }
     }
 
+    fn test_config() -> Config {
+        Config {
+            region: REGION.to_string(),
+            creds: test_credentials(),
+        }
+    }
+
+    /// Wires a `Store` to `client` in place of the HTTPS client.
+    pub(crate) fn store_on(client: impl HttpClient + 'static) -> Store {
+        // Path-style URLs, so request URIs match `uri()`.
+        let config = aws::config(test_config(), SharedHttpClient::new(client), true);
+        Store::new(Options { config, gcs: false })
+    }
+
     /// Wires a `Store` to a `StaticReplayClient` serving the given events, so the
     /// client's requests are matched against canned responses without touching the
     /// network.
     pub(crate) fn store_with(events: Vec<ReplayEvent>) -> (Store, StaticReplayClient) {
         let replay = StaticReplayClient::new(events);
-        let cfg = Config {
-            region: REGION.to_string(),
-            creds: test_credentials(),
-        };
-        let http_client = SharedHttpClient::new(replay.clone());
-        // Path-style URLs, so request URIs match `uri()`.
-        let config = aws::config(cfg, http_client, true);
-        let store = Store::new(Options { config, gcs: false });
-        (store, replay)
+        (store_on(replay.clone()), replay)
     }
 
     /// Writes `bytes` to a fresh temp file and returns the guard (kept alive so
@@ -437,6 +410,44 @@ pub(super) mod tests {
             .collect()
     }
 
+    /// The payload a recorded request carried. AWS gets streamed bodies
+    /// aws-chunked (`<hex len>[;ext]\r\n<data>\r\n` chunks ending in a `0`
+    /// chunk and trailers), so those are decoded.
+    pub(crate) async fn recorded_payload(request: &HttpRequest) -> Vec<u8> {
+        let wire = request
+            .body()
+            .try_clone()
+            .expect("request bodies are retryable")
+            .collect()
+            .await
+            .expect("recorded body replays")
+            .to_bytes();
+        let aws_chunked = request
+            .headers()
+            .get("content-encoding")
+            .is_some_and(|v| v.contains("aws-chunked"));
+        if !aws_chunked {
+            return wire.to_vec();
+        }
+        let mut payload = Vec::new();
+        let mut rest = &wire[..];
+        loop {
+            let header_end = rest
+                .windows(2)
+                .position(|w| w == b"\r\n")
+                .expect("chunk header");
+            let header = std::str::from_utf8(&rest[..header_end]).unwrap();
+            let size_hex = header.split(';').next().unwrap_or_default();
+            let size = usize::from_str_radix(size_hex, 16).unwrap();
+            if size == 0 {
+                return payload;
+            }
+            let data = &rest[header_end + 2..];
+            payload.extend_from_slice(&data[..size]);
+            rest = &data[size + 2..];
+        }
+    }
+
     pub mod construction {
         use super::*;
 
@@ -453,6 +464,85 @@ pub(super) mod tests {
             // Constructing must not panic or touch the network.
             let config = aws::config(cfg, sdk::http_client(), false);
             let _store = Store::new(Options { config, gcs: false });
+        }
+    }
+
+    pub mod stalls {
+        use super::*;
+
+        /// Takes the first request body frame, then never polls the body again
+        /// or answers.
+        #[derive(Clone, Debug)]
+        struct HangAfterFirstFrame;
+
+        impl HttpConnector for HangAfterFirstFrame {
+            fn call(&self, request: HttpRequest) -> HttpConnectorFuture {
+                let mut body = request.into_body();
+                HttpConnectorFuture::new(async move {
+                    let _ = body.frame().await;
+                    std::future::pending::<Result<HttpResponse, ConnectorError>>().await
+                })
+            }
+        }
+
+        impl HttpClient for HangAfterFirstFrame {
+            fn http_connector(
+                &self,
+                _: &HttpConnectorSettings,
+                _: &RuntimeComponents,
+            ) -> SharedHttpConnector {
+                SharedHttpConnector::new(self.clone())
+            }
+        }
+
+        #[tokio::test(start_paused = true)]
+        async fn stalled_put_maps_to_connection_err() {
+            let len = 1024 * 1024;
+            let tf = temp_file_with(&vec![0u8; len]).await;
+            let src = Source::open(tf.to_file(), &obj("k")).await.unwrap();
+            let store = store_on(NeverClient::new());
+            let start = Instant::now();
+
+            let err = store
+                .put_singlepart(src, &obj("k"), &HashMap::new())
+                .await
+                .unwrap_err();
+
+            // Only the call's time limit can end it: stall protection measures on
+            // the wall clock, which barely moves while paused time races ahead.
+            assert!(matches!(err, S3Err::ConnectionErr(_)), "got {err:?}");
+            assert_eq!(start.elapsed(), sdk::upload_timeout(len as u64));
+        }
+
+        #[tokio::test]
+        async fn put_that_stops_sending_trips_stall_protection() {
+            let dst = obj("k");
+            let tf = temp_file_with(&vec![0u8; 256 * 1024]).await;
+            let src = Source::open(tf.to_file(), &dst).await.unwrap();
+            // A 1 s grace and no SDK retries keep the test short.
+            let fast_stall = StalledStreamProtectionConfig::enabled()
+                .grace_period(Duration::from_secs(1))
+                .build();
+            let http_client = SharedHttpClient::new(HangAfterFirstFrame);
+            let config = aws::config(test_config(), http_client, true)
+                .to_builder()
+                .stalled_stream_protection(fast_stall)
+                .retry_config(RetryConfig::disabled())
+                .build();
+            let store = Store::new(Options { config, gcs: false });
+
+            // Shorter than the call's time limit, so only stall protection can
+            // end the call.
+            let metadata = HashMap::new();
+            let put = store.put_singlepart(src, &dst, &metadata);
+            let result = tokio::time::timeout(Duration::from_secs(30), put)
+                .await
+                .expect("stall protection ends the call");
+
+            assert!(
+                matches!(result, Err(S3Err::ConnectionErr(_))),
+                "got {result:?}"
+            );
         }
     }
 
@@ -487,7 +577,7 @@ pub(super) mod tests {
                     requests[0].uri().to_string(),
                     uri("artifacts/hello.txt?x-id=PutObject")
                 );
-                assert_eq!(requests[0].body().bytes(), Some(&b"hello world"[..]));
+                assert_eq!(recorded_payload(requests[0]).await, b"hello world");
                 assert!(requests[0]
                     .headers()
                     .get("authorization")
@@ -522,7 +612,7 @@ pub(super) mod tests {
                     requests[0].uri().to_string(),
                     uri("artifacts/empty.txt?x-id=PutObject")
                 );
-                assert_eq!(requests[0].body().bytes(), Some(&b""[..]));
+                assert_eq!(recorded_payload(requests[0]).await, b"");
             }
 
             #[tokio::test]
@@ -547,35 +637,6 @@ pub(super) mod tests {
                 let header = |name: &str| requests[0].headers().get(name);
                 assert_eq!(header("x-amz-meta-device_id"), Some("dvc_1"));
                 assert_eq!(header("x-amz-meta-digest"), Some("sha256:abc"));
-            }
-
-            #[tokio::test]
-            async fn path_replaced_after_open_uploads_the_opened_file() {
-                let key = "artifacts/robot.log";
-                let src = temp_file_with(b"original").await;
-                let source = source_of(&src, key).await;
-
-                // Move the opened file away and put a longer, different file at
-                // the same path.
-                let path = src.file().path();
-                let moved = path.with_extension("1");
-                tokio::fs::rename(path, &moved).await.unwrap();
-                tokio::fs::write(path, b"replacement-bytes").await.unwrap();
-
-                let (store, replay) = store_expecting(
-                    req("PUT", "artifacts/robot.log?x-id=PutObject"),
-                    resp(200, &[]),
-                );
-
-                store
-                    .put_singlepart(source, &obj(key), &HashMap::new())
-                    .await
-                    .unwrap();
-
-                let requests = replay.actual_requests().collect::<Vec<_>>();
-                assert_eq!(requests[0].body().bytes(), Some(&b"original"[..]));
-
-                tokio::fs::remove_file(&moved).await.unwrap();
             }
         }
 

@@ -28,6 +28,7 @@ pub use self::file_rule::FileRuleRetention;
 pub use self::file_rule::FileRuleSource;
 pub use self::file_rule::FileRuleUpload;
 pub use self::file_rule::UploadCollectionID;
+pub use self::file_rule::UploadTimezone;
 pub use self::git_commit::GitCommit;
 pub use self::git_commit::GitCommitID;
 pub use self::instance_format::InstanceFormat;

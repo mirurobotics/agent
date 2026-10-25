@@ -24,17 +24,6 @@ impl crate::errors::Error for ExecutorErr {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
-#[error("upload attempt for file {file} ({size} bytes) exceeded its {deadline:?} deadline")]
-pub struct AttemptTimeoutErr {
-    pub file: String,
-    pub size: u64,
-    pub deadline: std::time::Duration,
-    pub trace: Box<Trace>,
-}
-
-impl crate::errors::Error for AttemptTimeoutErr {}
-
 /// The transfer layer's own preconditions, as a type so tests and callers can
 /// tell them apart. Carried as the `source` of an [`ExecutorErr`];
 /// classification is unchanged (non-terminal, non-network) and the `Display`
@@ -60,8 +49,6 @@ pub enum UploadErr {
     #[error(transparent)]
     ExecutorErr(ExecutorErr),
     #[error(transparent)]
-    AttemptTimeoutErr(AttemptTimeoutErr),
-    #[error(transparent)]
     SendActorMessageErr(SendActorMessageErr),
     #[error(transparent)]
     ReceiveActorMessageErr(ReceiveActorMessageErr),
@@ -70,7 +57,6 @@ pub enum UploadErr {
 crate::impl_error!(UploadErr {
     EnqueueErr,
     ExecutorErr,
-    AttemptTimeoutErr,
     SendActorMessageErr,
     ReceiveActorMessageErr
 });

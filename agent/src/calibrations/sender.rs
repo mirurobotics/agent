@@ -17,7 +17,8 @@ use tracing::warn;
 ///
 /// The worker drops an in-flight `send` on shutdown. The report is removed
 /// from the queue only after `send` returns `Ok`, so an interrupted send is
-/// retried on the next boot, and Miru may then store the calibration twice.
+/// retried on the next boot with the report's own `report_id`, which Miru
+/// records once.
 pub trait Sender: Send + Sync {
     fn send(&self, report: Report) -> impl Future<Output = Result<(), CalibrationsErr>> + Send;
 }
@@ -49,7 +50,7 @@ impl<C: ClientI, T: TokenManagerExt> Sender for HttpSender<C, T> {
         match http::calibrations::create(self.http_client.as_ref(), params).await {
             Ok(_) => Ok(()),
             // only a 2xx response body is parsed, so Miru has stored the
-            // report; retrying would store it again on every attempt
+            // report and there is nothing to retry
             Err(HTTPErr::UnmarshalJSONErr(e)) => {
                 warn!("calibrations: Miru accepted a report but its response could not be parsed: {e}");
                 Ok(())
@@ -68,6 +69,7 @@ pub fn new_request(report: Report) -> CreateCalibrationRequest {
         data: report.data,
     };
     CreateCalibrationRequest {
+        report_id: metadata.report_id,
         deployment_id: metadata.deployment_id,
         component: metadata.component,
         role: metadata.role,

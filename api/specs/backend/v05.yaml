@@ -6,140 +6,149 @@ info:
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
-  x-release-version: v0.5.10
+  x-release-version: v0.5.11
   x-git-commit:
-    sha: cab5fad2f93a2c430bc3a83481b135ff108588bb
-    url: https://github.com/mirurobotics/openapi/commit/cab5fad2f93a2c430bc3a83481b135ff108588bb
-    message: 'feat(file-rules): require upload.timezone in file rule responses (#347)
+    sha: 2a3eb728f10b95f12a0c8f96183727d5b9fd7047
+    url: https://github.com/mirurobotics/openapi/commit/2a3eb728f10b95f12a0c8f96183727d5b9fd7047
+    message: 'feat(calibrations): report_id on calibration reports (#352)
 
 
       <!-- claude-projects-attribution: {"github_login":"miru-agents"} -->
 
       _Requested by **bens-agent** · [project
 
-      thread](https://claude.ai/code/project/chan_01CAhx68ku57XYPMZ3ERH4TZ?thread=cmsg_01CAhx68ku57XYPMZ3ERH4TZ4stcGgoUh3kFiuqm2YhAuy)_
+      thread](https://claude.ai/code/project/chan_015imaa8aZrnubYZcZCvjeHx?thread=cmsg_015imaa8aZrnubYZcZCvjeHxRRaVTdwX2TA7u3cf9PHGg5)_
 
 
-      Before: `FileRuleUpload.timezone` was optional in responses, documented
+      Before: the Device API''s `POST /calibrations` returns only
 
-      as "`utc` when absent", so clients had to apply the default themselves.
+      `reported_at`, so the caller has no handle to find the calibration in
 
+      Miru later. If the agent loses Miru''s response to an upload, it uploads
 
-      After: responses always carry the resolved zone (`utc` or `device`).
+      again and Miru records the calibration twice. (#327 dropped `report_id`
 
-      Create and update requests (`CreateFileRuleUpload`) are unchanged: still
-
-      optional, defaulting to `utc`.
-
-
-      Asked for in mirurobotics/backend#999 ([review
-
-      comment](https://github.com/mirurobotics/backend/pull/999#discussion_r4364668817));
-
-      that PR already always fills the value.
+      as out of scope; it is now approved end to end.)
 
 
-      ## Summary
+      After:
 
-      - `FileRuleUpload`: add `timezone` to `required`, reword its
+      - **Device API**: `CreateCalibrationResponse` gains required `report_id`
 
-      description, add it to the example.
+      (uuid), next to `reported_at`. Still a plain 200 response with no
 
-      - Regenerated bundles for `frontend`, `cli`, `agent` and `device`, the
+      `object`/`id`, since there is no route to fetch a report. The path
 
-      four audiences that share the schema.
+      description now says the agent sends `report_id` with every upload, so a
+
+      retried upload does not record the calibration twice.
+
+      - **Agent API**: `CreateCalibrationRequest` gains required `report_id`
+
+      (uuid). If the device already reported a calibration with that
+
+      `report_id`, Miru returns that calibration and records nothing new.
+
+      - **Shared `BaseCalibration`** (agent and frontend audiences): gains
+
+      required, non-nullable `report_id`. The backend migration backfills a
+
+      random UUID for calibrations recorded before this change.
+
+      - **Frontend `GET /calibrations`**: can filter by `report_id`
+
+      (`CAL_SEARCH_REPORT_ID` + `calibration_search_report_id`, the same shape
+
+      as `serial_number`).
 
 
-      ## Points for review
+      How: source edits and `./scripts/regen.sh` output are in separate
 
-      - **Device API is included.** `FileRuleUpload` is a shared schema, so
+      commits (agent, frontend, and device bundles). Stainless configs are
 
-      the agent''s Device API also now promises the field. The agent gets it
-
-      from the backend agent API (now always present) and passes it through,
-
-      so it only needs to default to `utc` for a rule cached from an older
-
-      backend. Splitting the schema just to keep it optional on the device
-
-      seemed worse; say if you''d rather.
-
-      - **Not breaking for clients:** a response field going from optional to
-
-      required only adds a guarantee, so this edits the current versions in
-
-      place.
+      unchanged because no routes were added or removed (MIRU018).
 
 
-      ## Plan (`$api-change`)
+      ## Compatibility
 
-      1. This PR, then release `frontend`, `cli`, `agent` and `device`.
+      - Device API and frontend: additive (a new response field, a new
 
-      2. backend: vendor the new specs into #999.
+      optional query parameter and search enum value).
 
-      3. agent / cli: pick up on their next vendor.
+      - Agent API: **not additive**. `report_id` is required on `POST
+
+      /calibrations`
+
+      ([review](https://github.com/mirurobotics/openapi/pull/352#discussion_r4367712303)).
+
+      No stable agent uploads calibrations; only the betas `v0.11.2-beta.1` to
+
+      `beta.3` do, and they send no `report_id`. Once the backend enforces
+
+      this, those betas'' uploads are rejected, so devices on them need the
+
+      next agent build.
+
+
+      ## Plan
+
+      1. Merge this, then release the touched audiences the way the repo does:
+
+      `agent/` (after `agent/v0.5.10`), `device/` (after
+
+      `device/v0.2.3-beta.1`), and `frontend/` (after `frontend/v0.9.14`).
+
+      2. Backend PR (`mirurobotics/backend`): store `report_id` on
+
+      calibrations (backfilling existing rows) with a unique index per device,
+
+      return the existing calibration when a `report_id` repeats, and support
+
+      the `report_id` list filter.
+
+      3. Agent PR (`mirurobotics/agent`): generate `report_id` when it
+
+      receives a calibration, return it from the Device API, and send it on
+
+      every upload.
+
+      4. docs#269: its owner updates it to cover `report_id`.
 
 
       ## Precedent
 
-      Mirrors the other always-present fields in `FileRuleUpload.required`
+      - `calibration_search_report_id` follows
 
-      (`path`, `bucket_id`, ...).
+      `calibration_search_serial_number` (array of strings, `form`, `explode:
 
+      false`, example).
 
-      ---
+      - `format: uuid` has no precedent in this repo. Every other ID is a
 
-      _Generated by [Claude
+      prefixed string like `cal_123`. Here the agent generates the ID on the
 
-      Code](https://claude.ai/code/session_01BJ9QuwWzspBkDa7fnQduNq)_
+      device before Miru knows about the calibration, so it is not a Miru
 
+      resource ID. The `uuid` format states what the agent sends and what the
 
-      <!-- codesmith:footer -->
+      backend can index. The filter parameter''s items stay plain `type:
 
-      ---
-
-      <a
-
-      href="https://app.blacksmith.sh/mirurobotics/codesmith/openapi/pr/347?autoLogin=true&ref=codesmith_pr_footer"><picture><source
-
-      media="(prefers-color-scheme: dark)"
-
-      srcset="https://pr-comments-assets.blacksmith.sh/codesmith/view-with-codesmith-dark-v3.svg"><source
-
-      media="(prefers-color-scheme: light)"
-
-      srcset="https://pr-comments-assets.blacksmith.sh/codesmith/view-with-codesmith-light-v3.svg"><img
-
-      alt="View with [code]smith"
-
-      src="https://pr-comments-assets.blacksmith.sh/codesmith/view-with-codesmith-dark-v3-3x.png"
-
-      width="162" height="28"></picture></a> <a
-
-      href="https://backend.blacksmith.sh/track/enable-autofix?expires=1795385953&installation_model_id=425273&pr_number=347&ref=codesmith_pr_footer&repository=mirurobotics%2Fopenapi&return_to=https%3A%2F%2Fgithub.com%2Fmirurobotics%2Fopenapi%2Fpull%2F347&signature=caf03188e7a4be99647ee0e7007b26909b9119d99c83a393f7cac65b1da9f7f7"><picture><source
-
-      media="(prefers-color-scheme: dark)"
-
-      srcset="https://pr-comments-assets.blacksmith.sh/codesmith/autofix-with-codesmith-dark.svg"><source
-
-      media="(prefers-color-scheme: light)"
-
-      srcset="https://pr-comments-assets.blacksmith.sh/codesmith/autofix-with-codesmith-light.svg"><img
-
-      alt="Autofix with [code]smith"
-
-      src="https://pr-comments-assets.blacksmith.sh/codesmith/autofix-with-codesmith-dark-3x.png"
-
-      width="190" height="28"></picture></a>
-
-      <sup>Need help on this PR? Tag <code>@codesmith</code> with what you
-
-      need.</sup>
+      string`, like the sibling filters.
 
 
-      <!-- codesmith:autofix:disabled -->
+      ## Test plan
 
-      <!-- /codesmith:footer -->
+      - Regenerated bundles are committed. CI runs lint (Redocly + MIRU rules,
+
+      including MIRU005 search parity and `no-invalid-schema-examples`),
+
+      stale-specs, and tool tests.
+
+
+      🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+
+      https://claude.ai/code/session_01BPXgUTxFBwzqZRogmg7o8X
 
 
       ---------
@@ -150,7 +159,7 @@ info:
     branch: HEAD
     dirty: false
   x-build:
-    built_at: '2026-10-24T02:53:29.325120+00:00'
+    built_at: '2026-10-24T17:59:02.442093+00:00'
 servers:
 - url: https://staging.api.mirurobotics.com/agent/v1
   description: Staging
@@ -391,6 +400,10 @@ paths:
         most 100 roles and 100 aspects; once one is full, reports that would add
 
         a new component, role or aspect to it are rejected.
+
+        If the device already reported a calibration with the request''s
+
+        `report_id`, Miru returns that calibration and records nothing new.
 
         '
       requestBody:
@@ -706,14 +719,14 @@ components:
     ReleaseVersion:
       type: string
       enum:
-      - v0.5.10
+      - v0.5.11
       x-enum-varnames:
       - RELEASE_VERSION
       x-stainless-const: true
     APIGitCommit:
       type: string
       enum:
-      - cab5fad2f93a2c430bc3a83481b135ff108588bb
+      - 2a3eb728f10b95f12a0c8f96183727d5b9fd7047
       x-enum-varnames:
       - API_GIT_COMMIT
       x-stainless-const: true
@@ -2247,10 +2260,18 @@ components:
       title: Create Calibration Request
       type: object
       required:
+      - report_id
       - component
       - content
       - reported_at
       properties:
+        report_id:
+          type: string
+          format: uuid
+          example: 0b6f3c2e-6a51-4e0f-9a43-2f1d7c9e8b10
+          description: ID the agent gave the report when it received it. If the device
+            already reported a calibration with this `report_id`, Miru returns that
+            calibration and records nothing new.
         deployment_id:
           type: string
           example: dpl_123
@@ -2306,6 +2327,7 @@ components:
       - serial_number
       - digest
       - deployment_id
+      - report_id
       - reported_at
       - created_at
       properties:
@@ -2359,6 +2381,11 @@ components:
           example: dpl_123
           description: ID of the deployment the device was on when it reported the
             calibration; null if it had none or the deployment was deleted.
+        report_id:
+          type: string
+          format: uuid
+          example: 0b6f3c2e-6a51-4e0f-9a43-2f1d7c9e8b10
+          description: ID the agent gave the report this calibration came from.
         reported_at:
           type: string
           format: date-time
@@ -2386,6 +2413,7 @@ components:
         serial_number: M500-1234
         digest: sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
         deployment_id: dpl_123
+        report_id: 0b6f3c2e-6a51-4e0f-9a43-2f1d7c9e8b10
         reported_at: '2021-01-01T00:00:00Z'
         created_at: '2021-01-01T00:00:00Z'
     DeviceStatus:

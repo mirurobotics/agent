@@ -32,6 +32,7 @@ use aws_sdk_s3::config::{
     RuntimeComponents, SharedHttpClient,
 };
 use aws_sdk_s3::error::BoxError;
+use aws_sdk_s3::primitives::ByteStream;
 use aws_smithy_runtime_api::client::orchestrator::Metadata;
 use aws_smithy_runtime_api::http::Headers;
 use base64::Engine;
@@ -80,9 +81,14 @@ pub fn config(token: Token, http_client: SharedHttpClient) -> aws_sdk_s3::Config
         .build()
 }
 
-/// Base64 MD5 of `bytes`, for the `Content-MD5` header.
-pub fn content_md5(bytes: &[u8]) -> String {
-    base64::engine::general_purpose::STANDARD.encode(Md5::digest(bytes))
+/// Base64 MD5 of `body`, for the `Content-MD5` header. Hashes a frame at a
+/// time, so the body is never held in memory.
+pub(crate) async fn content_md5(mut body: ByteStream) -> std::io::Result<String> {
+    let mut hasher = Md5::new();
+    while let Some(frame) = body.try_next().await? {
+        hasher.update(frame);
+    }
+    Ok(base64::engine::general_purpose::STANDARD.encode(hasher.finalize()))
 }
 
 /// Sets the bearer token and GCS metadata header names on each attempt, right
@@ -187,13 +193,19 @@ mod tests {
 
     // internal crates
     use super::*;
-    use crate::s3::store::tests::{resp, resp_xml, temp_file_with};
+    use crate::s3::store::tests::{recorded_payload, resp, resp_xml, temp_file_with};
     use crate::s3::store::PART_SIZE;
     use crate::s3::{Object, Options, S3Err, Store};
 
     // external crates
     use aws_smithy_http_client::test_util::{ReplayEvent, StaticReplayClient};
     use aws_smithy_types::body::SdkBody;
+
+    /// Base64 MD5 of `bytes`, hashed in memory: what `Content-MD5` should
+    /// carry for them.
+    fn md5_of(bytes: &[u8]) -> String {
+        base64::engine::general_purpose::STANDARD.encode(Md5::digest(bytes))
+    }
 
     const BUCKET: &str = "gcs-bucket";
     const UPLOAD_ID: &str = "gcs-upload-1";
@@ -347,17 +359,21 @@ mod tests {
                 !headers.iter().any(|(k, _)| k.starts_with("x-amz-checksum")),
                 "SDK checksum header sent to GCS"
             );
-            assert_eq!(requests[0].body().bytes(), Some(&bytes[..]));
+            // Streamed in frames, but with a length: GCS gets no chunked encoding.
+            assert_eq!(headers.get("content-length"), Some("65536"));
+            assert_eq!(recorded_payload(requests[0]).await, bytes);
         }
     }
 
     mod content_md5 {
         use super::*;
 
-        #[test]
-        fn content_md5_is_base64_digest() {
-            assert_eq!(content_md5(b""), "1B2M2Y8AsgTpgAmY7PhCfg==");
-            assert_eq!(content_md5(b"hello world"), "XrY7u+Ae7tCTyyK7j1rNww==");
+        #[tokio::test]
+        async fn content_md5_is_base64_digest() {
+            let empty = content_md5(ByteStream::from_static(b"")).await;
+            assert_eq!(empty.unwrap(), "1B2M2Y8AsgTpgAmY7PhCfg==");
+            let hello = content_md5(ByteStream::from_static(b"hello world")).await;
+            assert_eq!(hello.unwrap(), "XrY7u+Ae7tCTyyK7j1rNww==");
         }
 
         #[tokio::test]
@@ -374,7 +390,7 @@ mod tests {
             let requests = replay.actual_requests().collect::<Vec<_>>();
             assert_eq!(
                 requests[0].headers().get("content-md5"),
-                Some(content_md5(&bytes).as_str())
+                Some(md5_of(&bytes).as_str())
             );
         }
 
@@ -398,9 +414,11 @@ mod tests {
             ] {
                 assert_eq!(
                     part.headers().get("content-md5"),
-                    Some(content_md5(slice).as_str())
+                    Some(md5_of(slice).as_str())
                 );
-                assert_eq!(part.body().bytes(), Some(slice));
+                let len = slice.len().to_string();
+                assert_eq!(part.headers().get("content-length"), Some(len.as_str()));
+                assert_eq!(recorded_payload(part).await, slice);
             }
         }
     }

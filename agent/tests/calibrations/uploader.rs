@@ -119,8 +119,8 @@ impl Harness {
         self.uploader.as_ref().expect("spawned")
     }
 
-    async fn enqueue(&self, slug: &str) -> Uuid {
-        guard(self.uploader().enqueue(report(slug))).await.unwrap()
+    async fn enqueue(&self, slug: &str) {
+        guard(self.uploader().enqueue(report(slug))).await.unwrap();
     }
 
     async fn len(&self) -> usize {
@@ -285,10 +285,12 @@ async fn shutdown_mid_upload_keeps_the_report_for_replay() {
     h.stop().await;
 
     assert_eq!(h.queued_on_disk().await, 1);
-    // the next boot sends it again: two sends in total, which Miru may store
-    // twice (dedup is out of scope)
+    // the next boot sends it again with the same report_id, so Miru records it
+    // once
     h.spawn().await;
     h.await_drained(&["a", "a"]).await;
+    let id = report("a").metadata.report_id;
+    assert_eq!(h.sender.report_ids(), [id, id]);
 }
 
 #[tokio::test]
