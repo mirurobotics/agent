@@ -16,21 +16,15 @@ use aws_sdk_s3::config::SharedHttpClient;
 use chrono::{DateTime, Utc};
 use tracing::info;
 
-/// The seam between the upload executor and the concrete cloud-storage SDKs.
-/// Given the vended downscoped credentials and the server-authorized upload,
-/// prepare the multipart upload a large file resumes, then transfer the file's
-/// bytes to the object store. Kept separate from the executor so its
-/// orchestration (create, reuse, confirm) is unit-testable without a live
-/// object store.
+/// The seam between the upload executor and the cloud storage SDKs, so the
+/// executor is testable without an object store.
 ///
 /// # Cancel safety
 ///
-/// Called from the upload actor, whose in-flight future may be dropped on
-/// shutdown, so implementations must tolerate cancellation at any await point.
+/// The upload actor may drop either future at any await point.
 pub trait ObjectTransfer: Send + Sync {
-    /// The multipart upload [`Self::transfer`] resumes for `file`: the one in
-    /// `upload.multipart` if it was started for this version of the file and
-    /// still exists, otherwise a new one. `None` for a file sent in one go.
+    /// The multipart upload [`Self::transfer`] resumes: the saved one if it
+    /// still matches `file`, else a new one. `None` for a single-part file.
     fn prepare_multipart(
         &self,
         credentials: &UploadCredentials,
@@ -38,8 +32,7 @@ pub trait ObjectTransfer: Send + Sync {
         file: &File,
     ) -> impl Future<Output = Result<Option<MultipartCheckpoint>, UploadErr>> + Send;
 
-    /// Transfers the file's bytes, resuming the multipart upload in
-    /// `upload.multipart` if it was started for this version of the file.
+    /// Transfers the file, resuming `upload.multipart` if it matches the file.
     fn transfer(
         &self,
         credentials: &UploadCredentials,
@@ -83,10 +76,7 @@ impl SdkTransfer {
         }
     }
 
-    /// The store for the vended credentials: AWS S3 with the session
-    /// credentials, whose `region` the SDK derives the endpoint from, or GCS
-    /// with the OAuth2 bearer token, which is scoped to `storage.objects.create`
-    /// on this exact object.
+    /// The S3 or GCS store for the vended credentials.
     fn store(&self, credentials: &UploadCredentials) -> Result<s3::Store, UploadErr> {
         match credentials.scheme {
             Scheme::S3 => {
@@ -122,8 +112,7 @@ impl SdkTransfer {
     }
 }
 
-/// The upload's physical bucket (`bucket_name`, not the Miru bucket id) and
-/// object key.
+/// The upload's physical bucket and object key.
 fn object(upload: &UploadCheckpoint) -> s3::Object {
     s3::Object {
         bucket: upload.bucket_name.clone(),
@@ -131,17 +120,15 @@ fn object(upload: &UploadCheckpoint) -> s3::Object {
     }
 }
 
-/// Whether `multipart` was started for the version of the file `src` reads,
-/// and cut into the part size this agent picks for it.
+/// Whether `multipart` was started for this version of `src`, with the part
+/// size this agent picks.
 fn started_for(multipart: &MultipartCheckpoint, src: &s3::Source) -> bool {
     src.mtime.map(DateTime::<Utc>::from) == Some(multipart.mtime)
         && src.size == multipart.size
         && s3::Store::part_size_for(src.size) == multipart.part_size
 }
 
-/// The multipart upload [`put`] resumes for `file`: the saved one if it was
-/// started for this version of the file and the provider still has it,
-/// otherwise a new one. `None` for a file [`put`] sends in one go.
+/// See [`ObjectTransfer::prepare_multipart`].
 async fn multipart_for(
     store: &s3::Store,
     upload: &UploadCheckpoint,
@@ -153,8 +140,7 @@ async fn multipart_for(
         return Ok(None);
     }
     let Some(mtime) = src.mtime.map(DateTime::<Utc>::from) else {
-        // Without an mtime the upload can't be pinned to this file version, so
-        // it runs start to finish without being saved.
+        // without an mtime, the upload can't be pinned to this file version
         return Ok(None);
     };
     if let Some(saved) = upload.multipart.as_ref().filter(|m| started_for(m, &src)) {
@@ -176,9 +162,8 @@ async fn multipart_for(
     }))
 }
 
-/// Puts `file` at the upload's physical bucket and object key, resuming the
-/// multipart upload in `upload.multipart` if it was started for this version
-/// of the file.
+/// Puts `file` at the upload's object, resuming `upload.multipart` if it
+/// matches the file.
 async fn put(store: &s3::Store, upload: &UploadCheckpoint, file: &File) -> Result<(), s3::S3Err> {
     let object = object(upload);
     let src = s3::Source::open(file.clone(), &object).await?;
@@ -727,9 +712,8 @@ mod tests {
                 .collect()
         }
 
-        /// Prepares the multipart upload, keeping the saved one if that fails,
-        /// then transfers `file` over `replay`, as an attempt does. Returns the
-        /// transfer's result and the upload it used.
+        /// Prepares and transfers `file` over `replay` as an attempt does,
+        /// returning the result and the upload it used.
         async fn run(
             creds: &UploadCredentials,
             replay: &StaticReplayClient,
@@ -765,9 +749,7 @@ mod tests {
             );
         }
 
-        // S3 and GCS share the multipart path, so both resume a saved upload by
-        // uploading only the parts that haven't landed. Preparing first checks
-        // that the upload still exists.
+        // S3 and GCS share the multipart path, so both upload only missing parts.
         #[tokio::test]
         async fn saved_upload_resumes_and_skips_landed_parts() {
             let (tf, mtime) = two_part_file().await;

@@ -202,9 +202,8 @@ impl<J: QueueJob> FileQueue<J> {
         true
     }
 
-    /// Change the job of the entry with `id` in place, keeping its position,
-    /// and persist. Records an in-flight job's progress. Returns `false` for
-    /// an unknown id, so an entry acked meanwhile is not revived.
+    /// Changes the job of entry `id` in place and persists it. `false` if
+    /// there's no such entry.
     pub async fn update_job(&mut self, id: Uuid, update: impl FnOnce(&mut J)) -> bool {
         let Some(entry) = self.find(id) else {
             return false;

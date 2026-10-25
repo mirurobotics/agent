@@ -560,9 +560,8 @@ mod tests {
 
         #[tokio::test]
         async fn resumed_upload_of_an_existing_object_is_aborted() {
-            // Both parts landed and an earlier attempt already stored the
-            // object, so completing gets 412: the file counts as uploaded and
-            // this upload's parts are aborted.
+            // An earlier attempt stored the object, so completing gets 412 and
+            // this upload is aborted.
             let listed = format!(
                 r#"<?xml version="1.0" encoding="UTF-8"?>
 <ListPartsResult><Bucket>{BUCKET}</Bucket><Key>big.bin</Key><UploadId>{UPLOAD_ID}</UploadId><IsTruncated>false</IsTruncated><Part><PartNumber>1</PartNumber><ETag>"e1"</ETag></Part><Part><PartNumber>2</PartNumber><ETag>"e2"</ETag></Part></ListPartsResult>"#

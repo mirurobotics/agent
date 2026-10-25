@@ -48,9 +48,7 @@ impl Store {
 
     /// Resumes an existing multipart upload: lists the parts that already landed
     /// in S3, uploads only the missing parts, and completes. Never aborts on
-    /// failure, so a resume is safe to retry. If GCS already holds the object
-    /// from an earlier attempt, this upload is aborted as in
-    /// [`Self::put_multipart`].
+    /// failure, so a resume is safe to retry.
     ///
     /// `NoSuchUploadErr` if S3 no longer knows the upload. The caller must resume
     /// against the same file bytes and part size the upload was started for.
@@ -65,6 +63,7 @@ impl Store {
         let written = self
             .complete_multipart_upload(dst, upload_id, &parts)
             .await?;
+        // GCS already had the object: abort this upload's leftover parts
         if matches!(written, WriteOutcome::AlreadyExists) {
             let _ = self.abort_multipart_upload(dst, upload_id).await;
         }

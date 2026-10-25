@@ -17,29 +17,16 @@ use backend_api::models::{CreateUploadRequest, Upload, UploadCredentials, Upload
 use chrono::{Local, TimeZone};
 use tracing::{debug, info};
 
-/// The seam between the upload actor and the transfer mechanics.
-///
-/// The production executor fetches short-lived downscoped cloud credentials from the
-/// backend, transfers the file with the native storage SDK, then confirms the upload.
-/// This trait keeps the actor independent of those mechanics.
-///
-/// An attempt takes two calls. The actor saves the upload [`Self::prepare`]
-/// returns on the queued job before calling [`Self::upload`], and the next
-/// attempt reads it back from `job.upload`, so a retry or a restart continues
-/// the same upload.
+/// The seam between the upload actor and the transfer mechanics. The actor
+/// saves the upload [`Self::prepare`] returns on the job, then calls
+/// [`Self::upload`].
 ///
 /// # Cancel safety
 ///
-/// The actor drops an in-progress `prepare` or `upload` future on shutdown, so
-/// implementations must tolerate being cancelled at any await point. An
-/// interrupted transfer is re-driven from the persisted queue, which keeps the
-/// entry, with its saved upload, until the upload is confirmed. Scanner
-/// re-observation does NOT re-drive it — the scanner ledger records that a file
-/// was reported, not that it was uploaded.
+/// The actor drops either future on shutdown, and the next process continues
+/// from the job's saved upload.
 pub trait UploadExecutor: Send + Sync {
-    /// Reuses or creates the job's backend upload and, for a file of more than
-    /// one part, the multipart upload the transfer resumes. `None` if the
-    /// backend upload was already confirmed.
+    /// Reuses or creates the job's upload. `None` if it was already confirmed.
     fn prepare(
         &self,
         job: &Job,
@@ -56,9 +43,7 @@ pub trait UploadExecutor: Send + Sync {
 /// What [`UploadExecutor::prepare`] hands to [`UploadExecutor::upload`].
 #[derive(Debug, PartialEq)]
 pub struct Prepared {
-    /// The job's upload, which the actor saves before the transfer starts.
     pub upload: UploadCheckpoint,
-    /// Fresh credentials for the transfer.
     pub credentials: UploadCredentials,
 }
 
@@ -127,9 +112,7 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> LiveExecutor<C, T, X> {
         unless_gone(result)
     }
 
-    /// Whether a gone upload is gone because it was already uploaded. Confirm
-    /// is idempotent: it succeeds on an uploaded upload and fails with 404 or
-    /// 409 on a deleted or failed one.
+    /// Whether a gone upload was uploaded, rather than deleted or failed.
     async fn already_uploaded(&self, id: &str) -> Result<bool, UploadErr> {
         let token = self.token().await?;
         Ok(unless_gone(self.confirm(&token, id).await)?.is_some())
@@ -155,8 +138,7 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> LiveExecutor<C, T, X> {
     }
 }
 
-/// `None` if the upload is gone: the backend deleted it (404), or it is no
-/// longer pending because it was uploaded or failed (409).
+/// `None` for a gone upload: deleted (404), or uploaded or failed (409).
 fn unless_gone<T>(result: Result<T, HTTPErr>) -> Result<Option<T>, UploadErr> {
     match result {
         Ok(value) => Ok(Some(value)),
@@ -167,8 +149,7 @@ fn unless_gone<T>(result: Result<T, HTTPErr>) -> Result<Option<T>, UploadErr> {
 
 impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> UploadExecutor for LiveExecutor<C, T, X> {
     async fn prepare(&self, job: &Job) -> Result<Option<Prepared>, UploadErr> {
-        // A retry reuses the job's upload with fresh credentials, unless the
-        // backend no longer accepts it.
+        // A retry reuses the job's upload, unless the backend no longer accepts it.
         let (mut upload, credentials) = match &job.upload {
             None => self.create_upload(job).await?,
             Some(upload) => match self.vend_credentials(&upload.miru_upload_id).await? {
@@ -189,8 +170,7 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> UploadExecutor for LiveE
                 }
             },
         };
-        // The Miru upload is saved even if this fails, and the transfer checks
-        // the old multipart upload against the file again.
+        // Best effort: on failure, the transfer rechecks the saved multipart upload.
         match self
             .transfer
             .prepare_multipart(&credentials, &upload, &job.file)

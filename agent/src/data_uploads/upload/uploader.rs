@@ -136,9 +136,8 @@ where
         }
     }
 
-    /// Prepare `entry`'s upload, save it on the queued job, then upload it, so
-    /// a retry or a restart continues the same upload. `None` if a shutdown
-    /// cancelled the attempt.
+    /// Prepares `entry`'s upload, saves it on the job, then uploads it. `None`
+    /// if a shutdown cancelled the attempt.
     async fn attempt(&mut self, entry: &QueueEntry) -> Option<Result<(), UploadErr>> {
         let prepare = self.uploader.prepare(entry);
         let prepared = match self.run_until_shutdown(prepare).await? {
