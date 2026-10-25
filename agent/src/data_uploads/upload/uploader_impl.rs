@@ -3,6 +3,7 @@ use std::future::Future;
 use std::sync::Arc;
 
 // internal crates
+use crate::clock::Clock;
 use crate::data_uploads::{
     retention::{DeleterExt, Job as DeleteJob},
     upload::{
@@ -16,7 +17,7 @@ use crate::errors::Error;
 use crate::queue::{NextAttempt, Persistence, RetryPolicy, Verdict};
 
 // external crates
-use chrono::{DateTime, TimeDelta, Utc};
+use chrono::TimeDelta;
 use tracing::{debug, error, info, warn};
 
 #[derive(Clone, Debug)]
@@ -42,31 +43,29 @@ impl Default for UploaderOptions {
 /// actor so callers can share it across tasks.
 ///
 /// [`Uploader`]: crate::data_uploads::upload::Uploader
-pub struct UploaderImpl<ExecutorT, D, N>
+pub struct UploaderImpl<ExecutorT, D>
 where
     ExecutorT: UploadExecutor,
     D: DeleterExt + 'static,
-    N: Fn() -> DateTime<Utc> + Send + Sync + 'static,
 {
     queue: Queue,
     executor: Arc<ExecutorT>,
     deleter: Arc<D>,
     options: UploaderOptions,
-    now_fn: N,
+    clock: Clock,
 }
 
-impl<ExecutorT, D, N> UploaderImpl<ExecutorT, D, N>
+impl<ExecutorT, D> UploaderImpl<ExecutorT, D>
 where
     ExecutorT: UploadExecutor,
     D: DeleterExt + 'static,
-    N: Fn() -> DateTime<Utc> + Send + Sync + 'static,
 {
     pub(crate) fn new(
         executor: Arc<ExecutorT>,
         deleter: Arc<D>,
         options: UploaderOptions,
         snapshot_file: Option<QueueSnapshotFile>,
-        now_fn: N,
+        clock: Clock,
     ) -> Self {
         let queue = match snapshot_file {
             Some(file) => {
@@ -79,7 +78,7 @@ where
             executor,
             deleter,
             options,
-            now_fn,
+            clock,
         }
     }
 
@@ -93,7 +92,7 @@ where
 
     /// The entry to attempt now, or how long until one is eligible.
     pub(crate) async fn next_attempt(&mut self) -> NextAttempt<Job> {
-        let now = (self.now_fn)();
+        let now = self.clock.system_now();
         let horizon = self.options.retry.horizon(now);
         self.queue.next_attempt(now, horizon).await
     }
@@ -148,7 +147,7 @@ where
             digest: job.digest.clone(),
             mtime: job.mtime,
             first_observed_at: job.first_observed_at,
-            last_observed_at: (self.now_fn)(),
+            last_observed_at: self.clock.system_now(),
             ttl_secs: retention.ttl_secs,
             file_rule_id: job.file_rule_id.clone(),
             deployment_id: job.deployment_id.clone(),
@@ -165,7 +164,7 @@ where
     /// errors are expected and don't count toward the attempt budget; any
     /// other failure does.
     async fn handle_failure(&mut self, mut entry: QueueEntry, err: UploadErr) {
-        let age = (self.now_fn)() - entry.job.first_observed_at;
+        let age = self.clock.system_now() - entry.job.first_observed_at;
         match self.options.retry.on_failure(&err, entry.attempts, age) {
             Verdict::Retry {
                 attempts,
@@ -205,7 +204,7 @@ where
             "upload: requeuing {file} at tail after {attempts} attempt(s), retrying in \
              {wait_secs}s"
         );
-        let next_attempt_at = (self.now_fn)() + TimeDelta::seconds(wait_secs);
+        let next_attempt_at = self.clock.system_now() + TimeDelta::seconds(wait_secs);
         self.queue.retry(entry.id, attempts, next_attempt_at).await;
     }
 
