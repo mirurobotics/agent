@@ -99,8 +99,8 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> LiveExecutor<C, T, X> {
                 credentials,
             }));
         }
-        // The backend refuses credentials only for an upload that isn't pending,
-        // so confirm accepts it only if an earlier attempt confirmed it.
+        // A gone upload isn't pending, so confirm accepts it only if an earlier
+        // attempt confirmed it, and rejects a deleted or failed one.
         match self.confirm_upload(id).await {
             Ok(()) => {
                 info!("upload: upload {id} was already confirmed");
