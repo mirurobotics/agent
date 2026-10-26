@@ -1,6 +1,7 @@
 // standard crates
 use std::future::Future;
 use std::sync::Arc;
+use std::time::Duration;
 
 // internal crates
 use crate::data_uploads::{
@@ -18,6 +19,11 @@ use crate::queue::{NextAttempt, Persistence, RetryPolicy, Verdict};
 // external crates
 use chrono::{DateTime, TimeDelta, Utc};
 use tracing::{debug, error, info, warn};
+
+/// A non-terminal failure after an attempt this long doesn't count toward the
+/// attempt budget. Its likeliest cause is storage credentials that expired
+/// mid-transfer, and the retry resumes the upload with fresh ones.
+const LONG_ATTEMPT: Duration = Duration::from_secs(30 * 60);
 
 #[derive(Clone, Debug)]
 pub struct UploaderOptions {
@@ -143,12 +149,13 @@ where
         }
     }
 
-    /// Settle `entry` with the result of its attempt: ack it on success or
-    /// when it is dropped, otherwise retry it at the tail.
+    /// Settle `entry` with the result of its attempt, which ran for `ran_for`:
+    /// ack it on success or when it is dropped, otherwise retry it at the tail.
     pub(crate) async fn finish_attempt(
         &mut self,
         mut entry: QueueEntry,
         result: Result<(), UploadErr>,
+        ran_for: Duration,
     ) {
         match result {
             Ok(()) => {
@@ -157,7 +164,7 @@ where
                 self.enqueue_delete_job(&entry).await;
                 self.queue.ack(entry.id).await;
             }
-            Err(err) => self.handle_failure(entry, err).await,
+            Err(err) => self.handle_failure(entry, err, ran_for).await,
         }
     }
 
@@ -194,11 +201,17 @@ where
     }
 
     /// Settle a failed attempt as the retry policy says. Network connection
-    /// errors are expected and don't count toward the attempt budget; any
-    /// other failure does.
-    async fn handle_failure(&mut self, mut entry: QueueEntry, err: UploadErr) {
+    /// errors, and non-terminal failures after a [`LONG_ATTEMPT`], don't count
+    /// toward the attempt budget; any other failure does.
+    async fn handle_failure(&mut self, mut entry: QueueEntry, err: UploadErr, ran_for: Duration) {
         let age = (self.now_fn)() - entry.job.first_observed_at;
-        match self.options.retry.on_failure(&err, entry.attempts, age) {
+        let retry = &self.options.retry;
+        let verdict = if ran_for >= LONG_ATTEMPT && !err.is_terminal() {
+            retry.on_uncounted_failure(entry.attempts, age)
+        } else {
+            retry.on_failure(&err, entry.attempts, age)
+        };
+        match verdict {
             Verdict::Retry {
                 attempts,
                 wait_secs,
@@ -242,12 +255,12 @@ where
     }
 
     /// A network error logs at debug, since it repeats every `base_secs` while
-    /// the device is offline; any other failure counts and logs at warn.
+    /// the device is offline; any other failure logs at warn.
     fn log_failure(entry: &QueueEntry, err: &UploadErr) {
         if err.is_network_conn_err() {
             Self::log_network_conn_err(entry, err);
         } else {
-            Self::log_counted_failure(entry, err);
+            Self::log_failed_attempt(entry, err);
         }
     }
 
@@ -258,10 +271,10 @@ where
         );
     }
 
-    fn log_counted_failure(entry: &QueueEntry, err: &UploadErr) {
+    fn log_failed_attempt(entry: &QueueEntry, err: &UploadErr) {
         warn!(
-            "upload: attempt {} for file {} failed: {err:?}",
-            entry.attempts, entry.job.file
+            "upload: attempt for file {} failed: {err:?}",
+            entry.job.file
         );
     }
 
