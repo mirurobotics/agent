@@ -591,10 +591,16 @@ mod tests {
         #[tokio::test]
         async fn access_denied_still_fails() {
             // 403 means the token or bucket refused the write, not that the object
-            // exists.
+            // exists. The error keeps GCS's Details, which name what was denied.
+            let details = "uploader@proj.iam.gserviceaccount.com does not have \
+                storage.objects.create access to the Google Cloud Storage object.";
+            let xml = format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>AccessDenied</Code><Message>Access denied.</Message><Details>{details}</Details></Error>"#
+            );
             let replay = StaticReplayClient::new(vec![ReplayEvent::new(
                 req("PUT", "small.bin?x-id=PutObject"),
-                error_xml(403, "AccessDenied"),
+                resp_xml(403, &xml),
             )]);
             let src = temp_file_with(b"hello world").await;
 
@@ -607,6 +613,7 @@ mod tests {
                 panic!("expected RequestFailedErr, got: {err:?}");
             };
             assert_eq!(e.status, Some(403));
+            assert!(e.msg.contains(details), "{}", e.msg);
         }
 
         #[tokio::test]

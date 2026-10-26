@@ -4,6 +4,7 @@ use crate::filesys::{self, file::File};
 use crate::s3::Object;
 
 // external crates
+use aws_sdk_s3::config::http::HttpResponse;
 use aws_sdk_s3::error::SdkError;
 use aws_sdk_s3::primitives::ByteStreamError;
 
@@ -202,12 +203,18 @@ where
         }),
         SdkError::ServiceError(e) => {
             let status = e.raw().status().as_u16();
+            let body = body_text(e.raw());
             let source = e.into_err();
+            let msg = if body.is_empty() {
+                source.to_string()
+            } else {
+                format!("{source}: {body}")
+            };
             S3Err::RequestFailedErr(RequestFailedErr {
                 operation: operation.to_string(),
                 object: object.clone(),
                 status: Some(status),
-                msg: source.to_string(),
+                msg,
                 trace: crate::trace!(),
             })
         }
@@ -221,6 +228,13 @@ where
             trace: crate::trace!(),
         }),
     }
+}
+
+/// An error response's body as text. GCS says which principal lacked which
+/// permission only there, not in the fields the SDK parses.
+fn body_text(resp: &HttpResponse) -> String {
+    let bytes = resp.body().bytes().unwrap_or_default();
+    String::from_utf8_lossy(bytes).trim().to_string()
 }
 
 /// Maps a local filesystem I/O error hit while streaming an object body
@@ -260,7 +274,6 @@ mod tests {
     use super::*;
     use crate::errors::Error as _;
     use crate::test_utils::filesys::missing_file;
-    use aws_sdk_s3::config::http::HttpResponse;
     use aws_sdk_s3::error::ConnectorError;
     use aws_smithy_types::body::SdkBody;
 
