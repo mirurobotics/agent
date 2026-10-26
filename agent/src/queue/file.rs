@@ -5,7 +5,7 @@ use std::time::Duration;
 // internal crates
 use crate::filesys::FileSysErr;
 use crate::queue::{
-    errors::{EnqueueErr, QueueFullErr},
+    errors::{EnqueueErr, EntryNotFoundErr, QueueFullErr},
     job::QueueJob,
     snapshot::{QueueEntry, QueueSnapshot, QueueSnapshotFile},
 };
@@ -200,6 +200,28 @@ impl<J: QueueJob> FileQueue<J> {
             self.entries.len()
         );
         true
+    }
+
+    /// Changes the job of entry `id` in place and persists it.
+    pub async fn update_job(
+        &mut self,
+        id: Uuid,
+        update: impl FnOnce(&mut J),
+    ) -> Result<(), EntryNotFoundErr> {
+        let Some(entry) = self.find(id) else {
+            return Err(EntryNotFoundErr {
+                label: J::LABEL,
+                id,
+                trace: crate::trace!(),
+            });
+        };
+        update(&mut entry.job);
+        let _ = self.persist().await;
+        Ok(())
+    }
+
+    fn find(&mut self, id: Uuid) -> Option<&mut QueueEntry<J>> {
+        self.entries.iter_mut().find(|entry| entry.id == id)
     }
 
     fn take(&mut self, id: Uuid) -> Option<QueueEntry<J>> {

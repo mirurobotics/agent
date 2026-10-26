@@ -8,7 +8,10 @@ use crate::mocks::{
     deleter::{MockDeleter, MockStep as DeleterStep},
     upload_executor::{MockStep, MockUploadExecutor},
 };
-use crate::test_utils::{filesys::dirs as test_dirs, upload::make_job};
+use crate::test_utils::{
+    filesys::dirs as test_dirs,
+    upload::{make_job, upload_checkpoint},
+};
 use miru_agent::data_uploads::retention::Job as DeleteJob;
 use miru_agent::data_uploads::upload::errors::{EnqueueErr, ExecutorErr};
 use miru_agent::data_uploads::upload::{
@@ -1129,6 +1132,59 @@ mod durability {
 
         timed(uploader2.shutdown()).await.unwrap();
         timed(handle2).await.unwrap();
+    }
+
+    /// An attempt's saved upload reaches disk while the attempt is still
+    /// running, so a crash mid-transfer keeps it for the next process.
+    #[tokio::test]
+    async fn saved_upload_reaches_disk_mid_attempt() {
+        let dir = test_dirs::temp("uploader_durability").unwrap();
+        let path = dir.to_dir().file("upload_queue.json");
+        let (mock, mut started_rx) = MockUploadExecutor::new();
+        let (_release_tx, release_rx) = oneshot::channel();
+        mock.push_step(MockStep::PrepareThen(
+            upload_checkpoint(),
+            Box::new(MockStep::Hang(release_rx)),
+        ));
+        let (uploader, handle) = spawn_persisted(mock.clone(), open(&path).await);
+
+        timed(uploader.enqueue(make_job("a.log"))).await.unwrap();
+        // once when the attempt starts, again when its upload starts after the save
+        timed(started_rx.recv()).await.unwrap();
+        timed(started_rx.recv()).await.unwrap();
+
+        let saved = open(&path).await.read().entries[0].job.checkpoint.clone();
+        assert_eq!(saved, Some(upload_checkpoint()));
+
+        timed(uploader.shutdown()).await.unwrap();
+        timed(handle).await.unwrap();
+    }
+
+    /// A failed attempt's requeue keeps its saved upload rather than writing
+    /// back the job as it was before the attempt.
+    #[tokio::test]
+    async fn failed_attempt_requeues_with_its_saved_upload() {
+        let dir = test_dirs::temp("uploader_durability").unwrap();
+        let path = dir.to_dir().file("upload_queue.json");
+        let job = make_job("a.log");
+        let (mock, _started_rx) = MockUploadExecutor::new();
+        mock.push_step(MockStep::PrepareThen(
+            upload_checkpoint(),
+            Box::new(MockStep::Err),
+        ));
+        mock.push_step(MockStep::Ok);
+        let (uploader, handle, _sleeps) =
+            spawn_persisted_with_test_clock(mock.clone(), open(&path).await);
+
+        timed(uploader.enqueue(job.clone())).await.unwrap();
+        await_drained(&uploader).await;
+
+        let mut expected = job.clone();
+        expected.checkpoint = Some(upload_checkpoint());
+        assert_eq!(mock.recorded_calls(), vec![job, expected]);
+
+        timed(uploader.shutdown()).await.unwrap();
+        timed(handle).await.unwrap();
     }
 
     #[tokio::test]
