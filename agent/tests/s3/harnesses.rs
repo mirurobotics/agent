@@ -189,16 +189,17 @@ pub async fn resuming_an_aborted_upload_fails_with_no_such_upload<B: RealBucket>
 }
 
 /// A put that finds its object already written, as when a retry follows a lost
-/// success response, succeeds. On GCS the upload token can't overwrite, so
-/// writes are create-only and the store counts GCS's 412 as done.
+/// success response, succeeds and leaves the object as it was: writes are
+/// create-only, and the store counts the 412 as done.
 pub async fn put_of_an_existing_object_succeeds<B: RealBucket>() {
     let bucket = B::load();
     for (name, len) in [("exists-single.bin", SMALL), ("exists-multi.bin", LARGE)] {
         let obj = bucket.object(name);
         let bytes = test_bytes(len);
-        let file = temp_file_with(&bytes).await;
+        let first = temp_file_with(&bytes).await;
+        let second = temp_file_with(&vec![0u8; len]).await;
 
-        for _ in 0..2 {
+        for file in [first, second] {
             let store = bucket.upload_store(&obj).await;
             store
                 .put(file.to_file(), &obj, &metadata())

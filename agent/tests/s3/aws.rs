@@ -6,11 +6,14 @@
 use std::collections::HashMap;
 
 // internal crates
-use crate::s3::harnesses::{env_var, real_bucket_tests, RealBucket};
+use crate::s3::harnesses::{env_var, real_bucket_tests, test_bytes, RealBucket, SMALL};
 use miru_agent::s3::{aws, sdk, Config, Credentials, Object, Options};
 
 // external crates
 use aws_sdk_s3::config::{Credentials as AwsCredentials, Region};
+use aws_sdk_s3::error::ProvideErrorMetadata;
+use aws_sdk_s3::primitives::ByteStream;
+use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart};
 use aws_sdk_s3::Client;
 use serde_json::json;
 
@@ -73,20 +76,31 @@ impl RealBucket for Aws {
 }
 
 impl Aws {
-    /// Assumes the upload role with a session policy that allows uploading
-    /// `obj` alone, as the backend does for each upload.
+    /// Assumes the upload role with a session policy that allows creating, but
+    /// not overwriting, `obj` alone, as the backend does for each upload.
     async fn upload_credentials(&self, obj: &Object) -> Credentials {
         let policy = json!({
             "Version": "2012-10-17",
-            "Statement": [{
-                "Effect": "Allow",
-                "Action": [
-                    "s3:PutObject",
-                    "s3:AbortMultipartUpload",
-                    "s3:ListMultipartUploadParts",
-                ],
-                "Resource": format!("arn:aws:s3:::{}/{}", obj.bucket, obj.key),
-            }],
+            "Statement": [
+                {
+                    "Effect": "Allow",
+                    "Action": [
+                        "s3:PutObject",
+                        "s3:AbortMultipartUpload",
+                        "s3:ListMultipartUploadParts",
+                    ],
+                    "Resource": format!("arn:aws:s3:::{}/{}", obj.bucket, obj.key),
+                },
+                {
+                    "Effect": "Deny",
+                    "Action": ["s3:PutObject"],
+                    "Resource": "*",
+                    "Condition": {
+                        "BoolIfExists": { "s3:ObjectCreationOperation": "true" },
+                        "StringNotEquals": { "s3:if-none-match": "*" },
+                    },
+                },
+            ],
         });
         let config = aws_sdk_sts::Config::builder()
             .region(Region::new(self.region.clone()))
@@ -110,3 +124,69 @@ impl Aws {
 }
 
 real_bucket_tests!(Aws);
+
+/// The upload credentials refuse a PutObject without `If-None-Match: *`, so
+/// they can't overwrite.
+#[tokio::test]
+async fn put_without_if_none_match_is_denied() {
+    let aws = Aws::load();
+    let obj = aws.object("unconditional.bin");
+    let client = aws.upload_client(&obj).await;
+
+    let err = client
+        .put_object()
+        .bucket(&obj.bucket)
+        .key(&obj.key)
+        .body(ByteStream::from(test_bytes(SMALL)))
+        .send()
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), Some("AccessDenied"), "{err:?}");
+}
+
+/// They refuse a CompleteMultipartUpload without `If-None-Match: *` too, but
+/// not the create and part calls, which can't send it.
+#[tokio::test]
+async fn complete_without_if_none_match_is_denied() {
+    let aws = Aws::load();
+    let obj = aws.object("unconditional-multi.bin");
+    let client = aws.upload_client(&obj).await;
+
+    let upload = client
+        .create_multipart_upload()
+        .bucket(&obj.bucket)
+        .key(&obj.key)
+        .send()
+        .await
+        .unwrap();
+    let upload_id = upload.upload_id().unwrap();
+    let part = client
+        .upload_part()
+        .bucket(&obj.bucket)
+        .key(&obj.key)
+        .upload_id(upload_id)
+        .part_number(1)
+        .body(ByteStream::from(test_bytes(SMALL)))
+        .send()
+        .await
+        .unwrap();
+    let completed = CompletedMultipartUpload::builder()
+        .parts(
+            CompletedPart::builder()
+                .part_number(1)
+                .e_tag(part.e_tag().unwrap())
+                .build(),
+        )
+        .build();
+
+    let err = client
+        .complete_multipart_upload()
+        .bucket(&obj.bucket)
+        .key(&obj.key)
+        .upload_id(upload_id)
+        .multipart_upload(completed)
+        .send()
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), Some("AccessDenied"), "{err:?}");
+}
