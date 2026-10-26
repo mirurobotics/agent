@@ -1,7 +1,7 @@
 // internal crates
 use crate::mocks::http_client::MockClient;
 use crate::test_utils::filesys::dirs as test_dirs;
-use backend_api::models::Device;
+use backend_api::models::{Device, TokenResponse};
 use miru_agent::crypt::base64;
 use miru_agent::disk::{Layout, Settings};
 use miru_agent::filesys::{dirs, files, PathExt};
@@ -9,6 +9,7 @@ use miru_agent::http::{errors::MockErr, HTTPErr};
 use miru_agent::provisioning::provision;
 
 // external crates
+use chrono::{Duration, Utc};
 use serde_json::json;
 
 pub(super) const DEVICE_ID: &str = "75899aa4-b08a-4047-8526-880b1b832973";
@@ -87,16 +88,27 @@ impl Env {
     }
 }
 
-/// MockClient that succeeds with a `Device` named `name` for `/devices/provision`.
+/// A `/devices/token` response the agent accepts.
+fn ok_token() -> Result<TokenResponse, HTTPErr> {
+    Ok(TokenResponse {
+        token: "mock.jwt.token".to_string(),
+        expires_at: (Utc::now() + Duration::minutes(5)).to_rfc3339(),
+    })
+}
+
+/// MockClient that succeeds with a `Device` named `name` for `/devices/provision`
+/// and accepts the existing device's credentials.
 pub(super) fn mock_ok_provision(name: impl Into<String>) -> MockClient {
     let name = name.into();
     MockClient {
         provision_device_fn: Box::new(move || Ok(new_device(DEVICE_ID, &name))),
+        issue_device_token_fn: Box::new(ok_token),
         ..MockClient::default()
     }
 }
 
-/// MockClient that returns a network-flagged HTTP error for `/devices/provision`.
+/// MockClient that returns a network-flagged HTTP error for `/devices/provision`
+/// and accepts the existing device's credentials.
 pub(super) fn mock_failing_provision() -> MockClient {
     MockClient {
         provision_device_fn: Box::new(|| {
@@ -104,6 +116,7 @@ pub(super) fn mock_failing_provision() -> MockClient {
                 is_network_conn_err: true,
             }))
         }),
+        issue_device_token_fn: Box::new(ok_token),
         ..MockClient::default()
     }
 }

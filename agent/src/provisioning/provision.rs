@@ -1,12 +1,14 @@
 // internal crates
+use crate::authn::{self, AuthnErr};
 use crate::cli;
 use crate::crypt::rsa;
 use crate::disk::{self, settings};
 use crate::filesys::{self, files, Overwrite};
-use crate::http;
+use crate::http::{self, HTTPErr};
 use crate::models;
 use crate::provisioning::{errors::*, shared};
 use crate::telemetry;
+use crate::trace;
 use crate::version;
 use backend_api::models as backend_client;
 
@@ -27,7 +29,8 @@ pub async fn provision<HTTPClientT: http::ClientI>(
     token: &str,
     device_name: Option<String>,
 ) -> Result<Outcome, ProvisionErr> {
-    // if a machine has already been provisioned, then just return the device's name
+    // if a machine has already been provisioned, confirm Miru still accepts its
+    // credentials and return the device's name
     if disk::assert_activated(layout).is_ok() {
         let device_name = match files::read_json::<models::Device>(&layout.device()).await {
             Ok(device) => device.name,
@@ -36,6 +39,7 @@ pub async fn provision<HTTPClientT: http::ClientI>(
                 "unknown".to_string()
             }
         };
+        verify_existing_device(http_client, layout, &device_name).await?;
         return Ok(Outcome {
             already_provisioned: true,
             device_name,
@@ -77,6 +81,27 @@ pub async fn provision<HTTPClientT: http::ClientI>(
 
     shared::cleanup_temp_files(&[&private_key_file, &public_key_file]).await;
     result
+}
+
+/// Fails if Miru rejects the machine's stored credentials, such as when its device
+/// was archived or deleted.
+async fn verify_existing_device<HTTPClientT: http::ClientI>(
+    http_client: &HTTPClientT,
+    layout: &disk::Layout,
+    device_name: &str,
+) -> Result<(), ProvisionErr> {
+    let auth = layout.auth();
+    match authn::issue_token(http_client, &auth.private_key(), &auth.public_key()).await {
+        Ok(_) => Ok(()),
+        Err(AuthnErr::HTTPErr(HTTPErr::RequestFailed(e))) if e.status.is_client_error() => {
+            Err(ProvisionErr::DeviceRejectedErr(DeviceRejectedErr {
+                device_name: device_name.to_string(),
+                source: e,
+                trace: trace!(),
+            }))
+        }
+        Err(e) => Err(e.into()),
+    }
 }
 
 async fn provision_with_backend<HTTPClientT: http::ClientI>(

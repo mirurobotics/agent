@@ -3,10 +3,29 @@ use super::shared::{
     assert_temp_dir_cleaned, mock_failing_provision, mock_ok_provision, validate_storage, Env,
     StorageSnapshot, DEVICE_ID,
 };
-use crate::mocks::http_client as mock;
+use crate::mocks::http_client::{self as mock, MockClient};
 use crate::test_utils::filesys::files as test_files;
+use miru_agent::authn::AuthnErr;
 use miru_agent::filesys::{dirs, files, PathExt};
+use miru_agent::http::{errors::RequestFailed, request::Params, HTTPErr};
 use miru_agent::provisioning::{errors::*, provision};
+
+/// MockClient whose `/devices/token` fails with `status`.
+fn mock_token_status(status: u16) -> MockClient {
+    MockClient {
+        issue_device_token_fn: Box::new(move || {
+            Err(HTTPErr::RequestFailed(RequestFailed {
+                request: Params::post("http://mock/devices/token", String::new())
+                    .meta()
+                    .unwrap(),
+                status: reqwest::StatusCode::from_u16(status).unwrap(),
+                error: None,
+                trace: miru_agent::trace!(),
+            }))
+        }),
+        ..MockClient::default()
+    }
+}
 
 pub mod provision_fn {
     use super::*;
@@ -85,7 +104,7 @@ pub mod provision_fn {
         env.seed_provision("initial").await;
         let snapshot = StorageSnapshot::capture(&env.layout).await;
 
-        // a poison-pill mock — any call would fail the test
+        // a poison-pill provision mock — reaching /devices/provision would fail the test
         let mock = mock_failing_provision();
         let outcome = provision::provision(
             &mock,
@@ -100,7 +119,47 @@ pub mod provision_fn {
         assert!(outcome.already_provisioned);
         assert_eq!(outcome.device_name, "initial");
         assert_eq!(mock.call_count(mock::Call::ProvisionDevice), 0);
+        assert_eq!(mock.call_count(mock::Call::IssueDeviceToken), 1);
         snapshot.assert_unchanged(&env.layout).await;
+
+        env.cleanup().await;
+    }
+
+    #[tokio::test]
+    async fn fails_when_miru_rejects_existing_device() {
+        let env = Env::new("provision-test").await;
+        env.seed_provision("initial").await;
+        let snapshot = StorageSnapshot::capture(&env.layout).await;
+
+        // e.g. the device was archived in Miru after this machine was wiped
+        let mock = mock_token_status(400);
+        let err = provision::provision(&mock, &env.layout, &env.settings, &env.token, None)
+            .await
+            .unwrap_err();
+
+        let ProvisionErr::DeviceRejectedErr(rejected) = &err else {
+            panic!("expected DeviceRejectedErr, got {err:?}");
+        };
+        assert_eq!(rejected.device_name, "initial");
+        assert!(err.to_string().contains("miru-agent reprovision"));
+        assert_eq!(mock.call_count(mock::Call::ProvisionDevice), 0);
+        snapshot.assert_unchanged(&env.layout).await;
+
+        env.cleanup().await;
+    }
+
+    #[tokio::test]
+    async fn server_error_verifying_existing_device_is_not_a_rejection() {
+        let env = Env::new("provision-test").await;
+        env.seed_provision("initial").await;
+
+        let mock = mock_token_status(500);
+        let err = provision::provision(&mock, &env.layout, &env.settings, &env.token, None)
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, ProvisionErr::AuthnErr(AuthnErr::HTTPErr(_))));
+        assert_eq!(mock.call_count(mock::Call::ProvisionDevice), 0);
 
         env.cleanup().await;
     }
@@ -184,7 +243,7 @@ pub mod provision_fn {
         test_files::seed(&env.layout.device(), "not valid json").await;
 
         // a failing mock — short-circuit must still fire even when device.json
-        // is unreadable, so the backend should never be called
+        // is unreadable, so /devices/provision should never be called
         let mock = mock_failing_provision();
         let outcome = provision::provision(&mock, &env.layout, &env.settings, &env.token, None)
             .await
