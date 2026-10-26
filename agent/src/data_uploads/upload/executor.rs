@@ -15,7 +15,7 @@ use backend_api::models::{CreateUploadRequest, UploadCredentials, UploadSource};
 
 // external crates
 use chrono::{Local, TimeZone};
-use tracing::{debug, info};
+use tracing::{info, warn};
 
 /// Uploads a job's file and confirms the upload with Miru.
 ///
@@ -197,7 +197,7 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> UploadExecutor for LiveE
                 prepared.checkpoint.multipart = Some(multipart);
             }
             Ok(TransferMethod::SinglePart) => prepared.checkpoint.multipart = None,
-            Err(err) => debug!(
+            Err(err) => warn!(
                 "upload: can't prepare multipart upload for {}: {err:?}",
                 job.file
             ),
