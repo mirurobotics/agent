@@ -272,7 +272,10 @@ where
     }
 
     fn log_failed_attempt(entry: &QueueEntry, err: &UploadErr) {
-        warn!("upload: attempt for file {} failed: {err:?}", entry.job.file);
+        warn!(
+            "upload: attempt for file {} failed: {err:?}",
+            entry.job.file
+        );
     }
 
     fn log_attempt(entry: &QueueEntry) {
