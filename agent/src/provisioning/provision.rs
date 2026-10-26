@@ -93,7 +93,7 @@ async fn verify_existing_device<HTTPClientT: http::ClientI>(
     let auth = layout.auth();
     match authn::issue_token(http_client, &auth.private_key(), &auth.public_key()).await {
         Ok(_) => Ok(()),
-        Err(AuthnErr::HTTPErr(HTTPErr::RequestFailed(e))) if e.status.is_client_error() => {
+        Err(AuthnErr::HTTPErr(HTTPErr::RequestFailed(e))) if is_rejection(e.status) => {
             Err(ProvisionErr::DeviceRejectedErr(DeviceRejectedErr {
                 device_name: device_name.to_string(),
                 source: e,
@@ -102,6 +102,14 @@ async fn verify_existing_device<HTTPClientT: http::ClientI>(
         }
         Err(e) => Err(e.into()),
     }
+}
+
+/// Whether Miru refused the credentials: any 4xx except a timeout or rate limit,
+/// which can pass on retry.
+fn is_rejection(status: reqwest::StatusCode) -> bool {
+    status.is_client_error()
+        && status != reqwest::StatusCode::REQUEST_TIMEOUT
+        && status != reqwest::StatusCode::TOO_MANY_REQUESTS
 }
 
 async fn provision_with_backend<HTTPClientT: http::ClientI>(

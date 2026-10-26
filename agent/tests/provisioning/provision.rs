@@ -149,19 +149,24 @@ pub mod provision_fn {
     }
 
     #[tokio::test]
-    async fn server_error_verifying_existing_device_is_not_a_rejection() {
-        let env = Env::new("provision-test").await;
-        env.seed_provision("initial").await;
+    async fn transient_error_verifying_existing_device_is_not_a_rejection() {
+        for status in [408, 429, 500] {
+            let env = Env::new("provision-test").await;
+            env.seed_provision("initial").await;
 
-        let mock = mock_token_status(500);
-        let err = provision::provision(&mock, &env.layout, &env.settings, &env.token, None)
-            .await
-            .unwrap_err();
+            let mock = mock_token_status(status);
+            let err = provision::provision(&mock, &env.layout, &env.settings, &env.token, None)
+                .await
+                .unwrap_err();
 
-        assert!(matches!(err, ProvisionErr::AuthnErr(AuthnErr::HTTPErr(_))));
-        assert_eq!(mock.call_count(mock::Call::ProvisionDevice), 0);
+            assert!(
+                matches!(err, ProvisionErr::AuthnErr(AuthnErr::HTTPErr(_))),
+                "status {status}: {err:?}"
+            );
+            assert_eq!(mock.call_count(mock::Call::ProvisionDevice), 0);
 
-        env.cleanup().await;
+            env.cleanup().await;
+        }
     }
 
     #[tokio::test]
