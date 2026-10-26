@@ -18,7 +18,7 @@ pub struct RetryPolicy {
     /// count minus one.
     pub backoff: cooldown::Backoff,
     /// Age past which a failing job is dropped, whatever the error. This is
-    /// what ends a job that only ever fails with network errors.
+    /// what ends a job whose failures never count.
     pub max_age: TimeDelta,
 }
 
@@ -58,17 +58,18 @@ impl RetryPolicy {
     }
 
     /// The verdict on a job that failed with `err` after `attempts` counted
-    /// attempts, `age` after it was first seen.
+    /// attempts, `age` after it was first seen. A network error doesn't count,
+    /// even if it is also marked terminal.
     pub fn on_failure(&self, err: &impl Error, attempts: u32, age: TimeDelta) -> Verdict {
         if err.is_network_conn_err() {
-            return self.on_network_failure(attempts, age);
+            return self.on_uncounted_failure(attempts, age);
         }
         self.on_counted_failure(err.is_terminal(), attempts.saturating_add(1), age)
     }
 
-    /// A network error leaves `attempts` as it is and waits a flat
-    /// `base_secs`, even if the error is also marked terminal.
-    fn on_network_failure(&self, attempts: u32, age: TimeDelta) -> Verdict {
+    /// The verdict on a failure that doesn't count as an attempt: `attempts`
+    /// stays as it is and the job waits a flat `base_secs`.
+    pub fn on_uncounted_failure(&self, attempts: u32, age: TimeDelta) -> Verdict {
         if age >= self.max_age {
             return Verdict::TooOld { attempts, age };
         }

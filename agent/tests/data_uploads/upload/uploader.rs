@@ -414,6 +414,49 @@ async fn network_failures_do_not_consume_attempt_budget() {
     assert_eq!(mock.recorded_calls(), expected);
 }
 
+#[tokio::test(start_paused = true)]
+async fn failures_after_long_attempts_do_not_consume_attempt_budget() {
+    let (mock, mut started_rx) = MockUploadExecutor::new();
+    // A's first two attempts fail after running 30 min and don't count; its
+    // third fails a second sooner and uses up the one-attempt budget
+    let long = Duration::from_secs(30 * 60);
+    let runs = [long, long, long - Duration::from_secs(1)];
+    let mut releases = Vec::new();
+    for _ in runs {
+        let (release_tx, release_rx) = oneshot::channel();
+        mock.push_step(MockStep::Hang(release_rx));
+        releases.push(release_tx);
+    }
+    mock.push_step(MockStep::Ok);
+    let options = UploaderOptions {
+        retry: RetryPolicy {
+            attempts: 1,
+            ..RetryPolicy::default()
+        },
+        ..UploaderOptions::default()
+    };
+    let (uploader, handle, _sleeps) = spawn_with_test_clock(mock.clone(), options);
+    let job_a = make_job("a.log");
+    let job_b = make_job("b.log");
+
+    timed(uploader.enqueue(job_a.clone())).await.unwrap();
+    for (ran_for, release_tx) in runs.into_iter().zip(releases) {
+        timed(started_rx.recv()).await.unwrap();
+        tokio::time::advance(ran_for).await;
+        release_tx.send(scripted_err()).unwrap();
+    }
+
+    // A was dropped at the cap with the actor still healthy: B processes next
+    timed(uploader.enqueue(job_b.clone())).await.unwrap();
+    timed(started_rx.recv()).await.unwrap();
+    assert_eq!(timed(uploader.len()).await.unwrap(), 0);
+
+    timed(uploader.shutdown()).await.unwrap();
+    timed(handle).await.unwrap();
+    let expected = vec![job_a.clone(), job_a.clone(), job_a, job_b];
+    assert_eq!(mock.recorded_calls(), expected);
+}
+
 #[tokio::test]
 async fn network_failure_past_max_job_age_drops_job() {
     let (mock, mut started_rx) = MockUploadExecutor::new();

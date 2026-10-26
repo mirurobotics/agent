@@ -22,6 +22,7 @@ use chrono::{DateTime, Utc};
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
+use tokio::time::Instant;
 use tracing::{error, info};
 
 macro_rules! dispatch {
@@ -123,14 +124,17 @@ where
     }
 
     /// Drive one executor attempt on `entry` to completion while staying
-    /// responsive to commands, then resolve the entry with its result.
+    /// responsive to commands, then resolve the entry with its result and how
+    /// long it ran.
     async fn run_attempt(&mut self, entry: QueueEntry) -> Flow {
+        let started = Instant::now();
         match self.attempt(&entry).await {
             // the attempt was cancelled -> leave the entry in the queue so the next
             // boot picks it up rather than losing it
             None => Flow::Shutdown,
             Some(result) => {
-                self.uploader.finish_attempt(entry, result).await;
+                let ran_for = started.elapsed();
+                self.uploader.finish_attempt(entry, result, ran_for).await;
                 Flow::Continue
             }
         }

@@ -48,6 +48,8 @@ Handlers in `agent/src/server/handlers.rs` don't convert wire types. Response co
 
 All error types derive `thiserror::Error` and implement the custom `crate::errors::Error` trait (defined in `agent/src/errors/`). The trait provides default implementations for `code()`, `http_status()`, `params()`, and `is_network_conn_err()`. Aggregating enum errors use the `impl_error!` macro (also in `agent/src/errors/`).
 
+Don't add a trait method for a failure only one module reacts to. Give the failure its own error variant and match it in that module ([agent#393](https://github.com/mirurobotics/agent/pull/393#discussion_r4368553524)).
+
 ### Test visibility
 
 Use ordinary `#[cfg(test)]` for additive test inspection and state setup, with
