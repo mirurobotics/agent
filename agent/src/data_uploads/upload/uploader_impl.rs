@@ -131,9 +131,16 @@ where
             "upload: saving checkpoint for {}: {checkpoint:?}",
             entry.job.file
         );
-        self.queue
+        let saved = self
+            .queue
             .update_job(entry.id, |job| job.checkpoint = Some(checkpoint.clone()))
             .await;
+        if let Err(err) = saved {
+            error!(
+                "upload: can't save checkpoint for file {}: {err}",
+                entry.job.file
+            );
+        }
     }
 
     /// Settle `entry` with the result of its attempt: ack it on success or

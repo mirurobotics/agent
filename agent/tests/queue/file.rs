@@ -486,23 +486,27 @@ pub mod cases {
             enqueue(&mut queue, make("b.log")).await;
 
             let entry = queue.next_ready(now()).unwrap();
-            assert!(queue.update_job(entry.id, |job| *job = make("c.log")).await);
+            queue
+                .update_job(entry.id, |job| *job = make("c.log"))
+                .await
+                .unwrap();
 
             assert_eq!(queue.len(), 2);
             assert_eq!(queue.next_ready(now()).unwrap().id, entry.id);
             assert_eq!(drain(&mut queue).await, jobs(make, &["c.log", "b.log"]));
         }
 
-        pub async fn unknown_id_is_ignored<J: QueueJob>(make: fn(&str) -> J) {
+        pub async fn unknown_id_errs<J: QueueJob>(make: fn(&str) -> J) {
             let mut queue = FileQueue::<J>::new(4);
             enqueue(&mut queue, make("a.log")).await;
+            let id = Uuid::new_v4();
 
-            assert!(
-                !queue
-                    .update_job(Uuid::new_v4(), |job| *job = make("b.log"))
-                    .await
-            );
+            let err = queue
+                .update_job(id, |job| *job = make("b.log"))
+                .await
+                .unwrap_err();
 
+            assert_eq!(err.id, id);
             assert_eq!(drain(&mut queue).await, jobs(make, &["a.log"]));
         }
 
@@ -516,7 +520,10 @@ pub mod cases {
             enqueue(&mut queue, make("a.log")).await;
 
             let entry = queue.next_ready(now()).unwrap();
-            queue.update_job(entry.id, |job| *job = make("b.log")).await;
+            queue
+                .update_job(entry.id, |job| *job = make("b.log"))
+                .await
+                .unwrap();
 
             assert_eq!(on_disk::<J>(&path).await, jobs(make, &["b.log"]));
         }
@@ -920,7 +927,7 @@ macro_rules! queue_suite {
             },
             update_job {
                 disk: [persists],
-                mem: [replaces_the_job_in_place, unknown_id_is_ignored],
+                mem: [replaces_the_job_in_place, unknown_id_errs],
             },
             retry {
                 disk: [order_survives_a_reload, attempts_and_deadline_survive_a_reload],
