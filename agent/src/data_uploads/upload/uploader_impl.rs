@@ -8,8 +8,8 @@ use crate::data_uploads::{
     retention::{DeleterExt, Job as DeleteJob},
     upload::{
         errors::*,
-        executor::UploadExecutor,
-        job::Job,
+        executor::{PrepareOutcome, PreparedUpload, UploadExecutor},
+        job::{Job, UploadCheckpoint},
         queue::{Queue, QueueEntry, QueueSnapshotFile},
     },
 };
@@ -104,17 +104,49 @@ where
         self.queue.next_attempt(now, horizon).await
     }
 
-    /// Build one executor attempt on `entry`. The future is built from clones
-    /// so it borrows nothing from `self`, leaving the worker free to serve
-    /// commands while it runs.
-    pub(crate) fn attempt(
+    /// The first step of an attempt on `entry`, built from clones so the
+    /// worker can serve commands while it runs.
+    pub(crate) fn prepare(
         &self,
         entry: &QueueEntry,
-    ) -> impl Future<Output = Result<(), UploadErr>> {
+    ) -> impl Future<Output = Result<PrepareOutcome, UploadErr>> {
         Self::log_attempt(entry);
         let executor = self.executor.clone();
         let job = entry.job.clone();
-        async move { executor.upload(&job).await }
+        async move { executor.prepare(&job).await }
+    }
+
+    /// The second step, which uploads what [`Self::prepare`] prepared.
+    pub(crate) fn upload(
+        &self,
+        entry: &QueueEntry,
+        prepared: PreparedUpload,
+    ) -> impl Future<Output = Result<(), UploadErr>> {
+        let executor = self.executor.clone();
+        let job = entry.job.clone();
+        async move { executor.upload(&job, &prepared).await }
+    }
+
+    /// Saves `checkpoint` on the queued job, for the next attempt to continue.
+    pub(crate) async fn save_checkpoint(
+        &mut self,
+        entry: &QueueEntry,
+        checkpoint: &UploadCheckpoint,
+    ) {
+        debug!(
+            "upload: saving checkpoint for {}: {checkpoint:?}",
+            entry.job.file
+        );
+        let saved = self
+            .queue
+            .update_job(entry.id, |job| job.checkpoint = Some(checkpoint.clone()))
+            .await;
+        if let Err(err) = saved {
+            error!(
+                "upload: can't save checkpoint for file {}: {err}",
+                entry.job.file
+            );
+        }
     }
 
     /// Settle `entry` with the result of its attempt, which ran for `ran_for`:

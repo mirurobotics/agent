@@ -475,6 +475,60 @@ pub mod cases {
         }
     }
 
+    // ------------------------------- update_job ---------------------------------- //
+
+    pub mod update_job {
+        use super::*;
+
+        pub async fn replaces_the_job_in_place<J: QueueJob>(make: fn(&str) -> J) {
+            let mut queue = FileQueue::<J>::new(4);
+            enqueue(&mut queue, make("a.log")).await;
+            enqueue(&mut queue, make("b.log")).await;
+
+            let entry = queue.next_ready(now()).unwrap();
+            queue
+                .update_job(entry.id, |job| *job = make("c.log"))
+                .await
+                .unwrap();
+
+            assert_eq!(queue.len(), 2);
+            assert_eq!(queue.next_ready(now()).unwrap().id, entry.id);
+            assert_eq!(drain(&mut queue).await, jobs(make, &["c.log", "b.log"]));
+        }
+
+        pub async fn unknown_id_errs<J: QueueJob>(make: fn(&str) -> J) {
+            let mut queue = FileQueue::<J>::new(4);
+            enqueue(&mut queue, make("a.log")).await;
+            let id = Uuid::new_v4();
+
+            let err = queue
+                .update_job(id, |job| *job = make("b.log"))
+                .await
+                .unwrap_err();
+
+            assert_eq!(err.id, id);
+            assert_eq!(drain(&mut queue).await, jobs(make, &["a.log"]));
+        }
+
+        pub async fn persists<J: QueueJob>(tmp: &str, make: fn(&str) -> J) {
+            let (_dir, path) = temp_path(tmp);
+            let mut queue = FileQueue::<J>::from_snapshot(
+                DEFAULT_CAPACITY,
+                open::<J>(&path).await,
+                Persistence::BestEffort,
+            );
+            enqueue(&mut queue, make("a.log")).await;
+
+            let entry = queue.next_ready(now()).unwrap();
+            queue
+                .update_job(entry.id, |job| *job = make("b.log"))
+                .await
+                .unwrap();
+
+            assert_eq!(on_disk::<J>(&path).await, jobs(make, &["b.log"]));
+        }
+    }
+
     // --------------------------------- retry ------------------------------------- //
 
     pub mod retry {
@@ -870,6 +924,10 @@ macro_rules! queue_suite {
             ack {
                 disk: [persist_failure_still_acks],
                 mem: [unknown_id_is_ignored, one_duplicate_leaves_the_other],
+            },
+            update_job {
+                disk: [persists],
+                mem: [replaces_the_job_in_place, unknown_id_errs],
             },
             retry {
                 disk: [order_survives_a_reload, attempts_and_deadline_survive_a_reload],

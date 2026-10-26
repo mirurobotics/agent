@@ -8,7 +8,7 @@ use backend_api::models::{
     Upload, UploadCredentials, UploadDestination, UploadStatus, UploadWithCredentials,
 };
 use miru_agent::authn::Token;
-use miru_agent::data_uploads::upload::Job;
+use miru_agent::data_uploads::upload::{Job, UploadCheckpoint};
 use miru_agent::filesys::File;
 
 // external crates
@@ -27,6 +27,7 @@ pub fn make_job(name: &str) -> Job {
         file_rule_id: "rule_1".to_string(),
         deployment_id: "dpl_1".to_string(),
         retention: None,
+        checkpoint: None,
     }
 }
 
@@ -81,6 +82,17 @@ pub fn response_with_status(status: UploadStatus) -> UploadWithCredentials {
 
 pub fn pending_response() -> UploadWithCredentials {
     response_with_status(UploadStatus::UPLOAD_STATUS_PENDING)
+}
+
+/// The upload a job saves from [`pending_response`].
+pub fn upload_checkpoint() -> UploadCheckpoint {
+    UploadCheckpoint {
+        miru_upload_id: "upl_1".to_string(),
+        bucket_name: "my-bucket".to_string(),
+        object_key: "logs/a.log".to_string(),
+        metadata: response_metadata(),
+        multipart: None,
+    }
 }
 
 pub fn token_manager() -> Arc<MockTokenManager> {

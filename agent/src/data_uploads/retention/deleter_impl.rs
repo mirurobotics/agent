@@ -173,7 +173,7 @@ impl DeleterImpl {
     }
 
     async fn check_digest_mismatch(entry: &Job) -> Option<SweepOutcome> {
-        match files::hash(&entry.file).await {
+        match files::sha256(&entry.file).await {
             Ok(digest) if digest == entry.digest => None,
             Ok(_) => {
                 info!(
@@ -287,7 +287,7 @@ mod tests {
         Job {
             file: file.clone(),
             size: files::size(file).await.unwrap(),
-            digest: files::hash(file).await.unwrap(),
+            digest: files::sha256(file).await.unwrap(),
             mtime: DateTime::<Utc>::from(files::last_modified(file).await.unwrap()),
             first_observed_at: observed_at,
             last_observed_at: observed_at,
@@ -331,7 +331,7 @@ mod tests {
     /// A `Job` for a path whose stat cannot succeed. The recorded
     /// size/digest/mtime are never compared: the sweep fails at the stat step
     /// before any identity check runs. `make_job` is unusable here — its
-    /// `files::size`/`files::hash` calls would fail in setup.
+    /// `files::size`/`files::sha256` calls would fail in setup.
     fn wedged_job(file: File) -> Job {
         let at = DateTime::from_timestamp(1000, 0).unwrap();
         Job {
