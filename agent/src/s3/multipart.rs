@@ -62,7 +62,7 @@ impl Store {
         let written = self
             .complete_multipart_upload(dst, upload_id, &parts)
             .await?;
-        // GCS already had the object: abort this upload's leftover parts
+        // The bucket already had the object: abort this upload's leftover parts
         if matches!(written, WriteOutcome::AlreadyExists) {
             let _ = self.abort_multipart_upload(dst, upload_id).await;
         }
