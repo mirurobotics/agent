@@ -269,12 +269,10 @@ workflows additionally run the package and installer lifecycle on a separate
 `windows-package` job. That job also runs after pushes to `main` and
 `release/*`, and when the release workflow calls CI for a tag. It packages a
 release-profile `miru-agent.exe` that `windows-agent-build` compiles on a faster
-Blacksmith runner; the release workflow builds and signs its own. Pull requests
-that touch `build/**` or the workflows also run `windows-release-build` (the
-`cargo auditable` MSVC release build that uploads `miru-agent.exe` and
-`miru_agent.pdb`) and `goreleaser-snapshot` (a GoReleaser dry run proving the
-`agent_Windows_x86_64.zip`, its SBOM and the PDB are produced). Superseded
-pull-request CI runs are cancelled.
+Blacksmith runner; the release workflow builds and signs its own, and is the
+only place GoReleaser packages `agent_Windows_x86_64.zip`, its SBOM and the PDB.
+Local snapshot builds (`build/build.sh`) skip the Windows build, since they have
+no signed executable to import. Superseded pull-request CI runs are cancelled.
 
 From an elevated 64-bit Windows PowerShell 5.1 session, run the native package
 integration matrix only on a disposable test machine. Normal integration removes
