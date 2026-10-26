@@ -6,32 +6,62 @@ use std::sync::Arc;
 use crate::authn::{Token, TokenManagerExt};
 use crate::data_uploads::upload::{
     errors::{classified_executor_err, UploadErr},
-    job::Job,
-    transfer::ObjectTransfer,
+    job::{Job, UploadCheckpoint},
+    transfer::{ObjectTransfer, TransferMethod},
 };
+use crate::errors::{Error, HTTPCode};
 use crate::http::{self, ClientI};
-use backend_api::models::{CreateUploadRequest, UploadSource, UploadWithCredentials};
+use backend_api::models::{CreateUploadRequest, UploadCredentials, UploadSource};
 
 // external crates
 use chrono::{Local, TimeZone};
-use tracing::info;
+use tracing::{info, warn};
 
-/// The seam between the upload actor and the transfer mechanics.
-///
-/// The production executor fetches short-lived downscoped cloud credentials from the
-/// backend, transfers the file with the native storage SDK, then confirms the upload.
-/// This trait keeps the actor independent of those mechanics.
+/// Uploads a job's file and confirms the upload with Miru.
 ///
 /// # Cancel safety
 ///
-/// The actor drops an in-progress `upload` future on shutdown, so implementations
-/// must tolerate being cancelled at any await point. An interrupted transfer is
-/// re-driven from the persisted queue, which keeps the entry until the upload is
-/// confirmed; duplicate transfers are absorbed by backend digest dedup. Scanner
-/// re-observation does NOT re-drive it — the scanner ledger records that a file
-/// was reported, not that it was uploaded.
+/// Either future may be dropped at any await point. [`Self::prepare`] resumes
+/// from the job's checkpoint.
 pub trait UploadExecutor: Send + Sync {
-    fn upload(&self, job: &Job) -> impl std::future::Future<Output = Result<(), UploadErr>> + Send;
+    /// Reuses or creates the job's upload and, for a file of more than one
+    /// part, its S3 or GCS multipart upload.
+    fn prepare(
+        &self,
+        job: &Job,
+    ) -> impl std::future::Future<Output = Result<PrepareOutcome, UploadErr>> + Send;
+
+    /// Transfers the file and confirms the upload.
+    fn upload(
+        &self,
+        job: &Job,
+        prepared: &PreparedUpload,
+    ) -> impl std::future::Future<Output = Result<(), UploadErr>> + Send;
+}
+
+/// The outcome of [`UploadExecutor::prepare`].
+#[derive(Debug, PartialEq)]
+#[allow(clippy::large_enum_variant)]
+pub enum PrepareOutcome {
+    /// Ready to transfer the file.
+    Ready(PreparedUpload),
+    /// The upload was already confirmed.
+    AlreadyUploaded,
+}
+
+/// What [`UploadExecutor::prepare`] hands to [`UploadExecutor::upload`].
+#[derive(Debug, PartialEq)]
+pub struct PreparedUpload {
+    pub checkpoint: UploadCheckpoint,
+    pub credentials: UploadCredentials,
+}
+
+/// The outcome of asking the backend for an upload's credentials.
+enum VendOutcome {
+    /// Fresh credentials for the upload.
+    Vended(UploadCredentials),
+    /// The upload was deleted (404), or uploaded or failed (409).
+    UploadGone,
 }
 
 pub struct LiveExecutor<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> {
@@ -56,10 +86,41 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> LiveExecutor<C, T, X> {
             .map_err(classified_executor_err)
     }
 
-    async fn create_upload(&self, job: &Job) -> Result<UploadWithCredentials, UploadErr> {
+    /// Reuses the job's upload with fresh credentials. If the backend refuses
+    /// them, the upload is either already confirmed or replaced with a new one.
+    async fn reuse_or_create_upload(&self, job: &Job) -> Result<PrepareOutcome, UploadErr> {
+        let Some(checkpoint) = &job.checkpoint else {
+            return self.create_upload(job).await.map(PrepareOutcome::Ready);
+        };
+        let id = &checkpoint.miru_upload_id;
+        if let VendOutcome::Vended(credentials) = self.vend_credentials(id).await? {
+            return Ok(PrepareOutcome::Ready(PreparedUpload {
+                checkpoint: checkpoint.clone(),
+                credentials,
+            }));
+        }
+        // A gone upload isn't pending, so confirm accepts it only if an earlier
+        // attempt confirmed it, and rejects a deleted or failed one.
+        match self.confirm_upload(id).await {
+            Ok(()) => {
+                info!("upload: upload {id} was already confirmed");
+                Ok(PrepareOutcome::AlreadyUploaded)
+            }
+            Err(err) if err.is_terminal() => {
+                info!(
+                    "upload: upload {id} is gone; creating a new one for file {}",
+                    job.file
+                );
+                self.create_upload(job).await.map(PrepareOutcome::Ready)
+            }
+            Err(err) => Err(err),
+        }
+    }
+
+    async fn create_upload(&self, job: &Job) -> Result<PreparedUpload, UploadErr> {
         let token = self.token().await?;
         let payload = new_upl_request(job, &Local);
-        http::with_retry(|| async {
+        let resp = http::with_retry(|| async {
             let params = http::uploads::CreateParams {
                 payload: &payload,
                 token: &token.token,
@@ -67,7 +128,42 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> LiveExecutor<C, T, X> {
             http::uploads::create(self.http_client.as_ref(), params).await
         })
         .await
-        .map_err(classified_executor_err)
+        .map_err(classified_executor_err)?;
+        info!(
+            "upload: created upload {} for file {} (scheme {:?})",
+            resp.upload.id, job.file, resp.credentials.scheme
+        );
+        let checkpoint = UploadCheckpoint {
+            miru_upload_id: resp.upload.id,
+            bucket_name: resp.upload.destination.bucket_name,
+            object_key: resp.upload.destination.object_key,
+            metadata: resp.metadata,
+            multipart: None,
+        };
+        Ok(PreparedUpload {
+            checkpoint,
+            credentials: *resp.credentials,
+        })
+    }
+
+    /// Asks the backend for fresh credentials for an existing upload.
+    async fn vend_credentials(&self, id: &str) -> Result<VendOutcome, UploadErr> {
+        let token = self.token().await?;
+        let result = http::with_retry(|| async {
+            let params = http::uploads::VendCredentialsParams {
+                id,
+                token: &token.token,
+            };
+            http::uploads::vend_credentials(self.http_client.as_ref(), params).await
+        })
+        .await;
+        match result {
+            Ok(credentials) => Ok(VendOutcome::Vended(credentials)),
+            Err(e) if matches!(e.http_status(), HTTPCode::NOT_FOUND | HTTPCode::CONFLICT) => {
+                Ok(VendOutcome::UploadGone)
+            }
+            Err(e) => Err(classified_executor_err(e)),
+        }
     }
 
     async fn confirm_upload(&self, id: &str) -> Result<(), UploadErr> {
@@ -86,33 +182,49 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> LiveExecutor<C, T, X> {
 }
 
 impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> UploadExecutor for LiveExecutor<C, T, X> {
-    async fn upload(&self, job: &Job) -> Result<(), UploadErr> {
-        let resp = self.create_upload(job).await?;
-        info!(
-            "upload: created upload {} for file {} (scheme {:?})",
-            resp.upload.id, job.file, resp.credentials.scheme
-        );
-
-        info!(
-            "upload: transferring file {} to bucket {} key {}",
-            job.file, resp.upload.destination.bucket_name, resp.upload.destination.object_key
-        );
-        self.transfer
-            .transfer(
-                &resp.credentials,
-                &resp.upload.destination,
+    async fn prepare(&self, job: &Job) -> Result<PrepareOutcome, UploadErr> {
+        let mut prepared = match self.reuse_or_create_upload(job).await? {
+            PrepareOutcome::Ready(prepared) => prepared,
+            PrepareOutcome::AlreadyUploaded => return Ok(PrepareOutcome::AlreadyUploaded),
+        };
+        // Best effort: on failure, the transfer rechecks the saved multipart upload.
+        match self
+            .transfer
+            .reuse_or_create_multipart(
+                &prepared.credentials,
+                &prepared.checkpoint,
                 &job.file,
                 job.crc32c,
-                &resp.metadata,
             )
+            .await
+        {
+            Ok(TransferMethod::Multipart(multipart)) => {
+                prepared.checkpoint.multipart = Some(multipart);
+            }
+            Ok(TransferMethod::SinglePart) => prepared.checkpoint.multipart = None,
+            Err(err) => warn!(
+                "upload: can't prepare multipart upload for {}: {err:?}",
+                job.file
+            ),
+        }
+        Ok(PrepareOutcome::Ready(prepared))
+    }
+
+    async fn upload(&self, job: &Job, prepared: &PreparedUpload) -> Result<(), UploadErr> {
+        let checkpoint = &prepared.checkpoint;
+        info!(
+            "upload: transferring file {} to bucket {} key {}",
+            job.file, checkpoint.bucket_name, checkpoint.object_key
+        );
+        self.transfer
+            .transfer(&prepared.credentials, checkpoint, &job.file, job.crc32c)
             .await?;
 
         info!(
             "upload: confirming upload {} for file {}",
-            resp.upload.id, job.file
+            checkpoint.miru_upload_id, job.file
         );
-        self.confirm_upload(&resp.upload.id).await?;
-        Ok(())
+        self.confirm_upload(&checkpoint.miru_upload_id).await
     }
 }
 
@@ -147,7 +259,9 @@ mod tests {
         http_client::{Call, MockClient},
         upload::{make_job, pending_response, token_manager},
     };
-    use miru_agent::data_uploads::upload::{LiveExecutor, SdkTransfer, UploadExecutor};
+    use miru_agent::data_uploads::upload::{
+        LiveExecutor, PrepareOutcome, SdkTransfer, UploadExecutor,
+    };
     use miru_agent::filesys::{files, WriteOptions};
 
     // external crates
@@ -193,7 +307,10 @@ mod tests {
             SdkTransfer::with_http_client(replay.clone()),
         );
 
-        executor.upload(&job).await.unwrap();
+        let PrepareOutcome::Ready(prepared) = executor.prepare(&job).await.unwrap() else {
+            panic!("expected a new upload");
+        };
+        executor.upload(&job, &prepared).await.unwrap();
 
         // The replay client saw exactly one PUT at the expected URI — the create
         // response's credentials and destination drove the production transfer —

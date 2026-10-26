@@ -49,13 +49,12 @@ impl Store {
     }
 
     /// Resumes an existing multipart upload: lists the parts that already landed
-    /// in S3, uploads only the missing parts, and completes. Never aborts, so a
-    /// resume is safe to retry.
+    /// in S3, uploads only the missing parts, and completes. Never aborts on
+    /// failure, so a resume is safe to retry.
     ///
     /// `NoSuchUploadErr` if S3 no longer knows the upload. The caller must resume
-    /// against the same file bytes the upload was started for. GCS lists parts
-    /// without their CRC32Cs, so on GCS a source with a CRC32C fails
-    /// [`check_parts_crc32c`] if any part had already landed.
+    /// against the same file bytes, part size and CRC32C the upload was started
+    /// for.
     pub async fn resume_multipart_upload(
         &self,
         src: Source,
@@ -64,9 +63,21 @@ impl Store {
     ) -> Result<(), S3Err> {
         let landed = self.list_parts(dst, upload_id).await?;
         let parts = self.upload_parts(&src, dst, upload_id, &landed).await?;
-        self.complete_multipart_upload(&src, dst, upload_id, &parts)
-            .await
-            .map(|_| ())
+        let written = self
+            .complete_multipart_upload(&src, dst, upload_id, &parts)
+            .await?;
+        // GCS already had the object: abort this upload's leftover parts
+        if matches!(written, WriteOutcome::AlreadyExists) {
+            let _ = self.abort_multipart_upload(dst, upload_id).await;
+        }
+        Ok(())
+    }
+
+    /// Whether S3 still has the multipart upload `upload_id` in progress. It
+    /// no longer does once the upload is completed or aborted.
+    pub async fn has_multipart_upload(&self, dst: &Object, upload_id: &str) -> Result<bool, S3Err> {
+        let page = self.list_parts_page(dst, upload_id, None).await?;
+        Ok(page.is_some())
     }
 
     /// Walks [`Self::part_plan`] in order. For each part number present in
@@ -196,8 +207,8 @@ impl Store {
         plan
     }
 
-    /// Starts a multipart upload and returns its `upload_id`.
-    async fn create_multipart_upload(
+    /// Starts a multipart upload of `src` and returns its `upload_id`.
+    pub async fn create_multipart_upload(
         &self,
         src: &Source,
         dst: &Object,
@@ -302,7 +313,7 @@ impl Store {
     ) -> Result<WriteOutcome, S3Err> {
         let mut parts = parts.to_vec();
         if self.gcs {
-            check_parts_crc32c(src, obj, &parts)?;
+            check_parts_crc32c(src, obj, &parts).await?;
             // GCS documents a manifest of part numbers and ETags only.
             for part in &mut parts {
                 part.checksum_crc32_c = None;
@@ -346,18 +357,26 @@ impl Store {
     }
 }
 
-/// Given `src`'s CRC32C, checks the parts GCS stored against it: the CRC32Cs
-/// GCS reported for them, combined in order, must equal it. A part without a
-/// CRC32C fails the check.
-fn check_parts_crc32c(src: &Source, dst: &Object, parts: &[CompletedPart]) -> Result<(), S3Err> {
+/// Given `src`'s CRC32C, checks the parts GCS stored against it: their
+/// CRC32Cs, combined in order, must equal it. A part GCS reported no CRC32C
+/// for, as with the parts it lists on a resume, is read from `src` instead,
+/// since GCS checked the part against its `Content-MD5` as it landed.
+async fn check_parts_crc32c(
+    src: &Source,
+    dst: &Object,
+    parts: &[CompletedPart],
+) -> Result<(), S3Err> {
     let Some(expected) = src.crc32c else {
         return Ok(());
     };
     let mut composed = 0;
-    for (part, (number, _, len)) in parts.iter().zip(Store::part_plan(src.size)) {
-        let Some(crc32c) = part.checksum_crc32_c().and_then(decode_crc32c) else {
-            let field = format!("a CRC32C for part {number}");
-            return Err(errors::missing_response_field("upload_part", dst, &field));
+    for (part, (_, offset, len)) in parts.iter().zip(Store::part_plan(src.size)) {
+        let crc32c = match part.checksum_crc32_c().and_then(decode_crc32c) {
+            Some(crc32c) => crc32c,
+            None => {
+                src.range_crc32c("complete_multipart_upload", dst, offset, len)
+                    .await?
+            }
         };
         composed = checksum_combine(CrcAlgorithm::Crc32Iscsi, composed, crc32c.into(), len);
     }
@@ -1054,6 +1073,38 @@ mod tests {
             assert_eq!(err.http_status().as_u16(), 404);
 
             // Only the list_parts call fired — no upload, no complete (and no abort).
+            assert_eq!(actual_shapes(&replay), vec![list_parts_shape()]);
+        }
+
+        #[tokio::test]
+        async fn open_upload_is_found() {
+            let (store, replay) = store_with(vec![ReplayEvent::new(
+                list_parts_req(),
+                list_parts_resp(&[], None),
+            )]);
+
+            let found = store
+                .has_multipart_upload(&obj("big.bin"), UPLOAD_ID)
+                .await
+                .unwrap();
+
+            assert!(found);
+            assert_eq!(actual_shapes(&replay), vec![list_parts_shape()]);
+        }
+
+        #[tokio::test]
+        async fn completed_or_aborted_upload_is_not_found() {
+            let (store, replay) = store_with(vec![ReplayEvent::new(
+                list_parts_req(),
+                resp_xml(404, NO_SUCH_UPLOAD_XML),
+            )]);
+
+            let found = store
+                .has_multipart_upload(&obj("big.bin"), UPLOAD_ID)
+                .await
+                .unwrap();
+
+            assert!(!found);
             assert_eq!(actual_shapes(&replay), vec![list_parts_shape()]);
         }
 

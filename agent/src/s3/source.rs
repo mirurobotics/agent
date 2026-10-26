@@ -6,6 +6,7 @@ use crate::trace;
 // external crates
 use aws_sdk_s3::primitives::{ByteStream, Length};
 use base64::Engine;
+use crc_fast::CrcAlgorithm;
 
 /// Bytes per read and per frame sent. The SDK's default is 4 KiB.
 const READ_SIZE: usize = 32 * 1024;
@@ -15,7 +16,7 @@ const READ_SIZE: usize = 32 * 1024;
 /// the upload is confirmed.
 pub struct Source {
     file: File,
-    pub(super) size: u64,
+    pub(crate) size: u64,
     pub(super) crc32c: Option<u32>,
 }
 
@@ -82,5 +83,27 @@ impl Source {
         gcs::content_md5(range)
             .await
             .map_err(|e| errors::map_body_io_err(operation, dst, &self.file, e))
+    }
+
+    /// The CRC32C of `len` bytes from `offset`, hashed in its own read of the
+    /// range.
+    pub(super) async fn range_crc32c(
+        &self,
+        operation: &str,
+        dst: &Object,
+        offset: u64,
+        len: u64,
+    ) -> Result<u32, S3Err> {
+        let mut range = self.read(operation, dst, offset, len).await?;
+        let mut crc32c = crc_fast::Digest::new(CrcAlgorithm::Crc32Iscsi);
+        while let Some(frame) = range
+            .try_next()
+            .await
+            .map_err(|e| errors::map_body_io_err(operation, dst, &self.file, e.into()))?
+        {
+            crc32c.update(&frame);
+        }
+        // CRC-32 values fit in the low 32 bits of crc-fast's u64
+        Ok(crc32c.finalize() as u32)
     }
 }

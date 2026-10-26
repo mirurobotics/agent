@@ -239,7 +239,7 @@ mod tests {
         recorded_payload, resp, resp_xml, temp_file_with, HELLO_WORLD_CRC32C,
     };
     use crate::s3::store::PART_SIZE;
-    use crate::s3::{Object, Options, S3Err, Store};
+    use crate::s3::{Object, Options, S3Err, Source, Store};
 
     // external crates
     use aws_smithy_http_client::test_util::{ReplayEvent, StaticReplayClient};
@@ -336,6 +336,16 @@ mod tests {
         let xml = format!(
             r#"<?xml version="1.0" encoding="UTF-8"?>
 <CompleteMultipartUploadResult><Bucket>{BUCKET}</Bucket><Key>big.bin</Key><ETag>"final"</ETag></CompleteMultipartUploadResult>"#
+        );
+        resp_xml(200, &xml)
+    }
+
+    /// A ListParts response with part 1 landed, listed without a CRC32C as GCS
+    /// lists parts.
+    fn listed_part_1_resp() -> http::Response<SdkBody> {
+        let xml = format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<ListPartsResult><Bucket>{BUCKET}</Bucket><Key>big.bin</Key><UploadId>{UPLOAD_ID}</UploadId><IsTruncated>false</IsTruncated><Part><PartNumber>1</PartNumber><ETag>"e1"</ETag></Part></ListPartsResult>"#
         );
         resp_xml(200, &xml)
     }
@@ -631,6 +641,36 @@ mod tests {
         }
 
         #[tokio::test]
+        async fn resumed_upload_of_an_existing_object_is_aborted() {
+            // An earlier attempt stored the object, so completing gets 412 and
+            // this upload is aborted.
+            let listed = format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<ListPartsResult><Bucket>{BUCKET}</Bucket><Key>big.bin</Key><UploadId>{UPLOAD_ID}</UploadId><IsTruncated>false</IsTruncated><Part><PartNumber>1</PartNumber><ETag>"e1"</ETag></Part><Part><PartNumber>2</PartNumber><ETag>"e2"</ETag></Part></ListPartsResult>"#
+            );
+            let replay = StaticReplayClient::new(vec![
+                ReplayEvent::new(req("GET", "big.bin"), resp_xml(200, &listed)),
+                ReplayEvent::new(req("POST", "big.bin"), error_xml(412, "PreconditionFailed")),
+                ReplayEvent::new(req("DELETE", "big.bin"), resp(204, &[])),
+            ]);
+            let big = temp_file_with(&vec![3u8; PART_SIZE as usize + 1]).await;
+            let src = Source::open(big.file().clone(), None, &obj("big.bin"))
+                .await
+                .unwrap();
+
+            gcs_store(&replay)
+                .resume_multipart_upload(src, &obj("big.bin"), UPLOAD_ID)
+                .await
+                .unwrap();
+
+            let methods: Vec<_> = replay
+                .actual_requests()
+                .map(|r| r.method().to_string())
+                .collect();
+            assert_eq!(methods, ["GET", "POST", "DELETE"]);
+        }
+
+        #[tokio::test]
         async fn access_denied_still_fails() {
             // 403 means the token or bucket refused the write, not that the object
             // exists.
@@ -781,34 +821,59 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn multipart_parts_without_crc32cs_are_aborted() {
-            // Parts GCS reported no CRC32C for can't be checked, so the upload
-            // fails rather than completing unchecked.
+        async fn resume_reads_the_crc32cs_of_landed_parts_from_the_file() {
+            // GCS lists part 1 without its CRC32C.
+            let bytes: Vec<u8> = (0..PART_SIZE + 1024).map(|i| (i % 251) as u8).collect();
+            let part2 = &bytes[PART_SIZE as usize..];
             let replay = StaticReplayClient::new(vec![
-                ReplayEvent::new(req("POST", "big.bin?uploads"), create_resp()),
-                ReplayEvent::new(req("PUT", "big.bin"), part_resp("\"e1\"")),
-                ReplayEvent::new(req("PUT", "big.bin"), part_resp("\"e2\"")),
-                ReplayEvent::new(req("DELETE", "big.bin"), resp(204, &[])),
+                ReplayEvent::new(req("GET", "big.bin"), listed_part_1_resp()),
+                ReplayEvent::new(req("PUT", "big.bin"), hashed_part_resp("\"e2\"", part2)),
+                ReplayEvent::new(req("POST", "big.bin"), complete_resp()),
             ]);
-            let bytes = vec![3u8; PART_SIZE as usize + 1];
-            let src = temp_file_with(&bytes).await;
-
-            let err = gcs_store(&replay)
-                .put(
-                    src.file().clone(),
-                    Some(crc32c_of(&bytes)),
-                    &obj("big.bin"),
-                    &HashMap::new(),
-                )
+            let big = temp_file_with(&bytes).await;
+            let crc32c = Some(crc32c_of(&bytes));
+            let src = Source::open(big.file().clone(), crc32c, &obj("big.bin"))
                 .await
-                .unwrap_err();
+                .unwrap();
 
-            assert!(matches!(err, S3Err::InvalidResponseErr(_)), "{err:?}");
+            gcs_store(&replay)
+                .resume_multipart_upload(src, &obj("big.bin"), UPLOAD_ID)
+                .await
+                .unwrap();
+
             let methods: Vec<_> = replay
                 .actual_requests()
                 .map(|r| r.method().to_string())
                 .collect();
-            assert_eq!(methods, ["POST", "PUT", "PUT", "DELETE"]);
+            assert_eq!(methods, ["GET", "PUT", "POST"]);
+        }
+
+        #[tokio::test]
+        async fn resume_of_a_file_that_doesnt_match_the_crc32c_is_refused() {
+            let bytes = vec![3u8; PART_SIZE as usize + 1];
+            let part2 = &bytes[PART_SIZE as usize..];
+            let replay = StaticReplayClient::new(vec![
+                ReplayEvent::new(req("GET", "big.bin"), listed_part_1_resp()),
+                ReplayEvent::new(req("PUT", "big.bin"), hashed_part_resp("\"e2\"", part2)),
+            ]);
+            let big = temp_file_with(&bytes).await;
+            let crc32c = Some(crc32c_of(b"the file before it changed"));
+            let src = Source::open(big.file().clone(), crc32c, &obj("big.bin"))
+                .await
+                .unwrap();
+
+            let err = gcs_store(&replay)
+                .resume_multipart_upload(src, &obj("big.bin"), UPLOAD_ID)
+                .await
+                .unwrap_err();
+
+            assert!(matches!(err, S3Err::ChecksumMismatchErr(_)), "{err:?}");
+            // Never completed.
+            let methods: Vec<_> = replay
+                .actual_requests()
+                .map(|r| r.method().to_string())
+                .collect();
+            assert_eq!(methods, ["GET", "PUT"]);
         }
     }
 }

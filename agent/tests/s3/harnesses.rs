@@ -15,6 +15,7 @@ use miru_agent::s3::{Object, Options, S3Err, Source, Store};
 
 // external crates
 use aws_sdk_s3::primitives::ByteStream;
+use aws_sdk_s3::types::ChecksumAlgorithm;
 use aws_sdk_s3::Client;
 use uuid::Uuid;
 
@@ -146,39 +147,42 @@ pub async fn put_of_a_file_changed_since_its_crc32c_is_refused<B: RealBucket>() 
     }
 }
 
-/// Resuming an upload another client started, with new credentials as after
-/// an agent restart, completes it with the exact bytes.
+/// Resuming an upload that an earlier attempt started and landed a part of,
+/// with new credentials as after an agent restart, completes it with the exact
+/// bytes and passes the bucket's checks against the file's CRC32C.
 pub async fn resume_completes_a_started_upload<B: RealBucket>() {
     let bucket = B::load();
     let obj = bucket.object("resume.bin");
     let bytes = test_bytes(LARGE);
     let file = temp_file_with(&bytes).await;
-
-    let client = bucket.upload_client(&obj).await;
-    let upload = client
-        .create_multipart_upload()
-        .bucket(&obj.bucket)
-        .key(&obj.key)
-        .set_metadata(Some(metadata()))
-        .send()
+    let src = Source::open(file.to_file(), crc32c_of(&file).await, &obj)
         .await
         .unwrap();
-    let upload_id = upload.upload_id().unwrap();
-    client
+
+    let upload_id = bucket
+        .upload_store(&obj)
+        .await
+        .create_multipart_upload(&src, &obj, &metadata())
+        .await
+        .unwrap();
+    // Part 1 carries a CRC32C on S3, as the store's parts do there.
+    let options = bucket.upload_options(&obj).await;
+    let checksum = (!options.gcs).then_some(ChecksumAlgorithm::Crc32C);
+    Client::from_conf(options.config)
         .upload_part()
         .bucket(&obj.bucket)
         .key(&obj.key)
-        .upload_id(upload_id)
+        .upload_id(&upload_id)
         .part_number(1)
         .body(ByteStream::from(bytes[..PART].to_vec()))
+        .set_checksum_algorithm(checksum)
         .send()
         .await
         .unwrap();
 
     let store = bucket.upload_store(&obj).await;
-    let src = Source::open(file.to_file(), None, &obj).await.unwrap();
     store
-        .resume_multipart_upload(src, &obj, upload_id)
+        .resume_multipart_upload(src, &obj, &upload_id)
         .await
         .unwrap();
     bucket.assert_stored(&obj, &bytes).await;
