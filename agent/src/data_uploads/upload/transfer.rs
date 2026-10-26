@@ -15,7 +15,8 @@ use backend_api::models::{S3UploadCredentials, UploadCredentials};
 use aws_sdk_s3::config::SharedHttpClient;
 use tracing::info;
 
-/// Transfers a file to the checkpoint's object in cloud storage.
+/// Transfers a file to the checkpoint's object in cloud storage. Given the
+/// file's `crc32c`, the object store refuses bytes that don't match it.
 ///
 /// # Cancel safety
 ///
@@ -29,6 +30,7 @@ pub trait ObjectTransfer: Send + Sync {
         credentials: &UploadCredentials,
         checkpoint: &UploadCheckpoint,
         file: &File,
+        crc32c: Option<u32>,
     ) -> impl Future<Output = Result<TransferMethod, UploadErr>> + Send;
 
     /// Transfers the file, resuming `checkpoint.multipart` if it matches the file.
@@ -37,6 +39,7 @@ pub trait ObjectTransfer: Send + Sync {
         credentials: &UploadCredentials,
         checkpoint: &UploadCheckpoint,
         file: &File,
+        crc32c: Option<u32>,
     ) -> impl Future<Output = Result<(), UploadErr>> + Send;
 }
 
@@ -125,9 +128,10 @@ impl ObjectTransfer for SdkTransfer {
         credentials: &UploadCredentials,
         checkpoint: &UploadCheckpoint,
         file: &File,
+        crc32c: Option<u32>,
     ) -> Result<TransferMethod, UploadErr> {
         let store = self.store_for(credentials)?;
-        reuse_or_create_multipart(&store, checkpoint, file)
+        reuse_or_create_multipart(&store, checkpoint, file, crc32c)
             .await
             .map_err(classified_executor_err)
     }
@@ -137,13 +141,14 @@ impl ObjectTransfer for SdkTransfer {
         credentials: &UploadCredentials,
         checkpoint: &UploadCheckpoint,
         file: &File,
+        crc32c: Option<u32>,
     ) -> Result<(), UploadErr> {
         info!(
             "upload: transferring file {} via scheme {:?} to bucket {} key {}",
             file, credentials.scheme, checkpoint.bucket_name, checkpoint.object_key
         );
         let store = self.store_for(credentials)?;
-        resume_or_put(&store, checkpoint, file)
+        resume_or_put(&store, checkpoint, file, crc32c)
             .await
             .map_err(classified_executor_err)
     }
@@ -154,9 +159,10 @@ async fn reuse_or_create_multipart(
     store: &s3::Store,
     checkpoint: &UploadCheckpoint,
     file: &File,
+    crc32c: Option<u32>,
 ) -> Result<TransferMethod, s3::S3Err> {
     let object = checkpoint.object();
-    let src = s3::Source::open(file.clone(), &object).await?;
+    let src = s3::Source::open(file.clone(), crc32c, &object).await?;
     if src.size <= s3::store::PART_SIZE {
         return Ok(TransferMethod::SinglePart);
     }
@@ -168,7 +174,7 @@ async fn reuse_or_create_multipart(
         info!("upload: multipart upload {id} for {object} is gone");
     }
     let id = store
-        .create_multipart_upload(&object, &checkpoint.metadata)
+        .create_multipart_upload(&src, &object, &checkpoint.metadata)
         .await?;
     info!("upload: started multipart upload {id} for {object}");
     Ok(TransferMethod::Multipart(MultipartCheckpoint {
@@ -184,16 +190,21 @@ async fn resume_or_put(
     store: &s3::Store,
     checkpoint: &UploadCheckpoint,
     file: &File,
+    crc32c: Option<u32>,
 ) -> Result<(), s3::S3Err> {
     let object = checkpoint.object();
-    let src = s3::Source::open(file.clone(), &object).await?;
+    let src = s3::Source::open(file.clone(), crc32c, &object).await?;
     match checkpoint.resumable_multipart(&src) {
         Some(multipart) => {
             let id = &multipart.multipart_upload_id;
             info!("upload: resuming multipart upload {id} for {object}");
             store.resume_multipart_upload(src, &object, id).await
         }
-        None => store.put(file.clone(), &object, &checkpoint.metadata).await,
+        None => {
+            store
+                .put(file.clone(), crc32c, &object, &checkpoint.metadata)
+                .await
+        }
     }
 }
 
@@ -281,6 +292,9 @@ mod tests {
     const S3_PUT_URI: &str =
         "https://s3.us-east-1.amazonaws.com/my-bucket/logs/a.log?x-id=PutObject";
 
+    /// CRC32C of `b"hello world"`, base64 `yZRlqg==` on the wire.
+    const HELLO_WORLD_CRC32C: u32 = 0xC994_65AA;
+
     /// Builds an expected request (method + path-style URI, empty body) to match a
     /// `ReplayEvent` against. Only the method and URI are meaningful; the streamed
     /// body is not compared.
@@ -323,7 +337,12 @@ mod tests {
     async fn unknown_scheme_is_unsupported() {
         let creds = credentials("something-new", s3_credentials_json(), Value::Null);
         let err = SdkTransfer::default()
-            .transfer(&creds, &upload_checkpoint(), &File::new("/data/a.log"))
+            .transfer(
+                &creds,
+                &upload_checkpoint(),
+                &File::new("/data/a.log"),
+                None,
+            )
             .await
             .unwrap_err();
 
@@ -337,7 +356,12 @@ mod tests {
     async fn s3_scheme_without_credentials_errs() {
         let creds = credentials("s3", Value::Null, Value::Null);
         let err = SdkTransfer::default()
-            .transfer(&creds, &upload_checkpoint(), &File::new("/data/a.log"))
+            .transfer(
+                &creds,
+                &upload_checkpoint(),
+                &File::new("/data/a.log"),
+                None,
+            )
             .await
             .unwrap_err();
 
@@ -357,7 +381,12 @@ mod tests {
         let creds = credentials("s3", s3_credentials_json(), Value::Null);
 
         SdkTransfer::with_http_client(replay.clone())
-            .transfer(&creds, &upload_checkpoint(), src.file())
+            .transfer(
+                &creds,
+                &upload_checkpoint(),
+                src.file(),
+                Some(HELLO_WORLD_CRC32C),
+            )
             .await
             .unwrap();
 
@@ -370,11 +399,11 @@ mod tests {
         assert_eq!(requests.len(), 1);
         assert_eq!(requests[0].method(), "PUT");
         assert_eq!(requests[0].uri().to_string(), S3_PUT_URI);
-        // The vended metadata map is stamped as user-defined object metadata.
-        assert_eq!(
-            requests[0].headers().get("x-amz-meta-device_id"),
-            Some("dvc_1")
-        );
+        // The vended metadata map is stamped as user-defined object metadata,
+        // and S3 checks the body against the CRC32C.
+        let header = |name: &str| requests[0].headers().get(name);
+        assert_eq!(header("x-amz-meta-device_id"), Some("dvc_1"));
+        assert_eq!(header("x-amz-checksum-crc32c"), Some("yZRlqg=="));
         assert!(requests[0]
             .headers()
             .get("authorization")
@@ -396,7 +425,7 @@ mod tests {
         let creds = credentials("s3", s3_credentials_json(), Value::Null);
 
         let err = SdkTransfer::with_http_client(replay.clone())
-            .transfer(&creds, &upload_checkpoint(), src.file())
+            .transfer(&creds, &upload_checkpoint(), src.file(), None)
             .await
             .unwrap_err();
 
@@ -414,7 +443,7 @@ mod tests {
         let missing = missing_file();
 
         let err = SdkTransfer::default()
-            .transfer(&creds, &upload_checkpoint(), &missing)
+            .transfer(&creds, &upload_checkpoint(), &missing, None)
             .await
             .unwrap_err();
 
@@ -425,7 +454,12 @@ mod tests {
     async fn gcs_scheme_without_credentials_errs() {
         let creds = credentials("gcs", Value::Null, Value::Null);
         let err = SdkTransfer::default()
-            .transfer(&creds, &upload_checkpoint(), &File::new("/data/a.log"))
+            .transfer(
+                &creds,
+                &upload_checkpoint(),
+                &File::new("/data/a.log"),
+                None,
+            )
             .await
             .unwrap_err();
 
@@ -441,7 +475,12 @@ mod tests {
         // before anything is sent.
         let creds = credentials("gcs", Value::Null, gcs_credentials_json("bad\ntoken"));
         let err = SdkTransfer::default()
-            .transfer(&creds, &upload_checkpoint(), &File::new("/data/a.log"))
+            .transfer(
+                &creds,
+                &upload_checkpoint(),
+                &File::new("/data/a.log"),
+                None,
+            )
             .await
             .unwrap_err();
 
@@ -460,7 +499,12 @@ mod tests {
         let creds = credentials("gcs", Value::Null, gcs_credentials_json("vended-token"));
 
         SdkTransfer::with_http_client(replay.clone())
-            .transfer(&creds, &upload_checkpoint(), src.file())
+            .transfer(
+                &creds,
+                &upload_checkpoint(),
+                src.file(),
+                Some(HELLO_WORLD_CRC32C),
+            )
             .await
             .unwrap();
 
@@ -473,6 +517,7 @@ mod tests {
         let headers = requests[0].headers();
         assert_eq!(headers.get("authorization"), Some("Bearer vended-token"));
         assert_eq!(headers.get("x-goog-meta-device_id"), Some("dvc_1"));
+        assert_eq!(headers.get("x-goog-hash"), Some("crc32c=yZRlqg=="));
         // GCS sends the streamed body without aws-chunked framing.
         let body = requests[0].body().try_clone().unwrap();
         let sent = body.collect().await.unwrap().to_bytes();
@@ -489,7 +534,7 @@ mod tests {
         let creds = credentials("gcs", Value::Null, gcs_credentials_json("vended-token"));
 
         let err = SdkTransfer::with_http_client(replay)
-            .transfer(&creds, &upload_checkpoint(), src.file())
+            .transfer(&creds, &upload_checkpoint(), src.file(), None)
             .await
             .unwrap_err();
 
@@ -507,7 +552,7 @@ mod tests {
         let missing = missing_file();
 
         let err = SdkTransfer::default()
-            .transfer(&creds, &upload_checkpoint(), &missing)
+            .transfer(&creds, &upload_checkpoint(), &missing, None)
             .await
             .unwrap_err();
 
@@ -556,7 +601,7 @@ mod tests {
         let creds = credentials("gcs", Value::Null, gcs_credentials_json("vended-token"));
 
         let err = SdkTransfer::with_http_client(Refused)
-            .transfer(&creds, &upload_checkpoint(), src.file())
+            .transfer(&creds, &upload_checkpoint(), src.file(), None)
             .await
             .unwrap_err();
 
@@ -695,22 +740,25 @@ mod tests {
                 .collect()
         }
 
-        /// Prepares and transfers `file` over `replay` as an attempt does,
-        /// returning the result and the checkpoint it used.
+        /// Prepares and transfers `file` over `replay` as an attempt does, with
+        /// the file's CRC32C, returning the result and the checkpoint it used.
         async fn run(
             creds: &UploadCredentials,
             replay: &StaticReplayClient,
             file: &File,
             mut checkpoint: UploadCheckpoint,
         ) -> (Result<(), UploadErr>, UploadCheckpoint) {
+            let (_, crc32c) = files::sha256_and_crc32c(file).await.unwrap();
             let transfer = SdkTransfer::with_http_client(replay.clone());
             if let Ok(TransferMethod::Multipart(multipart)) = transfer
-                .reuse_or_create_multipart(creds, &checkpoint, file)
+                .reuse_or_create_multipart(creds, &checkpoint, file, Some(crc32c))
                 .await
             {
                 checkpoint.multipart = Some(multipart);
             }
-            let result = transfer.transfer(creds, &checkpoint, file).await;
+            let result = transfer
+                .transfer(creds, &checkpoint, file, Some(crc32c))
+                .await;
             (result, checkpoint)
         }
 
@@ -733,6 +781,11 @@ mod tests {
                     "POST ?uploadId=mpu_new",
                 ]
             );
+            // Both steps carry the CRC32C, so S3 checks the whole object.
+            let requests: Vec<_> = replay.actual_requests().collect();
+            let header = |i: usize, name: &str| requests[i].headers().get(name);
+            assert_eq!(header(0, "x-amz-checksum-type"), Some("FULL_OBJECT"));
+            assert!(header(4, "x-amz-checksum-crc32c").is_some());
         }
 
         // S3 and GCS share the multipart path, so both upload only missing parts.

@@ -92,6 +92,23 @@ pub struct InvalidResponseErr {
 
 impl crate::errors::Error for InvalidResponseErr {}
 
+/// The uploaded bytes don't match the file's checksum, so the file changed after
+/// it was hashed. A retry would read the same bytes, so this is terminal.
+#[derive(Debug, thiserror::Error)]
+#[error("checksum mismatch during {operation} for object '{object}': {msg}")]
+pub struct ChecksumMismatchErr {
+    pub operation: String,
+    pub object: Object,
+    pub msg: String,
+    pub trace: Box<Trace>,
+}
+
+impl crate::errors::Error for ChecksumMismatchErr {
+    fn is_terminal(&self) -> bool {
+        true
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 #[error("local I/O error during {operation} for object '{object}': {msg}")]
 pub struct LocalIoErr {
@@ -116,6 +133,8 @@ pub enum S3Err {
     #[error(transparent)]
     InvalidResponseErr(InvalidResponseErr),
     #[error(transparent)]
+    ChecksumMismatchErr(ChecksumMismatchErr),
+    #[error(transparent)]
     LocalIoErr(LocalIoErr),
     #[error(transparent)]
     FileSysErr(filesys::FileSysErr),
@@ -133,6 +152,7 @@ crate::impl_error!(S3Err {
     ConnectionErr,
     RequestFailedErr,
     InvalidResponseErr,
+    ChecksumMismatchErr,
     LocalIoErr,
     FileSysErr,
 });
@@ -241,6 +261,17 @@ pub fn map_body_read_err(operation: &str, object: &Object, err: &ByteStreamError
     S3Err::ConnectionErr(ConnectionErr {
         object: object.clone(),
         msg: format!("failed to read object body during {operation}: {err}"),
+        trace: crate::trace!(),
+    })
+}
+
+/// Maps an upload whose bytes don't match its checksum to
+/// [`S3Err::ChecksumMismatchErr`].
+pub fn checksum_mismatch(operation: &str, object: &Object, msg: &str) -> S3Err {
+    S3Err::ChecksumMismatchErr(ChecksumMismatchErr {
+        operation: operation.to_string(),
+        object: object.clone(),
+        msg: msg.to_string(),
         trace: crate::trace!(),
     })
 }
@@ -488,6 +519,15 @@ mod tests {
             assert!(matches!(err.code(), Code::InternalServerError));
             assert_eq!(err.http_status().as_u16(), 500);
             assert!(err.to_string().contains("invalid response"));
+        }
+
+        #[test]
+        fn checksum_mismatch_err_is_terminal() {
+            let err = checksum_mismatch("put_object", &object(), "BadDigest");
+            assert!(matches!(err, S3Err::ChecksumMismatchErr(_)));
+            assert!(err.is_terminal());
+            assert!(!err.is_network_conn_err());
+            assert!(err.to_string().contains("checksum mismatch"));
         }
 
         #[test]

@@ -45,6 +45,7 @@ impl StableFileSink for UploadStableFileSink {
                 file: file.file,
                 size: file.size,
                 digest: file.digest,
+                crc32c: file.crc32c,
                 mtime: file.mtime,
                 first_observed_at: file.first_observed_at,
                 last_observed_at: file.last_observed_at,

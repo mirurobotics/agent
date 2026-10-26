@@ -110,6 +110,10 @@ pub struct StableFile {
     pub file: File,
     pub size: u64,
     pub digest: String,
+    /// The CRC32C from the same read as `digest`. `None` in ledger entries
+    /// saved before uploads carried a checksum.
+    #[serde(default)]
+    pub crc32c: Option<u32>,
     pub mtime: DateTime<Utc>,
     pub mtime_aliases: Vec<DateTime<Utc>>,
     pub first_observed_at: DateTime<Utc>,
@@ -165,6 +169,9 @@ mod tests {
     const HASH_AAAA: &str =
         "sha256:61be55a8e2f6b4e172338bddf184d6dbee29c98853e0a0485ecee7f27b9af0b4";
 
+    /// CRC32C of `b"aaaa"` — the checksum `files::sha256_and_crc32c` returns for that content.
+    const CRC32C_AAAA: u32 = 0x6A52_EEB0;
+
     fn deployment(id: &str) -> Deployment {
         Deployment {
             id: id.to_string(),
@@ -203,6 +210,7 @@ mod tests {
             file,
             size: 4,
             digest: HASH_AAAA.to_string(),
+            crc32c: Some(CRC32C_AAAA),
             mtime: ts(0),
             mtime_aliases: vec![],
             first_observed_at,
@@ -605,6 +613,23 @@ mod tests {
             let json = serde_json::to_string(&original).unwrap();
             let back: ScannerSnapshot = serde_json::from_str(&json).unwrap();
             assert_eq!(back, original);
+        }
+
+        #[test]
+        fn ledger_entry_without_crc32c_loads() {
+            let entry = stable_file(File::new("/none/p.mcap"), ts(1000));
+            // As saved by an agent from before upload checksums.
+            let mut value = serde_json::to_value(&entry).unwrap();
+            value.as_object_mut().unwrap().remove("crc32c");
+
+            let back: StableFile = serde_json::from_value(value).unwrap();
+            assert_eq!(
+                back,
+                StableFile {
+                    crc32c: None,
+                    ..entry
+                }
+            );
         }
 
         #[test]

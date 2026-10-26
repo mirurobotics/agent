@@ -11,7 +11,7 @@ use miru_agent::data_uploads::upload::{
 use miru_agent::filesys::File;
 
 /// One recorded `transfer` call's arguments.
-pub type TransferCall = (UploadCredentials, UploadCheckpoint, File);
+pub type TransferCall = (UploadCredentials, UploadCheckpoint, File, Option<u32>);
 
 /// Scripted [`ObjectTransfer`] test double. `reuse_or_create_multipart` returns
 /// the multipart upload given to [`Self::set_multipart`], or else the one on the
@@ -57,6 +57,7 @@ impl ObjectTransfer for MockObjectTransfer {
         _credentials: &UploadCredentials,
         checkpoint: &UploadCheckpoint,
         _file: &File,
+        _crc32c: Option<u32>,
     ) -> Result<TransferMethod, UploadErr> {
         if *self.fail_multipart.lock().unwrap() {
             return Err(scripted_err());
@@ -73,11 +74,14 @@ impl ObjectTransfer for MockObjectTransfer {
         credentials: &UploadCredentials,
         checkpoint: &UploadCheckpoint,
         file: &File,
+        crc32c: Option<u32>,
     ) -> Result<(), UploadErr> {
-        self.calls
-            .lock()
-            .unwrap()
-            .push((credentials.clone(), checkpoint.clone(), file.clone()));
+        self.calls.lock().unwrap().push((
+            credentials.clone(),
+            checkpoint.clone(),
+            file.clone(),
+            crc32c,
+        ));
         let step = self.script.lock().unwrap().pop_front();
         step.unwrap_or(Ok(()))
     }

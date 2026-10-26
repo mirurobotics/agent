@@ -6,7 +6,9 @@
 //!
 //! - [`GcsInterceptor`] sets `Authorization: Bearer <token>` on every attempt,
 //!   renames `x-amz-meta-*` headers to `x-goog-meta-*` (GCS silently drops the
-//!   AWS form under bearer auth), and makes object writes create-only.
+//!   AWS form under bearer auth), makes object writes create-only, and
+//!   translates CRC32C headers between `x-amz-checksum-crc32c` and GCS's
+//!   `x-goog-hash`.
 //! - [`TooManyRequests`] retries every HTTP 429. GCS's 429 codes
 //!   (`TooManyRequests`, `RateLimitExceeded`) are not in the SDK's throttling
 //!   list, so without it they get a single attempt.
@@ -14,7 +16,9 @@
 //!   body the default is `aws-chunked` with a trailing checksum, which GCS
 //!   stores as object bytes while still answering 200. Integrity comes from the
 //!   `Content-MD5` the store sets instead (GCS rejects a mismatch with 400
-//!   `BadDigest`).
+//!   `BadDigest`), and from the upload's CRC32C when it has one: GCS checks a
+//!   single PUT against it, and the store checks a multipart upload's parts
+//!   before completing it.
 //!
 //! These rely on how GCS treats aws-sdk-s3's requests, which Google doesn't
 //! document. The tests below pin the requests we send.
@@ -24,7 +28,10 @@ use crate::errors::HTTPCode;
 use crate::s3::sdk;
 
 // external crates
-use aws_sdk_s3::config::interceptors::{BeforeTransmitInterceptorContextMut, InterceptorContext};
+use aws_sdk_s3::config::interceptors::{
+    BeforeDeserializationInterceptorContextMut, BeforeTransmitInterceptorContextMut,
+    InterceptorContext,
+};
 use aws_sdk_s3::config::retry::{ClassifyRetry, RetryAction};
 use aws_sdk_s3::config::{
     ConfigBag, Intercept, Region, RequestChecksumCalculation, ResponseChecksumValidation,
@@ -43,6 +50,9 @@ const ENDPOINT: &str = "https://storage.googleapis.com";
 
 const AMZ_META: &str = "x-amz-meta-";
 const GOOG_META: &str = "x-goog-meta-";
+
+const AMZ_CRC32C: &str = "x-amz-checksum-crc32c";
+const GOOG_HASH: &str = "x-goog-hash";
 
 /// The operations that write an object, and so are sent create-only.
 const OBJECT_WRITES: [&str; 2] = ["PutObject", "CompleteMultipartUpload"];
@@ -89,9 +99,10 @@ pub(crate) async fn content_md5(mut body: ByteStream) -> std::io::Result<String>
     Ok(base64::engine::general_purpose::STANDARD.encode(hasher.finalize()))
 }
 
-/// Sets the bearer token and GCS metadata header names on each attempt, right
-/// before it is sent, and makes object writes create-only
-/// (`x-goog-if-generation-match: 0`).
+/// Sets the bearer token and GCS header names on each attempt, right before it
+/// is sent, and makes object writes create-only
+/// (`x-goog-if-generation-match: 0`). On each response, copies the CRC32C GCS
+/// reports to where the SDK reads it.
 ///
 /// The upload token has `roles/storage.objectCreator`, which can't overwrite,
 /// and can't read the object to check it. Without create-only, a write retried
@@ -120,7 +131,17 @@ impl Intercept for GcsInterceptor {
             set_create_only(headers);
         }
         rename_amz_metadata(headers)?;
+        move_crc32c_to_goog_hash(headers)?;
         set_bearer(headers, &self.token)
+    }
+
+    fn modify_before_deserialization(
+        &self,
+        context: &mut BeforeDeserializationInterceptorContextMut<'_>,
+        _runtime_components: &RuntimeComponents,
+        _cfg: &mut ConfigBag,
+    ) -> Result<(), BoxError> {
+        copy_goog_crc32c(context.response_mut().headers_mut())
     }
 }
 
@@ -151,6 +172,28 @@ fn rename_amz_metadata(headers: &mut Headers) -> Result<(), BoxError> {
     for (name, renamed, value) in renames {
         headers.remove(&name);
         headers.try_insert(renamed, value)?;
+    }
+    Ok(())
+}
+
+/// Moves the CRC32C the store sends as `x-amz-checksum-crc32c` to
+/// `x-goog-hash`, the header GCS documents for checking an upload.
+fn move_crc32c_to_goog_hash(headers: &mut Headers) -> Result<(), BoxError> {
+    if let Some(crc32c) = headers.remove(AMZ_CRC32C) {
+        headers.try_insert(GOOG_HASH, format!("crc32c={crc32c}"))?;
+    }
+    Ok(())
+}
+
+/// Copies the CRC32C from a response's `x-goog-hash: crc32c=<b64>` header to
+/// `x-amz-checksum-crc32c`, where the SDK reads a part's CRC32C.
+fn copy_goog_crc32c(headers: &mut Headers) -> Result<(), BoxError> {
+    let crc32c = headers
+        .get_all(GOOG_HASH)
+        .find_map(|hash| hash.strip_prefix("crc32c="))
+        .map(str::to_string);
+    if let Some(crc32c) = crc32c {
+        headers.try_insert(AMZ_CRC32C, crc32c)?;
     }
     Ok(())
 }
@@ -191,18 +234,27 @@ mod tests {
 
     // internal crates
     use super::*;
-    use crate::s3::store::tests::{recorded_payload, resp, resp_xml, temp_file_with};
+    use crate::errors::Error;
+    use crate::s3::store::tests::{
+        recorded_payload, resp, resp_xml, temp_file_with, HELLO_WORLD_CRC32C,
+    };
     use crate::s3::store::PART_SIZE;
     use crate::s3::{Object, Options, S3Err, Source, Store};
 
     // external crates
     use aws_smithy_http_client::test_util::{ReplayEvent, StaticReplayClient};
     use aws_smithy_types::body::SdkBody;
+    use crc_fast::CrcAlgorithm;
 
     /// Base64 MD5 of `bytes`, hashed in memory: what `Content-MD5` should
     /// carry for them.
     fn md5_of(bytes: &[u8]) -> String {
         base64::engine::general_purpose::STANDARD.encode(Md5::digest(bytes))
+    }
+
+    /// CRC32C of `bytes`, computed in memory.
+    fn crc32c_of(bytes: &[u8]) -> u32 {
+        crc_fast::checksum(CrcAlgorithm::Crc32Iscsi, bytes) as u32
     }
 
     const BUCKET: &str = "gcs-bucket";
@@ -265,10 +317,35 @@ mod tests {
             .unwrap()
     }
 
+    /// A part response that reports the part's CRC32C and MD5 the way GCS
+    /// does, in one `x-goog-hash` header each.
+    fn hashed_part_resp(etag: &str, part: &[u8]) -> http::Response<SdkBody> {
+        let crc32c = crc32c_of(part).to_be_bytes();
+        let crc32c = base64::engine::general_purpose::STANDARD.encode(crc32c);
+        http::Response::builder()
+            .status(200)
+            .header("ETag", etag)
+            .header(GOOG_HASH, format!("crc32c={crc32c}"))
+            .header(GOOG_HASH, format!("md5={}", md5_of(part)))
+            .header("content-length", "0")
+            .body(SdkBody::empty())
+            .unwrap()
+    }
+
     fn complete_resp() -> http::Response<SdkBody> {
         let xml = format!(
             r#"<?xml version="1.0" encoding="UTF-8"?>
 <CompleteMultipartUploadResult><Bucket>{BUCKET}</Bucket><Key>big.bin</Key><ETag>"final"</ETag></CompleteMultipartUploadResult>"#
+        );
+        resp_xml(200, &xml)
+    }
+
+    /// A ListParts response with part 1 landed, listed without a CRC32C as GCS
+    /// lists parts.
+    fn listed_part_1_resp() -> http::Response<SdkBody> {
+        let xml = format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<ListPartsResult><Bucket>{BUCKET}</Bucket><Key>big.bin</Key><UploadId>{UPLOAD_ID}</UploadId><IsTruncated>false</IsTruncated><Part><PartNumber>1</PartNumber><ETag>"e1"</ETag></Part></ListPartsResult>"#
         );
         resp_xml(200, &xml)
     }
@@ -300,11 +377,11 @@ mod tests {
         let small = temp_file_with(b"hello world").await;
         let big = temp_file_with(&vec![3u8; PART_SIZE as usize + 1]).await;
         store
-            .put(small.file().clone(), &obj("small.bin"), metadata)
+            .put(small.file().clone(), None, &obj("small.bin"), metadata)
             .await
             .unwrap();
         store
-            .put(big.file().clone(), &obj("big.bin"), metadata)
+            .put(big.file().clone(), None, &obj("big.bin"), metadata)
             .await
             .unwrap();
         replay
@@ -339,7 +416,7 @@ mod tests {
             let src = temp_file_with(&bytes).await;
 
             gcs_store(&replay)
-                .put(src.file().clone(), &obj("small.bin"), &HashMap::new())
+                .put(src.file().clone(), None, &obj("small.bin"), &HashMap::new())
                 .await
                 .unwrap();
 
@@ -381,7 +458,7 @@ mod tests {
             let src = temp_file_with(&bytes).await;
 
             gcs_store(&replay)
-                .put(src.file().clone(), &obj("small.bin"), &HashMap::new())
+                .put(src.file().clone(), None, &obj("small.bin"), &HashMap::new())
                 .await
                 .unwrap();
 
@@ -399,7 +476,7 @@ mod tests {
             let src = temp_file_with(&bytes).await;
 
             gcs_store(&replay)
-                .put(src.file().clone(), &obj("big.bin"), &HashMap::new())
+                .put(src.file().clone(), None, &obj("big.bin"), &HashMap::new())
                 .await
                 .unwrap();
 
@@ -479,7 +556,7 @@ mod tests {
             let src = temp_file_with(b"hello world").await;
 
             let err = store
-                .put(src.file().clone(), &obj("small.bin"), &HashMap::new())
+                .put(src.file().clone(), None, &obj("small.bin"), &HashMap::new())
                 .await
                 .unwrap_err();
 
@@ -509,7 +586,7 @@ mod tests {
             let src = temp_file_with(b"hello world").await;
 
             gcs_store(&replay)
-                .put(src.file().clone(), &obj("small.bin"), &HashMap::new())
+                .put(src.file().clone(), None, &obj("small.bin"), &HashMap::new())
                 .await
                 .unwrap();
 
@@ -541,10 +618,15 @@ mod tests {
             let big = temp_file_with(&vec![3u8; PART_SIZE as usize + 1]).await;
 
             let put = store
-                .put(small.file().clone(), &obj("small.bin"), &HashMap::new())
+                .put(
+                    small.file().clone(),
+                    None,
+                    &obj("small.bin"),
+                    &HashMap::new(),
+                )
                 .await;
             let multipart = store
-                .put(big.file().clone(), &obj("big.bin"), &HashMap::new())
+                .put(big.file().clone(), None, &obj("big.bin"), &HashMap::new())
                 .await;
 
             assert!(put.is_ok(), "{put:?}");
@@ -572,7 +654,7 @@ mod tests {
                 ReplayEvent::new(req("DELETE", "big.bin"), resp(204, &[])),
             ]);
             let big = temp_file_with(&vec![3u8; PART_SIZE as usize + 1]).await;
-            let src = Source::open(big.file().clone(), &obj("big.bin"))
+            let src = Source::open(big.file().clone(), None, &obj("big.bin"))
                 .await
                 .unwrap();
 
@@ -599,7 +681,7 @@ mod tests {
             let src = temp_file_with(b"hello world").await;
 
             let err = gcs_store(&replay)
-                .put(src.file().clone(), &obj("small.bin"), &HashMap::new())
+                .put(src.file().clone(), None, &obj("small.bin"), &HashMap::new())
                 .await
                 .unwrap_err();
 
@@ -625,7 +707,7 @@ mod tests {
             let src = temp_file_with(&bytes).await;
 
             let err = gcs_store(&replay)
-                .put(src.file().clone(), &obj("big.bin"), &HashMap::new())
+                .put(src.file().clone(), None, &obj("big.bin"), &HashMap::new())
                 .await
                 .unwrap_err();
 
@@ -642,6 +724,156 @@ mod tests {
                 .method()
                 .to_string();
             assert_eq!(last, "DELETE");
+        }
+    }
+
+    // How an upload is checked against its CRC32C.
+    mod crc32c {
+        use super::*;
+
+        #[tokio::test]
+        async fn put_sends_crc32c_as_goog_hash() {
+            let replay = StaticReplayClient::new(put_ok());
+            let src = temp_file_with(b"hello world").await;
+
+            gcs_store(&replay)
+                .put(
+                    src.file().clone(),
+                    Some(HELLO_WORLD_CRC32C),
+                    &obj("small.bin"),
+                    &HashMap::new(),
+                )
+                .await
+                .unwrap();
+
+            let requests = replay.actual_requests().collect::<Vec<_>>();
+            let headers = requests[0].headers();
+            assert_eq!(headers.get("x-goog-hash"), Some("crc32c=yZRlqg=="));
+            assert_eq!(headers.get("x-amz-checksum-crc32c"), None);
+        }
+
+        #[tokio::test]
+        async fn multipart_completes_when_parts_match_the_crc32c() {
+            let bytes: Vec<u8> = (0..PART_SIZE + 1024).map(|i| (i % 251) as u8).collect();
+            let (part1, part2) = bytes.split_at(PART_SIZE as usize);
+            let replay = StaticReplayClient::new(vec![
+                ReplayEvent::new(req("POST", "big.bin?uploads"), create_resp()),
+                ReplayEvent::new(req("PUT", "big.bin"), hashed_part_resp("\"e1\"", part1)),
+                ReplayEvent::new(req("PUT", "big.bin"), hashed_part_resp("\"e2\"", part2)),
+                ReplayEvent::new(req("POST", "big.bin"), complete_resp()),
+            ]);
+            let src = temp_file_with(&bytes).await;
+
+            gcs_store(&replay)
+                .put(
+                    src.file().clone(),
+                    Some(crc32c_of(&bytes)),
+                    &obj("big.bin"),
+                    &HashMap::new(),
+                )
+                .await
+                .unwrap();
+
+            let requests = replay.actual_requests().collect::<Vec<_>>();
+            // The parts go without SDK checksums, whose aws-chunked framing GCS
+            // would store as object bytes.
+            for part in &requests[1..3] {
+                assert_eq!(part.headers().get("content-encoding"), None);
+            }
+            // The manifest keeps to what GCS documents: part numbers and ETags.
+            let manifest = std::str::from_utf8(requests[3].body().bytes().unwrap()).unwrap();
+            assert_eq!(manifest.matches("<PartNumber>").count(), 2, "{manifest}");
+            assert!(!manifest.contains("Checksum"), "{manifest}");
+        }
+
+        #[tokio::test]
+        async fn multipart_parts_that_dont_match_the_crc32c_are_aborted() {
+            // The file no longer matches its CRC32C, so neither do the parts GCS
+            // stored.
+            let bytes = vec![3u8; PART_SIZE as usize + 1];
+            let (part1, part2) = bytes.split_at(PART_SIZE as usize);
+            let replay = StaticReplayClient::new(vec![
+                ReplayEvent::new(req("POST", "big.bin?uploads"), create_resp()),
+                ReplayEvent::new(req("PUT", "big.bin"), hashed_part_resp("\"e1\"", part1)),
+                ReplayEvent::new(req("PUT", "big.bin"), hashed_part_resp("\"e2\"", part2)),
+                ReplayEvent::new(req("DELETE", "big.bin"), resp(204, &[])),
+            ]);
+            let src = temp_file_with(&bytes).await;
+
+            let err = gcs_store(&replay)
+                .put(
+                    src.file().clone(),
+                    Some(crc32c_of(b"the file before it changed")),
+                    &obj("big.bin"),
+                    &HashMap::new(),
+                )
+                .await
+                .unwrap_err();
+
+            assert!(matches!(err, S3Err::ChecksumMismatchErr(_)), "{err:?}");
+            assert!(err.is_terminal());
+            // Never completed, and aborted so GCS drops the parts.
+            let methods: Vec<_> = replay
+                .actual_requests()
+                .map(|r| r.method().to_string())
+                .collect();
+            assert_eq!(methods, ["POST", "PUT", "PUT", "DELETE"]);
+        }
+
+        #[tokio::test]
+        async fn resume_reads_the_crc32cs_of_landed_parts_from_the_file() {
+            // GCS lists part 1 without its CRC32C.
+            let bytes: Vec<u8> = (0..PART_SIZE + 1024).map(|i| (i % 251) as u8).collect();
+            let part2 = &bytes[PART_SIZE as usize..];
+            let replay = StaticReplayClient::new(vec![
+                ReplayEvent::new(req("GET", "big.bin"), listed_part_1_resp()),
+                ReplayEvent::new(req("PUT", "big.bin"), hashed_part_resp("\"e2\"", part2)),
+                ReplayEvent::new(req("POST", "big.bin"), complete_resp()),
+            ]);
+            let big = temp_file_with(&bytes).await;
+            let crc32c = Some(crc32c_of(&bytes));
+            let src = Source::open(big.file().clone(), crc32c, &obj("big.bin"))
+                .await
+                .unwrap();
+
+            gcs_store(&replay)
+                .resume_multipart_upload(src, &obj("big.bin"), UPLOAD_ID)
+                .await
+                .unwrap();
+
+            let methods: Vec<_> = replay
+                .actual_requests()
+                .map(|r| r.method().to_string())
+                .collect();
+            assert_eq!(methods, ["GET", "PUT", "POST"]);
+        }
+
+        #[tokio::test]
+        async fn resume_of_a_file_that_doesnt_match_the_crc32c_is_refused() {
+            let bytes = vec![3u8; PART_SIZE as usize + 1];
+            let part2 = &bytes[PART_SIZE as usize..];
+            let replay = StaticReplayClient::new(vec![
+                ReplayEvent::new(req("GET", "big.bin"), listed_part_1_resp()),
+                ReplayEvent::new(req("PUT", "big.bin"), hashed_part_resp("\"e2\"", part2)),
+            ]);
+            let big = temp_file_with(&bytes).await;
+            let crc32c = Some(crc32c_of(b"the file before it changed"));
+            let src = Source::open(big.file().clone(), crc32c, &obj("big.bin"))
+                .await
+                .unwrap();
+
+            let err = gcs_store(&replay)
+                .resume_multipart_upload(src, &obj("big.bin"), UPLOAD_ID)
+                .await
+                .unwrap_err();
+
+            assert!(matches!(err, S3Err::ChecksumMismatchErr(_)), "{err:?}");
+            // Never completed.
+            let methods: Vec<_> = replay
+                .actual_requests()
+                .map(|r| r.method().to_string())
+                .collect();
+            assert_eq!(methods, ["GET", "PUT"]);
         }
     }
 }

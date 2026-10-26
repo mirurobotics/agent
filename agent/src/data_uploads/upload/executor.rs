@@ -190,7 +190,12 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> UploadExecutor for LiveE
         // Best effort: on failure, the transfer rechecks the saved multipart upload.
         match self
             .transfer
-            .reuse_or_create_multipart(&prepared.credentials, &prepared.checkpoint, &job.file)
+            .reuse_or_create_multipart(
+                &prepared.credentials,
+                &prepared.checkpoint,
+                &job.file,
+                job.crc32c,
+            )
             .await
         {
             Ok(TransferMethod::Multipart(multipart)) => {
@@ -212,7 +217,7 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> UploadExecutor for LiveE
             job.file, checkpoint.bucket_name, checkpoint.object_key
         );
         self.transfer
-            .transfer(&prepared.credentials, checkpoint, &job.file)
+            .transfer(&prepared.credentials, checkpoint, &job.file, job.crc32c)
             .await?;
 
         info!(

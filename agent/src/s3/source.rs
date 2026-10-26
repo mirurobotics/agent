@@ -5,21 +5,26 @@ use crate::trace;
 
 // external crates
 use aws_sdk_s3::primitives::{ByteStream, Length};
+use base64::Engine;
+use crc_fast::CrcAlgorithm;
 
 /// Bytes per read and per frame sent. The SDK's default is 4 KiB.
 const READ_SIZE: usize = 32 * 1024;
 
-/// A local file to upload and its size when the upload started. The file is
-/// expected to stay unchanged until the upload is confirmed.
+/// A local file to upload, its size when the upload started, and the CRC32C
+/// the uploaded bytes must match. The file is expected to stay unchanged until
+/// the upload is confirmed.
 pub struct Source {
     file: File,
     pub(crate) size: u64,
+    pub(super) crc32c: Option<u32>,
 }
 
 impl Source {
-    /// Sizes `file` for upload. A missing file is [`S3Err::FileSysErr`]; any
-    /// other metadata failure is [`S3Err::LocalIoErr`].
-    pub async fn open(file: File, dst: &Object) -> Result<Self, S3Err> {
+    /// Sizes `file` for upload, checked against `crc32c` when there is one. A
+    /// missing file is [`S3Err::FileSysErr`]; any other metadata failure is
+    /// [`S3Err::LocalIoErr`].
+    pub async fn open(file: File, crc32c: Option<u32>, dst: &Object) -> Result<Self, S3Err> {
         let metadata = tokio::fs::metadata(file.path()).await.map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
                 FileSysErr::PathDoesNotExistErr(PathDoesNotExistErr {
@@ -34,7 +39,15 @@ impl Source {
         Ok(Self {
             file,
             size: metadata.len(),
+            crc32c,
         })
+    }
+
+    /// The CRC32C as S3 and GCS headers carry it: the base64 of its big-endian
+    /// bytes.
+    pub(super) fn crc32c_base64(&self) -> Option<String> {
+        let crc32c = self.crc32c?;
+        Some(base64::engine::general_purpose::STANDARD.encode(crc32c.to_be_bytes()))
     }
 
     /// A request body that streams `len` bytes from `offset`. A retry reopens
@@ -70,5 +83,27 @@ impl Source {
         gcs::content_md5(range)
             .await
             .map_err(|e| errors::map_body_io_err(operation, dst, &self.file, e))
+    }
+
+    /// The CRC32C of `len` bytes from `offset`, hashed in its own read of the
+    /// range.
+    pub(super) async fn range_crc32c(
+        &self,
+        operation: &str,
+        dst: &Object,
+        offset: u64,
+        len: u64,
+    ) -> Result<u32, S3Err> {
+        let mut range = self.read(operation, dst, offset, len).await?;
+        let mut crc32c = crc_fast::Digest::new(CrcAlgorithm::Crc32Iscsi);
+        while let Some(frame) = range
+            .try_next()
+            .await
+            .map_err(|e| errors::map_body_io_err(operation, dst, &self.file, e.into()))?
+        {
+            crc32c.update(&frame);
+        }
+        // CRC-32 values fit in the low 32 bits of crc-fast's u64
+        Ok(crc32c.finalize() as u32)
     }
 }

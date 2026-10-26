@@ -275,7 +275,7 @@ async fn differs_from_previous(
     observation: &Observation,
 ) -> Result<Outcome, ScanErr> {
     // A new digest (or no prior ledger entry at all) is a new stable version.
-    let digest = files::sha256(&candidate.file).await?;
+    let (digest, crc32c) = files::sha256_and_crc32c(&candidate.file).await?;
     if let Some(previous) = find_previous_stable_file(state, candidate) {
         if digest == previous.digest {
             // Content unchanged since the latest ledger entry.
@@ -288,6 +288,7 @@ async fn differs_from_previous(
         candidate,
         observation.timestamp,
         digest,
+        crc32c,
     )))
 }
 
@@ -295,12 +296,14 @@ fn build_stable_file(
     candidate: &Candidate,
     last_observed_at: DateTime<Utc>,
     digest: Digest,
+    crc32c: u32,
 ) -> StableFile {
     let first_obs = &candidate.first_obs;
     StableFile {
         file: candidate.file.clone(),
         size: first_obs.size,
         digest,
+        crc32c: Some(crc32c),
         mtime: first_obs.mtime.into(),
         mtime_aliases: vec![],
         first_observed_at: first_obs.timestamp,
@@ -345,6 +348,12 @@ mod tests {
     /// SHA-256 of `b"bbbb"` — the digest `files::sha256` returns for that content.
     const HASH_BBBB: &str =
         "sha256:81cc5b17018674b401b42f35ba07bb79e211239c23bffe658da1577e3e646877";
+
+    /// CRC32C of `b"aaaa"` — the checksum `files::sha256_and_crc32c` returns for that content.
+    const CRC32C_AAAA: u32 = 0x6A52_EEB0;
+
+    /// CRC32C of `b"bbbb"` — the checksum `files::sha256_and_crc32c` returns for that content.
+    const CRC32C_BBBB: u32 = 0xC5E9_FC97;
 
     /// A deployment with the given id.
     fn deployment(id: &str) -> Deployment {
@@ -434,6 +443,7 @@ mod tests {
             file,
             size: 4,
             digest: HASH_AAAA.to_string(),
+            crc32c: Some(CRC32C_AAAA),
             mtime: ts(0),
             mtime_aliases: vec![],
             first_observed_at,
@@ -443,7 +453,7 @@ mod tests {
         }
     }
 
-    /// A StableFile built from an observation's metadata and a known digest.
+    /// A StableFile built from an observation's metadata and a known digest and checksum.
     ///
     /// `first_observed_at` (discovery) and `last_observed_at` (evaluation) are
     /// passed explicitly because they now diverge: the emitted StableFile stamps
@@ -452,6 +462,7 @@ mod tests {
     fn stable_from_obs(
         obs: &Observation,
         digest: &str,
+        crc32c: u32,
         first_observed_at: DateTime<Utc>,
         last_observed_at: DateTime<Utc>,
     ) -> StableFile {
@@ -459,6 +470,7 @@ mod tests {
             file: obs.file.clone(),
             size: obs.size,
             digest: digest.to_string(),
+            crc32c: Some(crc32c),
             mtime: DateTime::<Utc>::from(obs.mtime),
             mtime_aliases: vec![],
             first_observed_at,
@@ -508,7 +520,10 @@ mod tests {
     }
 
     fn assert_stable(outcome: Outcome) {
-        assert!(matches!(outcome, Outcome::Stable(sf) if sf.digest == HASH_AAAA));
+        assert!(matches!(
+            outcome,
+            Outcome::Stable(sf) if sf.digest == HASH_AAAA && sf.crc32c == Some(CRC32C_AAAA)
+        ));
     }
 
     fn assert_already_in_ledger(outcome: Outcome) {
@@ -986,7 +1001,7 @@ mod tests {
             let file = write(&dir, "e.mcap", b"aaaa").await;
             let state = RuleState::new(config("dpl-1", "r1", &glob_for(&dir), 10));
             let obs = observation(&state, file.clone(), ts(1000)).await;
-            let expected = stable_from_obs(&obs, HASH_AAAA, ts(1000), ts(1010));
+            let expected = stable_from_obs(&obs, HASH_AAAA, CRC32C_AAAA, ts(1000), ts(1010));
             let cand = candidate(file, obs);
 
             let action = eval_candidate(&state, &cand, ts(1010)).await.unwrap();
@@ -1031,7 +1046,7 @@ mod tests {
 
             write_file(&c.file, b"bbbb").await;
             let changed = observation(&c.state, c.file.clone(), ts(1000)).await;
-            let expected = stable_from_obs(&changed, HASH_BBBB, ts(1000), ts(1010));
+            let expected = stable_from_obs(&changed, HASH_BBBB, CRC32C_BBBB, ts(1000), ts(1010));
             track(&mut c.state, &c.file, changed);
             let file = c.file.clone();
             let mut scanner = RuleScanner::from_state(c.state, Options::default());
@@ -1068,7 +1083,7 @@ mod tests {
         #[tokio::test]
         async fn reevaluate_dedups_unchanged_file() {
             let mut c = case("dedup.mcap", 10).await;
-            let expected = stable_from_obs(&c.obs, HASH_AAAA, ts(1000), ts(1010));
+            let expected = stable_from_obs(&c.obs, HASH_AAAA, CRC32C_AAAA, ts(1000), ts(1010));
             track(&mut c.state, &c.file, c.obs.clone());
             let file = c.file.clone();
             let mut scanner = RuleScanner::from_state(c.state, Options::default());
@@ -1155,12 +1170,8 @@ mod tests {
 
             write_file(&c.file, b"bbbbbbbb").await;
             let changed = observation(&c.state, c.file.clone(), ts(1001)).await;
-            let expected = stable_from_obs(
-                &changed,
-                &files::sha256(&c.file).await.unwrap(),
-                ts(1001),
-                ts(1011),
-            );
+            let (digest, crc32c) = files::sha256_and_crc32c(&c.file).await.unwrap();
+            let expected = stable_from_obs(&changed, &digest, crc32c, ts(1001), ts(1011));
             track(&mut c.state, &c.file, changed);
             let file = c.file.clone();
             let mut scanner = RuleScanner::from_state(c.state, Options::default());
@@ -1183,7 +1194,7 @@ mod tests {
             write_file(&c.file, b"bbbb").await;
             let changed = observation(&c.state, c.file.clone(), ts(1001)).await;
             assert_eq!(changed.size, c.obs.size);
-            let expected = stable_from_obs(&changed, HASH_BBBB, ts(1001), ts(1011));
+            let expected = stable_from_obs(&changed, HASH_BBBB, CRC32C_BBBB, ts(1001), ts(1011));
             track(&mut c.state, &c.file, changed);
             let file = c.file.clone();
             let mut scanner = RuleScanner::from_state(c.state, Options::default());
@@ -1207,7 +1218,7 @@ mod tests {
             let mut state = RuleState::new(config("d", "r1", &glob_for(&dir), 10));
             let gone_obs = observation(&state, gone.clone(), ts(1000)).await;
             let live_obs = observation(&state, live.clone(), ts(1000)).await;
-            let expected = stable_from_obs(&live_obs, HASH_AAAA, ts(1000), ts(1010));
+            let expected = stable_from_obs(&live_obs, HASH_AAAA, CRC32C_AAAA, ts(1000), ts(1010));
             track(&mut state, &gone, gone_obs);
             track(&mut state, &live, live_obs);
             let mut scanner = RuleScanner::from_state(state, Options::default());
@@ -1238,7 +1249,7 @@ mod tests {
         // it does NOT short-circuit to Unstable); `observe_file`/`metadata`
         // succeeds (directories have metadata); `is_metadata_stable` passes
         // because first_obs was observed from the same directory; then
-        // `differs_from_previous` calls `files::sha256`, which opens the path and
+        // `differs_from_previous` calls `files::sha256_and_crc32c`, which opens the path and
         // reads it — reading a directory fails with EISDIR → ReadFileErr →
         // eval_candidate returns Err. No permissions trickery, so it holds even
         // when the suite runs as root.
@@ -1248,7 +1259,7 @@ mod tests {
             let good = write(&dir, "good.mcap", b"aaaa").await;
             let mut state = RuleState::new(config("d", "r1", &glob_for(&dir), 0));
             let good_obs = observation(&state, good.clone(), ts(1000)).await;
-            let expected = stable_from_obs(&good_obs, HASH_AAAA, ts(1000), ts(1010));
+            let expected = stable_from_obs(&good_obs, HASH_AAAA, CRC32C_AAAA, ts(1000), ts(1010));
 
             // the poisoned candidate is a directory living at a *.mcap path.
             let poison = dir.file("poison.mcap");
@@ -1291,7 +1302,7 @@ mod tests {
 
             // swap config to deployment d2, rule rule2.
             let mut s2 = RuleState::new(config("d2", "rule2", &glob_for(&dir), 0));
-            let expected = stable_from_obs(&first_obs, HASH_AAAA, ts(1000), ts(1010));
+            let expected = stable_from_obs(&first_obs, HASH_AAAA, CRC32C_AAAA, ts(1000), ts(1010));
             track(&mut s2, &file, first_obs);
             let mut scanner = RuleScanner::from_state(s2, Options::default());
 
