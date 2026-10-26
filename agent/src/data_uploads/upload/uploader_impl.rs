@@ -260,7 +260,7 @@ where
         if err.is_network_conn_err() {
             Self::log_network_conn_err(entry, err);
         } else {
-            Self::log_counted_failure(entry, err);
+            Self::log_failed_attempt(entry, err);
         }
     }
 
@@ -271,11 +271,8 @@ where
         );
     }
 
-    fn log_counted_failure(entry: &QueueEntry, err: &UploadErr) {
-        warn!(
-            "upload: attempt {} for file {} failed: {err:?}",
-            entry.attempts, entry.job.file
-        );
+    fn log_failed_attempt(entry: &QueueEntry, err: &UploadErr) {
+        warn!("upload: attempt for file {} failed: {err:?}", entry.job.file);
     }
 
     fn log_attempt(entry: &QueueEntry) {
