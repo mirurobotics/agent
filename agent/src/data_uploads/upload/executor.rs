@@ -7,7 +7,7 @@ use crate::authn::{Token, TokenManagerExt};
 use crate::data_uploads::upload::{
     errors::{classified_executor_err, UploadErr},
     job::{Job, UploadCheckpoint},
-    transfer::{ObjectTransfer, TransferPlan},
+    transfer::{ObjectTransfer, TransferMethod},
 };
 use crate::errors::{Error, HTTPCode};
 use crate::http::{self, ClientI};
@@ -24,7 +24,8 @@ use tracing::{debug, info};
 /// Either future may be dropped at any await point. [`Self::prepare`] resumes
 /// from the job's checkpoint.
 pub trait UploadExecutor: Send + Sync {
-    /// Reuses or creates the job's upload.
+    /// Reuses or creates the job's upload and, for a file of more than one
+    /// part, its S3 or GCS multipart upload.
     fn prepare(
         &self,
         job: &Job,
@@ -85,8 +86,8 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> LiveExecutor<C, T, X> {
             .map_err(classified_executor_err)
     }
 
-    /// The job's upload with fresh credentials, or a new upload if the backend
-    /// no longer accepts it.
+    /// Reuses the job's upload with fresh credentials. If the backend refuses
+    /// them, the upload is either already confirmed or replaced with a new one.
     async fn reuse_or_create_upload(&self, job: &Job) -> Result<PrepareOutcome, UploadErr> {
         let Some(checkpoint) = &job.checkpoint else {
             return self.create_upload(job).await.map(PrepareOutcome::Ready);
@@ -98,15 +99,22 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> LiveExecutor<C, T, X> {
                 credentials,
             }));
         }
-        if self.was_uploaded(id).await? {
-            info!("upload: upload {id} was already confirmed");
-            return Ok(PrepareOutcome::AlreadyUploaded);
+        // The backend refuses credentials only for an upload that isn't pending,
+        // so confirm accepts it only if an earlier attempt confirmed it.
+        match self.confirm_upload(id).await {
+            Ok(()) => {
+                info!("upload: upload {id} was already confirmed");
+                Ok(PrepareOutcome::AlreadyUploaded)
+            }
+            Err(err) if err.is_terminal() => {
+                info!(
+                    "upload: upload {id} is gone; creating a new one for file {}",
+                    job.file
+                );
+                self.create_upload(job).await.map(PrepareOutcome::Ready)
+            }
+            Err(err) => Err(err),
         }
-        info!(
-            "upload: upload {id} is gone; creating a new one for file {}",
-            job.file
-        );
-        self.create_upload(job).await.map(PrepareOutcome::Ready)
     }
 
     async fn create_upload(&self, job: &Job) -> Result<PreparedUpload, UploadErr> {
@@ -158,15 +166,6 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> LiveExecutor<C, T, X> {
         }
     }
 
-    /// Whether a gone upload was uploaded: confirm rejects a deleted or failed one.
-    async fn was_uploaded(&self, id: &str) -> Result<bool, UploadErr> {
-        match self.confirm_upload(id).await {
-            Ok(()) => Ok(true),
-            Err(err) if err.is_terminal() => Ok(false),
-            Err(err) => Err(err),
-        }
-    }
-
     async fn confirm_upload(&self, id: &str) -> Result<(), UploadErr> {
         let token = self.token().await?;
         http::with_retry(|| async {
@@ -194,10 +193,10 @@ impl<C: ClientI, T: TokenManagerExt, X: ObjectTransfer> UploadExecutor for LiveE
             .reuse_or_create_multipart(&prepared.credentials, &prepared.checkpoint, &job.file)
             .await
         {
-            Ok(TransferPlan::Multipart(multipart)) => {
+            Ok(TransferMethod::Multipart(multipart)) => {
                 prepared.checkpoint.multipart = Some(multipart);
             }
-            Ok(TransferPlan::SinglePart) => prepared.checkpoint.multipart = None,
+            Ok(TransferMethod::SinglePart) => prepared.checkpoint.multipart = None,
             Err(err) => debug!(
                 "upload: can't prepare multipart upload for {}: {err:?}",
                 job.file

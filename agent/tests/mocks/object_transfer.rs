@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use backend_api::models::UploadCredentials;
 use miru_agent::data_uploads::upload::errors::ExecutorErr;
 use miru_agent::data_uploads::upload::{
-    MultipartCheckpoint, ObjectTransfer, TransferPlan, UploadCheckpoint, UploadErr,
+    MultipartCheckpoint, ObjectTransfer, TransferMethod, UploadCheckpoint, UploadErr,
 };
 use miru_agent::filesys::File;
 
@@ -15,7 +15,7 @@ pub type TransferCall = (UploadCredentials, UploadCheckpoint, File);
 
 /// Scripted [`ObjectTransfer`] test double. `reuse_or_create_multipart` returns
 /// the multipart upload given to [`Self::set_multipart`], or else the one on the
-/// checkpoint, or else [`TransferPlan::SinglePart`], and fails after
+/// checkpoint, or else [`TransferMethod::SinglePart`], and fails after
 /// [`Self::fail_multipart`]. Each `transfer` call pops the next scripted result
 /// (an empty script defaults to `Ok`) and records the call's arguments. Clones
 /// share the script and the recorded calls, so a test keeps one clone for
@@ -57,14 +57,14 @@ impl ObjectTransfer for MockObjectTransfer {
         _credentials: &UploadCredentials,
         checkpoint: &UploadCheckpoint,
         _file: &File,
-    ) -> Result<TransferPlan, UploadErr> {
+    ) -> Result<TransferMethod, UploadErr> {
         if *self.fail_multipart.lock().unwrap() {
             return Err(scripted_err());
         }
         let started = self.multipart.lock().unwrap().clone();
         Ok(match started.or_else(|| checkpoint.multipart.clone()) {
-            Some(multipart) => TransferPlan::Multipart(multipart),
-            None => TransferPlan::SinglePart,
+            Some(multipart) => TransferMethod::Multipart(multipart),
+            None => TransferMethod::SinglePart,
         })
     }
 

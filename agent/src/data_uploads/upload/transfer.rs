@@ -22,14 +22,14 @@ use tracing::info;
 /// Either future may be dropped at any await point.
 pub trait ObjectTransfer: Send + Sync {
     /// The multipart upload [`Self::transfer`] resumes: the saved one if it
-    /// still matches `file`, else a new one, or [`TransferPlan::SinglePart`]
+    /// still matches `file`, else a new one, or [`TransferMethod::SinglePart`]
     /// for a single-part file.
     fn reuse_or_create_multipart(
         &self,
         credentials: &UploadCredentials,
         checkpoint: &UploadCheckpoint,
         file: &File,
-    ) -> impl Future<Output = Result<TransferPlan, UploadErr>> + Send;
+    ) -> impl Future<Output = Result<TransferMethod, UploadErr>> + Send;
 
     /// Transfers the file, resuming `checkpoint.multipart` if it matches the file.
     fn transfer(
@@ -42,7 +42,7 @@ pub trait ObjectTransfer: Send + Sync {
 
 /// How [`ObjectTransfer::transfer`] sends a file.
 #[derive(Debug, PartialEq)]
-pub enum TransferPlan {
+pub enum TransferMethod {
     /// In parts, through this multipart upload.
     Multipart(MultipartCheckpoint),
     /// In one request, since the file fits in one part.
@@ -125,7 +125,7 @@ impl ObjectTransfer for SdkTransfer {
         credentials: &UploadCredentials,
         checkpoint: &UploadCheckpoint,
         file: &File,
-    ) -> Result<TransferPlan, UploadErr> {
+    ) -> Result<TransferMethod, UploadErr> {
         let store = self.store_for(credentials)?;
         reuse_or_create_multipart(&store, checkpoint, file)
             .await
@@ -154,16 +154,16 @@ async fn reuse_or_create_multipart(
     store: &s3::Store,
     checkpoint: &UploadCheckpoint,
     file: &File,
-) -> Result<TransferPlan, s3::S3Err> {
+) -> Result<TransferMethod, s3::S3Err> {
     let object = checkpoint.object();
     let src = s3::Source::open(file.clone(), &object).await?;
     if src.size <= s3::store::PART_SIZE {
-        return Ok(TransferPlan::SinglePart);
+        return Ok(TransferMethod::SinglePart);
     }
     if let Some(saved) = checkpoint.resumable_multipart(&src) {
         let id = &saved.multipart_upload_id;
         if store.has_multipart_upload(&object, id).await? {
-            return Ok(TransferPlan::Multipart(saved.clone()));
+            return Ok(TransferMethod::Multipart(saved.clone()));
         }
         info!("upload: multipart upload {id} for {object} is gone");
     }
@@ -171,7 +171,7 @@ async fn reuse_or_create_multipart(
         .create_multipart_upload(&object, &checkpoint.metadata)
         .await?;
     info!("upload: started multipart upload {id} for {object}");
-    Ok(TransferPlan::Multipart(MultipartCheckpoint {
+    Ok(TransferMethod::Multipart(MultipartCheckpoint {
         multipart_upload_id: id,
         size: src.size,
         part_size: s3::Store::part_size_for(src.size),
@@ -571,7 +571,7 @@ mod tests {
         use super::*;
         use crate::s3::store::PART_SIZE;
         use miru_agent::data_uploads::upload::{
-            MultipartCheckpoint, TransferPlan, UploadCheckpoint,
+            MultipartCheckpoint, TransferMethod, UploadCheckpoint,
         };
 
         /// One part plus 1 KiB, so the file splits into two parts.
@@ -704,7 +704,7 @@ mod tests {
             mut checkpoint: UploadCheckpoint,
         ) -> (Result<(), UploadErr>, UploadCheckpoint) {
             let transfer = SdkTransfer::with_http_client(replay.clone());
-            if let Ok(TransferPlan::Multipart(multipart)) = transfer
+            if let Ok(TransferMethod::Multipart(multipart)) = transfer
                 .reuse_or_create_multipart(creds, &checkpoint, file)
                 .await
             {
