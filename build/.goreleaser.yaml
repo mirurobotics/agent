@@ -35,6 +35,9 @@ builds:
     # then treats the binary as if it had built it. `prebuilt.path` is relative
     # to GoReleaser's working directory, which is build/ (see build/Dockerfile).
     builder: prebuilt
+    # Only the release workflow stages that executable, so snapshot builds
+    # (build/build.sh) skip Windows instead of failing on the missing file.
+    skip: "{{ .IsSnapshot }}"
     goos:
       - windows
     goarch:
