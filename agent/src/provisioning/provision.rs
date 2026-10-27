@@ -1,10 +1,9 @@
 // internal crates
-use crate::authn::{self, AuthnErr};
 use crate::cli;
 use crate::crypt::rsa;
 use crate::disk::{self, settings};
 use crate::filesys::{self, files, Overwrite};
-use crate::http::{self, HTTPErr};
+use crate::http;
 use crate::models;
 use crate::provisioning::{errors::*, shared};
 use crate::telemetry;
@@ -16,21 +15,13 @@ use backend_api::models as backend_client;
 #[allow(unused_imports)]
 use tracing::{debug, error, info, warn};
 
-#[derive(Debug)]
-pub struct Outcome {
-    pub already_provisioned: bool,
-    pub device_name: String,
-}
-
 pub async fn provision<HTTPClientT: http::ClientI>(
     http_client: &HTTPClientT,
     layout: &disk::Layout,
     settings: &settings::Settings,
     token: &str,
     device_name: Option<String>,
-) -> Result<Outcome, ProvisionErr> {
-    // if a machine has already been provisioned, confirm Miru still accepts its
-    // credentials and return the device's name
+) -> Result<backend_client::Device, ProvisionErr> {
     if disk::assert_activated(layout).is_ok() {
         let device_name = match files::read_json::<models::Device>(&layout.device()).await {
             Ok(device) => device.name,
@@ -39,11 +30,10 @@ pub async fn provision<HTTPClientT: http::ClientI>(
                 "unknown".to_string()
             }
         };
-        verify_existing_device(http_client, layout, &device_name).await?;
-        return Ok(Outcome {
-            already_provisioned: true,
+        return Err(ProvisionErr::AlreadyProvisionedErr(AlreadyProvisionedErr {
             device_name,
-        });
+            trace: trace!(),
+        }));
     }
 
     let temp_dir = layout.temp_dir();
@@ -72,44 +62,12 @@ pub async fn provision<HTTPClientT: http::ClientI>(
             version::VERSION,
         )
         .await?;
-        Ok(Outcome {
-            already_provisioned: false,
-            device_name: device.name,
-        })
+        Ok(device)
     }
     .await;
 
     shared::cleanup_temp_files(&[&private_key_file, &public_key_file]).await;
     result
-}
-
-/// Fails if Miru rejects the machine's stored credentials, such as when its device
-/// was archived or deleted.
-async fn verify_existing_device<HTTPClientT: http::ClientI>(
-    http_client: &HTTPClientT,
-    layout: &disk::Layout,
-    device_name: &str,
-) -> Result<(), ProvisionErr> {
-    let auth = layout.auth();
-    match authn::issue_token(http_client, &auth.private_key(), &auth.public_key()).await {
-        Ok(_) => Ok(()),
-        Err(AuthnErr::HTTPErr(HTTPErr::RequestFailed(e))) if is_rejection(e.status) => {
-            Err(ProvisionErr::DeviceRejectedErr(DeviceRejectedErr {
-                device_name: device_name.to_string(),
-                source: e,
-                trace: trace!(),
-            }))
-        }
-        Err(e) => Err(e.into()),
-    }
-}
-
-/// Whether Miru refused the credentials: any 4xx except a timeout or rate limit,
-/// which can pass on retry.
-fn is_rejection(status: reqwest::StatusCode) -> bool {
-    status.is_client_error()
-        && status != reqwest::StatusCode::REQUEST_TIMEOUT
-        && status != reqwest::StatusCode::TOO_MANY_REQUESTS
 }
 
 async fn provision_with_backend<HTTPClientT: http::ClientI>(

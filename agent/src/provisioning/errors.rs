@@ -18,22 +18,21 @@ impl crate::errors::Error for MissingEnvVarErr {}
 
 #[derive(Debug, thiserror::Error)]
 #[error(
-    "this machine is already provisioned as device '{device_name}', but Miru rejected its credentials: {source}\n\nIf the device was archived or deleted in Miru, run `miru-agent reprovision` to attach this machine to an existing device."
+    "this machine is already provisioned as device '{device_name}'\n\nTo attach it to a different device, run `miru-agent reprovision`. To provision it as a new device, uninstall the agent and delete its data first."
 )]
-pub struct DeviceRejectedErr {
+pub struct AlreadyProvisionedErr {
     pub device_name: String,
-    pub source: http::errors::RequestFailed,
     pub trace: Box<Trace>,
 }
 
-impl crate::errors::Error for DeviceRejectedErr {}
+impl crate::errors::Error for AlreadyProvisionedErr {}
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProvisionErr {
     #[error(transparent)]
     MissingEnvVarErr(MissingEnvVarErr),
     #[error(transparent)]
-    DeviceRejectedErr(DeviceRejectedErr),
+    AlreadyProvisionedErr(AlreadyProvisionedErr),
     #[error(transparent)]
     AuthnErr(authn::AuthnErr),
     #[error(transparent)]
@@ -86,7 +85,7 @@ impl From<DiskErr> for ProvisionErr {
 
 crate::impl_error!(ProvisionErr {
     MissingEnvVarErr,
-    DeviceRejectedErr,
+    AlreadyProvisionedErr,
     AuthnErr,
     CryptErr,
     FileSysErr,
