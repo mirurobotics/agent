@@ -17,9 +17,22 @@ pub struct MissingEnvVarErr {
 impl crate::errors::Error for MissingEnvVarErr {}
 
 #[derive(Debug, thiserror::Error)]
+#[error(
+    "this machine is already provisioned as device '{device_name}'\n\nTo attach it to a different device, run `miru-agent reprovision`. To provision it as a new device, uninstall the agent and delete its data first."
+)]
+pub struct AlreadyProvisionedErr {
+    pub device_name: String,
+    pub trace: Box<Trace>,
+}
+
+impl crate::errors::Error for AlreadyProvisionedErr {}
+
+#[derive(Debug, thiserror::Error)]
 pub enum ProvisionErr {
     #[error(transparent)]
     MissingEnvVarErr(MissingEnvVarErr),
+    #[error(transparent)]
+    AlreadyProvisionedErr(AlreadyProvisionedErr),
     #[error(transparent)]
     AuthnErr(authn::AuthnErr),
     #[error(transparent)]
@@ -72,6 +85,7 @@ impl From<DiskErr> for ProvisionErr {
 
 crate::impl_error!(ProvisionErr {
     MissingEnvVarErr,
+    AlreadyProvisionedErr,
     AuthnErr,
     CryptErr,
     FileSysErr,

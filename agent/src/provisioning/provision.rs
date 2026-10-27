@@ -7,6 +7,7 @@ use crate::http;
 use crate::models;
 use crate::provisioning::{errors::*, shared};
 use crate::telemetry;
+use crate::trace;
 use crate::version;
 use backend_api::models as backend_client;
 
@@ -14,20 +15,13 @@ use backend_api::models as backend_client;
 #[allow(unused_imports)]
 use tracing::{debug, error, info, warn};
 
-#[derive(Debug)]
-pub struct Outcome {
-    pub already_provisioned: bool,
-    pub device_name: String,
-}
-
 pub async fn provision<HTTPClientT: http::ClientI>(
     http_client: &HTTPClientT,
     layout: &disk::Layout,
     settings: &settings::Settings,
     token: &str,
     device_name: Option<String>,
-) -> Result<Outcome, ProvisionErr> {
-    // if a machine has already been provisioned, then just return the device's name
+) -> Result<backend_client::Device, ProvisionErr> {
     if disk::assert_activated(layout).is_ok() {
         let device_name = match files::read_json::<models::Device>(&layout.device()).await {
             Ok(device) => device.name,
@@ -36,10 +30,10 @@ pub async fn provision<HTTPClientT: http::ClientI>(
                 "unknown".to_string()
             }
         };
-        return Ok(Outcome {
-            already_provisioned: true,
+        return Err(ProvisionErr::AlreadyProvisionedErr(AlreadyProvisionedErr {
             device_name,
-        });
+            trace: trace!(),
+        }));
     }
 
     let temp_dir = layout.temp_dir();
@@ -68,10 +62,7 @@ pub async fn provision<HTTPClientT: http::ClientI>(
             version::VERSION,
         )
         .await?;
-        Ok(Outcome {
-            already_provisioned: false,
-            device_name: device.name,
-        })
+        Ok(device)
     }
     .await;
 
