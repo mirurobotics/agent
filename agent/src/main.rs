@@ -78,9 +78,7 @@ fn runtime() -> tokio::runtime::Runtime {
         .expect("failed to build tokio runtime")
 }
 
-async fn run_provision(
-    args: cli::ProvisionArgs,
-) -> Result<backend_client::Device, ProvisionErr> {
+async fn run_provision(args: cli::ProvisionArgs) -> Result<backend_client::Device, ProvisionErr> {
     // initialize logging
     let tmp_dir = dirs::create_temp("miru-agent-provision-logs").await?;
     let options = logs::Options {
