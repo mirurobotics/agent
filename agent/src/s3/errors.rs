@@ -4,6 +4,7 @@ use crate::filesys::{self, file::File};
 use crate::s3::Object;
 
 // external crates
+use aws_sdk_s3::config::http::HttpResponse;
 use aws_sdk_s3::error::SdkError;
 use aws_sdk_s3::primitives::ByteStreamError;
 
@@ -202,12 +203,17 @@ where
         }),
         SdkError::ServiceError(e) => {
             let status = e.raw().status().as_u16();
+            let explanation = error_explanation(e.raw());
             let source = e.into_err();
+            let msg = match explanation {
+                Some(text) => format!("{source}: {text}"),
+                None => source.to_string(),
+            };
             S3Err::RequestFailedErr(RequestFailedErr {
                 operation: operation.to_string(),
                 object: object.clone(),
                 status: Some(status),
-                msg: source.to_string(),
+                msg,
                 trace: crate::trace!(),
             })
         }
@@ -221,6 +227,26 @@ where
             trace: crate::trace!(),
         }),
     }
+}
+
+/// The `<Message>` and `<Details>` of an error response. GCS names the denied
+/// principal and permission only in `<Details>`, which the SDK doesn't parse.
+/// The rest of the body is left out, since S3 can echo signed headers in it.
+fn error_explanation(resp: &HttpResponse) -> Option<String> {
+    let body = std::str::from_utf8(resp.body().bytes()?).ok()?;
+    let parts: Vec<&str> = ["Message", "Details"]
+        .into_iter()
+        .filter_map(|tag| xml_element(body, tag))
+        .filter(|text| !text.is_empty())
+        .collect();
+    (!parts.is_empty()).then(|| parts.join(" "))
+}
+
+/// The trimmed text of the first `<tag>` element in `xml`.
+fn xml_element<'a>(xml: &'a str, tag: &str) -> Option<&'a str> {
+    let (_, rest) = xml.split_once(&format!("<{tag}>"))?;
+    let (text, _) = rest.split_once(&format!("</{tag}>"))?;
+    Some(text.trim())
 }
 
 /// Maps a local filesystem I/O error hit while streaming an object body
@@ -260,7 +286,6 @@ mod tests {
     use super::*;
     use crate::errors::Error as _;
     use crate::test_utils::filesys::missing_file;
-    use aws_sdk_s3::config::http::HttpResponse;
     use aws_sdk_s3::error::ConnectorError;
     use aws_smithy_types::body::SdkBody;
 
@@ -282,11 +307,24 @@ mod tests {
     // the `http` crate so we reuse the `TryFrom<http::Response>` conversion the
     // SDK itself uses.
     fn raw_response(status: u16) -> HttpResponse {
+        raw_response_with_body(status, "")
+    }
+
+    fn raw_response_with_body(status: u16, body: &str) -> HttpResponse {
         let http = http::Response::builder()
             .status(status)
-            .body(SdkBody::empty())
+            .body(SdkBody::from(body.to_string()))
             .unwrap();
         HttpResponse::try_from(http).unwrap()
+    }
+
+    fn service_error_msg(body: &str) -> String {
+        let err: SdkError<DummyErr> =
+            SdkError::service_error(DummyErr, raw_response_with_body(403, body));
+        match map_sdk_err("put_object", &object(), err) {
+            S3Err::RequestFailedErr(e) => e.msg,
+            other => panic!("expected RequestFailedErr, got {other:?}"),
+        }
     }
 
     #[test]
@@ -339,6 +377,32 @@ mod tests {
             S3Err::RequestFailedErr(e) => assert_eq!(e.status, Some(403)),
             other => panic!("expected RequestFailedErr, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn service_error_keeps_message_and_details() {
+        let msg = service_error_msg(
+            "<Error><Code>AccessDenied</Code><Message>Access denied.</Message>\
+             <Details>sa@p.iam.gserviceaccount.com lacks storage.objects.create</Details></Error>",
+        );
+        assert_eq!(
+            msg,
+            "dummy service error: Access denied. \
+             sa@p.iam.gserviceaccount.com lacks storage.objects.create"
+        );
+    }
+
+    #[test]
+    fn service_error_leaves_out_the_rest_of_the_body() {
+        // S3 echoes the signed request, session token included.
+        let msg = service_error_msg(
+            "<Error><Code>SignatureDoesNotMatch</Code><Message>Signature mismatch.</Message>\
+             <CanonicalRequest>x-amz-security-token:secret-session-token</CanonicalRequest></Error>",
+        );
+        assert_eq!(msg, "dummy service error: Signature mismatch.");
+
+        let msg = service_error_msg("<html><body>proxy login</body></html>");
+        assert_eq!(msg, "dummy service error");
     }
 
     #[test]
