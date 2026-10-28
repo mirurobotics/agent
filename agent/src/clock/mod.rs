@@ -7,7 +7,14 @@
 //! - **How long has it been?** [`Clock::monotonic_now`] and [`Clock::elapsed_since`]
 //!   use the monotonic clock, which never jumps but resets on reboot. Use these
 //!   for cooldowns, backoff and refresh scheduling.
-//! - **What time is it, for sure?** [`Clock::server_now`] is the server's
+//! - **What time is it?** [`Clock::now`] gives the best available time with a
+//!   [`Trust`] tier: the system clock when it agrees with the server
+//!   ([`Trust::Synced`]), the server's time when it does not
+//!   ([`Trust::Corrected`]), and the system clock before the server has been
+//!   heard from ([`Trust::Unverified`]). [`Clock::trusted_now`] is the same
+//!   time, but only for the first two tiers. Prefer these over the raw sources
+//!   below.
+//! - **What time does the server say it is?** [`Clock::server_now`] is the server's
 //!   time, from the latest reading passed to [`Clock::observe_server_time`]
 //!   and advanced by monotonic time since. It is `None` until the agent has heard
 //!   from the server in this process.
@@ -18,4 +25,4 @@
 
 pub mod shared;
 
-pub use self::shared::{Clock, SYNC_TOLERANCE};
+pub use self::shared::{Clock, Reading, Trust, SYNC_TOLERANCE};

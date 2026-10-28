@@ -37,6 +37,9 @@ pub struct Client {
 pub trait ClientI: Send + Sync {
     fn base_url(&self) -> &str;
 
+    /// The clock this client feeds with the server's time.
+    fn clock(&self) -> &Clock;
+
     /// Build, send, handle response — returns body text and request metadata.
     fn execute(
         &self,
@@ -47,6 +50,10 @@ pub trait ClientI: Send + Sync {
 impl ClientI for Client {
     fn base_url(&self) -> &str {
         &self.base_url
+    }
+
+    fn clock(&self) -> &Clock {
+        &self.clock
     }
 
     async fn execute(
@@ -66,6 +73,10 @@ impl<T: ClientI> ClientI for Arc<T> {
         self.as_ref().base_url()
     }
 
+    fn clock(&self) -> &Clock {
+        self.as_ref().clock()
+    }
+
     async fn execute(
         &self,
         params: request::Params<'_>,
@@ -79,7 +90,7 @@ impl Client {
         Self::with_clock(base_url, Clock::new())
     }
 
-    /// A client that records the backend's time into `clock` from every
+    /// A client that records the server's time into `clock` from every
     /// response that comes from `base_url`'s origin.
     pub fn with_clock(base_url: &str, clock: Clock) -> Result<Self, HTTPErr> {
         let client = reqwest::Client::builder().build().map_err(|e| {
@@ -95,11 +106,6 @@ impl Client {
             headers: request::Headers::default(),
             clock,
         })
-    }
-
-    /// The clock this client feeds with the backend's time.
-    pub fn clock(&self) -> &Clock {
-        &self.clock
     }
 
     pub fn build_request(&self, params: request::Params) -> Result<request::Request, HTTPErr> {
