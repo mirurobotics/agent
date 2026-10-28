@@ -7,6 +7,7 @@ use std::sync::Arc;
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::app::state::AppState;
 use miru_agent::authn::{Token, TokenManagerExt};
+use miru_agent::clock::UptimeState;
 use miru_agent::data_uploads::retention::DeleterExt;
 use miru_agent::data_uploads::scan::ScannerExt;
 use miru_agent::data_uploads::upload::UploaderExt;
@@ -323,6 +324,49 @@ pub mod init {
 
         // nothing replaced the blocking directory with a snapshot file
         assert!(queue.path().is_dir());
+    }
+
+    #[tokio::test]
+    async fn uptime_is_saved_on_shutdown() {
+        let env = TestEnv::valid().await;
+        files::write_json(
+            &env.layout.uptime(),
+            &UptimeState { secs: 3600 },
+            WriteOptions::OVERWRITE_NONATOMIC,
+        )
+        .await
+        .unwrap();
+
+        let (state, state_handle) = env.init().await.unwrap();
+
+        // the saved total from earlier runs carries on
+        assert!(state.uptime.now() >= Duration::from_secs(3600));
+        // run for over a second so the total to save has grown
+        tokio::time::sleep(Duration::from_millis(1100)).await;
+
+        state.shutdown().await.unwrap();
+        state_handle.await;
+        let saved = files::read_json::<UptimeState>(&env.layout.uptime())
+            .await
+            .unwrap();
+        assert!(saved.secs >= 3601);
+    }
+
+    #[tokio::test]
+    async fn uptime_degrades_when_its_path_is_unwritable() {
+        let env = TestEnv::valid().await;
+        dirs::create(&Dir::new(env.layout.uptime().path().clone()))
+            .await
+            .unwrap();
+
+        let (state, state_handle) = env.init().await.unwrap();
+
+        // fail-open: the agent boots and counts uptime from zero
+        assert!(state.uptime.now() < Duration::from_secs(3600));
+
+        state.shutdown().await.unwrap();
+        state_handle.await;
+        assert!(env.layout.uptime().path().is_dir());
     }
 }
 
