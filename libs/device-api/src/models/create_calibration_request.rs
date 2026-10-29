@@ -20,9 +20,9 @@ pub struct CreateCalibrationRequest {
     /// Serial number of the physical unit that was calibrated, not of the device, such as `SN-1234`. Free text, at most 255 characters.
     #[serde(rename = "serial_number", skip_serializing_if = "Option::is_none")]
     pub serial_number: Option<String>,
-    /// Who ran the calibration, as the device knows them, such as `Benjamin Smidt`. Free text, at most 255 characters. Miru stores it unchanged.
-    #[serde(rename = "user", skip_serializing_if = "Option::is_none")]
-    pub user: Option<String>,
+    /// Who reported the calibration, as the device knows them, such as `Benjamin Smidt`. Free text, at most 255 characters. Miru stores it unchanged.
+    #[serde(rename = "reported_by", skip_serializing_if = "Option::is_none")]
+    pub reported_by: Option<String>,
     /// Slug of the aspect of the unit that was calibrated, when it has more than one, e.g. `intrinsics` vs `extrinsics`, or `pose` vs `joint-offsets`. Validated like a slug. Miru resolves it to one of the component's `aspects`, creating the aspect the first time it is reported.
     #[serde(rename = "aspect", skip_serializing_if = "Option::is_none")]
     pub aspect: Option<String>,
@@ -37,7 +37,7 @@ impl CreateCalibrationRequest {
             component,
             role: None,
             serial_number: None,
-            user: None,
+            reported_by: None,
             aspect: None,
             content: Box::new(content),
         }

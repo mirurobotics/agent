@@ -39,9 +39,9 @@ pub struct Calibration {
     /// ID of the deployment the device was on when it reported the calibration; null if it had none or the deployment was deleted.
     #[serde(rename = "deployment_id", deserialize_with = "Option::deserialize")]
     pub deployment_id: Option<String>,
-    /// ID of the external user the device reported as running the calibration; null if no external user was reported.
-    #[serde(rename = "external_user_id", deserialize_with = "Option::deserialize")]
-    pub external_user_id: Option<String>,
+    /// ID of the external user who reported the calibration; null if none was reported.
+    #[serde(rename = "reported_by_id", deserialize_with = "Option::deserialize")]
+    pub reported_by_id: Option<String>,
     /// ID the agent gave the report this calibration came from.
     #[serde(rename = "report_id")]
     pub report_id: uuid::Uuid,
@@ -55,7 +55,7 @@ pub struct Calibration {
 
 impl Calibration {
     /// A calibration recorded by Miru.
-    pub fn new(object: Object, id: String, device_id: String, component_id: String, role_id: Option<String>, aspect_id: Option<String>, serial_number: Option<String>, digest: String, deployment_id: Option<String>, external_user_id: Option<String>, report_id: uuid::Uuid, reported_at: String, created_at: String) -> Calibration {
+    pub fn new(object: Object, id: String, device_id: String, component_id: String, role_id: Option<String>, aspect_id: Option<String>, serial_number: Option<String>, digest: String, deployment_id: Option<String>, reported_by_id: Option<String>, report_id: uuid::Uuid, reported_at: String, created_at: String) -> Calibration {
         Calibration {
             object,
             id,
@@ -66,7 +66,7 @@ impl Calibration {
             serial_number,
             digest,
             deployment_id,
-            external_user_id,
+            reported_by_id,
             report_id,
             reported_at,
             created_at,
