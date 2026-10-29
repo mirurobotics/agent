@@ -11,54 +11,82 @@ info:
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
-  x-release-version: v0.2.4-beta.2
+  x-release-version: v0.2.4
   x-git-commit:
-    sha: 67b58d48c00b0f92ccb6772344d9ef00f1e13027
-    url: https://github.com/mirurobotics/openapi/commit/67b58d48c00b0f92ccb6772344d9ef00f1e13027
-    message: "refactor(calibrations)!: name the calibration's external user reported_by\
-      \ (#395)\n\n<!-- claude-projects-attribution: {\"github_login\":\"miru-agents\"\
-      } -->\n_Requested by **bens-agent** · [project\nthread](https://claude.ai/code/project/chan_015imaa8aZrnubYZcZCvjeHx?thread=cmsg_015imaa8aZrnubYZcZCvjeHx6HTArhtGtMpoitqDXkyMq7)_\n\
-      \nFollows #386.\n\n## Summary\n\nEvery calibration field that points at the\
-      \ person who reported the\ncalibration is now named `reported_by`, across the\
-      \ device, agent and\nfrontend APIs. `user` and `external_user` read like a Miru\
-      \ account or an\nunrelated resource. `reported_by` pairs with the existing `reported_at`,\n\
-      and the field follows the `created_by` / `created_by_id` pattern.\n\n| API |\
-      \ Before | After |\n|---|---|---|\n| Device `CreateCalibrationRequest` | `user`\
-      \ | `reported_by` |\n| Agent `CreateCalibrationRequest` | `external_user` |\
-      \ `reported_by` |\n| `Calibration` (agent, frontend) | `external_user_id` |\n\
-      `reported_by_id` |\n| Calibration expansion (frontend) | `expand=external_user`\
-      \ |\n`expand=reported_by` |\n| Calibration list filter (frontend) | `external_user_id`\
-      \ |\n`reported_by_id` |\n\n- The external user resource is unchanged: `ExternalUser`,\n\
-      `/external_users`, `ext_usr_` IDs. `reported_by_id` holds an external\nuser\
-      \ ID and `reported_by` expands to an `ExternalUser`.\n- The platform API is\
-      \ unaffected, since #387 already dropped the field\nthere.\n- Source edits and\
-      \ `./scripts/regen.sh` output are in separate commits.\nAn earlier pair of commits\
-      \ used `calibrated_by`; the latest pair renames\nit to `reported_by`.\n\n##\
-      \ Reviewer notes\n\n- **Breaking for the device, agent and frontend APIs.**\n\
-      - Device: `user` is only in the `device/v0.2.4-beta.1` tag, and its only\nconsumer\
-      \ is mirurobotics/agent#409 (open).\n- Agent and frontend: backend#1062 serves\
-      \ `agent/v0.5.14` and\n`frontend/v0.9.21`. After this merges and is tagged,\
-      \ a backend follow-up\nre-vendors both specs and renames the fields, and agent#409\
-      \ re-vendors\nthe device and agent specs.\n  - No SDK, Dinghy or dashboard code\
-      \ uses these fields yet.\n\n\U0001F916 Generated with [Claude Code](https://claude.com/claude-code)\n\
-      \nhttps://claude.ai/code/session_01XHScKYffhVuSntTMwJK7xK\n\n<!-- codesmith:footer\
-      \ -->\n---\n<a\nhref=\"https://app.blacksmith.sh/mirurobotics/codesmith/openapi/pr/395?autoLogin=true&ref=codesmith_pr_footer\"\
-      ><picture>``&lt;source\nmedia=\"(prefers-color-scheme: dark)\"\nsrcset=\"https://pr-comments-assets.blacksmith.sh/codesmith/view-with-codesmith-dark-v3.svg\"\
-      &gt;&lt;source\nmedia=\"(prefers-color-scheme: light)\"\nsrcset=\"https://pr-comments-assets.blacksmith.sh/codesmith/view-with-codesmith-light-v3.svg\"\
-      &gt;&lt;img\nalt=\"View with [code]smith\"\nsrc=\"https://pr-comments-assets.blacksmith.sh/codesmith/view-with-codesmith-dark-v3-3x.png\"\
-      \nwidth=\"162\" height=\"28\"&gt;``</picture></a> <a\nhref=\"```https://backend.blacksmith.sh/track/enable-autofix?expires=1795886184&installation_model_id=425273&pr_number=395&ref=codesmith_pr_footer&repository=mirurobotics%2Fopenapi&return_to=https%3A%2F%2Fgithub.com%2Fmirurobotics%2Fopenapi%2Fpull%2F395&signature=a51fe152faa0c2be5b44701d20bfa1a755e654edd8049f267322f63a81f9e596\"\
-      &gt;&lt;picture&gt;&lt;source\nmedia=\"(prefers-color-scheme: dark)\"\nsrcset=\"\
-      https://pr-comments-assets.blacksmith.sh/codesmith/autofix-with-codesmith-dark.svg\"\
-      &gt;&lt;source\nmedia=\"(prefers-color-scheme: light)\"\nsrcset=\"https://pr-comments-assets.blacksmith.sh/codesmith/autofix-with-codesmith-light.svg\"\
-      &gt;&lt;img\nalt=\"Autofix with [code]smith\"\nsrc=\"https://pr-comments-assets.blacksmith.sh/codesmith/autofix-with-codesmith-dark-3x.png\"\
-      \nwidth=\"190\" height=\"28\"&gt;```</picture></a>\n<sup>Need help on this PR?\
-      \ Tag <code>@codesmith</code> with what you\nneed.</sup>\n\n<!-- codesmith:autofix:disabled\
-      \ -->\n<!-- /codesmith:footer -->\n\n---------\n\nCo-authored-by: Claude <noreply@anthropic.com>"
-    author: Ben's Agent
+    sha: 13405ec342d31653d51698d8da8b860db728df18
+    url: https://github.com/mirurobotics/openapi/commit/13405ec342d31653d51698d8da8b860db728df18
+    message: 'chore(stlc): seal custom-code tracking files (#396)
+
+
+      Automated by the stlc generate workflow: a push-to-main or manual
+
+      `workflow_dispatch` publish re-sealed custom code, updating the tracking
+
+      files under `sdkgen/*/stainless/custom-code/`. Publishing targets the
+
+      private staging repos. Safe to merge - this PR''s head branch
+
+      `stlc/seal-tracking` is skipped by the generate workflow''s skip-bot
+
+      guard in `detect`, and on merge the push loop-breaker `guard` sees only
+
+      custom-code changes and runs no rebuild.
+
+
+      <!-- codesmith:footer -->
+
+      ---
+
+      <a
+
+      href="https://app.blacksmith.sh/mirurobotics/codesmith/openapi/pr/396?autoLogin=true&ref=codesmith_pr_footer"><picture><source
+
+      media="(prefers-color-scheme: dark)"
+
+      srcset="https://pr-comments-assets.blacksmith.sh/codesmith/view-with-codesmith-dark-v3.svg"><source
+
+      media="(prefers-color-scheme: light)"
+
+      srcset="https://pr-comments-assets.blacksmith.sh/codesmith/view-with-codesmith-light-v3.svg"><img
+
+      alt="View with [code]smith"
+
+      src="https://pr-comments-assets.blacksmith.sh/codesmith/view-with-codesmith-dark-v3-3x.png"
+
+      width="162" height="28"></picture></a> <a
+
+      href="https://backend.blacksmith.sh/track/enable-autofix?expires=1795887387&installation_model_id=425273&pr_number=396&ref=codesmith_pr_footer&repository=mirurobotics%2Fopenapi&return_to=https%3A%2F%2Fgithub.com%2Fmirurobotics%2Fopenapi%2Fpull%2F396&signature=36ab39c5d717b3d9ff699ab6514ceba14c9fae2a8d4a356f380950ed197d6701"><picture><source
+
+      media="(prefers-color-scheme: dark)"
+
+      srcset="https://pr-comments-assets.blacksmith.sh/codesmith/autofix-with-codesmith-dark.svg"><source
+
+      media="(prefers-color-scheme: light)"
+
+      srcset="https://pr-comments-assets.blacksmith.sh/codesmith/autofix-with-codesmith-light.svg"><img
+
+      alt="Autofix with [code]smith"
+
+      src="https://pr-comments-assets.blacksmith.sh/codesmith/autofix-with-codesmith-dark-3x.png"
+
+      width="190" height="28"></picture></a>
+
+      <sup>Need help on this PR? Tag <code>@codesmith</code> with what you
+
+      need.</sup>
+
+
+      <!-- codesmith:autofix:disabled -->
+
+      <!-- /codesmith:footer -->
+
+
+      Co-authored-by: stlc-sealback-bot[bot] <298483487+stlc-sealback-bot[bot]@users.noreply.github.com>'
+    author: stlc-sealback-bot[bot]
     branch: HEAD
     dirty: false
   x-build:
-    built_at: '2026-10-29T17:51:42.804446+00:00'
+    built_at: '2026-10-29T20:27:44.269490+00:00'
 servers:
 - url: http://localhost/v0.2
   description: localhost
@@ -325,14 +353,14 @@ components:
     ReleaseVersion:
       type: string
       enum:
-      - v0.2.4-beta.2
+      - v0.2.4
       x-enum-varnames:
       - RELEASE_VERSION
       x-stainless-const: true
     APIGitCommit:
       type: string
       enum:
-      - 67b58d48c00b0f92ccb6772344d9ef00f1e13027
+      - 13405ec342d31653d51698d8da8b860db728df18
       x-enum-varnames:
       - API_GIT_COMMIT
       x-stainless-const: true
@@ -471,7 +499,7 @@ components:
         api_release_version:
           type: string
           description: The API release version of the agent.
-          example: v0.2.4-beta.2
+          example: v0.2.4
         rust_version:
           type: string
           description: The version of Rust.
@@ -494,7 +522,7 @@ components:
         git_commit: a1b2c3d4
         api_version: v0.2
         api_git_commit: a1b2c3d4
-        api_release_version: v0.2.4-beta.2
+        api_release_version: v0.2.4
         rust_version: 1.93.0
         build_date: '2026-02-24T10:30:00Z'
         os: linux
