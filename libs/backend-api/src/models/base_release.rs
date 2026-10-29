@@ -20,6 +20,9 @@ pub struct BaseRelease {
     /// The version of the release.
     #[serde(rename = "version")]
     pub version: String,
+    /// A free-form description of the release.
+    #[serde(rename = "description", deserialize_with = "Option::deserialize")]
+    pub description: Option<String>,
     /// The ID of the git commit associated with this release.
     #[serde(rename = "git_commit_id", deserialize_with = "Option::deserialize")]
     pub git_commit_id: Option<String>,
@@ -35,11 +38,12 @@ pub struct BaseRelease {
 }
 
 impl BaseRelease {
-    pub fn new(object: Object, id: String, version: String, git_commit_id: Option<String>, os: models::Os, created_at: String, updated_at: String) -> BaseRelease {
+    pub fn new(object: Object, id: String, version: String, description: Option<String>, git_commit_id: Option<String>, os: models::Os, created_at: String, updated_at: String) -> BaseRelease {
         BaseRelease {
             object,
             id,
             version,
+            description,
             git_commit_id,
             os,
             created_at,

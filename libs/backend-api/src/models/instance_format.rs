@@ -9,8 +9,8 @@
 use crate::models;
 use serde::{Deserialize, Serialize};
 
-/// InstanceFormat : The serialization format of config content. A config instance is written to the device filesystem in this format. - `json`: standard JSON. - `yaml`: YAML 1.2. - `jsonc`: JSON with comments (JSON plus `//` and `/_* *_/` comment syntax). - `xml`: XML. - `text`: plain, unstructured text with no specific format. 
-/// The serialization format of config content. A config instance is written to the device filesystem in this format. - `json`: standard JSON. - `yaml`: YAML 1.2. - `jsonc`: JSON with comments (JSON plus `//` and `/_* *_/` comment syntax). - `xml`: XML. - `text`: plain, unstructured text with no specific format. 
+/// InstanceFormat : The serialization format of config content. A config instance is written to the device filesystem in this format. - `json`: standard JSON. - `yaml`: YAML 1.2. - `jsonc`: JSON with comments (JSON plus `//` and `/_* *_/` comment syntax). - `xml`: XML. - `csv`: comma-separated values (RFC 4180). - `text`: plain, unstructured text with no specific format. 
+/// The serialization format of config content. A config instance is written to the device filesystem in this format. - `json`: standard JSON. - `yaml`: YAML 1.2. - `jsonc`: JSON with comments (JSON plus `//` and `/_* *_/` comment syntax). - `xml`: XML. - `csv`: comma-separated values (RFC 4180). - `text`: plain, unstructured text with no specific format. 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub enum InstanceFormat {
     #[serde(rename = "json")]
@@ -21,6 +21,8 @@ pub enum InstanceFormat {
     INSTANCE_FORMAT_JSONC,
     #[serde(rename = "xml")]
     INSTANCE_FORMAT_XML,
+    #[serde(rename = "csv")]
+    INSTANCE_FORMAT_CSV,
     #[serde(rename = "text")]
     INSTANCE_FORMAT_TEXT,
 
@@ -38,6 +40,7 @@ impl std::fmt::Display for InstanceFormat {
             Self::INSTANCE_FORMAT_YAML => write!(f, "yaml"),
             Self::INSTANCE_FORMAT_JSONC => write!(f, "jsonc"),
             Self::INSTANCE_FORMAT_XML => write!(f, "xml"),
+            Self::INSTANCE_FORMAT_CSV => write!(f, "csv"),
             Self::INSTANCE_FORMAT_TEXT => write!(f, "text"),
             Self::InstanceFormatUnknown => write!(f, "unknown"),
         }
