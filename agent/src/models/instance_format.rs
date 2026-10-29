@@ -15,6 +15,7 @@ pub enum InstanceFormat {
     Yaml,
     Jsonc,
     Xml,
+    Csv,
     /// Plain text, and the fallback for a format this agent doesn't know.
     #[default]
     Text,
@@ -32,6 +33,7 @@ impl_status_enum!(
         Yaml => "yaml" => backend_client::InstanceFormat::INSTANCE_FORMAT_YAML,
         Jsonc => "jsonc" => backend_client::InstanceFormat::INSTANCE_FORMAT_JSONC,
         Xml => "xml" => backend_client::InstanceFormat::INSTANCE_FORMAT_XML,
+        Csv => "csv" => backend_client::InstanceFormat::INSTANCE_FORMAT_CSV,
         Text => "text" => backend_client::InstanceFormat::INSTANCE_FORMAT_TEXT,
     ]
 );
@@ -45,6 +47,7 @@ impl InstanceFormat {
             agent_server::InstanceFormat::INSTANCE_FORMAT_YAML => Some(Self::Yaml),
             agent_server::InstanceFormat::INSTANCE_FORMAT_JSONC => Some(Self::Jsonc),
             agent_server::InstanceFormat::INSTANCE_FORMAT_XML => Some(Self::Xml),
+            agent_server::InstanceFormat::INSTANCE_FORMAT_CSV => Some(Self::Csv),
             agent_server::InstanceFormat::INSTANCE_FORMAT_TEXT => Some(Self::Text),
             agent_server::InstanceFormat::InstanceFormatUnknown => None,
         }

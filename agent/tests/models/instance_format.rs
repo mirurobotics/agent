@@ -40,6 +40,12 @@ impl StatusEnumFixture for InstanceFormat {
                 agent: (),
             },
             StatusCase {
+                variant: InstanceFormat::Csv,
+                wire: "csv",
+                backend: backend_client::InstanceFormat::INSTANCE_FORMAT_CSV,
+                agent: (),
+            },
+            StatusCase {
                 variant: InstanceFormat::Text,
                 wire: "text",
                 backend: backend_client::InstanceFormat::INSTANCE_FORMAT_TEXT,
@@ -83,6 +89,10 @@ fn from_device_api_maps_each_known_format() {
         (
             agent_server::InstanceFormat::INSTANCE_FORMAT_XML,
             InstanceFormat::Xml,
+        ),
+        (
+            agent_server::InstanceFormat::INSTANCE_FORMAT_CSV,
+            InstanceFormat::Csv,
         ),
         (
             agent_server::InstanceFormat::INSTANCE_FORMAT_TEXT,
