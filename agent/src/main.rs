@@ -78,7 +78,7 @@ fn runtime() -> tokio::runtime::Runtime {
         .expect("failed to build tokio runtime")
 }
 
-async fn run_provision(args: cli::ProvisionArgs) -> Result<provision::Outcome, ProvisionErr> {
+async fn run_provision(args: cli::ProvisionArgs) -> Result<backend_client::Device, ProvisionErr> {
     // initialize logging
     let tmp_dir = dirs::create_temp("miru-agent-provision-logs").await?;
     let options = logs::Options {
@@ -105,19 +105,12 @@ async fn run_provision(args: cli::ProvisionArgs) -> Result<provision::Outcome, P
     result
 }
 
-fn handle_provision_result(result: Result<provision::Outcome, ProvisionErr>) {
+fn handle_provision_result(result: Result<backend_client::Device, ProvisionErr>) {
     match result {
-        Ok(outcome) if outcome.already_provisioned => {
-            let msg = format!(
-                "Device is already provisioned as {}!",
-                display::color(&outcome.device_name, display::Colors::Green)
-            );
-            println!("{}", display::format_info(msg.as_str()));
-        }
-        Ok(outcome) => {
+        Ok(device) => {
             let msg = format!(
                 "Successfully provisioned this device as {}!",
-                display::color(&outcome.device_name, display::Colors::Green)
+                display::color(&device.name, display::Colors::Green)
             );
             println!("{}", display::format_info(msg.as_str()));
         }

@@ -8,10 +8,10 @@ pub mod uploader;
 mod uploader_impl;
 
 pub use self::errors::UploadErr;
-pub use self::executor::{LiveExecutor, UploadExecutor};
-pub use self::job::Job;
+pub use self::executor::{LiveExecutor, PrepareOutcome, PreparedUpload, UploadExecutor};
+pub use self::job::{Job, MultipartCheckpoint, UploadCheckpoint};
 pub use self::queue::{Queue, QueueEntry, QueueSnapshot, QueueSnapshotFile};
 pub use self::sink::UploadStableFileSink;
-pub use self::transfer::{ObjectTransfer, SdkTransfer};
+pub use self::transfer::{ObjectTransfer, SdkTransfer, TransferMethod};
 pub use self::uploader::{Uploader, UploaderExt};
 pub use self::uploader_impl::UploaderOptions;

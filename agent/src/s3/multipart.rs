@@ -47,11 +47,11 @@ impl Store {
     }
 
     /// Resumes an existing multipart upload: lists the parts that already landed
-    /// in S3, uploads only the missing parts, and completes. Never aborts, so a
-    /// resume is safe to retry.
+    /// in S3, uploads only the missing parts, and completes. Never aborts on
+    /// failure, so a resume is safe to retry.
     ///
     /// `NoSuchUploadErr` if S3 no longer knows the upload. The caller must resume
-    /// against the same file bytes the upload was started for.
+    /// against the same file bytes and part size the upload was started for.
     pub async fn resume_multipart_upload(
         &self,
         src: Source,
@@ -60,9 +60,21 @@ impl Store {
     ) -> Result<(), S3Err> {
         let landed = self.list_parts(dst, upload_id).await?;
         let parts = self.upload_parts(&src, dst, upload_id, &landed).await?;
-        self.complete_multipart_upload(dst, upload_id, &parts)
-            .await
-            .map(|_| ())
+        let written = self
+            .complete_multipart_upload(dst, upload_id, &parts)
+            .await?;
+        // GCS already had the object: abort this upload's leftover parts
+        if matches!(written, WriteOutcome::AlreadyExists) {
+            let _ = self.abort_multipart_upload(dst, upload_id).await;
+        }
+        Ok(())
+    }
+
+    /// Whether S3 still has the multipart upload `upload_id` in progress. It
+    /// no longer does once the upload is completed or aborted.
+    pub async fn has_multipart_upload(&self, dst: &Object, upload_id: &str) -> Result<bool, S3Err> {
+        let page = self.list_parts_page(dst, upload_id, None).await?;
+        Ok(page.is_some())
     }
 
     /// Walks [`Self::part_plan`] in order. For each part number present in
@@ -191,7 +203,7 @@ impl Store {
     }
 
     /// Starts a multipart upload and returns its `upload_id`.
-    async fn create_multipart_upload(
+    pub async fn create_multipart_upload(
         &self,
         dst: &Object,
         metadata: &std::collections::HashMap<String, String>,
@@ -941,6 +953,38 @@ mod tests {
             assert_eq!(err.http_status().as_u16(), 404);
 
             // Only the list_parts call fired — no upload, no complete (and no abort).
+            assert_eq!(actual_shapes(&replay), vec![list_parts_shape()]);
+        }
+
+        #[tokio::test]
+        async fn open_upload_is_found() {
+            let (store, replay) = store_with(vec![ReplayEvent::new(
+                list_parts_req(),
+                list_parts_resp(&[], None),
+            )]);
+
+            let found = store
+                .has_multipart_upload(&obj("big.bin"), UPLOAD_ID)
+                .await
+                .unwrap();
+
+            assert!(found);
+            assert_eq!(actual_shapes(&replay), vec![list_parts_shape()]);
+        }
+
+        #[tokio::test]
+        async fn completed_or_aborted_upload_is_not_found() {
+            let (store, replay) = store_with(vec![ReplayEvent::new(
+                list_parts_req(),
+                resp_xml(404, NO_SUCH_UPLOAD_XML),
+            )]);
+
+            let found = store
+                .has_multipart_upload(&obj("big.bin"), UPLOAD_ID)
+                .await
+                .unwrap();
+
+            assert!(!found);
             assert_eq!(actual_shapes(&replay), vec![list_parts_shape()]);
         }
 

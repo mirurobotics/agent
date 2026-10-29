@@ -13,7 +13,7 @@ const READ_SIZE: usize = 32 * 1024;
 /// expected to stay unchanged until the upload is confirmed.
 pub struct Source {
     file: File,
-    pub(super) size: u64,
+    pub(crate) size: u64,
 }
 
 impl Source {

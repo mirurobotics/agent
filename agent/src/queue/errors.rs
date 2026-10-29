@@ -1,6 +1,9 @@
 // internal crates
 use crate::errors::Trace;
 
+// external crates
+use uuid::Uuid;
+
 /// Returned (inside [`EnqueueErr`]) by [`super::FileQueue::enqueue`] when the
 /// queue is at capacity. Nothing was written and nothing already queued was
 /// dropped.
@@ -47,3 +50,14 @@ crate::impl_error!(EnqueueErr {
     QueueFullErr,
     FileSysErr,
 });
+
+/// Returned by [`super::FileQueue::update_job`] when no queued entry has the id.
+#[derive(Debug, thiserror::Error)]
+#[error("{label} queue has no entry {id}")]
+pub struct EntryNotFoundErr {
+    pub label: &'static str,
+    pub id: Uuid,
+    pub trace: Box<Trace>,
+}
+
+impl crate::errors::Error for EntryNotFoundErr {}

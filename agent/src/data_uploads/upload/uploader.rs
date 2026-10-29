@@ -8,7 +8,7 @@ use crate::data_uploads::{
     retention::DeleterExt,
     upload::{
         errors::*,
-        executor::UploadExecutor,
+        executor::{PrepareOutcome, UploadExecutor},
         job::Job,
         queue::{QueueEntry, QueueSnapshotFile},
         uploader_impl::{UploaderImpl, UploaderOptions},
@@ -22,6 +22,7 @@ use chrono::{DateTime, Utc};
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
+use tokio::time::Instant;
 use tracing::{error, info};
 
 macro_rules! dispatch {
@@ -52,7 +53,7 @@ pub trait UploaderExt: Send + Sync {
 // ================================== WORKER ======================================= //
 pub(crate) enum Command {
     Enqueue {
-        job: Job,
+        job: Box<Job>,
         respond_to: oneshot::Sender<Result<(), UploadErr>>,
     },
     Len {
@@ -123,18 +124,36 @@ where
     }
 
     /// Drive one executor attempt on `entry` to completion while staying
-    /// responsive to commands, then resolve the entry with its result.
+    /// responsive to commands, then resolve the entry with its result and how
+    /// long it ran.
     async fn run_attempt(&mut self, entry: QueueEntry) -> Flow {
-        let attempt = self.uploader.attempt(&entry);
-        match self.run_until_shutdown(attempt).await {
+        let started = Instant::now();
+        match self.attempt(&entry).await {
             // the attempt was cancelled -> leave the entry in the queue so the next
             // boot picks it up rather than losing it
             None => Flow::Shutdown,
             Some(result) => {
-                self.uploader.finish_attempt(entry, result).await;
+                let ran_for = started.elapsed();
+                self.uploader.finish_attempt(entry, result, ran_for).await;
                 Flow::Continue
             }
         }
+    }
+
+    /// Prepares `entry`'s upload, saves its checkpoint on the job, then uploads
+    /// it. `None` if a shutdown cancelled the attempt.
+    async fn attempt(&mut self, entry: &QueueEntry) -> Option<Result<(), UploadErr>> {
+        let prepare = self.uploader.prepare(entry);
+        let prepared = match self.run_until_shutdown(prepare).await? {
+            Ok(PrepareOutcome::Ready(prepared)) => prepared,
+            Ok(PrepareOutcome::AlreadyUploaded) => return Some(Ok(())),
+            Err(err) => return Some(Err(err)),
+        };
+        self.uploader
+            .save_checkpoint(entry, &prepared.checkpoint)
+            .await;
+        let upload = self.uploader.upload(entry, prepared);
+        self.run_until_shutdown(upload).await
     }
 
     /// Sleep for `wait`, staying responsive to commands. Deliberately NOT
@@ -186,7 +205,7 @@ where
             }
             Command::Enqueue { job, respond_to } => {
                 dispatch!(
-                    self.uploader.enqueue(job).await,
+                    self.uploader.enqueue(*job).await,
                     respond_to,
                     "Actor failed to send enqueue response"
                 );
@@ -263,7 +282,7 @@ impl Uploader {
 impl UploaderExt for Uploader {
     async fn enqueue(&self, job: Job) -> Result<(), UploadErr> {
         self.send_command("enqueue", |tx| Command::Enqueue {
-            job,
+            job: Box::new(job),
             respond_to: tx,
         })
         .await?

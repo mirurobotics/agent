@@ -16,7 +16,7 @@ pub mod provision_fn {
         let env = Env::new("provision-test").await;
         let mock = mock_ok_provision("test-device");
 
-        let outcome = provision::provision(
+        let device = provision::provision(
             &mock,
             &env.layout,
             &env.settings,
@@ -26,8 +26,7 @@ pub mod provision_fn {
         .await
         .unwrap();
 
-        assert!(!outcome.already_provisioned);
-        assert_eq!(outcome.device_name, "test-device");
+        assert_eq!(device.name, "test-device");
         assert_eq!(mock.call_count(mock::Call::ProvisionDevice), 1);
         validate_storage(&env.layout, "test-device").await;
 
@@ -53,15 +52,15 @@ pub mod provision_fn {
     }
 
     #[tokio::test]
-    async fn provision_is_idempotent_on_second_call() {
+    async fn fails_when_already_provisioned() {
         let env = Env::new("provision-test").await;
         env.seed_provision("first").await;
         let snapshot = StorageSnapshot::capture(&env.layout).await;
 
-        // second call should short-circuit, not call the backend, and leave
-        // every persisted blob byte-identical
+        // the backend would accept a second provision, so only the local check
+        // can stop it
         let mock = mock_ok_provision("second");
-        let outcome = provision::provision(
+        let err = provision::provision(
             &mock,
             &env.layout,
             &env.settings,
@@ -69,36 +68,13 @@ pub mod provision_fn {
             Some("second".into()),
         )
         .await
-        .unwrap();
+        .unwrap_err();
 
-        assert!(outcome.already_provisioned);
-        assert_eq!(outcome.device_name, "first");
-        assert_eq!(mock.call_count(mock::Call::ProvisionDevice), 0);
-        snapshot.assert_unchanged(&env.layout).await;
-
-        env.cleanup().await;
-    }
-
-    #[tokio::test]
-    async fn is_noop_when_already_activated() {
-        let env = Env::new("provision-test").await;
-        env.seed_provision("initial").await;
-        let snapshot = StorageSnapshot::capture(&env.layout).await;
-
-        // a poison-pill mock — any call would fail the test
-        let mock = mock_failing_provision();
-        let outcome = provision::provision(
-            &mock,
-            &env.layout,
-            &env.settings,
-            &env.token,
-            Some("ignored".into()),
-        )
-        .await
-        .unwrap();
-
-        assert!(outcome.already_provisioned);
-        assert_eq!(outcome.device_name, "initial");
+        let ProvisionErr::AlreadyProvisionedErr(already) = &err else {
+            panic!("expected AlreadyProvisionedErr, got {err:?}");
+        };
+        assert_eq!(already.device_name, "first");
+        assert!(err.to_string().contains("miru-agent reprovision"));
         assert_eq!(mock.call_count(mock::Call::ProvisionDevice), 0);
         snapshot.assert_unchanged(&env.layout).await;
 
@@ -129,7 +105,7 @@ pub mod provision_fn {
         .await;
 
         let mock = mock_ok_provision("after-fallthrough");
-        let outcome = provision::provision(
+        let device = provision::provision(
             &mock,
             &env.layout,
             &env.settings,
@@ -139,8 +115,7 @@ pub mod provision_fn {
         .await
         .unwrap();
 
-        assert!(!outcome.already_provisioned);
-        assert_eq!(outcome.device_name, "after-fallthrough");
+        assert_eq!(device.name, "after-fallthrough");
         assert_eq!(mock.call_count(mock::Call::ProvisionDevice), 1);
         validate_storage(&env.layout, "after-fallthrough").await;
 
@@ -175,23 +150,23 @@ pub mod provision_fn {
     }
 
     #[tokio::test]
-    async fn short_circuit_with_unparseable_device_json_returns_unknown_name() {
+    async fn already_provisioned_with_unparseable_device_json_reports_unknown_name() {
         let env = Env::new("provision-test").await;
         env.seed_provision("initial").await;
 
         // corrupt device.json so read_json fails, but keep the keys intact so
-        // assert_activated still succeeds and the short-circuit branch runs
+        // assert_activated still succeeds
         test_files::seed(&env.layout.device(), "not valid json").await;
 
-        // a failing mock — short-circuit must still fire even when device.json
-        // is unreadable, so the backend should never be called
         let mock = mock_failing_provision();
-        let outcome = provision::provision(&mock, &env.layout, &env.settings, &env.token, None)
+        let err = provision::provision(&mock, &env.layout, &env.settings, &env.token, None)
             .await
-            .unwrap();
+            .unwrap_err();
 
-        assert!(outcome.already_provisioned);
-        assert_eq!(outcome.device_name, "unknown");
+        let ProvisionErr::AlreadyProvisionedErr(already) = &err else {
+            panic!("expected AlreadyProvisionedErr, got {err:?}");
+        };
+        assert_eq!(already.device_name, "unknown");
         assert_eq!(mock.call_count(mock::Call::ProvisionDevice), 0);
 
         env.cleanup().await;

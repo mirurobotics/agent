@@ -275,7 +275,7 @@ async fn differs_from_previous(
     observation: &Observation,
 ) -> Result<Outcome, ScanErr> {
     // A new digest (or no prior ledger entry at all) is a new stable version.
-    let digest = files::hash(&candidate.file).await?;
+    let digest = files::sha256(&candidate.file).await?;
     if let Some(previous) = find_previous_stable_file(state, candidate) {
         if digest == previous.digest {
             // Content unchanged since the latest ledger entry.
@@ -338,11 +338,11 @@ mod tests {
 
     // ================================ FIXTURES =================================== //
 
-    /// SHA-256 of `b"aaaa"` — the digest `files::hash` returns for that content.
+    /// SHA-256 of `b"aaaa"` — the digest `files::sha256` returns for that content.
     const HASH_AAAA: &str =
         "sha256:61be55a8e2f6b4e172338bddf184d6dbee29c98853e0a0485ecee7f27b9af0b4";
 
-    /// SHA-256 of `b"bbbb"` — the digest `files::hash` returns for that content.
+    /// SHA-256 of `b"bbbb"` — the digest `files::sha256` returns for that content.
     const HASH_BBBB: &str =
         "sha256:81cc5b17018674b401b42f35ba07bb79e211239c23bffe658da1577e3e646877";
 
@@ -1157,7 +1157,7 @@ mod tests {
             let changed = observation(&c.state, c.file.clone(), ts(1001)).await;
             let expected = stable_from_obs(
                 &changed,
-                &files::hash(&c.file).await.unwrap(),
+                &files::sha256(&c.file).await.unwrap(),
                 ts(1001),
                 ts(1011),
             );
@@ -1238,7 +1238,7 @@ mod tests {
         // it does NOT short-circuit to Unstable); `observe_file`/`metadata`
         // succeeds (directories have metadata); `is_metadata_stable` passes
         // because first_obs was observed from the same directory; then
-        // `differs_from_previous` calls `files::hash`, which opens the path and
+        // `differs_from_previous` calls `files::sha256`, which opens the path and
         // reads it — reading a directory fails with EISDIR → ReadFileErr →
         // eval_candidate returns Err. No permissions trickery, so it holds even
         // when the suite runs as root.

@@ -193,7 +193,7 @@ mod tests {
     use super::*;
     use crate::s3::store::tests::{recorded_payload, resp, resp_xml, temp_file_with};
     use crate::s3::store::PART_SIZE;
-    use crate::s3::{Object, Options, S3Err, Store};
+    use crate::s3::{Object, Options, S3Err, Source, Store};
 
     // external crates
     use aws_smithy_http_client::test_util::{ReplayEvent, StaticReplayClient};
@@ -559,12 +559,48 @@ mod tests {
         }
 
         #[tokio::test]
+        async fn resumed_upload_of_an_existing_object_is_aborted() {
+            // An earlier attempt stored the object, so completing gets 412 and
+            // this upload is aborted.
+            let listed = format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<ListPartsResult><Bucket>{BUCKET}</Bucket><Key>big.bin</Key><UploadId>{UPLOAD_ID}</UploadId><IsTruncated>false</IsTruncated><Part><PartNumber>1</PartNumber><ETag>"e1"</ETag></Part><Part><PartNumber>2</PartNumber><ETag>"e2"</ETag></Part></ListPartsResult>"#
+            );
+            let replay = StaticReplayClient::new(vec![
+                ReplayEvent::new(req("GET", "big.bin"), resp_xml(200, &listed)),
+                ReplayEvent::new(req("POST", "big.bin"), error_xml(412, "PreconditionFailed")),
+                ReplayEvent::new(req("DELETE", "big.bin"), resp(204, &[])),
+            ]);
+            let big = temp_file_with(&vec![3u8; PART_SIZE as usize + 1]).await;
+            let src = Source::open(big.file().clone(), &obj("big.bin"))
+                .await
+                .unwrap();
+
+            gcs_store(&replay)
+                .resume_multipart_upload(src, &obj("big.bin"), UPLOAD_ID)
+                .await
+                .unwrap();
+
+            let methods: Vec<_> = replay
+                .actual_requests()
+                .map(|r| r.method().to_string())
+                .collect();
+            assert_eq!(methods, ["GET", "POST", "DELETE"]);
+        }
+
+        #[tokio::test]
         async fn access_denied_still_fails() {
             // 403 means the token or bucket refused the write, not that the object
-            // exists.
+            // exists. The error keeps GCS's Details, which name what was denied.
+            let details = "uploader@proj.iam.gserviceaccount.com does not have \
+                storage.objects.create access to the Google Cloud Storage object.";
+            let xml = format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>AccessDenied</Code><Message>Access denied.</Message><Details>{details}</Details></Error>"#
+            );
             let replay = StaticReplayClient::new(vec![ReplayEvent::new(
                 req("PUT", "small.bin?x-id=PutObject"),
-                error_xml(403, "AccessDenied"),
+                resp_xml(403, &xml),
             )]);
             let src = temp_file_with(b"hello world").await;
 
@@ -577,6 +613,7 @@ mod tests {
                 panic!("expected RequestFailedErr, got: {err:?}");
             };
             assert_eq!(e.status, Some(403));
+            assert!(e.msg.contains(details), "{}", e.msg);
         }
 
         #[tokio::test]
