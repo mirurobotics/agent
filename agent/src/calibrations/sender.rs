@@ -74,6 +74,7 @@ pub fn new_request(report: Report) -> CreateCalibrationRequest {
         component: metadata.component,
         role: metadata.role,
         serial_number: metadata.serial_number,
+        reported_by: metadata.reported_by,
         aspect: metadata.aspect,
         content: Box::new(content),
         reported_at: metadata.reported_at.to_rfc3339(),

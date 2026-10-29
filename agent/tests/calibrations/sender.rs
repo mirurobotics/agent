@@ -22,6 +22,7 @@ fn full_report() -> Report {
     report.metadata.role = Some("left".to_string());
     report.metadata.aspect = Some("pose".to_string());
     report.metadata.serial_number = Some("SN-1".to_string());
+    report.metadata.reported_by = Some("Ada Lovelace".to_string());
     report.metadata.deployment_id = Some("dpl_1".to_string());
     report
 }
@@ -55,6 +56,7 @@ pub mod new_request {
             component: "arm".to_string(),
             role: Some("left".to_string()),
             serial_number: Some("SN-1".to_string()),
+            reported_by: Some("Ada Lovelace".to_string()),
             aspect: Some("pose".to_string()),
             content: Box::new(InstanceContent {
                 format: BackendFormat::INSTANCE_FORMAT_JSON,

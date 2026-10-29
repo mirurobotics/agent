@@ -15,6 +15,7 @@ pub struct CreateParams {
     pub role: Option<String>,
     pub aspect: Option<String>,
     pub serial_number: Option<String>,
+    pub reported_by: Option<String>,
     /// The format `data` is serialized in.
     pub format: InstanceFormat,
     /// The calibration's values, queued exactly as given.
@@ -51,6 +52,7 @@ pub async fn create(
             role: params.role,
             aspect: params.aspect,
             serial_number: params.serial_number,
+            reported_by: params.reported_by,
             deployment_id,
             reported_at: now,
         },
