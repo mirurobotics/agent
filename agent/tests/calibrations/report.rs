@@ -142,6 +142,7 @@ mod wire {
         let raw = concat!(
             r#"{"entries":[{"job":{"component":"arm","format":"yaml","#,
             r#""role":"aligner-1","aspect":"pose","serial_number":"SN-1","#,
+            r#""user":"Ada Lovelace","#,
             r#""deployment_id":"dpl_1","reported_at":"1970-01-01T00:16:40Z"}}]}"#,
         );
         files::write_string(&path, raw, WriteOptions::OVERWRITE_ATOMIC)
