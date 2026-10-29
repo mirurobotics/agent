@@ -8,7 +8,7 @@ fn calibration_request(format: openapi::InstanceFormat) -> openapi::CreateCalibr
         component: "arm".into(),
         role: Some("left".into()),
         serial_number: Some("SN-1".into()),
-        user: Some("Ada Lovelace".into()),
+        reported_by: Some("Ada Lovelace".into()),
         aspect: Some("pose".into()),
         content: Box::new(openapi::InstanceContent::new(format, "offset: 1\n".into())),
     }
@@ -26,7 +26,7 @@ pub mod create_calibration_request {
             role: Some("left".into()),
             aspect: Some("pose".into()),
             serial_number: Some("SN-1".into()),
-            user: Some("Ada Lovelace".into()),
+            reported_by: Some("Ada Lovelace".into()),
             format: InstanceFormat::Yaml,
             data: "offset: 1\n".into(),
         };

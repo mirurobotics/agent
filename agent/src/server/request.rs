@@ -22,7 +22,7 @@ impl TryFrom<device_server::CreateCalibrationRequest> for calibration::CreatePar
             role: request.role,
             aspect: request.aspect,
             serial_number: request.serial_number,
-            user: request.user,
+            reported_by: request.reported_by,
             format,
             data: content.data,
         })

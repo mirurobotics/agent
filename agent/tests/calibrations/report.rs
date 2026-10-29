@@ -23,7 +23,7 @@ fn metadata(name: &str) -> ReportMetadata {
         role: Some("aligner-1".to_string()),
         aspect: Some("pose".to_string()),
         serial_number: Some("SN-1".to_string()),
-        user: Some("Ada Lovelace".to_string()),
+        reported_by: Some("Ada Lovelace".to_string()),
         deployment_id: Some("dpl_1".to_string()),
         reported_at: DateTime::from_timestamp(1000, 0).unwrap(),
     }
@@ -83,7 +83,7 @@ mod wire {
                 r#"{{"entries":[{{"id":"{id}","job":{{"#,
                 r#""report_id":"{report_id}","component":"arm","format":"yaml","#,
                 r#""role":"aligner-1","aspect":"pose","serial_number":"SN-1","#,
-                r#""user":"Ada Lovelace","#,
+                r#""reported_by":"Ada Lovelace","#,
                 r#""deployment_id":"dpl_1","reported_at":"1970-01-01T00:16:40Z""#,
                 r#"}},"attempts":0,"next_attempt_at":null}}]}}"#,
             ),
@@ -102,7 +102,7 @@ mod wire {
     }
 
     /// The optional fields may be absent, as for a calibration taken with no
-    /// deployment, role, aspect, serial number or user.
+    /// deployment, role, aspect, serial number or reporting user.
     #[tokio::test]
     async fn optional_fields_default_to_none() {
         let dir = test_dirs::temp("calibration_queue_test").unwrap();
@@ -126,7 +126,7 @@ mod wire {
             role: None,
             aspect: None,
             serial_number: None,
-            user: None,
+            reported_by: None,
             deployment_id: None,
             ..metadata("arm")
         };
@@ -142,7 +142,7 @@ mod wire {
         let raw = concat!(
             r#"{"entries":[{"job":{"component":"arm","format":"yaml","#,
             r#""role":"aligner-1","aspect":"pose","serial_number":"SN-1","#,
-            r#""user":"Ada Lovelace","#,
+            r#""reported_by":"Ada Lovelace","#,
             r#""deployment_id":"dpl_1","reported_at":"1970-01-01T00:16:40Z"}}]}"#,
         );
         files::write_string(&path, raw, WriteOptions::OVERWRITE_ATOMIC)

@@ -22,7 +22,7 @@ fn payload() -> CreateCalibrationRequest {
         component: "front-camera".to_string(),
         role: Some("left".to_string()),
         serial_number: Some("SN-123".to_string()),
-        external_user: Some("Ada Lovelace".to_string()),
+        reported_by: Some("Ada Lovelace".to_string()),
         aspect: Some("intrinsics".to_string()),
         content: Box::new(InstanceContent {
             format: InstanceFormat::INSTANCE_FORMAT_JSON,

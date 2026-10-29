@@ -37,7 +37,7 @@ pub struct ReportMetadata {
     #[serde(default)]
     pub serial_number: Option<String>,
     #[serde(default)]
-    pub user: Option<String>,
+    pub reported_by: Option<String>,
     /// The deployment active at intake, or `None` when there was none.
     #[serde(default)]
     pub deployment_id: Option<String>,

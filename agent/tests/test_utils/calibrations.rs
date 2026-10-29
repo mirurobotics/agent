@@ -39,7 +39,7 @@ pub fn report(slug: &str) -> Report {
             role: None,
             aspect: None,
             serial_number: None,
-            user: None,
+            reported_by: None,
             deployment_id: None,
             reported_at: received_at(),
         },
