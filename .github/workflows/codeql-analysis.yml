@@ -10,7 +10,6 @@ on:
 
 permissions:
   actions: read
-  checks: write
   contents: read
   security-events: write
 
@@ -34,11 +33,12 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.scan != 'false' }}
     runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
         id: checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Initialize CodeQL
         id: initialize
