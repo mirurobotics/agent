@@ -96,6 +96,7 @@ fn params() -> CreateParams {
         role: Some("left".to_string()),
         aspect: Some("pose".to_string()),
         serial_number: Some("SN-1".to_string()),
+        user: Some("Ada Lovelace".to_string()),
         format: InstanceFormat::Yaml,
         // the caller's data is queued unchanged, comments and all
         data: "offset: 1 # kept\n".to_string(),
@@ -117,6 +118,7 @@ async fn queues_the_report_stamped_with_its_id_and_the_time() {
             role: Some("left".to_string()),
             aspect: Some("pose".to_string()),
             serial_number: Some("SN-1".to_string()),
+            user: Some("Ada Lovelace".to_string()),
             deployment_id: None,
             reported_at: received_at(),
         },

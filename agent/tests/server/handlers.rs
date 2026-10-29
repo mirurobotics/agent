@@ -576,6 +576,7 @@ pub mod routes {
                 "role": "left",
                 "aspect": "pose",
                 "serial_number": "SN-1",
+                "user": "Ada Lovelace",
                 "content": { "format": format, "data": data },
             })
             .to_string()
