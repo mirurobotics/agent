@@ -6,152 +6,152 @@ info:
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
-  x-release-version: v0.5.11
+  x-release-version: v0.5.14
   x-git-commit:
-    sha: 2a3eb728f10b95f12a0c8f96183727d5b9fd7047
-    url: https://github.com/mirurobotics/openapi/commit/2a3eb728f10b95f12a0c8f96183727d5b9fd7047
-    message: 'feat(calibrations): report_id on calibration reports (#352)
+    sha: 114508842e1077d1bfa0d572adfe35ff94da9a46
+    url: https://github.com/mirurobotics/openapi/commit/114508842e1077d1bfa0d572adfe35ff94da9a46
+    message: 'chore(sdkgen): repin stlc-python to rebuild list models (6a8d16c) (#389)
 
 
       <!-- claude-projects-attribution: {"github_login":"miru-agents"} -->
 
       _Requested by **bens-agent** · [project
 
-      thread](https://claude.ai/code/project/chan_015imaa8aZrnubYZcZCvjeHx?thread=cmsg_015imaa8aZrnubYZcZCvjeHxRRaVTdwX2TA7u3cf9PHGg5)_
+      thread](https://claude.ai/code/project/chan_015imaa8aZrnubYZcZCvjeHx?thread=cmsg_015imaa8aZrnubYZcZCvjeHxTY3dDr8DyJFS2VMCaTBztc)_
 
 
-      Before: the Device API''s `POST /calibrations` returns only
-
-      `reported_at`, so the caller has no handle to find the calibration in
-
-      Miru later. If the agent loses Miru''s response to an upload, it uploads
-
-      again and Miru records the calibration twice. (#327 dropped `report_id`
-
-      as out of scope; it is now approved end to end.)
+      ## Summary
 
 
-      After:
+      Points the SDK generator at `stlc-python` `6a8d16c`, which includes
 
-      - **Device API**: `CreateCalibrationResponse` gains required `report_id`
+      [stlc-python#2](https://github.com/mirurobotics/stlc-python/pull/2).
 
-      (uuid), next to `reported_at`. Still a plain 200 response with no
+      That fix makes the generated `types/__init__.py` rebuild the list models
 
-      `object`/`id`, since there is no route to fetch a report. The path
+      that reference cyclic models (`ComponentList`, `ComponentAspectList`,
 
-      description now says the agent sends `report_id` with every upload, so a
+      `ComponentRoleList`, `DeploymentList`, `DeviceList`, `GroupList`). Today
 
-      retried upload does not record the calibration twice.
+      the platform SDK''s `list()` calls for those resources return items as
 
-      - **Agent API**: `CreateCalibrationRequest` gains required `report_id`
+      plain dicts. After codegen they return models, and callers can drop
 
-      (uuid). If the device already reported a calibration with that
-
-      `report_id`, Miru returns that calibration and records nothing new.
-
-      - **Shared `BaseCalibration`** (agent and frontend audiences): gains
-
-      required, non-nullable `report_id`. The backend migration backfills a
-
-      random UUID for calibrations recorded before this change.
-
-      - **Frontend `GET /calibrations`**: can filter by `report_id`
-
-      (`CAL_SEARCH_REPORT_ID` + `calibration_search_report_id`, the same shape
-
-      as `serial_number`).
+      their `model_rebuild()` workarounds.
 
 
-      How: source edits and `./scripts/regen.sh` output are in separate
-
-      commits (agent, frontend, and device bundles). Stainless configs are
-
-      unchanged because no routes were added or removed (MIRU018).
+      ## Changes
 
 
-      ## Compatibility
+      - `sdkgen/platform/pnpm-lock.yaml`, `sdkgen/device/pnpm-lock.yaml`: bump
 
-      - Device API and frontend: additive (a new response field, a new
-
-      optional query parameter and search enum value).
-
-      - Agent API: **not additive**. `report_id` is required on `POST
-
-      /calibrations`
-
-      ([review](https://github.com/mirurobotics/openapi/pull/352#discussion_r4367712303)).
-
-      No stable agent uploads calibrations; only the betas `v0.11.2-beta.1` to
-
-      `beta.3` do, and they send no `report_id`. Once the backend enforces
-
-      this, those betas'' uploads are rejected, so devices on them need the
-
-      next agent build.
+      the `stlc-python` git pin `570bf02` → `6a8d16c`.
 
 
-      ## Plan
+      The new pin also carries stlc-python#1, which bumps the SDK template
 
-      1. Merge this, then release the touched audiences the way the repo does:
+      lockfiles for Dependabot security alerts: aiohttp 3.14.4, anyio 4.14.2,
 
-      `agent/` (after `agent/v0.5.10`), `device/` (after
+      certifi 2026.10.19, multidict 6.9.1, yarl 1.25.1 and pygments 2.20.0.
 
-      `device/v0.2.3-beta.1`), and `frontend/` (after `frontend/v0.9.14`).
-
-      2. Backend PR (`mirurobotics/backend`): store `report_id` on
-
-      calibrations (backfilling existing rows) with a unique index per device,
-
-      return the existing calibration when a `report_id` repeats, and support
-
-      the `report_id` list filter.
-
-      3. Agent PR (`mirurobotics/agent`): generate `report_id` when it
-
-      receives a calibration, return it from the Device API, and send it on
-
-      every upload.
-
-      4. docs#269: its owner updates it to cover `report_id`.
+      pydantic is unchanged.
 
 
       ## Precedent
 
-      - `calibration_search_report_id` follows
 
-      `calibration_search_serial_number` (array of strings, `form`, `explode:
+      This mirrors #287: only the pin SHA changes. `pnpm update stlc-python`
 
-      false`, example).
+      also moved the `stlc` pin and rewrote the `package.json` specifiers, so
 
-      - `format: uuid` has no precedent in this repo. Every other ID is a
+      I swapped the SHA directly. `pnpm install --frozen-lockfile` in
 
-      prefixed string like `cal_123`. Here the agent generates the ID on the
+      `sdkgen/device` resolves the new pin and installs the fixed bundle. In
 
-      device before Miru knows about the calibration, so it is not a Miru
+      this sandbox, the platform workspace only fails on fetching `stlc-go`,
 
-      resource ID. The `uuid` format states what the agent sends and what the
-
-      backend can index. The filter parameter''s items stay plain `type:
-
-      string`, like the sibling filters.
+      which this session can''t read.
 
 
-      ## Test plan
-
-      - Regenerated bundles are committed. CI runs lint (Redocly + MIRU rules,
-
-      including MIRU005 search parity and `no-invalid-schema-examples`),
-
-      stale-specs, and tool tests.
+      ## Validation
 
 
-      🤖 Generated with [Claude Code](https://claude.com/claude-code)
+      - Ran `stlc generate` locally against this repo''s platform spec and
+
+      config with the new generator. The only change in the platform SDK
+
+      output is the six added rebuilds in `types/__init__.py`, and all six
+
+      `list()` calls return model instances. On 0.12.0 they return dicts.
+
+      - The device SDK''s `types/__init__.py` is unchanged.
 
 
-      https://claude.ai/code/session_01BPXgUTxFBwzqZRogmg7o8X
+      ## Post-merge (operator)
 
 
-      ---------
+      Merging triggers the `stlc-generate.yml` push path, which pushes the
+
+      regenerated SDKs to the `*-staging` repos. Then run `stlc-promote.yml`
+
+      (platform) and release, so Dinghy#114 can drop its
+
+      `ComponentList.model_rebuild()` / `DeviceList.model_rebuild()` lines.
+
+
+      ---
+
+      _Generated by [Claude
+
+      Code](https://claude.ai/code/session_01XHScKXxo4Rfs9oLyyg8tTN)_
+
+
+      <!-- codesmith:footer -->
+
+      ---
+
+      <a
+
+      href="https://app.blacksmith.sh/mirurobotics/codesmith/openapi/pr/389?autoLogin=true&ref=codesmith_pr_footer"><picture><source
+
+      media="(prefers-color-scheme: dark)"
+
+      srcset="https://pr-comments-assets.blacksmith.sh/codesmith/view-with-codesmith-dark-v3.svg"><source
+
+      media="(prefers-color-scheme: light)"
+
+      srcset="https://pr-comments-assets.blacksmith.sh/codesmith/view-with-codesmith-light-v3.svg"><img
+
+      alt="View with [code]smith"
+
+      src="https://pr-comments-assets.blacksmith.sh/codesmith/view-with-codesmith-dark-v3-3x.png"
+
+      width="162" height="28"></picture></a> <a
+
+      href="https://backend.blacksmith.sh/track/enable-autofix?expires=1795838355&installation_model_id=425273&pr_number=389&ref=codesmith_pr_footer&repository=mirurobotics%2Fopenapi&return_to=https%3A%2F%2Fgithub.com%2Fmirurobotics%2Fopenapi%2Fpull%2F389&signature=0dc7931ca5bd5e2c5485ec3e6eaec8c63e3c13d3e57152fb9b4f2b578bf4aca3"><picture><source
+
+      media="(prefers-color-scheme: dark)"
+
+      srcset="https://pr-comments-assets.blacksmith.sh/codesmith/autofix-with-codesmith-dark.svg"><source
+
+      media="(prefers-color-scheme: light)"
+
+      srcset="https://pr-comments-assets.blacksmith.sh/codesmith/autofix-with-codesmith-light.svg"><img
+
+      alt="Autofix with [code]smith"
+
+      src="https://pr-comments-assets.blacksmith.sh/codesmith/autofix-with-codesmith-dark-3x.png"
+
+      width="190" height="28"></picture></a>
+
+      <sup>Need help on this PR? Tag <code>@codesmith</code> with what you
+
+      need.</sup>
+
+
+      <!-- codesmith:autofix:disabled -->
+
+      <!-- /codesmith:footer -->
 
 
       Co-authored-by: Claude <noreply@anthropic.com>'
@@ -159,7 +159,7 @@ info:
     branch: HEAD
     dirty: false
   x-build:
-    built_at: '2026-10-24T17:59:02.442093+00:00'
+    built_at: '2026-10-29T04:29:04.882930+00:00'
 servers:
 - url: https://staging.api.mirurobotics.com/agent/v1
   description: Staging
@@ -719,14 +719,14 @@ components:
     ReleaseVersion:
       type: string
       enum:
-      - v0.5.11
+      - v0.5.14
       x-enum-varnames:
       - RELEASE_VERSION
       x-stainless-const: true
     APIGitCommit:
       type: string
       enum:
-      - 2a3eb728f10b95f12a0c8f96183727d5b9fd7047
+      - 114508842e1077d1bfa0d572adfe35ff94da9a46
       x-enum-varnames:
       - API_GIT_COMMIT
       x-stainless-const: true
@@ -1057,6 +1057,7 @@ components:
       - object
       - id
       - version
+      - description
       - git_commit_id
       - os
       - created_at
@@ -1077,6 +1078,11 @@ components:
           type: string
           example: v1.0.0
           description: The version of the release.
+        description:
+          type: string
+          nullable: true
+          example: Add lidar calibration to motion control
+          description: A free-form description of the release.
         git_commit_id:
           type: string
           nullable: true
@@ -1513,6 +1519,7 @@ components:
         object: release
         id: rls_123
         version: v1.0.0
+        description: Add lidar calibration to motion control
         git_commit_id: git_commit_123
         os: linux
         created_at: '2024-01-01T00:00:00Z'
@@ -1585,6 +1592,8 @@ components:
 
         - `xml`: XML.
 
+        - `csv`: comma-separated values (RFC 4180).
+
         - `text`: plain, unstructured text with no specific format.
 
         '
@@ -1593,12 +1602,14 @@ components:
       - yaml
       - jsonc
       - xml
+      - csv
       - text
       x-enum-varnames:
       - INSTANCE_FORMAT_JSON
       - INSTANCE_FORMAT_YAML
       - INSTANCE_FORMAT_JSONC
       - INSTANCE_FORMAT_XML
+      - INSTANCE_FORMAT_CSV
       - INSTANCE_FORMAT_TEXT
     InstanceContent:
       title: Instance Content
@@ -2285,22 +2296,28 @@ components:
             first time it is reported.
         role:
           type: string
-          example: aligner-1
+          example: front-left
           description: Slug of the role the calibrated unit fills on the device, such
-            as `aligner-1` or `front-left`. Distinguishes several units of one component
+            as `left` or `front-left`. Distinguishes several units of one component
             on a device. Validated like a slug. Miru resolves it to one of the component's
             `roles`, creating the role the first time it is reported.
         serial_number:
           type: string
           maxLength: 255
-          example: M500-1234
+          example: SN-1234
           description: Serial number of the physical unit that was calibrated, not
-            of the device, such as `M500-1234`. Free text, at most 255 characters.
+            of the device, such as `SN-1234`. Free text, at most 255 characters.
+        external_user:
+          type: string
+          maxLength: 255
+          example: Benjamin Smidt
+          description: Who ran the calibration, as the device reported them, such
+            as `Benjamin Smidt`. Free text, at most 255 characters.
         aspect:
           type: string
           example: pose
           description: Slug of the aspect of the unit that was calibrated, when it
-            has more than one, e.g. `intrinsics` vs `extrinsics`, or `pose` vs `home-offsets`.
+            has more than one, e.g. `intrinsics` vs `extrinsics`, or `pose` vs `joint-offsets`.
             Validated like a slug. Miru resolves it to one of the component's `aspects`,
             creating the aspect the first time it is reported.
         content:
@@ -2327,6 +2344,7 @@ components:
       - serial_number
       - digest
       - deployment_id
+      - external_user_id
       - report_id
       - reported_at
       - created_at
@@ -2366,10 +2384,10 @@ components:
           type: string
           nullable: true
           maxLength: 255
-          example: M500-1234
+          example: SN-1234
           description: Serial number of the physical unit that was calibrated, not
-            of the device, such as `M500-1234`, or null if none was reported. Free
-            text, at most 255 characters.
+            of the device, such as `SN-1234`, or null if none was reported. Free text,
+            at most 255 characters.
         digest:
           type: string
           example: sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
@@ -2381,6 +2399,12 @@ components:
           example: dpl_123
           description: ID of the deployment the device was on when it reported the
             calibration; null if it had none or the deployment was deleted.
+        external_user_id:
+          type: string
+          nullable: true
+          example: ext_usr_123
+          description: ID of the external user the device reported as running the
+            calibration; null if no external user was reported.
         report_id:
           type: string
           format: uuid
@@ -2410,9 +2434,10 @@ components:
         component_id: cmp_123
         role_id: cmp_rol_123
         aspect_id: null
-        serial_number: M500-1234
+        serial_number: SN-1234
         digest: sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
         deployment_id: dpl_123
+        external_user_id: ext_usr_123
         report_id: 0b6f3c2e-6a51-4e0f-9a43-2f1d7c9e8b10
         reported_at: '2021-01-01T00:00:00Z'
         created_at: '2021-01-01T00:00:00Z'
