@@ -24,7 +24,7 @@ permissions:
 
 jobs:
   ai-review:
-    uses: mirurobotics/.github/.github/workflows/ai-review.yml@524b5a77ecbdef917272ab8e43adc6e3eeb590a5
+    uses: mirurobotics/.github/.github/workflows/ai-review.yml@279a051cd7afbb3d16699b8dd39b7d5d9c172c37
     with:
       runs-on: blacksmith-2vcpu-ubuntu-2404
     secrets:
