@@ -156,7 +156,10 @@ pub mod list {
                 method: reqwest::Method::GET,
                 path: "/calibrations".into(),
                 url: "http://mock/calibrations".into(),
-                query: query.iter().map(|(k, v)| (k.to_string(), v.clone())).collect(),
+                query: query
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), v.clone()))
+                    .collect(),
                 body: None,
                 token: Some("test-token".into()),
             }]

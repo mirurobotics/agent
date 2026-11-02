@@ -4,8 +4,7 @@ use std::sync::{Arc, Mutex};
 // internal crates
 use backend_api::models::{
     BaseFileRule as BackendFileRule, Calibration, CalibrationList, Deployment as BackendDeployment,
-    DeploymentList,
-    Device, Error as ApiError, ErrorResponse, GitCommit as BackendGitCommit,
+    DeploymentList, Device, Error as ApiError, ErrorResponse, GitCommit as BackendGitCommit,
     Release as BackendRelease, TokenResponse, Upload, UploadCredentials, UploadWithCredentials,
 };
 use miru_agent::http::{self, request::Params, HTTPErr};

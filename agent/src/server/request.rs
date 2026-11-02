@@ -29,13 +29,15 @@ pub fn forward_query(
 ) -> Result<Vec<(&'static str, String)>, InvalidRequestErr> {
     query
         .into_iter()
-        .map(|(name, value)| match keys.iter().find(|key| **key == name) {
-            Some(key) => Ok((*key, value)),
-            None => Err(InvalidRequestErr {
-                msg: format!("unknown query parameter '{name}'"),
-                trace: trace!(),
-            }),
-        })
+        .map(
+            |(name, value)| match keys.iter().find(|key| **key == name) {
+                Some(key) => Ok((*key, value)),
+                None => Err(InvalidRequestErr {
+                    msg: format!("unknown query parameter '{name}'"),
+                    trace: trace!(),
+                }),
+            },
+        )
         .collect()
 }
 
