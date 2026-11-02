@@ -147,7 +147,9 @@ pub fn to_platform_calibration_list(
     }
 }
 
-pub fn to_platform_calibration(cal: backend_client::Calibration) -> device_server::PlatformCalibration {
+pub fn to_platform_calibration(
+    cal: backend_client::Calibration,
+) -> device_server::PlatformCalibration {
     device_server::PlatformCalibration {
         object: device_server::platform_calibration::Object::Calibration,
         id: cal.id,

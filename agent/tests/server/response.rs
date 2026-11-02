@@ -525,7 +525,9 @@ pub mod platform_calibration_response {
         }
     }
 
-    fn platform_calibration(content: Option<openapi::InstanceContent>) -> openapi::PlatformCalibration {
+    fn platform_calibration(
+        content: Option<openapi::InstanceContent>,
+    ) -> openapi::PlatformCalibration {
         openapi::PlatformCalibration {
             object: openapi::platform_calibration::Object::Calibration,
             id: "cal_1".into(),
