@@ -26,15 +26,28 @@ impl_status_enum!(
     default: Text,
     label: "instance format",
     log: warn,
+    agent_type: agent_server::InstanceFormat,
     backend_type: backend_client::InstanceFormat,
     unknown_backend: backend_client::InstanceFormat::InstanceFormatUnknown,
     mappings: [
-        Json => "json" => backend_client::InstanceFormat::INSTANCE_FORMAT_JSON,
-        Yaml => "yaml" => backend_client::InstanceFormat::INSTANCE_FORMAT_YAML,
-        Jsonc => "jsonc" => backend_client::InstanceFormat::INSTANCE_FORMAT_JSONC,
-        Xml => "xml" => backend_client::InstanceFormat::INSTANCE_FORMAT_XML,
-        Csv => "csv" => backend_client::InstanceFormat::INSTANCE_FORMAT_CSV,
-        Text => "text" => backend_client::InstanceFormat::INSTANCE_FORMAT_TEXT,
+        Json => "json" =>
+            agent_server::InstanceFormat::INSTANCE_FORMAT_JSON =>
+            backend_client::InstanceFormat::INSTANCE_FORMAT_JSON,
+        Yaml => "yaml" =>
+            agent_server::InstanceFormat::INSTANCE_FORMAT_YAML =>
+            backend_client::InstanceFormat::INSTANCE_FORMAT_YAML,
+        Jsonc => "jsonc" =>
+            agent_server::InstanceFormat::INSTANCE_FORMAT_JSONC =>
+            backend_client::InstanceFormat::INSTANCE_FORMAT_JSONC,
+        Xml => "xml" =>
+            agent_server::InstanceFormat::INSTANCE_FORMAT_XML =>
+            backend_client::InstanceFormat::INSTANCE_FORMAT_XML,
+        Csv => "csv" =>
+            agent_server::InstanceFormat::INSTANCE_FORMAT_CSV =>
+            backend_client::InstanceFormat::INSTANCE_FORMAT_CSV,
+        Text => "text" =>
+            agent_server::InstanceFormat::INSTANCE_FORMAT_TEXT =>
+            backend_client::InstanceFormat::INSTANCE_FORMAT_TEXT,
     ]
 );
 

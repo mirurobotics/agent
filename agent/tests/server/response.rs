@@ -1,4 +1,5 @@
 // internal crates
+use backend_api::models as backend_client;
 use device_api::models as openapi;
 use miru_agent::models::{
     Deployment, Device, DeviceStatus, DplActivity, DplErrStatus, DplTarget, FileRule,
@@ -491,6 +492,95 @@ pub mod create_calibration_response {
         };
 
         let sdk: openapi::CreateCalibrationResponse = (&created).into();
+        assert_eq!(sdk, expected);
+    }
+}
+
+pub mod cloud_calibration_response {
+    use super::*;
+
+    fn calibration(
+        content: Option<backend_client::InstanceContent>,
+    ) -> backend_client::Calibration {
+        backend_client::Calibration {
+            object: backend_client::calibration::Object::Calibration,
+            id: "cal_1".into(),
+            device_id: "dvc_1".into(),
+            component_id: "cmp_1".into(),
+            role_id: None,
+            aspect_id: Some("asp_1".into()),
+            serial_number: Some("SN-1".into()),
+            digest: "sha256:abc".into(),
+            deployment_id: Some("dpl_1".into()),
+            reported_by_id: Some("eu_1".into()),
+            report_id: Uuid::from_u128(1),
+            reported_at: "2026-10-19T12:00:00Z".into(),
+            created_at: "2026-10-19T12:00:01Z".into(),
+            component_slug: "arm".into(),
+            role_slug: None,
+            aspect_slug: Some("pose".into()),
+            reported_by_identifier: Some("Ada Lovelace".into()),
+            content: content.map(Box::new),
+        }
+    }
+
+    fn cloud_calibration(content: Option<openapi::InstanceContent>) -> openapi::CloudCalibration {
+        openapi::CloudCalibration {
+            object: openapi::cloud_calibration::Object::Calibration,
+            id: "cal_1".into(),
+            component: "arm".into(),
+            role: None,
+            aspect: Some("pose".into()),
+            serial_number: Some("SN-1".into()),
+            digest: "sha256:abc".into(),
+            report_id: Uuid::from_u128(1),
+            reported_at: "2026-10-19T12:00:00Z".into(),
+            created_at: "2026-10-19T12:00:01Z".into(),
+            content: content.map(Box::new),
+        }
+    }
+
+    #[test]
+    fn converts_slugs_and_drops_miru_ids() {
+        let sdk: openapi::CloudCalibration = (&calibration(None)).into();
+        assert_eq!(sdk, cloud_calibration(None));
+    }
+
+    #[test]
+    fn converts_content() {
+        let content = backend_client::InstanceContent {
+            format: backend_client::InstanceFormat::INSTANCE_FORMAT_YAML,
+            data: "offset: 1\n".into(),
+        };
+        let expected = openapi::InstanceContent {
+            format: openapi::InstanceFormat::INSTANCE_FORMAT_YAML,
+            data: "offset: 1\n".into(),
+        };
+
+        let sdk: openapi::CloudCalibration = (&calibration(Some(content))).into();
+        assert_eq!(sdk, cloud_calibration(Some(expected)));
+    }
+
+    #[test]
+    fn converts_list() {
+        let list = backend_client::CalibrationList {
+            object: backend_client::calibration_list::Object::List,
+            total_count: Some(3),
+            limit: 1,
+            offset: 2,
+            has_more: false,
+            data: vec![calibration(None)],
+        };
+        let expected = openapi::CloudCalibrationList {
+            object: openapi::cloud_calibration_list::Object::List,
+            total_count: Some(3),
+            limit: 1,
+            offset: 2,
+            has_more: false,
+            data: vec![cloud_calibration(None)],
+        };
+
+        let sdk: openapi::CloudCalibrationList = (&list).into();
         assert_eq!(sdk, expected);
     }
 }

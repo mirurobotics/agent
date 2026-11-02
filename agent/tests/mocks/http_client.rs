@@ -3,7 +3,8 @@ use std::sync::{Arc, Mutex};
 
 // internal crates
 use backend_api::models::{
-    BaseFileRule as BackendFileRule, Calibration, Deployment as BackendDeployment, DeploymentList,
+    BaseFileRule as BackendFileRule, Calibration, CalibrationList, Deployment as BackendDeployment,
+    DeploymentList,
     Device, Error as ApiError, ErrorResponse, GitCommit as BackendGitCommit,
     Release as BackendRelease, TokenResponse, Upload, UploadCredentials, UploadWithCredentials,
 };
@@ -38,6 +39,8 @@ pub enum Call {
     VendUploadCredentials,
     ConfirmUpload,
     CreateCalibration,
+    ListCalibrations,
+    GetCalibration,
 }
 
 // ================================ CAPTURED REQUEST ================================ //
@@ -68,6 +71,8 @@ type VendUploadCredentialsFn =
     Mutex<Box<dyn Fn() -> Result<UploadCredentials, HTTPErr> + Send + Sync>>;
 type ConfirmUploadFn = Mutex<Box<dyn Fn() -> Result<Upload, HTTPErr> + Send + Sync>>;
 type CreateCalibrationFn = Mutex<Box<dyn Fn() -> Result<Calibration, HTTPErr> + Send + Sync>>;
+type ListCalibrationsFn = Mutex<Box<dyn Fn() -> Result<CalibrationList, HTTPErr> + Send + Sync>>;
+type GetCalibrationFn = Mutex<Box<dyn Fn() -> Result<Calibration, HTTPErr> + Send + Sync>>;
 
 pub struct MockClient {
     pub provision_device_fn: Box<dyn Fn() -> Result<Device, HTTPErr> + Send + Sync>,
@@ -86,6 +91,8 @@ pub struct MockClient {
     pub vend_upload_credentials_fn: VendUploadCredentialsFn,
     pub confirm_upload_fn: ConfirmUploadFn,
     pub create_calibration_fn: CreateCalibrationFn,
+    pub list_calibrations_fn: ListCalibrationsFn,
+    pub get_calibration_fn: GetCalibrationFn,
     pub requests: Arc<Mutex<Vec<CapturedRequest>>>,
 }
 
@@ -108,6 +115,8 @@ impl Default for MockClient {
             vend_upload_credentials_fn: Mutex::new(Box::new(|| Ok(UploadCredentials::default()))),
             confirm_upload_fn: Mutex::new(Box::new(|| Ok(Upload::default()))),
             create_calibration_fn: Mutex::new(Box::new(|| Ok(Calibration::default()))),
+            list_calibrations_fn: Mutex::new(Box::new(|| Ok(CalibrationList::default()))),
+            get_calibration_fn: Mutex::new(Box::new(|| Ok(Calibration::default()))),
             requests: Arc::new(Mutex::new(Vec::new())),
         }
     }
@@ -219,6 +228,20 @@ impl MockClient {
         *self.create_calibration_fn.lock().unwrap() = Box::new(f);
     }
 
+    pub fn set_list_calibrations<F>(&self, f: F)
+    where
+        F: Fn() -> Result<CalibrationList, HTTPErr> + Send + Sync + 'static,
+    {
+        *self.list_calibrations_fn.lock().unwrap() = Box::new(f);
+    }
+
+    pub fn set_get_calibration<F>(&self, f: F)
+    where
+        F: Fn() -> Result<Calibration, HTTPErr> + Send + Sync + 'static,
+    {
+        *self.get_calibration_fn.lock().unwrap() = Box::new(f);
+    }
+
     pub fn call_count(&self, target: Call) -> usize {
         self.requests
             .lock()
@@ -276,6 +299,8 @@ impl MockClient {
             }
             (m, p) if *m == Method::POST && p == "/uploads" => Call::CreateUpload,
             (m, p) if *m == Method::POST && p == "/calibrations" => Call::CreateCalibration,
+            (m, p) if *m == Method::GET && p == "/calibrations" => Call::ListCalibrations,
+            (m, p) if *m == Method::GET && p.starts_with("/calibrations/") => Call::GetCalibration,
             _ => panic!("MockClient: unhandled route: {method} {path}"),
         }
     }
@@ -302,6 +327,8 @@ impl MockClient {
             }
             Call::ConfirmUpload => json(&(self.confirm_upload_fn.lock().unwrap())()?),
             Call::CreateCalibration => json(&(self.create_calibration_fn.lock().unwrap())()?),
+            Call::ListCalibrations => json(&(self.list_calibrations_fn.lock().unwrap())()?),
+            Call::GetCalibration => json(&(self.get_calibration_fn.lock().unwrap())()?),
             Call::GetConfigInstanceContent => {
                 // Extract ID from /config_instances/{id}/content
                 let id = path

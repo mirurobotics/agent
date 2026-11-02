@@ -56,9 +56,10 @@ pub mod routes {
     use axum::body::{self, Body};
     use axum::http::{Request, StatusCode};
     use axum::routing::get;
-    use axum::Router;
+    use axum::{Json, Router};
     use tower::ServiceExt;
 
+    use backend_api::models as backend_client;
     use device_api::models as openapi;
     use miru_agent::calibrations::UploaderOptions;
     use miru_agent::events::hub::{EventHub, SpawnOptions};
@@ -82,6 +83,22 @@ pub mod routes {
 
     fn fixed_time() -> DateTime<Utc> {
         Utc.with_ymd_and_hms(2025, 6, 15, 12, 0, 0).unwrap()
+    }
+
+    async fn list_calibrations() -> Json<backend_client::CalibrationList> {
+        Json(backend_client::CalibrationList {
+            data: vec![backend_client::Calibration {
+                id: "cal_1".into(),
+                component_slug: "arm".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        })
+    }
+
+    fn error_code(bytes: &[u8]) -> String {
+        let actual: openapi::ErrorResponse = serde_json::from_slice(bytes).unwrap();
+        actual.error.code
     }
 
     struct Fixture {
@@ -111,7 +128,9 @@ pub mod routes {
                 .route("/deployments/{id}", get(mock::not_found))
                 .route("/releases/{id}", get(mock::not_found))
                 .route("/git_commits/{id}", get(mock::not_found))
-                .route("/file_rules/{id}", get(mock::not_found));
+                .route("/file_rules/{id}", get(mock::not_found))
+                .route("/calibrations", get(list_calibrations))
+                .route("/calibrations/{id}", get(mock::not_found));
             let backend = mock::run_server(backend_router).await;
             let real_http_client =
                 Arc::new(miru_agent::http::Client::new(&backend.base_url).unwrap());
@@ -582,11 +601,6 @@ pub mod routes {
             .to_string()
         }
 
-        fn error_code(bytes: &[u8]) -> String {
-            let actual: openapi::ErrorResponse = serde_json::from_slice(bytes).unwrap();
-            actual.error.code
-        }
-
         #[tokio::test]
         async fn create_calibration_returns_200_with_report_id_and_reported_at() {
             let f = Fixture::new("handler_create_calibration").await;
@@ -658,6 +672,20 @@ pub mod routes {
         }
 
         #[tokio::test]
+        async fn create_calibration_returns_422_for_a_null_role() {
+            let f = Fixture::new("handler_create_calibration_null_role").await;
+            let body = json!({
+                "component": "arm",
+                "role": "null",
+                "content": { "format": "json", "data": "{}" },
+            });
+
+            let (status, bytes) = f.post_json(URI, body.to_string()).await;
+            assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+            assert_eq!(error_code(&bytes), "invalid_request");
+        }
+
+        #[tokio::test]
         async fn create_calibration_returns_507_when_the_buffer_is_full() {
             let options = UploaderOptions {
                 capacity: 0,
@@ -668,6 +696,45 @@ pub mod routes {
             let (status, bytes) = f.post_json(URI, request("json", "{}")).await;
             assert_eq!(status, StatusCode::INSUFFICIENT_STORAGE);
             assert_eq!(error_code(&bytes), "calibration_buffer_full");
+        }
+    }
+
+    mod cloud_calibrations {
+        use super::*;
+
+        #[tokio::test]
+        async fn list_cloud_calibrations_returns_200_with_device_calibrations() {
+            let f = Fixture::new("handler_list_cloud_calibrations").await;
+
+            let (status, bytes) = f
+                .get("/v0.2/cloud/calibrations?role=null&expand=content")
+                .await;
+            assert_eq!(status, StatusCode::OK);
+
+            let actual: openapi::CloudCalibrationList = serde_json::from_slice(&bytes).unwrap();
+            let ids: Vec<(&str, &str)> = actual
+                .data
+                .iter()
+                .map(|c| (c.id.as_str(), c.component.as_str()))
+                .collect();
+            assert_eq!(ids, vec![("cal_1", "arm")]);
+        }
+
+        #[tokio::test]
+        async fn list_cloud_calibrations_returns_422_for_an_unknown_query_parameter() {
+            let f = Fixture::new("handler_list_cloud_calibrations_unknown_param").await;
+
+            let (status, bytes) = f.get("/v0.2/cloud/calibrations?componet=arm").await;
+            assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+            assert_eq!(error_code(&bytes), "invalid_request");
+        }
+
+        #[tokio::test]
+        async fn get_cloud_calibration_returns_404_when_missing() {
+            let f = Fixture::new("handler_get_cloud_calibration_missing").await;
+
+            let (status, _) = f.get("/v0.2/cloud/calibrations/cal_missing").await;
+            assert_eq!(status, StatusCode::NOT_FOUND);
         }
     }
 }

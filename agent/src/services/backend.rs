@@ -40,6 +40,45 @@ impl<'a, C: ClientI, T: TokenManagerExt> HttpBackend<'a, C, T> {
             .await
             .map_err(|e| ServiceErr::SyncErr(sync::SyncErr::from(e)))
     }
+
+    /// Lists the calibrations Miru recorded for this device, forwarding `query`
+    /// as given. Calibrations aren't cached, so this isn't a `BackendFetcher`
+    /// method.
+    pub async fn list_calibrations(
+        &self,
+        query: &[(&'static str, String)],
+    ) -> Result<backend_client::CalibrationList, ServiceErr> {
+        let token = self.token().await?;
+        http::with_retry(|| async {
+            let params = http::calibrations::ListParams {
+                query,
+                token: &token.token,
+            };
+            http::calibrations::list(self.client, params).await
+        })
+        .await
+        .map_err(ServiceErr::from)
+    }
+
+    /// Gets a calibration Miru recorded for this device, forwarding `query` as
+    /// given.
+    pub async fn get_calibration(
+        &self,
+        id: &str,
+        query: &[(&'static str, String)],
+    ) -> Result<backend_client::Calibration, ServiceErr> {
+        let token = self.token().await?;
+        http::with_retry(|| async {
+            let params = http::calibrations::GetParams {
+                id,
+                query,
+                token: &token.token,
+            };
+            http::calibrations::get(self.client, params).await
+        })
+        .await
+        .map_err(ServiceErr::from)
+    }
 }
 
 impl<'a, C: ClientI, T: TokenManagerExt> BackendFetcher for HttpBackend<'a, C, T> {
