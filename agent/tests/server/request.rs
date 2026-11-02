@@ -34,30 +34,9 @@ pub mod create_calibration_request {
     }
 
     #[test]
-    fn accepts_a_missing_role_and_aspect() {
-        let mut request = calibration_request(openapi::InstanceFormat::INSTANCE_FORMAT_JSON);
-        request.role = None;
-        request.aspect = None;
-
-        let params = CreateParams::try_from(request).unwrap();
-        assert_eq!((params.role, params.aspect), (None, None));
-    }
-
-    #[test]
     fn rejects_an_unknown_format() {
         let request = calibration_request(openapi::InstanceFormat::InstanceFormatUnknown);
 
         assert!(CreateParams::try_from(request).is_err());
-    }
-
-    #[test]
-    fn rejects_a_null_role_or_aspect() {
-        let mut role = calibration_request(openapi::InstanceFormat::INSTANCE_FORMAT_JSON);
-        role.role = Some("null".into());
-        let mut aspect = calibration_request(openapi::InstanceFormat::INSTANCE_FORMAT_JSON);
-        aspect.aspect = Some("null".into());
-
-        assert!(CreateParams::try_from(role).is_err());
-        assert!(CreateParams::try_from(aspect).is_err());
     }
 }

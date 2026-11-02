@@ -658,20 +658,6 @@ pub mod routes {
         }
 
         #[tokio::test]
-        async fn create_calibration_returns_422_for_a_null_role() {
-            let f = Fixture::new("handler_create_calibration_null_role").await;
-            let body = json!({
-                "component": "arm",
-                "role": "null",
-                "content": { "format": "json", "data": "{}" },
-            });
-
-            let (status, bytes) = f.post_json(URI, body.to_string()).await;
-            assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
-            assert_eq!(error_code(&bytes), "invalid_request");
-        }
-
-        #[tokio::test]
         async fn create_calibration_returns_507_when_the_buffer_is_full() {
             let options = UploaderOptions {
                 capacity: 0,
