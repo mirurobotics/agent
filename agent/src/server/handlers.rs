@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 // internal crates
 use crate::errors::Error;
-use crate::server::{errors::*, request, response, routes, state::State};
+use crate::server::{errors::*, response, routes, state::State};
 use crate::services::{
     calibration as calibration_svc, deployment as dpl_svc, device as dvc_svc,
     file_rule as file_rule_svc, git_commit as git_cmt_svc, release as rls_svc, HttpBackend,
@@ -217,8 +217,6 @@ pub async fn list_cloud_calibrations(
 ) -> impl IntoResponse {
     handle(
         async {
-            let query = request::forward_query(query, request::CLOUD_CALIBRATION_LIST_KEYS)
-                .map_err(ServerErr::InvalidRequestErr)?;
             let backend = HttpBackend::new(state.http_client.as_ref(), state.token_mngr.as_ref());
             let list = backend.list_calibrations(&query).await?;
             Ok::<_, ServerErr>(response::to_cloud_calibration_list(&list))
@@ -235,8 +233,6 @@ pub async fn get_cloud_calibration(
 ) -> impl IntoResponse {
     handle(
         async {
-            let query = request::forward_query(query, request::CLOUD_CALIBRATION_GET_KEYS)
-                .map_err(ServerErr::InvalidRequestErr)?;
             let backend = HttpBackend::new(state.http_client.as_ref(), state.token_mngr.as_ref());
             let cal = backend.get_calibration(&calibration_id, &query).await?;
             Ok::<_, ServerErr>(response::to_cloud_calibration(&cal))

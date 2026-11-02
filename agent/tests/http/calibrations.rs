@@ -136,10 +136,10 @@ pub mod list {
             let list = list.clone();
             move || Ok(list.clone())
         });
-        let query = [
-            ("component", "arm,leg".to_string()),
-            ("expand", "content".to_string()),
-            ("expand", "total_count".to_string()),
+        let query = vec![
+            ("component".to_string(), "arm,leg".to_string()),
+            ("expand".to_string(), "content".to_string()),
+            ("expand".to_string(), "total_count".to_string()),
         ];
 
         let params = ListParams {
@@ -156,10 +156,7 @@ pub mod list {
                 method: reqwest::Method::GET,
                 path: "/calibrations".into(),
                 url: "http://mock/calibrations".into(),
-                query: query
-                    .iter()
-                    .map(|(k, v)| (k.to_string(), v.clone()))
-                    .collect(),
+                query,
                 body: None,
                 token: Some("test-token".into()),
             }]
@@ -174,7 +171,7 @@ pub mod get {
     async fn forwards_the_query_and_returns_the_calibration() {
         let mock = MockClient::default();
         mock.set_get_calibration(|| Ok(calibration()));
-        let query = [("expand", "content".to_string())];
+        let query = vec![("expand".to_string(), "content".to_string())];
 
         let params = GetParams {
             id: "cal_1",
@@ -191,7 +188,7 @@ pub mod get {
                 method: reqwest::Method::GET,
                 path: "/calibrations/cal_1".into(),
                 url: "http://mock/calibrations/cal_1".into(),
-                query: vec![("expand".into(), "content".into())],
+                query,
                 body: None,
                 token: Some("test-token".into()),
             }]

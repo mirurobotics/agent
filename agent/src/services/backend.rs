@@ -46,7 +46,7 @@ impl<'a, C: ClientI, T: TokenManagerExt> HttpBackend<'a, C, T> {
     /// method.
     pub async fn list_calibrations(
         &self,
-        query: &[(&'static str, String)],
+        query: &[(String, String)],
     ) -> Result<backend_client::CalibrationList, ServiceErr> {
         let token = self.token().await?;
         http::with_retry(|| async {
@@ -65,7 +65,7 @@ impl<'a, C: ClientI, T: TokenManagerExt> HttpBackend<'a, C, T> {
     pub async fn get_calibration(
         &self,
         id: &str,
-        query: &[(&'static str, String)],
+        query: &[(String, String)],
     ) -> Result<backend_client::Calibration, ServiceErr> {
         let token = self.token().await?;
         http::with_retry(|| async {

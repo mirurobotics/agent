@@ -96,11 +96,6 @@ pub mod routes {
         })
     }
 
-    fn error_code(bytes: &[u8]) -> String {
-        let actual: openapi::ErrorResponse = serde_json::from_slice(bytes).unwrap();
-        actual.error.code
-    }
-
     struct Fixture {
         state: Arc<State>,
         app: Router,
@@ -601,6 +596,11 @@ pub mod routes {
             .to_string()
         }
 
+        fn error_code(bytes: &[u8]) -> String {
+            let actual: openapi::ErrorResponse = serde_json::from_slice(bytes).unwrap();
+            actual.error.code
+        }
+
         #[tokio::test]
         async fn create_calibration_returns_200_with_report_id_and_reported_at() {
             let f = Fixture::new("handler_create_calibration").await;
@@ -718,15 +718,6 @@ pub mod routes {
                 .map(|c| (c.id.as_str(), c.component.as_str()))
                 .collect();
             assert_eq!(ids, vec![("cal_1", "arm")]);
-        }
-
-        #[tokio::test]
-        async fn list_cloud_calibrations_returns_422_for_an_unknown_query_parameter() {
-            let f = Fixture::new("handler_list_cloud_calibrations_unknown_param").await;
-
-            let (status, bytes) = f.get("/v0.2/cloud/calibrations?componet=arm").await;
-            assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
-            assert_eq!(error_code(&bytes), "invalid_request");
         }
 
         #[tokio::test]

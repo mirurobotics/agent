@@ -477,7 +477,7 @@ async fn list_calibrations_forwards_the_query_with_the_token() {
     let backend = HttpBackend::new(&mock, &token_mngr);
 
     backend
-        .list_calibrations(&[("role", "null".to_string())])
+        .list_calibrations(&[("role".to_string(), "null".to_string())])
         .await
         .unwrap();
 
@@ -521,7 +521,7 @@ async fn get_calibration_forwards_the_query_with_the_token() {
     let backend = HttpBackend::new(&mock, &token_mngr);
 
     backend
-        .get_calibration("cal_1", &[("expand", "content".to_string())])
+        .get_calibration("cal_1", &[("expand".to_string(), "content".to_string())])
         .await
         .unwrap();
 
