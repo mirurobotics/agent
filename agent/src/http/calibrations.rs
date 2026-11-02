@@ -5,9 +5,9 @@ use std::time::Duration;
 use crate::http::{errors::HTTPErr, path, request, ClientI};
 use backend_api::models::{Calibration, CalibrationList, CreateCalibrationRequest};
 
-/// Calibration content can be up to 1 MiB, so creating one gets more time than
-/// the default request timeout.
-pub const CREATE_TIMEOUT: Duration = Duration::from_secs(60);
+/// Calibration content can be up to 1 MiB, so requests that may carry it get
+/// more time than the default request timeout.
+pub const CONTENT_TIMEOUT: Duration = Duration::from_secs(60);
 
 // ================================ PARAM STRUCTS ================================== //
 
@@ -35,7 +35,7 @@ pub async fn create(
 ) -> Result<Calibration, HTTPErr> {
     let url = path::url(client.base_url(), &["calibrations"])?;
     let request = request::Params::post(&url, request::marshal_json(params.payload)?)
-        .with_timeout(CREATE_TIMEOUT)
+        .with_timeout(CONTENT_TIMEOUT)
         .with_token(params.token);
     super::client::fetch(client, request).await
 }
@@ -49,6 +49,7 @@ pub async fn list(
         query: params.query.to_vec(),
         ..request::Params::get(&url)
     }
+    .with_timeout(CONTENT_TIMEOUT)
     .with_token(params.token);
     super::client::fetch(client, request).await
 }
@@ -59,6 +60,7 @@ pub async fn get(client: &impl ClientI, params: GetParams<'_>) -> Result<Calibra
         query: params.query.to_vec(),
         ..request::Params::get(&url)
     }
+    .with_timeout(CONTENT_TIMEOUT)
     .with_token(params.token);
     super::client::fetch(client, request).await
 }
