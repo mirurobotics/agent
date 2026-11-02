@@ -9,8 +9,8 @@ use crate::sync;
 use backend_api::models as backend_client;
 
 /// Single seam used by the services layer to fetch resources from the backend
-/// on a local-cache miss. One interface for every resource, so that stubbing
-/// one backend stubs them all.
+/// on a local-cache miss. One interface for every cached resource, so that
+/// stubbing one backend stubs them all.
 #[allow(async_fn_in_trait)]
 pub trait BackendFetcher: Send + Sync {
     async fn fetch_deployment(&self, id: &str) -> Result<backend_client::Deployment, ServiceErr>;
@@ -20,8 +20,9 @@ pub trait BackendFetcher: Send + Sync {
 }
 
 /// Production `BackendFetcher` wrapping an `http::ClientI` and an
-/// `authn::TokenManagerExt`. Holds borrows so handlers can build one per
-/// request without moving the client or the token manager.
+/// `authn::TokenManagerExt`, which also reads calibrations from Miru. Holds
+/// borrows so handlers can build one per request without moving the client or
+/// the token manager.
 pub struct HttpBackend<'a, C: ClientI, T: TokenManagerExt> {
     client: &'a C,
     token_mngr: &'a T,

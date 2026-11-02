@@ -219,7 +219,7 @@ pub async fn list_cloud_calibrations(
         async {
             let backend = HttpBackend::new(state.http_client.as_ref(), state.token_mngr.as_ref());
             let list = backend.list_calibrations(&query).await?;
-            Ok::<_, ServerErr>(response::to_cloud_calibration_list(&list))
+            Ok::<_, ServerErr>(response::to_cloud_calibration_list(list))
         },
         "Error listing cloud calibrations",
     )
@@ -235,7 +235,7 @@ pub async fn get_cloud_calibration(
         async {
             let backend = HttpBackend::new(state.http_client.as_ref(), state.token_mngr.as_ref());
             let cal = backend.get_calibration(&calibration_id, &query).await?;
-            Ok::<_, ServerErr>(response::to_cloud_calibration(&cal))
+            Ok::<_, ServerErr>(response::to_cloud_calibration(cal))
         },
         "Error getting cloud calibration",
     )

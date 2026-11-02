@@ -34,6 +34,16 @@ pub mod create_calibration_request {
     }
 
     #[test]
+    fn accepts_a_missing_role_and_aspect() {
+        let mut request = calibration_request(openapi::InstanceFormat::INSTANCE_FORMAT_JSON);
+        request.role = None;
+        request.aspect = None;
+
+        let params = CreateParams::try_from(request).unwrap();
+        assert_eq!((params.role, params.aspect), (None, None));
+    }
+
+    #[test]
     fn rejects_an_unknown_format() {
         let request = calibration_request(openapi::InstanceFormat::InstanceFormatUnknown);
 

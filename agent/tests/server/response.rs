@@ -543,7 +543,7 @@ pub mod cloud_calibration_response {
 
     #[test]
     fn converts_slugs_and_drops_miru_ids() {
-        let sdk = to_cloud_calibration(&calibration(None));
+        let sdk = to_cloud_calibration(calibration(None));
         assert_eq!(sdk, cloud_calibration(None));
     }
 
@@ -558,7 +558,7 @@ pub mod cloud_calibration_response {
             data: "offset: 1\n".into(),
         };
 
-        let sdk = to_cloud_calibration(&calibration(Some(content)));
+        let sdk = to_cloud_calibration(calibration(Some(content)));
         assert_eq!(sdk, cloud_calibration(Some(expected)));
     }
 
@@ -581,7 +581,7 @@ pub mod cloud_calibration_response {
             data: vec![cloud_calibration(None)],
         };
 
-        let sdk = to_cloud_calibration_list(&list);
+        let sdk = to_cloud_calibration_list(list);
         assert_eq!(sdk, expected);
     }
 }
