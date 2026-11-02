@@ -132,34 +132,34 @@ impl From<&calibration::Created> for device_server::CreateCalibrationResponse {
     }
 }
 
-impl From<&backend_client::CalibrationList> for device_server::CloudCalibrationList {
-    fn from(list: &backend_client::CalibrationList) -> Self {
-        device_server::CloudCalibrationList {
-            object: device_server::cloud_calibration_list::Object::List,
-            total_count: list.total_count,
-            limit: list.limit,
-            offset: list.offset,
-            has_more: list.has_more,
-            data: list.data.iter().map(Into::into).collect(),
-        }
+// Free functions, not `From` impls: both types are foreign, so the orphan rule
+// forbids an impl.
+pub fn to_cloud_calibration_list(
+    list: &backend_client::CalibrationList,
+) -> device_server::CloudCalibrationList {
+    device_server::CloudCalibrationList {
+        object: device_server::cloud_calibration_list::Object::List,
+        total_count: list.total_count,
+        limit: list.limit,
+        offset: list.offset,
+        has_more: list.has_more,
+        data: list.data.iter().map(to_cloud_calibration).collect(),
     }
 }
 
-impl From<&backend_client::Calibration> for device_server::CloudCalibration {
-    fn from(cal: &backend_client::Calibration) -> Self {
-        device_server::CloudCalibration {
-            object: device_server::cloud_calibration::Object::Calibration,
-            id: cal.id.clone(),
-            component: cal.component_slug.clone(),
-            role: cal.role_slug.clone(),
-            aspect: cal.aspect_slug.clone(),
-            serial_number: cal.serial_number.clone(),
-            digest: cal.digest.clone(),
-            report_id: cal.report_id,
-            reported_at: cal.reported_at.clone(),
-            created_at: cal.created_at.clone(),
-            content: cal.content.as_ref().map(|c| Box::new(to_content(c))),
-        }
+pub fn to_cloud_calibration(cal: &backend_client::Calibration) -> device_server::CloudCalibration {
+    device_server::CloudCalibration {
+        object: device_server::cloud_calibration::Object::Calibration,
+        id: cal.id.clone(),
+        component: cal.component_slug.clone(),
+        role: cal.role_slug.clone(),
+        aspect: cal.aspect_slug.clone(),
+        serial_number: cal.serial_number.clone(),
+        digest: cal.digest.clone(),
+        report_id: cal.report_id,
+        reported_at: cal.reported_at.clone(),
+        created_at: cal.created_at.clone(),
+        content: cal.content.as_ref().map(|c| Box::new(to_content(c))),
     }
 }
 

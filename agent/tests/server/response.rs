@@ -5,6 +5,7 @@ use miru_agent::models::{
     Deployment, Device, DeviceStatus, DplActivity, DplErrStatus, DplTarget, FileRule,
     FileRuleRetention, FileRuleSource, FileRuleUpload, GitCommit, Release, UploadTimezone,
 };
+use miru_agent::server::response::{to_cloud_calibration, to_cloud_calibration_list};
 use miru_agent::services::calibration::Created;
 
 // external crates
@@ -542,7 +543,7 @@ pub mod cloud_calibration_response {
 
     #[test]
     fn converts_slugs_and_drops_miru_ids() {
-        let sdk: openapi::CloudCalibration = (&calibration(None)).into();
+        let sdk = to_cloud_calibration(&calibration(None));
         assert_eq!(sdk, cloud_calibration(None));
     }
 
@@ -557,7 +558,7 @@ pub mod cloud_calibration_response {
             data: "offset: 1\n".into(),
         };
 
-        let sdk: openapi::CloudCalibration = (&calibration(Some(content))).into();
+        let sdk = to_cloud_calibration(&calibration(Some(content)));
         assert_eq!(sdk, cloud_calibration(Some(expected)));
     }
 
@@ -580,7 +581,7 @@ pub mod cloud_calibration_response {
             data: vec![cloud_calibration(None)],
         };
 
-        let sdk: openapi::CloudCalibrationList = (&list).into();
+        let sdk = to_cloud_calibration_list(&list);
         assert_eq!(sdk, expected);
     }
 }
