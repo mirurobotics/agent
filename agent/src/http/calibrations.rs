@@ -62,5 +62,5 @@ pub async fn get(client: &impl ClientI, params: GetParams<'_>) -> Result<Calibra
 fn to_query_params(query: &[(&'static str, String)]) -> QueryParams {
     query
         .iter()
-        .fold(QueryParams::new(), |qp, (key, value)| qp.add(*key, value))
+        .fold(QueryParams::new(), |qp, (key, value)| qp.add(key, value))
 }
