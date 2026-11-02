@@ -162,6 +162,24 @@ pub mod list {
             }]
         );
     }
+
+    #[tokio::test]
+    async fn error_propagates() {
+        let mock = MockClient::default();
+        mock.set_list_calibrations(|| {
+            Err(HTTPErr::MockErr(MockErr {
+                is_network_conn_err: false,
+            }))
+        });
+
+        let params = ListParams {
+            query: &[],
+            token: "test-token",
+        };
+        let err = calibrations::list(&mock, params).await.unwrap_err();
+
+        assert!(matches!(err, HTTPErr::MockErr(_)));
+    }
 }
 
 pub mod get {

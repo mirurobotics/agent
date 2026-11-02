@@ -119,9 +119,9 @@ pub mod routes {
             let (sender, _receiver) = mpsc::channel(1);
             let syncer = Arc::new(Syncer::new(sender));
 
-            // Backend mock server. Handlers that reach the cache-miss fallback
-            // hit this server; all routes respond with 404 so the raw
-            // RequestFailed error propagates through (HTTP 404 to clients).
+            // Backend mock server for cache-miss fallbacks and cloud reads.
+            // Single-resource routes respond with 404 so the raw RequestFailed
+            // error propagates through (HTTP 404 to clients).
             let backend_router = Router::new()
                 .route("/deployments/{id}", get(mock::not_found))
                 .route("/releases/{id}", get(mock::not_found))
