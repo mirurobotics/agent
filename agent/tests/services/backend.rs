@@ -494,6 +494,27 @@ async fn list_calibrations_forwards_the_query_with_the_token() {
 }
 
 #[tokio::test]
+async fn list_calibrations_returns_deserialized_value() {
+    let mock = MockClient::default();
+    let expected = backend_client::CalibrationList {
+        data: vec![backend_client::Calibration {
+            id: "cal_1".to_string(),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    mock.set_list_calibrations({
+        let expected = expected.clone();
+        move || Ok(expected.clone())
+    });
+    let token_mngr = StubTokenManager::ok("test-token");
+    let backend = HttpBackend::new(&mock, &token_mngr);
+
+    let actual = backend.list_calibrations(&[]).await.unwrap();
+    assert_eq!(actual, expected);
+}
+
+#[tokio::test]
 async fn list_calibrations_token_failure_returns_sync_err() {
     let mock = MockClient::default();
     let token_mngr = StubTokenManager::err(AuthnErr::MockError(AuthnMockError {
@@ -512,22 +533,48 @@ async fn list_calibrations_token_failure_returns_sync_err() {
     assert!(mock.requests().is_empty());
 }
 
-#[tokio::test(start_paused = true)]
-async fn list_calibrations_retries_network_errors() {
+#[tokio::test]
+async fn list_calibrations_422_propagates_as_request_failed() {
     let mock = MockClient::default();
     mock.set_list_calibrations(|| {
-        Err(HTTPErr::MockErr(HttpMockErr {
-            is_network_conn_err: true,
+        Err(HTTPErr::RequestFailed(RequestFailed {
+            request: HttpParams::get("http://mock/calibrations").meta().unwrap(),
+            status: reqwest::StatusCode::UNPROCESSABLE_ENTITY,
+            error: None,
+            trace: miru_agent::trace!(),
         }))
     });
     let token_mngr = StubTokenManager::ok("test-token");
     let backend = HttpBackend::new(&mock, &token_mngr);
 
-    let result = backend.list_calibrations(&[]).await;
-    assert!(matches!(
-        result,
-        Err(ServiceErr::HTTPErr(HTTPErr::MockErr(_)))
-    ));
+    let err = backend.list_calibrations(&[]).await.unwrap_err();
+    match err {
+        ServiceErr::HTTPErr(HTTPErr::RequestFailed(rf)) => {
+            assert_eq!(rf.status, reqwest::StatusCode::UNPROCESSABLE_ENTITY);
+        }
+        other => panic!("expected ServiceErr::HTTPErr(RequestFailed), got {other:?}"),
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn list_calibrations_with_retry_recovers_from_network_error() {
+    let mock = MockClient::default();
+    let counter = AtomicUsize::new(0);
+    mock.set_list_calibrations(move || {
+        let n = counter.fetch_add(1, Ordering::SeqCst);
+        if n < 2 {
+            Err(HTTPErr::MockErr(HttpMockErr {
+                is_network_conn_err: true,
+            }))
+        } else {
+            Ok(backend_client::CalibrationList::default())
+        }
+    });
+    let token_mngr = StubTokenManager::ok("test-token");
+    let backend = HttpBackend::new(&mock, &token_mngr);
+
+    backend.list_calibrations(&[]).await.unwrap();
+    // Retry logic: 2 failures + 1 success = 3 total calls.
     assert_eq!(mock.call_count(Call::ListCalibrations), 3);
 }
 
@@ -556,31 +603,11 @@ async fn get_calibration_forwards_the_query_with_the_token() {
     assert_eq!(mock.requests(), vec![expected]);
 }
 
-#[tokio::test(start_paused = true)]
-async fn get_calibration_retries_network_errors() {
-    let mock = MockClient::default();
-    mock.set_get_calibration(|| {
-        Err(HTTPErr::MockErr(HttpMockErr {
-            is_network_conn_err: true,
-        }))
-    });
-    let token_mngr = StubTokenManager::ok("test-token");
-    let backend = HttpBackend::new(&mock, &token_mngr);
-
-    let result = backend.get_calibration("cal_1", &[]).await;
-    assert!(matches!(
-        result,
-        Err(ServiceErr::HTTPErr(HTTPErr::MockErr(_)))
-    ));
-    assert_eq!(mock.call_count(Call::GetCalibration), 3);
-}
-
 #[tokio::test]
 async fn get_calibration_returns_deserialized_value() {
     let mock = MockClient::default();
     let expected = backend_client::Calibration {
         id: "cal_1".to_string(),
-        component_slug: "arm".to_string(),
         ..Default::default()
     };
     mock.set_get_calibration({
@@ -590,8 +617,8 @@ async fn get_calibration_returns_deserialized_value() {
     let token_mngr = StubTokenManager::ok("test-token");
     let backend = HttpBackend::new(&mock, &token_mngr);
 
-    let cal = backend.get_calibration("cal_1", &[]).await.unwrap();
-    assert_eq!(cal, expected);
+    let actual = backend.get_calibration("cal_1", &[]).await.unwrap();
+    assert_eq!(actual, expected);
 }
 
 #[tokio::test]
@@ -636,4 +663,26 @@ async fn get_calibration_404_propagates_as_request_failed() {
         }
         other => panic!("expected ServiceErr::HTTPErr(RequestFailed), got {other:?}"),
     }
+}
+
+#[tokio::test(start_paused = true)]
+async fn get_calibration_with_retry_recovers_from_network_error() {
+    let mock = MockClient::default();
+    let counter = AtomicUsize::new(0);
+    mock.set_get_calibration(move || {
+        let n = counter.fetch_add(1, Ordering::SeqCst);
+        if n < 2 {
+            Err(HTTPErr::MockErr(HttpMockErr {
+                is_network_conn_err: true,
+            }))
+        } else {
+            Ok(backend_client::Calibration::default())
+        }
+    });
+    let token_mngr = StubTokenManager::ok("test-token");
+    let backend = HttpBackend::new(&mock, &token_mngr);
+
+    backend.get_calibration("cal_1", &[]).await.unwrap();
+    // Retry logic: 2 failures + 1 success = 3 total calls.
+    assert_eq!(mock.call_count(Call::GetCalibration), 3);
 }

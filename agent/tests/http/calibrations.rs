@@ -180,6 +180,30 @@ pub mod list {
 
         assert!(matches!(err, HTTPErr::MockErr(_)));
     }
+
+    #[tokio::test(start_paused = true)]
+    async fn timeout_is_network_error() {
+        async fn handler() -> Json<CalibrationList> {
+            std::future::pending().await
+        }
+        let router = Router::new().route("/calibrations", get(handler));
+        let server = mock::run_server(router).await;
+        let client = http::Client::new(&server.base_url).unwrap();
+
+        let start = tokio::time::Instant::now();
+        let params = ListParams {
+            query: &[],
+            token: "test-token",
+        };
+        let err = calibrations::list(&client, params).await.unwrap_err();
+
+        let HTTPErr::TimeoutErr(timeout) = &err else {
+            panic!("expected TimeoutErr, got {err:?}");
+        };
+        assert_eq!(timeout.request.timeout, CONTENT_TIMEOUT);
+        assert!(start.elapsed() >= CONTENT_TIMEOUT);
+        assert!(err.is_network_conn_err());
+    }
 }
 
 pub mod get {
