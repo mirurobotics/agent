@@ -54,8 +54,8 @@ pub mod routes {
     use std::sync::Arc;
 
     use axum::body::{self, Body};
-    use axum::http::{Request, StatusCode};
     use axum::extract::RawQuery;
+    use axum::http::{Request, StatusCode};
     use axum::routing::get;
     use axum::{Json, Router};
     use tower::ServiceExt;
