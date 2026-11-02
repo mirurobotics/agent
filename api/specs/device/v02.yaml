@@ -11,82 +11,237 @@ info:
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
-  x-release-version: v0.2.4
+  x-release-version: v0.2.5-beta.1
   x-git-commit:
-    sha: 13405ec342d31653d51698d8da8b860db728df18
-    url: https://github.com/mirurobotics/openapi/commit/13405ec342d31653d51698d8da8b860db728df18
-    message: 'chore(stlc): seal custom-code tracking files (#396)
+    sha: b1379e91e55f80c4addc371e4d77d5f2dc057b42
+    url: https://github.com/mirurobotics/openapi/commit/b1379e91e55f80c4addc371e4d77d5f2dc057b42
+    message: 'feat(device,agent): let device apps read their calibrations from Miru
+      via /cloud (#370)
 
 
-      Automated by the stlc generate workflow: a push-to-main or manual
+      <!-- claude-projects-attribution: {"github_login":"miru-agents"} -->
 
-      `workflow_dispatch` publish re-sealed custom code, updating the tracking
+      _Requested by **bens-agent** · [project
 
-      files under `sdkgen/*/stainless/custom-code/`. Publishing targets the
-
-      private staging repos. Safe to merge - this PR''s head branch
-
-      `stlc/seal-tracking` is skipped by the generate workflow''s skip-bot
-
-      guard in `detect`, and on merge the push loop-breaker `guard` sees only
-
-      custom-code changes and runs no rebuild.
+      thread](https://claude.ai/code/project/chan_015imaa8aZrnubYZcZCvjeHx?thread=cmsg_015imaa8aZrnubYZcZCvjeHxWGqHhKiQZQ2XvsvqiqABoN)_
 
 
-      <!-- codesmith:footer -->
-
-      ---
-
-      <a
-
-      href="https://app.blacksmith.sh/mirurobotics/codesmith/openapi/pr/396?autoLogin=true&ref=codesmith_pr_footer"><picture><source
-
-      media="(prefers-color-scheme: dark)"
-
-      srcset="https://pr-comments-assets.blacksmith.sh/codesmith/view-with-codesmith-dark-v3.svg"><source
-
-      media="(prefers-color-scheme: light)"
-
-      srcset="https://pr-comments-assets.blacksmith.sh/codesmith/view-with-codesmith-light-v3.svg"><img
-
-      alt="View with [code]smith"
-
-      src="https://pr-comments-assets.blacksmith.sh/codesmith/view-with-codesmith-dark-v3-3x.png"
-
-      width="162" height="28"></picture></a> <a
-
-      href="https://backend.blacksmith.sh/track/enable-autofix?expires=1795887387&installation_model_id=425273&pr_number=396&ref=codesmith_pr_footer&repository=mirurobotics%2Fopenapi&return_to=https%3A%2F%2Fgithub.com%2Fmirurobotics%2Fopenapi%2Fpull%2F396&signature=36ab39c5d717b3d9ff699ab6514ceba14c9fae2a8d4a356f380950ed197d6701"><picture><source
-
-      media="(prefers-color-scheme: dark)"
-
-      srcset="https://pr-comments-assets.blacksmith.sh/codesmith/autofix-with-codesmith-dark.svg"><source
-
-      media="(prefers-color-scheme: light)"
-
-      srcset="https://pr-comments-assets.blacksmith.sh/codesmith/autofix-with-codesmith-light.svg"><img
-
-      alt="Autofix with [code]smith"
-
-      src="https://pr-comments-assets.blacksmith.sh/codesmith/autofix-with-codesmith-dark-3x.png"
-
-      width="190" height="28"></picture></a>
-
-      <sup>Need help on this PR? Tag <code>@codesmith</code> with what you
-
-      need.</sup>
+      ## Summary
 
 
-      <!-- codesmith:autofix:disabled -->
+      On-device apps can report calibrations but cannot read them back, so a
 
-      <!-- /codesmith:footer -->
+      re-imaged or replaced station PC has no way to import its calibrations
+
+      from Miru. This adds read endpoints, scoped to the calling device''s own
+
+      calibrations. Miru is the source of truth: the agent reads from Miru on
+
+      each request, and a network error is an error.
 
 
-      Co-authored-by: stlc-sealback-bot[bot] <298483487+stlc-sealback-bot[bot]@users.noreply.github.com>'
-    author: stlc-sealback-bot[bot]
+      **Device API** (served by the agent)
+
+      - `GET /cloud/calibrations` (`listCloudCalibrations`): `offset`,
+
+      `limit`, `order_by`, `expand` (`content`, `total_count`), and array
+
+      filters `component`, `role`, `aspect` (slugs), `serial_number`,
+
+      `report_id`.
+
+      - `GET /cloud/calibrations/{calibration_id}` (`getCloudCalibration`):
+
+      `expand=content`.
+
+      - Both return a new device `CloudCalibration`: the platform
+
+      `Calibration` without `device_id` (`component`, `role`, `aspect` slugs,
+
+      `serial_number`, `digest`, `report_id`, timestamps, expandable
+
+      `content`). The `/cloud` prefix marks routes the agent serves by reading
+
+      from Miru with the device''s credentials; both say they require the agent
+
+      to reach Miru.
+
+      - SDK: `client.cloud.calibrations.list(...)` and
+
+      `client.cloud.calibrations.retrieve(...)` in
+
+      `tools/stainless/device.yml`. `client.calibrations.create(...)` is
+
+      unchanged. The `cloud` namespace leaves room for a device-side
+
+      `Calibration` model later without a name clash.
+
+      - A calibration appears only once the agent has uploaded it.
+
+
+      **Agent API** (backend, what the agent calls)
+
+      - `GET /calibrations` and `GET /calibrations/{calibration_id}`, same
+
+      parameters, Miru-Version header. The device is derived from the token;
+
+      another device''s calibration is not found.
+
+      - Agent `Calibration` gains the reported `component_slug`, `role_slug`,
+
+      `aspect_slug` and `reported_by_identifier` next to their IDs, and an
+
+      expandable `content`. This also applies to the existing `POST
+
+      /calibrations` response (additive).
+
+
+      **Shared filters** (platform, agent, device): `role=null` and
+
+      `aspect=null` match calibrations reported without a role or aspect. On
+
+      the Platform API this is a description change to existing params; the
+
+      backend implements it once for all three. The device and agent create
+
+      requests now say the slug `null` is reserved for `role` and `aspect`.
+
+
+      ## Precedent
+
+
+      - The device `CloudCalibration` is a copy of the platform `Calibration`
+
+      (#387) without `device_id`, per review. Per review, cloud calibrations
+
+      have their own files, separate from the device''s own calibrations:
+
+      `apps/device-server/paths/cloud-calibrations.yaml` (routes, `CalSearch`,
+
+      `CloudCalibrationExpansion` / `CloudCalibrationListExpansion`) and
+
+      `apps/device-server/components/schemas/cloud-calibration.yaml`, laid out
+
+      like the device `Deployment` and the Agent API''s `DplSearch` /
+
+      `DeploymentExpansion`. Cloud routes come last in `openapi.yaml` and in
+
+      `device.yml`. The Device API doesn''t reference backend-server files.
+
+      - List/get shape, `order_by` and the `calibration_search_*` array
+
+      filters mirror the Frontend API''s `listCalibrations` / `getCalibration`
+
+      in `apis/configs/paths/calibrations.yaml`, and reuse its
+
+      `calibration_order_bys` and `serial_number`/`report_id` params.
+
+      - The slug filters (`calibration_search_component`, `_role`, `_aspect`)
+
+      came from the platform path file (#387) and now live in the shared file,
+
+      used by platform, agent and device.
+
+      - `null` in a slug filter is new; elsewhere our API matches null only
+
+      through `search` (`role_id:null`). Chosen by the author for simpler
+
+      device calls, with `null` reserved as a slug.
+
+      - Agent names, per review: the slug fields are `*_slug` so they don''t
+
+      read as component objects next to `component_id`, and the reported text
+
+      is `reported_by_identifier`, matching `ExternalUser.identifier`, because
+
+      `reported_by` elsewhere is the expansion of `reported_by_id`. The agent
+
+      `CreateCalibrationRequest` (#395) keeps `component`, `role`, `aspect`
+
+      and `reported_by`.
+
+      - `/cloud` is new. Stainless namespacing with `subresources` follows
+
+      `users.settings` and `workspaces.settings` in
+
+      `tools/stainless/frontend.yml`.
+
+
+      ## Rollout plan
+
+
+      1. This PR, then cut `agent/`, `device/` and `platform/` releases.
+
+      2. `backend`: vendor the agent and platform specs; serve `GET
+
+      /calibrations` and `GET /calibrations/{id}` filtered to the token''s
+
+      device; add the reported fields to the agent `Calibration` (including
+
+      the POST response); treat `null` in the `role`/`aspect` filters as
+
+      "unset" on the agent and platform lists; reject `null` as a reported
+
+      role or aspect slug.
+
+      3. `agent`: vendor both specs, regenerate, and add
+
+      `/v0.2/cloud/calibrations` handlers that call the Agent API with the
+
+      device token and convert its `Calibration` to `CloudCalibration` in
+
+      `server/response.rs`. On a Miru 401 the agent refreshes its session and
+
+      retries; it maps upstream auth and network failures to its own errors,
+
+      so a Device API 401 still only means a bad local token. Reject `null`
+
+      for `role` and `aspect` at `POST /calibrations` intake with a 400;
+
+      reports already queued by older agents get the backend''s validation
+
+      error like any other rejected report.
+
+      4. Python device SDK release via Stainless; docs.
+
+
+      ## Reviewer notes
+
+
+      - Scope is this device''s own calibrations. Reprovisioning rebinds the
+
+      same device record, so a re-imaged station still sees its history.
+
+      Pulling another device''s calibrations by serial number is left out; it
+
+      can be added later without breaking anything.
+
+      - Open in review: whether the agent list filters should also be named
+
+      `*_slug`.
+
+      - Proposed follow-up: define the fields `CloudCalibration` shares with
+
+      the platform `Calibration` once in `apis/configs/` and compose both with
+
+      `allOf`. Left out here because it changes the public platform bundle.
+
+
+      🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+
+      https://claude.ai/code/session_01XHScKZhkExkUq1bYQfmimH
+
+
+      ---------
+
+
+      Co-authored-by: Claude <noreply@anthropic.com>'
+    author: Ben's Agent
     branch: HEAD
     dirty: false
   x-build:
-    built_at: '2026-10-29T20:27:44.269490+00:00'
+    built_at: '2026-11-02T03:00:11.824064+00:00'
 servers:
 - url: http://localhost/v0.2
   description: localhost
@@ -327,6 +482,50 @@ paths:
             text/event-stream:
               schema:
                 $ref: '#/components/schemas/Event'
+  /cloud/calibrations:
+    get:
+      tags:
+      - Cloud Calibrations
+      summary: List
+      operationId: listCloudCalibrations
+      description: List the calibrations Miru recorded for this device. Requires the
+        agent to reach Miru. By default, results are ordered by `created_at` descending,
+        with ties broken by `id`.
+      parameters:
+      - $ref: '#/components/parameters/offset'
+      - $ref: '#/components/parameters/limit'
+      - $ref: '#/components/parameters/calibration_order_bys'
+      - $ref: '#/components/parameters/cloud_calibration_list_expansions'
+      - $ref: '#/components/parameters/calibration_search_component'
+      - $ref: '#/components/parameters/calibration_search_role'
+      - $ref: '#/components/parameters/calibration_search_aspect'
+      - $ref: '#/components/parameters/calibration_search_serial_number'
+      - $ref: '#/components/parameters/calibration_search_report_id'
+      responses:
+        '200':
+          description: Successfully retrieved the calibrations.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CloudCalibrationList'
+  /cloud/calibrations/{calibration_id}:
+    get:
+      tags:
+      - Cloud Calibrations
+      summary: Get
+      operationId: getCloudCalibration
+      description: Retrieve a calibration Miru recorded for this device by its ID.
+        Requires the agent to reach Miru.
+      parameters:
+      - $ref: '#/components/parameters/calibration_id'
+      - $ref: '#/components/parameters/cloud_calibration_expansions'
+      responses:
+        '200':
+          description: Successfully retrieved the calibration.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CloudCalibration'
 components:
   securitySchemes:
     BearerAuth:
@@ -353,14 +552,14 @@ components:
     ReleaseVersion:
       type: string
       enum:
-      - v0.2.4
+      - v0.2.5-beta.1
       x-enum-varnames:
       - RELEASE_VERSION
       x-stainless-const: true
     APIGitCommit:
       type: string
       enum:
-      - 13405ec342d31653d51698d8da8b860db728df18
+      - b1379e91e55f80c4addc371e4d77d5f2dc057b42
       x-enum-varnames:
       - API_GIT_COMMIT
       x-stainless-const: true
@@ -456,6 +655,23 @@ components:
         error_status: none
         target_status: archived
         archived_at: '2026-03-10T12:00:00Z'
+    CalSearch:
+      type: string
+      description: '**Internal server use only**: an enum of possible search fields.
+
+        '
+      enum:
+      - component
+      - role
+      - aspect
+      - serial_number
+      - report_id
+      x-enum-varnames:
+      - CAL_SEARCH_COMPONENT
+      - CAL_SEARCH_ROLE
+      - CAL_SEARCH_ASPECT
+      - CAL_SEARCH_SERIAL_NUMBER
+      - CAL_SEARCH_REPORT_ID
     HealthResponse:
       type: object
       required:
@@ -499,7 +715,7 @@ components:
         api_release_version:
           type: string
           description: The API release version of the agent.
-          example: v0.2.4
+          example: v0.2.5-beta.1
         rust_version:
           type: string
           description: The version of Rust.
@@ -522,7 +738,7 @@ components:
         git_commit: a1b2c3d4
         api_version: v0.2
         api_git_commit: a1b2c3d4
-        api_release_version: v0.2.4
+        api_release_version: v0.2.5-beta.1
         rust_version: 1.93.0
         build_date: '2026-02-24T10:30:00Z'
         os: linux
@@ -596,8 +812,9 @@ components:
           example: front-left
           description: Slug of the role the calibrated unit fills on the device, such
             as `left` or `front-left`. Distinguishes several units of one component
-            on a device. Validated like a slug. Miru resolves it to one of the component's
-            `roles`, creating the role the first time it is reported.
+            on a device. Validated like a slug; `null` is reserved. Miru resolves
+            it to one of the component's `roles`, creating the role the first time
+            it is reported.
         serial_number:
           type: string
           maxLength: 255
@@ -616,8 +833,8 @@ components:
           example: pose
           description: Slug of the aspect of the unit that was calibrated, when it
             has more than one, e.g. `intrinsics` vs `extrinsics`, or `pose` vs `joint-offsets`.
-            Validated like a slug. Miru resolves it to one of the component's `aspects`,
-            creating the aspect the first time it is reported.
+            Validated like a slug; `null` is reserved. Miru resolves it to one of
+            the component's `aspects`, creating the aspect the first time it is reported.
         content:
           allOf:
           - $ref: '#/components/schemas/InstanceContent'
@@ -1412,6 +1629,186 @@ components:
           error_status: none
           target_status: deployed
           deployed_at: '2026-03-10T12:00:00Z'
+    CalibrationOrderBy:
+      type: string
+      enum:
+      - id:asc
+      - id:desc
+      - created_at:asc
+      - created_at:desc
+      - reported_at:asc
+      - reported_at:desc
+      x-enum-varnames:
+      - CALIBRATION_ORDER_BY_ID_ASC
+      - CALIBRATION_ORDER_BY_ID_DESC
+      - CALIBRATION_ORDER_BY_CREATED_AT_ASC
+      - CALIBRATION_ORDER_BY_CREATED_AT_DESC
+      - CALIBRATION_ORDER_BY_REPORTED_AT_ASC
+      - CALIBRATION_ORDER_BY_REPORTED_AT_DESC
+      default: created_at:desc
+    CloudCalibrationListExpansion:
+      type: string
+      enum:
+      - content
+      - total_count
+      x-enum-varnames:
+      - CLOUD_CALIBRATION_LIST_EXPAND_CONTENT
+      - CLOUD_CALIBRATION_LIST_EXPAND_TOTAL_COUNT
+    PaginatedList:
+      title: Paginated List
+      type: object
+      required:
+      - object
+      - limit
+      - offset
+      - has_more
+      properties:
+        object:
+          type: string
+          enum:
+          - list
+          example: list
+          x-stainless-const: true
+          description: The object type, which is always `list`.
+        total_count:
+          type: integer
+          format: int64
+          description: The total number of items in the list. By default the total
+            count is not returned. The total count must be expanded (using expand=total_count)
+            to get the total number of items in the list.
+        limit:
+          type: integer
+          description: The maximum number of items to return. A limit of 15 with an
+            offset of 0 returns items 1-15.
+          default: 10
+          minimum: 1
+          maximum: 100
+        offset:
+          type: integer
+          description: The offset of the items to return. An offset of 10 with a limit
+            of 10 returns items 11-20.
+          default: 0
+          minimum: 0
+        has_more:
+          type: boolean
+          description: True if there are more items in the list to return. False if
+            there are no more items to return.
+          example: false
+    CloudCalibration:
+      title: Cloud Calibration
+      type: object
+      description: One calibration reported by a device for a unit of a component.
+        Calibrations are immutable and append-only; a device's history is kept per
+        component, role, and aspect. Content is at most 1 MiB.
+      required:
+      - object
+      - id
+      - component
+      - role
+      - aspect
+      - serial_number
+      - digest
+      - report_id
+      - reported_at
+      - created_at
+      properties:
+        object:
+          type: string
+          enum:
+          - calibration
+          example: calibration
+          x-stainless-const: true
+          description: The object type, which is always `calibration`.
+        id:
+          type: string
+          example: cal_123
+          description: ID of the calibration, generated by Miru.
+        component:
+          type: string
+          example: arm
+          description: Slug of the component the calibrated unit belongs to, as it
+            was reported.
+        role:
+          type: string
+          nullable: true
+          example: front-left
+          description: Slug of the role the calibrated unit fills on the device, as
+            it was reported; null if no role was reported.
+        aspect:
+          type: string
+          nullable: true
+          example: pose
+          description: Slug of the aspect of the unit that was calibrated, as it was
+            reported; null if no aspect was reported.
+        serial_number:
+          type: string
+          nullable: true
+          maxLength: 255
+          example: SN-1234
+          description: Serial number of the physical unit that was calibrated, not
+            of the device, such as `SN-1234`, or null if none was reported. Free text,
+            at most 255 characters.
+        digest:
+          type: string
+          example: sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+          description: Digest of the content, formatted as `sha256:` followed by 64
+            lowercase hex characters.
+        report_id:
+          type: string
+          format: uuid
+          example: 0b6f3c2e-6a51-4e0f-9a43-2f1d7c9e8b10
+          description: ID the agent gave the report this calibration came from.
+        reported_at:
+          type: string
+          format: date-time
+          example: '2021-01-01T00:00:00Z'
+          description: Timestamp of when the calibration was reported to the agent
+            on the device. The agent may upload it much later, for example after an
+            outage, so this can be well before `created_at`.
+        created_at:
+          type: string
+          format: date-time
+          example: '2021-01-01T00:00:00Z'
+          description: Timestamp of when Miru recorded the calibration.
+        content:
+          allOf:
+          - $ref: '#/components/schemas/InstanceContent'
+          description: The calibration's content. Expand using `expand=content` in
+            the query string.
+      example:
+        object: calibration
+        id: cal_123
+        component: arm
+        role: front-left
+        aspect: null
+        serial_number: SN-1234
+        digest: sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+        report_id: 0b6f3c2e-6a51-4e0f-9a43-2f1d7c9e8b10
+        reported_at: '2021-01-01T00:00:00Z'
+        created_at: '2021-01-01T00:00:00Z'
+        content:
+          format: json
+          data: "{\n  \"x\": 0.412,\n  \"y\": -0.087,\n  \"z\": 0.256,\n  \"roll\"\
+            : 0.0,\n  \"pitch\": 0.0,\n  \"yaw\": 1.571\n}\n"
+    CloudCalibrationList:
+      title: Cloud Calibration List
+      allOf:
+      - $ref: '#/components/schemas/PaginatedList'
+      - type: object
+        required:
+        - data
+        properties:
+          data:
+            type: array
+            items:
+              $ref: '#/components/schemas/CloudCalibration'
+            description: The list of calibrations.
+    CloudCalibrationExpansion:
+      type: string
+      enum:
+      - content
+      x-enum-varnames:
+      - CLOUD_CALIBRATION_EXPAND_CONTENT
     Error:
       type: object
       required:
@@ -1471,3 +1868,138 @@ components:
       schema:
         type: string
         example: rls_123
+    offset:
+      name: offset
+      in: query
+      required: false
+      description: The offset of the items to return. An offset of 10 with a limit
+        of 10 returns items 11-20.
+      schema:
+        type: integer
+        default: 0
+        minimum: 0
+        example: 0
+    limit:
+      name: limit
+      in: query
+      required: false
+      description: The maximum number of items to return. A limit of 15 with an offset
+        of 0 returns items 1-15.
+      schema:
+        type: integer
+        default: 10
+        minimum: 1
+        maximum: 100
+        example: 10
+    calibration_order_bys:
+      name: order_by
+      in: query
+      required: false
+      style: form
+      explode: false
+      description: Sort order for the calibration results.
+      schema:
+        type: array
+        items:
+          $ref: '#/components/schemas/CalibrationOrderBy'
+        example:
+        - created_at:desc
+    cloud_calibration_list_expansions:
+      name: expand
+      in: query
+      required: false
+      description: Fields to expand on each calibration in the list.
+      schema:
+        type: array
+        items:
+          $ref: '#/components/schemas/CloudCalibrationListExpansion'
+        example:
+        - content
+    calibration_search_component:
+      name: component
+      in: query
+      required: false
+      style: form
+      explode: false
+      description: The component slugs to filter by.
+      schema:
+        type: array
+        items:
+          type: string
+        example:
+        - arm
+    calibration_search_role:
+      name: role
+      in: query
+      required: false
+      style: form
+      explode: false
+      description: The role slugs to filter by; `null` matches calibrations reported
+        without a role. Role slugs are unique only within a component, so filter by
+        component too to match one component's role.
+      schema:
+        type: array
+        items:
+          type: string
+        example:
+        - front-left
+    calibration_search_aspect:
+      name: aspect
+      in: query
+      required: false
+      style: form
+      explode: false
+      description: The aspect slugs to filter by; `null` matches calibrations reported
+        without an aspect. Aspect slugs are unique only within a component, so filter
+        by component too to match one component's aspect.
+      schema:
+        type: array
+        items:
+          type: string
+        example:
+        - pose
+    calibration_search_serial_number:
+      name: serial_number
+      in: query
+      required: false
+      style: form
+      explode: false
+      description: The unit serial numbers to filter by.
+      schema:
+        type: array
+        items:
+          type: string
+        example:
+        - SN-1234
+    calibration_search_report_id:
+      name: report_id
+      in: query
+      required: false
+      style: form
+      explode: false
+      description: The report IDs to filter by.
+      schema:
+        type: array
+        items:
+          type: string
+        example:
+        - 0b6f3c2e-6a51-4e0f-9a43-2f1d7c9e8b10
+    calibration_id:
+      name: calibration_id
+      in: path
+      required: true
+      description: The unique identifier of the calibration.
+      schema:
+        type: string
+        example: cal_123
+    cloud_calibration_expansions:
+      name: expand
+      in: query
+      required: false
+      description: Fields to expand on the calibration.
+      schema:
+        type: array
+        items:
+          $ref: '#/components/schemas/CloudCalibrationExpansion'
+        example:
+        - content

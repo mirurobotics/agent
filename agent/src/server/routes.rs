@@ -124,5 +124,14 @@ fn table(state: Arc<State>) -> Router {
             format!("/{api_version}/events").as_str(),
             get(super::sse::events),
         )
+        // ============================== CLOUD ==================================== //
+        .route(
+            format!("/{api_version}/cloud/calibrations").as_str(),
+            get(handlers::list_cloud_calibrations),
+        )
+        .route(
+            format!("/{api_version}/cloud/calibrations/{{calibration_id}}").as_str(),
+            get(handlers::get_cloud_calibration),
+        )
         .with_state(state)
 }

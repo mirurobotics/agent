@@ -1,13 +1,15 @@
 // internal crates
 use crate::mocks::http_client::{self as mock, Call, CapturedRequest, MockClient};
-use backend_api::models::{Calibration, CreateCalibrationRequest, InstanceContent, InstanceFormat};
+use backend_api::models::{
+    Calibration, CalibrationList, CreateCalibrationRequest, InstanceContent, InstanceFormat,
+};
 use miru_agent::errors::Error;
-use miru_agent::http::calibrations::{self, CreateParams, CREATE_TIMEOUT};
+use miru_agent::http::calibrations::{self, CreateParams, GetParams, ListParams, CONTENT_TIMEOUT};
 use miru_agent::http::errors::MockErr;
 use miru_agent::http::{self, HTTPErr};
 
 // external crates
-use axum::routing::post;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use uuid::Uuid;
 
@@ -114,8 +116,168 @@ pub mod create {
         let HTTPErr::TimeoutErr(timeout) = &err else {
             panic!("expected TimeoutErr, got {err:?}");
         };
-        assert_eq!(timeout.request.timeout, CREATE_TIMEOUT);
-        assert!(start.elapsed() >= CREATE_TIMEOUT);
+        assert_eq!(timeout.request.timeout, CONTENT_TIMEOUT);
+        assert!(start.elapsed() >= CONTENT_TIMEOUT);
+        assert!(err.is_network_conn_err());
+    }
+}
+
+pub mod list {
+    use super::*;
+
+    #[tokio::test]
+    async fn forwards_the_query_and_returns_the_list() {
+        let list = CalibrationList {
+            data: vec![calibration()],
+            ..CalibrationList::default()
+        };
+        let mock = MockClient::default();
+        mock.set_list_calibrations({
+            let list = list.clone();
+            move || Ok(list.clone())
+        });
+        let query = vec![
+            ("component".to_string(), "arm,leg".to_string()),
+            ("expand".to_string(), "content".to_string()),
+            ("expand".to_string(), "total_count".to_string()),
+        ];
+
+        let params = ListParams {
+            query: &query,
+            token: "test-token",
+        };
+        let result = calibrations::list(&mock, params).await.unwrap();
+
+        assert_eq!(result, list);
+        assert_eq!(
+            mock.requests(),
+            vec![CapturedRequest {
+                call: Call::ListCalibrations,
+                method: reqwest::Method::GET,
+                path: "/calibrations".into(),
+                url: "http://mock/calibrations".into(),
+                query,
+                body: None,
+                token: Some("test-token".into()),
+            }]
+        );
+    }
+
+    #[tokio::test]
+    async fn error_propagates() {
+        let mock = MockClient::default();
+        mock.set_list_calibrations(|| {
+            Err(HTTPErr::MockErr(MockErr {
+                is_network_conn_err: false,
+            }))
+        });
+
+        let params = ListParams {
+            query: &[],
+            token: "test-token",
+        };
+        let err = calibrations::list(&mock, params).await.unwrap_err();
+
+        assert!(matches!(err, HTTPErr::MockErr(_)));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn timeout_is_network_error() {
+        async fn handler() -> Json<CalibrationList> {
+            std::future::pending().await
+        }
+        let router = Router::new().route("/calibrations", get(handler));
+        let server = mock::run_server(router).await;
+        let client = http::Client::new(&server.base_url).unwrap();
+
+        let start = tokio::time::Instant::now();
+        let params = ListParams {
+            query: &[],
+            token: "test-token",
+        };
+        let err = calibrations::list(&client, params).await.unwrap_err();
+
+        let HTTPErr::TimeoutErr(timeout) = &err else {
+            panic!("expected TimeoutErr, got {err:?}");
+        };
+        assert_eq!(timeout.request.timeout, CONTENT_TIMEOUT);
+        assert!(start.elapsed() >= CONTENT_TIMEOUT);
+        assert!(err.is_network_conn_err());
+    }
+}
+
+pub mod get {
+    use super::*;
+
+    #[tokio::test]
+    async fn forwards_the_query_and_returns_the_calibration() {
+        let mock = MockClient::default();
+        mock.set_get_calibration(|| Ok(calibration()));
+        let query = vec![("expand".to_string(), "content".to_string())];
+
+        let params = GetParams {
+            id: "cal_1",
+            query: &query,
+            token: "test-token",
+        };
+        let result = calibrations::get(&mock, params).await.unwrap();
+
+        assert_eq!(result, calibration());
+        assert_eq!(
+            mock.requests(),
+            vec![CapturedRequest {
+                call: Call::GetCalibration,
+                method: reqwest::Method::GET,
+                path: "/calibrations/cal_1".into(),
+                url: "http://mock/calibrations/cal_1".into(),
+                query,
+                body: None,
+                token: Some("test-token".into()),
+            }]
+        );
+    }
+
+    #[tokio::test]
+    async fn error_propagates() {
+        let mock = MockClient::default();
+        mock.set_get_calibration(|| {
+            Err(HTTPErr::MockErr(MockErr {
+                is_network_conn_err: false,
+            }))
+        });
+
+        let params = GetParams {
+            id: "cal_1",
+            query: &[],
+            token: "test-token",
+        };
+        let err = calibrations::get(&mock, params).await.unwrap_err();
+
+        assert!(matches!(err, HTTPErr::MockErr(_)));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn timeout_is_network_error() {
+        async fn handler() -> Json<Calibration> {
+            std::future::pending().await
+        }
+        let router = Router::new().route("/calibrations/{id}", get(handler));
+        let server = mock::run_server(router).await;
+        let client = http::Client::new(&server.base_url).unwrap();
+
+        let start = tokio::time::Instant::now();
+        let params = GetParams {
+            id: "cal_1",
+            query: &[],
+            token: "test-token",
+        };
+        let err = calibrations::get(&client, params).await.unwrap_err();
+
+        let HTTPErr::TimeoutErr(timeout) = &err else {
+            panic!("expected TimeoutErr, got {err:?}");
+        };
+        assert_eq!(timeout.request.timeout, CONTENT_TIMEOUT);
+        assert!(start.elapsed() >= CONTENT_TIMEOUT);
         assert!(err.is_network_conn_err());
     }
 }

@@ -2,6 +2,7 @@
 use crate::events;
 use crate::models;
 use crate::services::calibration;
+use backend_api::models as backend_client;
 use device_api::models as device_server;
 
 impl From<&models::Device> for device_server::Device {
@@ -128,5 +129,43 @@ impl From<&calibration::Created> for device_server::CreateCalibrationResponse {
             report_id: created.report_id,
             reported_at: created.reported_at.to_rfc3339(),
         }
+    }
+}
+
+// Free functions, not `From` impls: both types are foreign, so the orphan rule
+// forbids an impl. They take ownership so a page of content isn't copied.
+pub fn to_cloud_calibration_list(
+    list: backend_client::CalibrationList,
+) -> device_server::CloudCalibrationList {
+    device_server::CloudCalibrationList {
+        object: device_server::cloud_calibration_list::Object::List,
+        total_count: list.total_count,
+        limit: list.limit,
+        offset: list.offset,
+        has_more: list.has_more,
+        data: list.data.into_iter().map(to_cloud_calibration).collect(),
+    }
+}
+
+pub fn to_cloud_calibration(cal: backend_client::Calibration) -> device_server::CloudCalibration {
+    device_server::CloudCalibration {
+        object: device_server::cloud_calibration::Object::Calibration,
+        id: cal.id,
+        component: cal.component_slug,
+        role: cal.role_slug,
+        aspect: cal.aspect_slug,
+        serial_number: cal.serial_number,
+        digest: cal.digest,
+        report_id: cal.report_id,
+        reported_at: cal.reported_at,
+        created_at: cal.created_at,
+        content: cal.content.map(|c| Box::new(to_content(*c))),
+    }
+}
+
+fn to_content(content: backend_client::InstanceContent) -> device_server::InstanceContent {
+    device_server::InstanceContent {
+        format: (&models::InstanceFormat::from(&content.format)).into(),
+        data: content.data,
     }
 }
