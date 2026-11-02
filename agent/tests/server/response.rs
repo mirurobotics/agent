@@ -5,7 +5,7 @@ use miru_agent::models::{
     Deployment, Device, DeviceStatus, DplActivity, DplErrStatus, DplTarget, FileRule,
     FileRuleRetention, FileRuleSource, FileRuleUpload, GitCommit, Release, UploadTimezone,
 };
-use miru_agent::server::response::{to_cloud_calibration, to_cloud_calibration_list};
+use miru_agent::server::response::{to_platform_calibration, to_platform_calibration_list};
 use miru_agent::services::calibration::Created;
 
 // external crates
@@ -497,7 +497,7 @@ pub mod create_calibration_response {
     }
 }
 
-pub mod cloud_calibration_response {
+pub mod platform_calibration_response {
     use super::*;
 
     fn calibration(
@@ -525,9 +525,9 @@ pub mod cloud_calibration_response {
         }
     }
 
-    fn cloud_calibration(content: Option<openapi::InstanceContent>) -> openapi::CloudCalibration {
-        openapi::CloudCalibration {
-            object: openapi::cloud_calibration::Object::Calibration,
+    fn platform_calibration(content: Option<openapi::InstanceContent>) -> openapi::PlatformCalibration {
+        openapi::PlatformCalibration {
+            object: openapi::platform_calibration::Object::Calibration,
             id: "cal_1".into(),
             component: "arm".into(),
             role: Some("front-left".into()),
@@ -543,8 +543,8 @@ pub mod cloud_calibration_response {
 
     #[test]
     fn converts_slugs_and_drops_miru_ids() {
-        let sdk = to_cloud_calibration(calibration(None));
-        assert_eq!(sdk, cloud_calibration(None));
+        let sdk = to_platform_calibration(calibration(None));
+        assert_eq!(sdk, platform_calibration(None));
     }
 
     #[test]
@@ -558,8 +558,8 @@ pub mod cloud_calibration_response {
             data: "offset: 1\n".into(),
         };
 
-        let sdk = to_cloud_calibration(calibration(Some(content)));
-        assert_eq!(sdk, cloud_calibration(Some(expected)));
+        let sdk = to_platform_calibration(calibration(Some(content)));
+        assert_eq!(sdk, platform_calibration(Some(expected)));
     }
 
     #[test]
@@ -572,16 +572,16 @@ pub mod cloud_calibration_response {
             has_more: true,
             data: vec![calibration(None)],
         };
-        let expected = openapi::CloudCalibrationList {
-            object: openapi::cloud_calibration_list::Object::List,
+        let expected = openapi::PlatformCalibrationList {
+            object: openapi::platform_calibration_list::Object::List,
             total_count: Some(3),
             limit: 1,
             offset: 2,
             has_more: true,
-            data: vec![cloud_calibration(None)],
+            data: vec![platform_calibration(None)],
         };
 
-        let sdk = to_cloud_calibration_list(list);
+        let sdk = to_platform_calibration_list(list);
         assert_eq!(sdk, expected);
     }
 }

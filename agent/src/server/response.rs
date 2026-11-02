@@ -134,22 +134,22 @@ impl From<&calibration::Created> for device_server::CreateCalibrationResponse {
 
 // Free functions, not `From` impls: both types are foreign, so the orphan rule
 // forbids an impl. They take ownership so a page of content isn't copied.
-pub fn to_cloud_calibration_list(
+pub fn to_platform_calibration_list(
     list: backend_client::CalibrationList,
-) -> device_server::CloudCalibrationList {
-    device_server::CloudCalibrationList {
-        object: device_server::cloud_calibration_list::Object::List,
+) -> device_server::PlatformCalibrationList {
+    device_server::PlatformCalibrationList {
+        object: device_server::platform_calibration_list::Object::List,
         total_count: list.total_count,
         limit: list.limit,
         offset: list.offset,
         has_more: list.has_more,
-        data: list.data.into_iter().map(to_cloud_calibration).collect(),
+        data: list.data.into_iter().map(to_platform_calibration).collect(),
     }
 }
 
-pub fn to_cloud_calibration(cal: backend_client::Calibration) -> device_server::CloudCalibration {
-    device_server::CloudCalibration {
-        object: device_server::cloud_calibration::Object::Calibration,
+pub fn to_platform_calibration(cal: backend_client::Calibration) -> device_server::PlatformCalibration {
+    device_server::PlatformCalibration {
+        object: device_server::platform_calibration::Object::Calibration,
         id: cal.id,
         component: cal.component_slug,
         role: cal.role_slug,

@@ -210,8 +210,8 @@ fn reject_body(rejection: JsonRejection) -> ServerErr {
     })
 }
 
-// ============================ CLOUD CALIBRATIONS ================================= //
-pub async fn list_cloud_calibrations(
+// ============================ PLATFORM CALIBRATIONS ============================== //
+pub async fn list_platform_calibrations(
     AxumState(state): AxumState<Arc<State>>,
     Query(query): Query<Vec<(String, String)>>,
 ) -> impl IntoResponse {
@@ -219,14 +219,14 @@ pub async fn list_cloud_calibrations(
         async {
             let backend = HttpBackend::new(state.http_client.as_ref(), state.token_mngr.as_ref());
             let list = backend.list_calibrations(&query).await?;
-            Ok::<_, ServerErr>(response::to_cloud_calibration_list(list))
+            Ok::<_, ServerErr>(response::to_platform_calibration_list(list))
         },
-        "Error listing cloud calibrations",
+        "Error listing platform calibrations",
     )
     .await
 }
 
-pub async fn get_cloud_calibration(
+pub async fn get_platform_calibration(
     AxumState(state): AxumState<Arc<State>>,
     Path(calibration_id): Path<String>,
     Query(query): Query<Vec<(String, String)>>,
@@ -235,9 +235,9 @@ pub async fn get_cloud_calibration(
         async {
             let backend = HttpBackend::new(state.http_client.as_ref(), state.token_mngr.as_ref());
             let cal = backend.get_calibration(&calibration_id, &query).await?;
-            Ok::<_, ServerErr>(response::to_cloud_calibration(cal))
+            Ok::<_, ServerErr>(response::to_platform_calibration(cal))
         },
-        "Error getting cloud calibration",
+        "Error getting platform calibration",
     )
     .await
 }

@@ -143,7 +143,7 @@ pub mod routes {
             let (sender, _receiver) = mpsc::channel(1);
             let syncer = Arc::new(Syncer::new(sender));
 
-            // Backend mock server for cache-miss fallbacks and cloud reads.
+            // Backend mock server for cache-miss fallbacks and platform reads.
             // Missing resources respond with 404 so the raw RequestFailed
             // error propagates through (HTTP 404 to clients).
             let backend_router = Router::new()
@@ -726,19 +726,19 @@ pub mod routes {
         }
     }
 
-    mod cloud_calibrations {
+    mod platform_calibrations {
         use super::*;
 
         #[tokio::test]
-        async fn list_cloud_calibrations_returns_200_with_device_calibrations() {
-            let f = Fixture::new("handler_list_cloud_calibrations").await;
+        async fn list_platform_calibrations_returns_200_with_device_calibrations() {
+            let f = Fixture::new("handler_list_platform_calibrations").await;
 
             let (status, bytes) = f
-                .get("/v0.2/cloud/calibrations?role=null&expand=content")
+                .get("/v0.2/platform/calibrations?role=null&expand=content")
                 .await;
             assert_eq!(status, StatusCode::OK);
 
-            let actual: openapi::CloudCalibrationList = serde_json::from_slice(&bytes).unwrap();
+            let actual: openapi::PlatformCalibrationList = serde_json::from_slice(&bytes).unwrap();
             let ids: Vec<(&str, &str)> = actual
                 .data
                 .iter()
@@ -748,10 +748,10 @@ pub mod routes {
         }
 
         #[tokio::test]
-        async fn list_cloud_calibrations_returns_miru_rejection() {
-            let f = Fixture::new("handler_list_cloud_calibrations_rejected").await;
+        async fn list_platform_calibrations_returns_miru_rejection() {
+            let f = Fixture::new("handler_list_platform_calibrations_rejected").await;
 
-            let (status, bytes) = f.get("/v0.2/cloud/calibrations?role=invalid").await;
+            let (status, bytes) = f.get("/v0.2/platform/calibrations?role=invalid").await;
             assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
 
             let actual: openapi::ErrorResponse = serde_json::from_slice(&bytes).unwrap();
@@ -759,13 +759,13 @@ pub mod routes {
         }
 
         #[tokio::test]
-        async fn get_cloud_calibration_returns_200() {
-            let f = Fixture::new("handler_get_cloud_calibration").await;
+        async fn get_platform_calibration_returns_200() {
+            let f = Fixture::new("handler_get_platform_calibration").await;
 
-            let (status, bytes) = f.get("/v0.2/cloud/calibrations/cal_1").await;
+            let (status, bytes) = f.get("/v0.2/platform/calibrations/cal_1").await;
             assert_eq!(status, StatusCode::OK);
 
-            let actual: openapi::CloudCalibration = serde_json::from_slice(&bytes).unwrap();
+            let actual: openapi::PlatformCalibration = serde_json::from_slice(&bytes).unwrap();
             assert_eq!(
                 (actual.id.as_str(), actual.component.as_str()),
                 ("cal_1", "arm")
@@ -773,10 +773,10 @@ pub mod routes {
         }
 
         #[tokio::test]
-        async fn get_cloud_calibration_returns_404_when_missing() {
-            let f = Fixture::new("handler_get_cloud_calibration_missing").await;
+        async fn get_platform_calibration_returns_404_when_missing() {
+            let f = Fixture::new("handler_get_platform_calibration_missing").await;
 
-            let (status, bytes) = f.get("/v0.2/cloud/calibrations/cal_missing").await;
+            let (status, bytes) = f.get("/v0.2/platform/calibrations/cal_missing").await;
             assert_eq!(status, StatusCode::NOT_FOUND);
 
             let actual: openapi::ErrorResponse = serde_json::from_slice(&bytes).unwrap();
