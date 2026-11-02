@@ -11,7 +11,7 @@ use serde_json::json;
 
 impl StatusEnumFixture for InstanceFormat {
     type Backend = backend_client::InstanceFormat;
-    type Agent = agent_server::InstanceFormat;
+    type Agent = ();
 
     fn cases() -> Vec<StatusCase<Self>> {
         vec![
@@ -19,43 +19,43 @@ impl StatusEnumFixture for InstanceFormat {
                 variant: InstanceFormat::Json,
                 wire: "json",
                 backend: backend_client::InstanceFormat::INSTANCE_FORMAT_JSON,
-                agent: agent_server::InstanceFormat::INSTANCE_FORMAT_JSON,
+                agent: (),
             },
             StatusCase {
                 variant: InstanceFormat::Yaml,
                 wire: "yaml",
                 backend: backend_client::InstanceFormat::INSTANCE_FORMAT_YAML,
-                agent: agent_server::InstanceFormat::INSTANCE_FORMAT_YAML,
+                agent: (),
             },
             StatusCase {
                 variant: InstanceFormat::Jsonc,
                 wire: "jsonc",
                 backend: backend_client::InstanceFormat::INSTANCE_FORMAT_JSONC,
-                agent: agent_server::InstanceFormat::INSTANCE_FORMAT_JSONC,
+                agent: (),
             },
             StatusCase {
                 variant: InstanceFormat::Xml,
                 wire: "xml",
                 backend: backend_client::InstanceFormat::INSTANCE_FORMAT_XML,
-                agent: agent_server::InstanceFormat::INSTANCE_FORMAT_XML,
+                agent: (),
             },
             StatusCase {
                 variant: InstanceFormat::Csv,
                 wire: "csv",
                 backend: backend_client::InstanceFormat::INSTANCE_FORMAT_CSV,
-                agent: agent_server::InstanceFormat::INSTANCE_FORMAT_CSV,
+                agent: (),
             },
             StatusCase {
                 variant: InstanceFormat::Text,
                 wire: "text",
                 backend: backend_client::InstanceFormat::INSTANCE_FORMAT_TEXT,
-                agent: agent_server::InstanceFormat::INSTANCE_FORMAT_TEXT,
+                agent: (),
             },
         ]
     }
 }
 
-status_enum_tests!(InstanceFormat, backend, agent);
+status_enum_tests!(InstanceFormat, backend);
 
 #[test]
 fn defaults_to_text() {
