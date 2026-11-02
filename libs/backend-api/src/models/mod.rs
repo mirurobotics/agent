@@ -12,6 +12,8 @@ pub mod base_deployment;
 pub use self::base_deployment::BaseDeployment;
 pub mod base_device;
 pub use self::base_device::BaseDevice;
+pub mod base_external_user;
+pub use self::base_external_user::BaseExternalUser;
 pub mod base_file_rule;
 pub use self::base_file_rule::BaseFileRule;
 pub mod base_git_commit;

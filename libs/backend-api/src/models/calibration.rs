@@ -60,17 +60,17 @@ pub struct Calibration {
     /// Slug of the aspect of the unit that was calibrated, as the device reported it; null if no aspect was reported.
     #[serde(rename = "aspect_slug", deserialize_with = "Option::deserialize")]
     pub aspect_slug: Option<String>,
-    /// Identifier of the external user who reported the calibration, exactly as the device reported it; null if none was reported.
-    #[serde(rename = "reported_by_identifier", deserialize_with = "Option::deserialize")]
-    pub reported_by_identifier: Option<String>,
     /// The calibration's content. Returned only when expanded with `expand=content`.
     #[serde(rename = "content", skip_serializing_if = "Option::is_none")]
     pub content: Option<Box<models::InstanceContent>>,
+    /// The external user who reported the calibration; null if none was reported. Returned only when expanded with `expand=reported_by`.
+    #[serde(rename = "reported_by", default, with = "::serde_with::rust::double_option", skip_serializing_if = "Option::is_none")]
+    pub reported_by: Option<Option<Box<models::BaseExternalUser>>>,
 }
 
 impl Calibration {
     /// A calibration recorded by Miru.
-    pub fn new(object: Object, id: String, device_id: String, component_id: String, role_id: Option<String>, aspect_id: Option<String>, serial_number: Option<String>, digest: String, deployment_id: Option<String>, reported_by_id: Option<String>, report_id: uuid::Uuid, reported_at: String, created_at: String, component_slug: String, role_slug: Option<String>, aspect_slug: Option<String>, reported_by_identifier: Option<String>) -> Calibration {
+    pub fn new(object: Object, id: String, device_id: String, component_id: String, role_id: Option<String>, aspect_id: Option<String>, serial_number: Option<String>, digest: String, deployment_id: Option<String>, reported_by_id: Option<String>, report_id: uuid::Uuid, reported_at: String, created_at: String, component_slug: String, role_slug: Option<String>, aspect_slug: Option<String>) -> Calibration {
         Calibration {
             object,
             id,
@@ -88,8 +88,8 @@ impl Calibration {
             component_slug,
             role_slug,
             aspect_slug,
-            reported_by_identifier,
             content: None,
+            reported_by: None,
         }
     }
 }

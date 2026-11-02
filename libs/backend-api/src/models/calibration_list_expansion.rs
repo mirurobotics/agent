@@ -14,6 +14,8 @@ use serde::{Deserialize, Serialize};
 pub enum CalibrationListExpansion {
     #[serde(rename = "content")]
     CALIBRATION_LIST_EXPAND_CONTENT,
+    #[serde(rename = "reported_by")]
+    CALIBRATION_LIST_EXPAND_REPORTED_BY,
     #[serde(rename = "total_count")]
     CALIBRATION_LIST_EXPAND_TOTAL_COUNT,
 
@@ -28,6 +30,7 @@ impl std::fmt::Display for CalibrationListExpansion {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
             Self::CALIBRATION_LIST_EXPAND_CONTENT => write!(f, "content"),
+            Self::CALIBRATION_LIST_EXPAND_REPORTED_BY => write!(f, "reported_by"),
             Self::CALIBRATION_LIST_EXPAND_TOTAL_COUNT => write!(f, "total_count"),
             Self::CalibrationListExpansionUnknown => write!(f, "unknown"),
         }

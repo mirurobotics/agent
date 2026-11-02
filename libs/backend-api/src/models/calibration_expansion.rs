@@ -14,6 +14,8 @@ use serde::{Deserialize, Serialize};
 pub enum CalibrationExpansion {
     #[serde(rename = "content")]
     CALIBRATION_EXPAND_CONTENT,
+    #[serde(rename = "reported_by")]
+    CALIBRATION_EXPAND_REPORTED_BY,
 
     /// Catch-all for values added by the API after this client was
     /// generated. `#[serde(other)]` makes unrecognized strings
@@ -26,6 +28,7 @@ impl std::fmt::Display for CalibrationExpansion {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
             Self::CALIBRATION_EXPAND_CONTENT => write!(f, "content"),
+            Self::CALIBRATION_EXPAND_REPORTED_BY => write!(f, "reported_by"),
             Self::CalibrationExpansionUnknown => write!(f, "unknown"),
         }
     }

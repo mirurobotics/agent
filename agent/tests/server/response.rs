@@ -520,8 +520,12 @@ pub mod platform_calibration_response {
             component_slug: "arm".into(),
             role_slug: Some("front-left".into()),
             aspect_slug: Some("pose".into()),
-            reported_by_identifier: Some("Ada Lovelace".into()),
             content: content.map(Box::new),
+            reported_by: Some(Some(Box::new(backend_client::BaseExternalUser {
+                id: "eu_1".into(),
+                identifier: "Ada Lovelace".into(),
+                ..Default::default()
+            }))),
         }
     }
 
