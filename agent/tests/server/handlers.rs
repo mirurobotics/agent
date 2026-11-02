@@ -51,11 +51,13 @@ pub mod version_tests {
 }
 
 pub mod routes {
+    use std::collections::HashMap;
     use std::sync::Arc;
 
     use axum::body::{self, Body};
-    use axum::extract::RawQuery;
+    use axum::extract::{Path, RawQuery};
     use axum::http::{Request, StatusCode};
+    use axum::response::{IntoResponse, Response};
     use axum::routing::get;
     use axum::{Json, Router};
     use tower::ServiceExt;
@@ -87,16 +89,38 @@ pub mod routes {
     }
 
     /// Echoes the query it got as the component slug, so tests can check the
-    /// agent forwarded it.
-    async fn list_calibrations(RawQuery(query): RawQuery) -> Json<backend_client::CalibrationList> {
+    /// agent forwarded it. Rejects an `invalid` query as Miru would.
+    async fn list_calibrations(RawQuery(query): RawQuery) -> Response {
+        let query = query.unwrap_or_default();
+        if query.contains("invalid") {
+            let error = backend_client::ErrorResponse::new(backend_client::Error::new(
+                "invalid_query".to_string(),
+                HashMap::new(),
+                "invalid query".to_string(),
+            ));
+            return (StatusCode::UNPROCESSABLE_ENTITY, Json(error)).into_response();
+        }
         Json(backend_client::CalibrationList {
             data: vec![backend_client::Calibration {
                 id: "cal_1".into(),
-                component_slug: query.unwrap_or_default(),
+                component_slug: query,
                 ..Default::default()
             }],
             ..Default::default()
         })
+        .into_response()
+    }
+
+    async fn get_calibration(Path(id): Path<String>) -> Response {
+        if id != "cal_1" {
+            return StatusCode::NOT_FOUND.into_response();
+        }
+        Json(backend_client::Calibration {
+            id,
+            component_slug: "arm".into(),
+            ..Default::default()
+        })
+        .into_response()
     }
 
     struct Fixture {
@@ -120,7 +144,7 @@ pub mod routes {
             let syncer = Arc::new(Syncer::new(sender));
 
             // Backend mock server for cache-miss fallbacks and cloud reads.
-            // Single-resource routes respond with 404 so the raw RequestFailed
+            // Missing resources respond with 404 so the raw RequestFailed
             // error propagates through (HTTP 404 to clients).
             let backend_router = Router::new()
                 .route("/deployments/{id}", get(mock::not_found))
@@ -128,7 +152,7 @@ pub mod routes {
                 .route("/git_commits/{id}", get(mock::not_found))
                 .route("/file_rules/{id}", get(mock::not_found))
                 .route("/calibrations", get(list_calibrations))
-                .route("/calibrations/{id}", get(mock::not_found));
+                .route("/calibrations/{id}", get(get_calibration));
             let backend = mock::run_server(backend_router).await;
             let real_http_client =
                 Arc::new(miru_agent::http::Client::new(&backend.base_url).unwrap());
@@ -721,6 +745,28 @@ pub mod routes {
                 .map(|c| (c.id.as_str(), c.component.as_str()))
                 .collect();
             assert_eq!(ids, vec![("cal_1", "role=null&expand=content")]);
+        }
+
+        #[tokio::test]
+        async fn list_cloud_calibrations_returns_miru_rejection() {
+            let f = Fixture::new("handler_list_cloud_calibrations_rejected").await;
+
+            let (status, bytes) = f.get("/v0.2/cloud/calibrations?role=invalid").await;
+            assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
+            let actual: openapi::ErrorResponse = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(actual.error.code, "invalid_query");
+        }
+
+        #[tokio::test]
+        async fn get_cloud_calibration_returns_200() {
+            let f = Fixture::new("handler_get_cloud_calibration").await;
+
+            let (status, bytes) = f.get("/v0.2/cloud/calibrations/cal_1").await;
+            assert_eq!(status, StatusCode::OK);
+
+            let actual: openapi::CloudCalibration = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!((actual.id.as_str(), actual.component.as_str()), ("cal_1", "arm"));
         }
 
         #[tokio::test]
