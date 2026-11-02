@@ -272,6 +272,30 @@ paths:
   /calibrations:
     parameters:
     - $ref: '#/components/parameters/MiruVersion'
+    get:
+      tags:
+      - Calibrations
+      summary: List
+      operationId: listCalibrations
+      description: List the calibrations the device reported. By default, results
+        are ordered by `created_at` descending, with ties broken by `id`.
+      parameters:
+      - $ref: '#/components/parameters/offset'
+      - $ref: '#/components/parameters/limit'
+      - $ref: '#/components/parameters/calibration_order_bys'
+      - $ref: '#/components/parameters/calibration_list_expansions'
+      - $ref: '#/components/parameters/calibration_search_component'
+      - $ref: '#/components/parameters/calibration_search_role'
+      - $ref: '#/components/parameters/calibration_search_aspect'
+      - $ref: '#/components/parameters/calibration_search_serial_number'
+      - $ref: '#/components/parameters/calibration_search_report_id'
+      responses:
+        '200':
+          description: Successfully retrieved the calibrations.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CalibrationList'
     post:
       tags:
       - Calibrations
@@ -309,6 +333,25 @@ paths:
       responses:
         '200':
           description: Successfully recorded the calibration.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Calibration'
+  /calibrations/{calibration_id}:
+    parameters:
+    - $ref: '#/components/parameters/MiruVersion'
+    get:
+      tags:
+      - Calibrations
+      summary: Get
+      operationId: getCalibration
+      description: Retrieve a calibration the device reported by its ID.
+      parameters:
+      - $ref: '#/components/parameters/calibration_id'
+      - $ref: '#/components/parameters/calibration_expansions'
+      responses:
+        '200':
+          description: Successfully retrieved the calibration.
           content:
             application/json:
               schema:
@@ -640,6 +683,23 @@ components:
       - activity_status
       x-enum-varnames:
       - DPL_SEARCH_ACTIVITY_STATUS
+    CalSearch:
+      type: string
+      description: '**Internal server use only**: an enum of possible search fields.
+
+        '
+      enum:
+      - component
+      - role
+      - aspect
+      - serial_number
+      - report_id
+      x-enum-varnames:
+      - CAL_SEARCH_COMPONENT
+      - CAL_SEARCH_ROLE
+      - CAL_SEARCH_ASPECT
+      - CAL_SEARCH_SERIAL_NUMBER
+      - CAL_SEARCH_REPORT_ID
     Version:
       title: Version
       type: object
@@ -2161,70 +2221,31 @@ components:
           deployment_id: dpl_123
           digest: sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
           mtime: '2021-01-01T00:00:00Z'
-    CreateCalibrationRequest:
-      title: Create Calibration Request
-      type: object
-      required:
-      - report_id
-      - component
+    CalibrationOrderBy:
+      type: string
+      enum:
+      - id:asc
+      - id:desc
+      - created_at:asc
+      - created_at:desc
+      - reported_at:asc
+      - reported_at:desc
+      x-enum-varnames:
+      - CALIBRATION_ORDER_BY_ID_ASC
+      - CALIBRATION_ORDER_BY_ID_DESC
+      - CALIBRATION_ORDER_BY_CREATED_AT_ASC
+      - CALIBRATION_ORDER_BY_CREATED_AT_DESC
+      - CALIBRATION_ORDER_BY_REPORTED_AT_ASC
+      - CALIBRATION_ORDER_BY_REPORTED_AT_DESC
+      default: created_at:desc
+    CalibrationListExpansion:
+      type: string
+      enum:
       - content
-      - reported_at
-      properties:
-        report_id:
-          type: string
-          format: uuid
-          example: 0b6f3c2e-6a51-4e0f-9a43-2f1d7c9e8b10
-          description: ID the agent gave the report when it received it. If the device
-            already reported a calibration with this `report_id`, Miru returns that
-            calibration and records nothing new.
-        deployment_id:
-          type: string
-          example: dpl_123
-          description: ID of the deployment the device is on. Omitted if the device
-            is on no deployment.
-        component:
-          type: string
-          example: arm
-          description: Slug of the component the calibrated unit belongs to, such
-            as `arm`. Miru resolves it to the component, creating the component the
-            first time it is reported.
-        role:
-          type: string
-          example: front-left
-          description: Slug of the role the calibrated unit fills on the device, such
-            as `left` or `front-left`. Distinguishes several units of one component
-            on a device. Validated like a slug. Miru resolves it to one of the component's
-            `roles`, creating the role the first time it is reported.
-        serial_number:
-          type: string
-          maxLength: 255
-          example: SN-1234
-          description: Serial number of the physical unit that was calibrated, not
-            of the device, such as `SN-1234`. Free text, at most 255 characters.
-        reported_by:
-          type: string
-          maxLength: 255
-          example: Benjamin Smidt
-          description: Who reported the calibration, as the device named them, such
-            as `Benjamin Smidt`. Free text, at most 255 characters.
-        aspect:
-          type: string
-          example: pose
-          description: Slug of the aspect of the unit that was calibrated, when it
-            has more than one, e.g. `intrinsics` vs `extrinsics`, or `pose` vs `joint-offsets`.
-            Validated like a slug. Miru resolves it to one of the component's `aspects`,
-            creating the aspect the first time it is reported.
-        content:
-          allOf:
-          - $ref: '#/components/schemas/InstanceContent'
-          description: The calibration's content, at most 1 MiB.
-        reported_at:
-          type: string
-          format: date-time
-          example: '2026-03-10T12:00:00Z'
-          description: When the calibration was reported to the agent on the device.
-            The agent may upload it much later, for example after an outage, so Miru
-            stores this time with the calibration, separately from `created_at`.
+      - total_count
+      x-enum-varnames:
+      - CALIBRATION_LIST_EXPAND_CONTENT
+      - CALIBRATION_LIST_EXPAND_TOTAL_COUNT
     BaseCalibration:
       title: Calibration
       type: object
@@ -2321,20 +2342,144 @@ components:
       description: A calibration recorded by Miru.
       allOf:
       - $ref: '#/components/schemas/BaseCalibration'
+      - type: object
+        required:
+        - component_slug
+        - role_slug
+        - aspect_slug
+        - reported_by_identifier
+        properties:
+          component_slug:
+            type: string
+            example: arm
+            description: Slug of the component the calibrated unit belongs to, as
+              the device reported it.
+          role_slug:
+            type: string
+            nullable: true
+            example: front-left
+            description: Slug of the role the calibrated unit fills on the device,
+              as the device reported it; null if no role was reported.
+          aspect_slug:
+            type: string
+            nullable: true
+            example: pose
+            description: Slug of the aspect of the unit that was calibrated, as the
+              device reported it; null if no aspect was reported.
+          reported_by_identifier:
+            type: string
+            nullable: true
+            maxLength: 255
+            example: Benjamin Smidt
+            description: Identifier of the external user who reported the calibration,
+              exactly as the device reported it; null if none was reported.
+          content:
+            allOf:
+            - $ref: '#/components/schemas/InstanceContent'
+            description: The calibration's content. Returned only when expanded with
+              `expand=content`.
       example:
         object: calibration
         id: cal_123
         device_id: dvc_123
         component_id: cmp_123
+        component_slug: arm
         role_id: cmp_rol_123
+        role_slug: front-left
         aspect_id: null
+        aspect_slug: null
         serial_number: SN-1234
         digest: sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
         deployment_id: dpl_123
         reported_by_id: ext_usr_123
+        reported_by_identifier: Benjamin Smidt
         report_id: 0b6f3c2e-6a51-4e0f-9a43-2f1d7c9e8b10
         reported_at: '2021-01-01T00:00:00Z'
         created_at: '2021-01-01T00:00:00Z'
+    CalibrationList:
+      title: CalibrationList
+      allOf:
+      - $ref: '#/components/schemas/PaginatedList'
+      - type: object
+        required:
+        - data
+        properties:
+          data:
+            type: array
+            items:
+              $ref: '#/components/schemas/Calibration'
+            description: The list of calibrations.
+    CreateCalibrationRequest:
+      title: Create Calibration Request
+      type: object
+      required:
+      - report_id
+      - component
+      - content
+      - reported_at
+      properties:
+        report_id:
+          type: string
+          format: uuid
+          example: 0b6f3c2e-6a51-4e0f-9a43-2f1d7c9e8b10
+          description: ID the agent gave the report when it received it. If the device
+            already reported a calibration with this `report_id`, Miru returns that
+            calibration and records nothing new.
+        deployment_id:
+          type: string
+          example: dpl_123
+          description: ID of the deployment the device is on. Omitted if the device
+            is on no deployment.
+        component:
+          type: string
+          example: arm
+          description: Slug of the component the calibrated unit belongs to, such
+            as `arm`. Miru resolves it to the component, creating the component the
+            first time it is reported.
+        role:
+          type: string
+          example: front-left
+          description: Slug of the role the calibrated unit fills on the device, such
+            as `left` or `front-left`. Distinguishes several units of one component
+            on a device. Validated like a slug; `null` is reserved. Miru resolves
+            it to one of the component's `roles`, creating the role the first time
+            it is reported.
+        serial_number:
+          type: string
+          maxLength: 255
+          example: SN-1234
+          description: Serial number of the physical unit that was calibrated, not
+            of the device, such as `SN-1234`. Free text, at most 255 characters.
+        reported_by:
+          type: string
+          maxLength: 255
+          example: Benjamin Smidt
+          description: Who reported the calibration, as the device named them, such
+            as `Benjamin Smidt`. Free text, at most 255 characters.
+        aspect:
+          type: string
+          example: pose
+          description: Slug of the aspect of the unit that was calibrated, when it
+            has more than one, e.g. `intrinsics` vs `extrinsics`, or `pose` vs `joint-offsets`.
+            Validated like a slug; `null` is reserved. Miru resolves it to one of
+            the component's `aspects`, creating the aspect the first time it is reported.
+        content:
+          allOf:
+          - $ref: '#/components/schemas/InstanceContent'
+          description: The calibration's content, at most 1 MiB.
+        reported_at:
+          type: string
+          format: date-time
+          example: '2026-03-10T12:00:00Z'
+          description: When the calibration was reported to the agent on the device.
+            The agent may upload it much later, for example after an outage, so Miru
+            stores this time with the calibration, separately from `created_at`.
+    CalibrationExpansion:
+      type: string
+      enum:
+      - content
+      x-enum-varnames:
+      - CALIBRATION_EXPAND_CONTENT
     DeviceStatus:
       type: string
       description: 'The status of the device.
@@ -2845,6 +2990,118 @@ components:
       schema:
         type: string
         example: upl_123
+    calibration_order_bys:
+      name: order_by
+      in: query
+      required: false
+      style: form
+      explode: false
+      description: Sort order for the calibration results.
+      schema:
+        type: array
+        items:
+          $ref: '#/components/schemas/CalibrationOrderBy'
+        example:
+        - created_at:desc
+    calibration_list_expansions:
+      name: expand
+      in: query
+      required: false
+      description: Fields to expand on each calibration in the list.
+      schema:
+        type: array
+        items:
+          $ref: '#/components/schemas/CalibrationListExpansion'
+        example:
+        - content
+    calibration_search_component:
+      name: component
+      in: query
+      required: false
+      style: form
+      explode: false
+      description: The component slugs to filter by.
+      schema:
+        type: array
+        items:
+          type: string
+        example:
+        - arm
+    calibration_search_role:
+      name: role
+      in: query
+      required: false
+      style: form
+      explode: false
+      description: The role slugs to filter by; `null` matches calibrations reported
+        without a role. Role slugs are unique only within a component, so filter by
+        component too to match one component's role.
+      schema:
+        type: array
+        items:
+          type: string
+        example:
+        - front-left
+    calibration_search_aspect:
+      name: aspect
+      in: query
+      required: false
+      style: form
+      explode: false
+      description: The aspect slugs to filter by; `null` matches calibrations reported
+        without an aspect. Aspect slugs are unique only within a component, so filter
+        by component too to match one component's aspect.
+      schema:
+        type: array
+        items:
+          type: string
+        example:
+        - pose
+    calibration_search_serial_number:
+      name: serial_number
+      in: query
+      required: false
+      style: form
+      explode: false
+      description: The unit serial numbers to filter by.
+      schema:
+        type: array
+        items:
+          type: string
+        example:
+        - SN-1234
+    calibration_search_report_id:
+      name: report_id
+      in: query
+      required: false
+      style: form
+      explode: false
+      description: The report IDs to filter by.
+      schema:
+        type: array
+        items:
+          type: string
+        example:
+        - 0b6f3c2e-6a51-4e0f-9a43-2f1d7c9e8b10
+    calibration_id:
+      name: calibration_id
+      in: path
+      required: true
+      description: The unique identifier of the calibration.
+      schema:
+        type: string
+        example: cal_123
+    calibration_expansions:
+      name: expand
+      in: query
+      required: false
+      description: Fields to expand on the calibration.
+      schema:
+        type: array
+        items:
+          $ref: '#/components/schemas/CalibrationExpansion'
+        example:
+        - content
     git_commit_id:
       name: git_commit_id
       in: path

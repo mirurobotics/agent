@@ -327,6 +327,50 @@ paths:
             text/event-stream:
               schema:
                 $ref: '#/components/schemas/Event'
+  /cloud/calibrations:
+    get:
+      tags:
+      - Cloud Calibrations
+      summary: List
+      operationId: listCloudCalibrations
+      description: List the calibrations Miru recorded for this device. Requires the
+        agent to reach Miru. By default, results are ordered by `created_at` descending,
+        with ties broken by `id`.
+      parameters:
+      - $ref: '#/components/parameters/offset'
+      - $ref: '#/components/parameters/limit'
+      - $ref: '#/components/parameters/calibration_order_bys'
+      - $ref: '#/components/parameters/cloud_calibration_list_expansions'
+      - $ref: '#/components/parameters/calibration_search_component'
+      - $ref: '#/components/parameters/calibration_search_role'
+      - $ref: '#/components/parameters/calibration_search_aspect'
+      - $ref: '#/components/parameters/calibration_search_serial_number'
+      - $ref: '#/components/parameters/calibration_search_report_id'
+      responses:
+        '200':
+          description: Successfully retrieved the calibrations.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CloudCalibrationList'
+  /cloud/calibrations/{calibration_id}:
+    get:
+      tags:
+      - Cloud Calibrations
+      summary: Get
+      operationId: getCloudCalibration
+      description: Retrieve a calibration Miru recorded for this device by its ID.
+        Requires the agent to reach Miru.
+      parameters:
+      - $ref: '#/components/parameters/calibration_id'
+      - $ref: '#/components/parameters/cloud_calibration_expansions'
+      responses:
+        '200':
+          description: Successfully retrieved the calibration.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CloudCalibration'
 components:
   securitySchemes:
     BearerAuth:
@@ -456,6 +500,23 @@ components:
         error_status: none
         target_status: archived
         archived_at: '2026-03-10T12:00:00Z'
+    CalSearch:
+      type: string
+      description: '**Internal server use only**: an enum of possible search fields.
+
+        '
+      enum:
+      - component
+      - role
+      - aspect
+      - serial_number
+      - report_id
+      x-enum-varnames:
+      - CAL_SEARCH_COMPONENT
+      - CAL_SEARCH_ROLE
+      - CAL_SEARCH_ASPECT
+      - CAL_SEARCH_SERIAL_NUMBER
+      - CAL_SEARCH_REPORT_ID
     HealthResponse:
       type: object
       required:
@@ -596,8 +657,9 @@ components:
           example: front-left
           description: Slug of the role the calibrated unit fills on the device, such
             as `left` or `front-left`. Distinguishes several units of one component
-            on a device. Validated like a slug. Miru resolves it to one of the component's
-            `roles`, creating the role the first time it is reported.
+            on a device. Validated like a slug; `null` is reserved. Miru resolves
+            it to one of the component's `roles`, creating the role the first time
+            it is reported.
         serial_number:
           type: string
           maxLength: 255
@@ -616,8 +678,8 @@ components:
           example: pose
           description: Slug of the aspect of the unit that was calibrated, when it
             has more than one, e.g. `intrinsics` vs `extrinsics`, or `pose` vs `joint-offsets`.
-            Validated like a slug. Miru resolves it to one of the component's `aspects`,
-            creating the aspect the first time it is reported.
+            Validated like a slug; `null` is reserved. Miru resolves it to one of
+            the component's `aspects`, creating the aspect the first time it is reported.
         content:
           allOf:
           - $ref: '#/components/schemas/InstanceContent'
@@ -1412,6 +1474,186 @@ components:
           error_status: none
           target_status: deployed
           deployed_at: '2026-03-10T12:00:00Z'
+    CalibrationOrderBy:
+      type: string
+      enum:
+      - id:asc
+      - id:desc
+      - created_at:asc
+      - created_at:desc
+      - reported_at:asc
+      - reported_at:desc
+      x-enum-varnames:
+      - CALIBRATION_ORDER_BY_ID_ASC
+      - CALIBRATION_ORDER_BY_ID_DESC
+      - CALIBRATION_ORDER_BY_CREATED_AT_ASC
+      - CALIBRATION_ORDER_BY_CREATED_AT_DESC
+      - CALIBRATION_ORDER_BY_REPORTED_AT_ASC
+      - CALIBRATION_ORDER_BY_REPORTED_AT_DESC
+      default: created_at:desc
+    CloudCalibrationListExpansion:
+      type: string
+      enum:
+      - content
+      - total_count
+      x-enum-varnames:
+      - CLOUD_CALIBRATION_LIST_EXPAND_CONTENT
+      - CLOUD_CALIBRATION_LIST_EXPAND_TOTAL_COUNT
+    PaginatedList:
+      title: Paginated List
+      type: object
+      required:
+      - object
+      - limit
+      - offset
+      - has_more
+      properties:
+        object:
+          type: string
+          enum:
+          - list
+          example: list
+          x-stainless-const: true
+          description: The object type, which is always `list`.
+        total_count:
+          type: integer
+          format: int64
+          description: The total number of items in the list. By default the total
+            count is not returned. The total count must be expanded (using expand=total_count)
+            to get the total number of items in the list.
+        limit:
+          type: integer
+          description: The maximum number of items to return. A limit of 15 with an
+            offset of 0 returns items 1-15.
+          default: 10
+          minimum: 1
+          maximum: 100
+        offset:
+          type: integer
+          description: The offset of the items to return. An offset of 10 with a limit
+            of 10 returns items 11-20.
+          default: 0
+          minimum: 0
+        has_more:
+          type: boolean
+          description: True if there are more items in the list to return. False if
+            there are no more items to return.
+          example: false
+    CloudCalibration:
+      title: Cloud Calibration
+      type: object
+      description: One calibration reported by a device for a unit of a component.
+        Calibrations are immutable and append-only; a device's history is kept per
+        component, role, and aspect. Content is at most 1 MiB.
+      required:
+      - object
+      - id
+      - component
+      - role
+      - aspect
+      - serial_number
+      - digest
+      - report_id
+      - reported_at
+      - created_at
+      properties:
+        object:
+          type: string
+          enum:
+          - calibration
+          example: calibration
+          x-stainless-const: true
+          description: The object type, which is always `calibration`.
+        id:
+          type: string
+          example: cal_123
+          description: ID of the calibration, generated by Miru.
+        component:
+          type: string
+          example: arm
+          description: Slug of the component the calibrated unit belongs to, as it
+            was reported.
+        role:
+          type: string
+          nullable: true
+          example: front-left
+          description: Slug of the role the calibrated unit fills on the device, as
+            it was reported; null if no role was reported.
+        aspect:
+          type: string
+          nullable: true
+          example: pose
+          description: Slug of the aspect of the unit that was calibrated, as it was
+            reported; null if no aspect was reported.
+        serial_number:
+          type: string
+          nullable: true
+          maxLength: 255
+          example: SN-1234
+          description: Serial number of the physical unit that was calibrated, not
+            of the device, such as `SN-1234`, or null if none was reported. Free text,
+            at most 255 characters.
+        digest:
+          type: string
+          example: sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+          description: Digest of the content, formatted as `sha256:` followed by 64
+            lowercase hex characters.
+        report_id:
+          type: string
+          format: uuid
+          example: 0b6f3c2e-6a51-4e0f-9a43-2f1d7c9e8b10
+          description: ID the agent gave the report this calibration came from.
+        reported_at:
+          type: string
+          format: date-time
+          example: '2021-01-01T00:00:00Z'
+          description: Timestamp of when the calibration was reported to the agent
+            on the device. The agent may upload it much later, for example after an
+            outage, so this can be well before `created_at`.
+        created_at:
+          type: string
+          format: date-time
+          example: '2021-01-01T00:00:00Z'
+          description: Timestamp of when Miru recorded the calibration.
+        content:
+          allOf:
+          - $ref: '#/components/schemas/InstanceContent'
+          description: The calibration's content. Expand using `expand=content` in
+            the query string.
+      example:
+        object: calibration
+        id: cal_123
+        component: arm
+        role: front-left
+        aspect: null
+        serial_number: SN-1234
+        digest: sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+        report_id: 0b6f3c2e-6a51-4e0f-9a43-2f1d7c9e8b10
+        reported_at: '2021-01-01T00:00:00Z'
+        created_at: '2021-01-01T00:00:00Z'
+        content:
+          format: json
+          data: "{\n  \"x\": 0.412,\n  \"y\": -0.087,\n  \"z\": 0.256,\n  \"roll\"\
+            : 0.0,\n  \"pitch\": 0.0,\n  \"yaw\": 1.571\n}\n"
+    CloudCalibrationList:
+      title: Cloud Calibration List
+      allOf:
+      - $ref: '#/components/schemas/PaginatedList'
+      - type: object
+        required:
+        - data
+        properties:
+          data:
+            type: array
+            items:
+              $ref: '#/components/schemas/CloudCalibration'
+            description: The list of calibrations.
+    CloudCalibrationExpansion:
+      type: string
+      enum:
+      - content
+      x-enum-varnames:
+      - CLOUD_CALIBRATION_EXPAND_CONTENT
     Error:
       type: object
       required:
@@ -1471,3 +1713,138 @@ components:
       schema:
         type: string
         example: rls_123
+    offset:
+      name: offset
+      in: query
+      required: false
+      description: The offset of the items to return. An offset of 10 with a limit
+        of 10 returns items 11-20.
+      schema:
+        type: integer
+        default: 0
+        minimum: 0
+        example: 0
+    limit:
+      name: limit
+      in: query
+      required: false
+      description: The maximum number of items to return. A limit of 15 with an offset
+        of 0 returns items 1-15.
+      schema:
+        type: integer
+        default: 10
+        minimum: 1
+        maximum: 100
+        example: 10
+    calibration_order_bys:
+      name: order_by
+      in: query
+      required: false
+      style: form
+      explode: false
+      description: Sort order for the calibration results.
+      schema:
+        type: array
+        items:
+          $ref: '#/components/schemas/CalibrationOrderBy'
+        example:
+        - created_at:desc
+    cloud_calibration_list_expansions:
+      name: expand
+      in: query
+      required: false
+      description: Fields to expand on each calibration in the list.
+      schema:
+        type: array
+        items:
+          $ref: '#/components/schemas/CloudCalibrationListExpansion'
+        example:
+        - content
+    calibration_search_component:
+      name: component
+      in: query
+      required: false
+      style: form
+      explode: false
+      description: The component slugs to filter by.
+      schema:
+        type: array
+        items:
+          type: string
+        example:
+        - arm
+    calibration_search_role:
+      name: role
+      in: query
+      required: false
+      style: form
+      explode: false
+      description: The role slugs to filter by; `null` matches calibrations reported
+        without a role. Role slugs are unique only within a component, so filter by
+        component too to match one component's role.
+      schema:
+        type: array
+        items:
+          type: string
+        example:
+        - front-left
+    calibration_search_aspect:
+      name: aspect
+      in: query
+      required: false
+      style: form
+      explode: false
+      description: The aspect slugs to filter by; `null` matches calibrations reported
+        without an aspect. Aspect slugs are unique only within a component, so filter
+        by component too to match one component's aspect.
+      schema:
+        type: array
+        items:
+          type: string
+        example:
+        - pose
+    calibration_search_serial_number:
+      name: serial_number
+      in: query
+      required: false
+      style: form
+      explode: false
+      description: The unit serial numbers to filter by.
+      schema:
+        type: array
+        items:
+          type: string
+        example:
+        - SN-1234
+    calibration_search_report_id:
+      name: report_id
+      in: query
+      required: false
+      style: form
+      explode: false
+      description: The report IDs to filter by.
+      schema:
+        type: array
+        items:
+          type: string
+        example:
+        - 0b6f3c2e-6a51-4e0f-9a43-2f1d7c9e8b10
+    calibration_id:
+      name: calibration_id
+      in: path
+      required: true
+      description: The unique identifier of the calibration.
+      schema:
+        type: string
+        example: cal_123
+    cloud_calibration_expansions:
+      name: expand
+      in: query
+      required: false
+      description: Fields to expand on the calibration.
+      schema:
+        type: array
+        items:
+          $ref: '#/components/schemas/CloudCalibrationExpansion'
+        example:
+        - content
