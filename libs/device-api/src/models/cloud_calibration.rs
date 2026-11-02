@@ -9,9 +9,9 @@
 use crate::models;
 use serde::{Deserialize, Serialize};
 
-/// PlatformCalibration : A calibration the device reported for a unit of a component. Calibrations are immutable.
+/// CloudCalibration : One calibration reported by a device for a unit of a component. Calibrations are immutable and append-only; a device's history is kept per component, role, and aspect. Content is at most 1 MiB.
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
-pub struct PlatformCalibration {
+pub struct CloudCalibration {
     /// The object type, which is always `calibration`.
     #[serde(rename = "object")]
     pub object: Object,
@@ -42,15 +42,15 @@ pub struct PlatformCalibration {
     /// Timestamp of when Miru recorded the calibration.
     #[serde(rename = "created_at")]
     pub created_at: String,
-    /// The calibration's content, at most 1 MiB. Expand using `expand=content` in the query string.
+    /// The calibration's content. Expand using `expand=content` in the query string.
     #[serde(rename = "content", skip_serializing_if = "Option::is_none")]
     pub content: Option<Box<models::InstanceContent>>,
 }
 
-impl PlatformCalibration {
-    /// A calibration the device reported for a unit of a component. Calibrations are immutable.
-    pub fn new(object: Object, id: String, component: String, role: Option<String>, aspect: Option<String>, serial_number: Option<String>, digest: String, report_id: uuid::Uuid, reported_at: String, created_at: String) -> PlatformCalibration {
-        PlatformCalibration {
+impl CloudCalibration {
+    /// One calibration reported by a device for a unit of a component. Calibrations are immutable and append-only; a device's history is kept per component, role, and aspect. Content is at most 1 MiB.
+    pub fn new(object: Object, id: String, component: String, role: Option<String>, aspect: Option<String>, serial_number: Option<String>, digest: String, report_id: uuid::Uuid, reported_at: String, created_at: String) -> CloudCalibration {
+        CloudCalibration {
             object,
             id,
             component,

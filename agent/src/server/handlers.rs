@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 // internal crates
 use crate::errors::Error;
-use crate::server::{errors::*, response, routes, state::State};
+use crate::server::{errors::*, routes, state::State};
 use crate::services::{
     calibration as calibration_svc, deployment as dpl_svc, device as dvc_svc,
     file_rule as file_rule_svc, git_commit as git_cmt_svc, release as rls_svc, HttpBackend,
@@ -15,7 +15,7 @@ use device_api::models as device_server;
 
 // external crates
 use axum::{
-    extract::{rejection::JsonRejection, Path, Query, State as AxumState},
+    extract::{rejection::JsonRejection, Path, State as AxumState},
     http::StatusCode,
     response::IntoResponse,
     Json,
@@ -208,38 +208,6 @@ fn reject_body(rejection: JsonRejection) -> ServerErr {
         msg: rejection.body_text(),
         trace: trace!(),
     })
-}
-
-// ============================ PLATFORM CALIBRATIONS ============================== //
-pub async fn list_platform_calibrations(
-    AxumState(state): AxumState<Arc<State>>,
-    Query(query): Query<Vec<(String, String)>>,
-) -> impl IntoResponse {
-    handle(
-        async {
-            let backend = HttpBackend::new(state.http_client.as_ref(), state.token_mngr.as_ref());
-            let list = backend.list_calibrations(&query).await?;
-            Ok::<_, ServerErr>(response::to_platform_calibration_list(list))
-        },
-        "Error listing platform calibrations",
-    )
-    .await
-}
-
-pub async fn get_platform_calibration(
-    AxumState(state): AxumState<Arc<State>>,
-    Path(calibration_id): Path<String>,
-    Query(query): Query<Vec<(String, String)>>,
-) -> impl IntoResponse {
-    handle(
-        async {
-            let backend = HttpBackend::new(state.http_client.as_ref(), state.token_mngr.as_ref());
-            let cal = backend.get_calibration(&calibration_id, &query).await?;
-            Ok::<_, ServerErr>(response::to_platform_calibration(cal))
-        },
-        "Error getting platform calibration",
-    )
-    .await
 }
 
 // ================================ UTILITIES ====================================== //

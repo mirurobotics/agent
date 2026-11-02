@@ -11,32 +11,29 @@ use serde::{Deserialize, Serialize};
 
 /// 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-pub enum PlatformCalibrationListExpansion {
+pub enum CloudCalibrationExpansion {
     #[serde(rename = "content")]
-    PLATFORM_CALIBRATION_LIST_EXPAND_CONTENT,
-    #[serde(rename = "total_count")]
-    PLATFORM_CALIBRATION_LIST_EXPAND_TOTAL_COUNT,
+    CLOUD_CALIBRATION_EXPAND_CONTENT,
 
     /// Catch-all for values added by the API after this client was
     /// generated. `#[serde(other)]` makes unrecognized strings
     /// deserialize here instead of failing the whole payload.
     #[serde(other)]
-    PlatformCalibrationListExpansionUnknown,
+    CloudCalibrationExpansionUnknown,
 }
 
-impl std::fmt::Display for PlatformCalibrationListExpansion {
+impl std::fmt::Display for CloudCalibrationExpansion {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Self::PLATFORM_CALIBRATION_LIST_EXPAND_CONTENT => write!(f, "content"),
-            Self::PLATFORM_CALIBRATION_LIST_EXPAND_TOTAL_COUNT => write!(f, "total_count"),
-            Self::PlatformCalibrationListExpansionUnknown => write!(f, "unknown"),
+            Self::CLOUD_CALIBRATION_EXPAND_CONTENT => write!(f, "content"),
+            Self::CloudCalibrationExpansionUnknown => write!(f, "unknown"),
         }
     }
 }
 
-impl Default for PlatformCalibrationListExpansion {
-    fn default() -> PlatformCalibrationListExpansion {
-        Self::PLATFORM_CALIBRATION_LIST_EXPAND_CONTENT
+impl Default for CloudCalibrationExpansion {
+    fn default() -> CloudCalibrationExpansion {
+        Self::CLOUD_CALIBRATION_EXPAND_CONTENT
     }
 }
 

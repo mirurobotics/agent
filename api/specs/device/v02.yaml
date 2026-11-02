@@ -423,16 +423,30 @@ paths:
       - Events
       summary: Stream Events
       operationId: streamEvents
-      description: Subscribe to a Server-Sent Events (SSE) stream of agent lifecycle
+      description: 'Subscribe to a Server-Sent Events (SSE) stream of agent lifecycle
         events.
+
+
+        The stream replays retained historical events after the cursor, then
+
+        delivers live events as they occur. Events are delivered at-least-once;
+
+        clients should deduplicate by event `id`.
+
+
+        Use the `after` query parameter or `Last-Event-ID` header to resume
+
+        from a previous position. If the cursor is older than the earliest
+
+        retained event, the server returns `410 Gone`.
+
+        '
       parameters:
       - name: after
         in: query
         required: false
-        description: Event ID cursor to resume from. Retained events with `id` greater
-          than this value are replayed, then live events follow. If the cursor is
-          older than the earliest retained event, the server returns `410 Gone`. Takes
-          precedence over the `Last-Event-ID` header.
+        description: Event ID cursor. Only events with `id` greater than this value
+          are returned. Takes precedence over the `Last-Event-ID` header.
         schema:
           type: integer
           format: int64
@@ -454,34 +468,34 @@ paths:
         in: header
         required: false
         description: Standard SSE reconnection header. Used as the replay cursor if
-          `after` query parameter is not provided. If the cursor is older than the
-          earliest retained event, the server returns `410 Gone`.
+          `after` query parameter is not provided.
         schema:
           type: string
         example: '42'
       responses:
         '200':
           description: 'SSE event stream. Each event is delivered as an SSE frame
-            with `id`, `event`, and `data` fields. Events are delivered at-least-once,
-            so deduplicate by event `id`. A ": heartbeat" comment is sent immediately
-            when the connection opens, and again every 30 seconds while the stream
-            is idle. Comments carry no data and should be ignored by clients.'
+            with `id`, `event`, and `data` fields. A ": heartbeat" comment is sent
+            immediately when the connection opens, and again every 30 seconds while
+            the stream is idle. Comments carry no data and should be ignored by clients.'
           content:
             text/event-stream:
               schema:
                 $ref: '#/components/schemas/Event'
-  /platform/calibrations:
+  /cloud/calibrations:
     get:
       tags:
-      - Platform Calibrations
+      - Cloud Calibrations
       summary: List
-      operationId: listPlatformCalibrations
-      description: List the device's calibrations from the control plane.
+      operationId: listCloudCalibrations
+      description: List the calibrations Miru recorded for this device. Requires the
+        agent to reach Miru. By default, results are ordered by `created_at` descending,
+        with ties broken by `id`.
       parameters:
       - $ref: '#/components/parameters/offset'
       - $ref: '#/components/parameters/limit'
       - $ref: '#/components/parameters/calibration_order_bys'
-      - $ref: '#/components/parameters/platform_calibration_list_expansions'
+      - $ref: '#/components/parameters/cloud_calibration_list_expansions'
       - $ref: '#/components/parameters/calibration_search_component'
       - $ref: '#/components/parameters/calibration_search_role'
       - $ref: '#/components/parameters/calibration_search_aspect'
@@ -493,24 +507,25 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformCalibrationList'
-  /platform/calibrations/{calibration_id}:
+                $ref: '#/components/schemas/CloudCalibrationList'
+  /cloud/calibrations/{calibration_id}:
     get:
       tags:
-      - Platform Calibrations
+      - Cloud Calibrations
       summary: Get
-      operationId: getPlatformCalibration
-      description: Retrieve a calibration by its ID from the control plane.
+      operationId: getCloudCalibration
+      description: Retrieve a calibration Miru recorded for this device by its ID.
+        Requires the agent to reach Miru.
       parameters:
       - $ref: '#/components/parameters/calibration_id'
-      - $ref: '#/components/parameters/platform_calibration_expansions'
+      - $ref: '#/components/parameters/cloud_calibration_expansions'
       responses:
         '200':
           description: Successfully retrieved the calibration.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformCalibration'
+                $ref: '#/components/schemas/CloudCalibration'
 components:
   securitySchemes:
     BearerAuth:
@@ -1354,8 +1369,26 @@ components:
     BaseFileRule:
       title: Base File Rule
       type: object
-      description: A file rule declares which files on a device Miru manages and whether
-        to upload them, delete them, or both.
+      description: 'A file rule declares which files on a device Miru manages and
+        what to do
+
+        with them: upload them to a bucket, delete the local copies once they
+
+        are no longer needed, or both. `retention` is optional and marks the
+
+        rules that delete: when it is absent the device keeps matching files
+
+        indefinitely — Miru never deletes them — and when it is present the rule
+
+        deletes each matching file once its retention guarantee ends. A rule
+
+        that both deletes and uploads always states `retention.require_upload`,
+
+        so whether local deletion waits for the upload is itself an explicit
+
+        decision.
+
+        '
       required:
       - object
       - id
@@ -1613,14 +1646,14 @@ components:
       - CALIBRATION_ORDER_BY_REPORTED_AT_ASC
       - CALIBRATION_ORDER_BY_REPORTED_AT_DESC
       default: created_at:desc
-    PlatformCalibrationListExpansion:
+    CloudCalibrationListExpansion:
       type: string
       enum:
       - content
       - total_count
       x-enum-varnames:
-      - PLATFORM_CALIBRATION_LIST_EXPAND_CONTENT
-      - PLATFORM_CALIBRATION_LIST_EXPAND_TOTAL_COUNT
+      - CLOUD_CALIBRATION_LIST_EXPAND_CONTENT
+      - CLOUD_CALIBRATION_LIST_EXPAND_TOTAL_COUNT
     PaginatedList:
       title: Paginated List
       type: object
@@ -1661,11 +1694,12 @@ components:
           description: True if there are more items in the list to return. False if
             there are no more items to return.
           example: false
-    PlatformCalibration:
-      title: Platform Calibration
+    CloudCalibration:
+      title: Cloud Calibration
       type: object
-      description: A calibration the device reported for a unit of a component. Calibrations
-        are immutable.
+      description: One calibration reported by a device for a unit of a component.
+        Calibrations are immutable and append-only; a device's history is kept per
+        component, role, and aspect. Content is at most 1 MiB.
       required:
       - object
       - id
@@ -1739,8 +1773,8 @@ components:
         content:
           allOf:
           - $ref: '#/components/schemas/InstanceContent'
-          description: The calibration's content, at most 1 MiB. Expand using `expand=content`
-            in the query string.
+          description: The calibration's content. Expand using `expand=content` in
+            the query string.
       example:
         object: calibration
         id: cal_123
@@ -1756,8 +1790,8 @@ components:
           format: json
           data: "{\n  \"x\": 0.412,\n  \"y\": -0.087,\n  \"z\": 0.256,\n  \"roll\"\
             : 0.0,\n  \"pitch\": 0.0,\n  \"yaw\": 1.571\n}\n"
-    PlatformCalibrationList:
-      title: Platform Calibration List
+    CloudCalibrationList:
+      title: Cloud Calibration List
       allOf:
       - $ref: '#/components/schemas/PaginatedList'
       - type: object
@@ -1767,14 +1801,14 @@ components:
           data:
             type: array
             items:
-              $ref: '#/components/schemas/PlatformCalibration'
+              $ref: '#/components/schemas/CloudCalibration'
             description: The list of calibrations.
-    PlatformCalibrationExpansion:
+    CloudCalibrationExpansion:
       type: string
       enum:
       - content
       x-enum-varnames:
-      - PLATFORM_CALIBRATION_EXPAND_CONTENT
+      - CLOUD_CALIBRATION_EXPAND_CONTENT
     Error:
       type: object
       required:
@@ -1863,14 +1897,14 @@ components:
       required: false
       style: form
       explode: false
-      description: Sort order for the calibration results. Ties are broken by `id`.
+      description: Sort order for the calibration results.
       schema:
         type: array
         items:
           $ref: '#/components/schemas/CalibrationOrderBy'
         example:
         - created_at:desc
-    platform_calibration_list_expansions:
+    cloud_calibration_list_expansions:
       name: expand
       in: query
       required: false
@@ -1878,7 +1912,7 @@ components:
       schema:
         type: array
         items:
-          $ref: '#/components/schemas/PlatformCalibrationListExpansion'
+          $ref: '#/components/schemas/CloudCalibrationListExpansion'
         example:
         - content
     calibration_search_component:
@@ -1958,7 +1992,7 @@ components:
       schema:
         type: string
         example: cal_123
-    platform_calibration_expansions:
+    cloud_calibration_expansions:
       name: expand
       in: query
       required: false
@@ -1966,6 +2000,6 @@ components:
       schema:
         type: array
         items:
-          $ref: '#/components/schemas/PlatformCalibrationExpansion'
+          $ref: '#/components/schemas/CloudCalibrationExpansion'
         example:
         - content

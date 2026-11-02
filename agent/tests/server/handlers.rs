@@ -51,18 +51,14 @@ pub mod version_tests {
 }
 
 pub mod routes {
-    use std::collections::HashMap;
     use std::sync::Arc;
 
     use axum::body::{self, Body};
-    use axum::extract::{Path, RawQuery};
     use axum::http::{Request, StatusCode};
-    use axum::response::{IntoResponse, Response};
     use axum::routing::get;
-    use axum::{Json, Router};
+    use axum::Router;
     use tower::ServiceExt;
 
-    use backend_api::models as backend_client;
     use device_api::models as openapi;
     use miru_agent::calibrations::UploaderOptions;
     use miru_agent::events::hub::{EventHub, SpawnOptions};
@@ -88,41 +84,6 @@ pub mod routes {
         Utc.with_ymd_and_hms(2025, 6, 15, 12, 0, 0).unwrap()
     }
 
-    /// Echoes the query it got as the component slug, so tests can check the
-    /// agent forwarded it. Rejects an `invalid` query as Miru would.
-    async fn list_calibrations(RawQuery(query): RawQuery) -> Response {
-        let query = query.unwrap_or_default();
-        if query.contains("invalid") {
-            let error = backend_client::ErrorResponse::new(backend_client::Error::new(
-                "invalid_query".to_string(),
-                HashMap::new(),
-                "invalid query".to_string(),
-            ));
-            return (StatusCode::UNPROCESSABLE_ENTITY, Json(error)).into_response();
-        }
-        Json(backend_client::CalibrationList {
-            data: vec![backend_client::Calibration {
-                id: "cal_1".into(),
-                component_slug: query,
-                ..Default::default()
-            }],
-            ..Default::default()
-        })
-        .into_response()
-    }
-
-    async fn get_calibration(Path(id): Path<String>) -> Response {
-        if id != "cal_1" {
-            return StatusCode::NOT_FOUND.into_response();
-        }
-        Json(backend_client::Calibration {
-            id,
-            component_slug: "arm".into(),
-            ..Default::default()
-        })
-        .into_response()
-    }
-
     struct Fixture {
         state: Arc<State>,
         app: Router,
@@ -143,16 +104,14 @@ pub mod routes {
             let (sender, _receiver) = mpsc::channel(1);
             let syncer = Arc::new(Syncer::new(sender));
 
-            // Backend mock server for cache-miss fallbacks and platform reads.
-            // Missing resources respond with 404 so the raw RequestFailed
-            // error propagates through (HTTP 404 to clients).
+            // Backend mock server. Handlers that reach the cache-miss fallback
+            // hit this server; all routes respond with 404 so the raw
+            // RequestFailed error propagates through (HTTP 404 to clients).
             let backend_router = Router::new()
                 .route("/deployments/{id}", get(mock::not_found))
                 .route("/releases/{id}", get(mock::not_found))
                 .route("/git_commits/{id}", get(mock::not_found))
-                .route("/file_rules/{id}", get(mock::not_found))
-                .route("/calibrations", get(list_calibrations))
-                .route("/calibrations/{id}", get(get_calibration));
+                .route("/file_rules/{id}", get(mock::not_found));
             let backend = mock::run_server(backend_router).await;
             let real_http_client =
                 Arc::new(miru_agent::http::Client::new(&backend.base_url).unwrap());
@@ -723,64 +682,6 @@ pub mod routes {
             let (status, bytes) = f.post_json(URI, request("json", "{}")).await;
             assert_eq!(status, StatusCode::INSUFFICIENT_STORAGE);
             assert_eq!(error_code(&bytes), "calibration_buffer_full");
-        }
-    }
-
-    mod platform_calibrations {
-        use super::*;
-
-        #[tokio::test]
-        async fn list_platform_calibrations_returns_200_with_device_calibrations() {
-            let f = Fixture::new("handler_list_platform_calibrations").await;
-
-            let (status, bytes) = f
-                .get("/v0.2/platform/calibrations?role=null&expand=content")
-                .await;
-            assert_eq!(status, StatusCode::OK);
-
-            let actual: openapi::PlatformCalibrationList = serde_json::from_slice(&bytes).unwrap();
-            let ids: Vec<(&str, &str)> = actual
-                .data
-                .iter()
-                .map(|c| (c.id.as_str(), c.component.as_str()))
-                .collect();
-            assert_eq!(ids, vec![("cal_1", "role=null&expand=content")]);
-        }
-
-        #[tokio::test]
-        async fn list_platform_calibrations_returns_miru_rejection() {
-            let f = Fixture::new("handler_list_platform_calibrations_rejected").await;
-
-            let (status, bytes) = f.get("/v0.2/platform/calibrations?role=invalid").await;
-            assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
-
-            let actual: openapi::ErrorResponse = serde_json::from_slice(&bytes).unwrap();
-            assert_eq!(actual.error.code, "invalid_query");
-        }
-
-        #[tokio::test]
-        async fn get_platform_calibration_returns_200() {
-            let f = Fixture::new("handler_get_platform_calibration").await;
-
-            let (status, bytes) = f.get("/v0.2/platform/calibrations/cal_1").await;
-            assert_eq!(status, StatusCode::OK);
-
-            let actual: openapi::PlatformCalibration = serde_json::from_slice(&bytes).unwrap();
-            assert_eq!(
-                (actual.id.as_str(), actual.component.as_str()),
-                ("cal_1", "arm")
-            );
-        }
-
-        #[tokio::test]
-        async fn get_platform_calibration_returns_404_when_missing() {
-            let f = Fixture::new("handler_get_platform_calibration_missing").await;
-
-            let (status, bytes) = f.get("/v0.2/platform/calibrations/cal_missing").await;
-            assert_eq!(status, StatusCode::NOT_FOUND);
-
-            let actual: openapi::ErrorResponse = serde_json::from_slice(&bytes).unwrap();
-            assert_eq!(actual.error.code, "internal_server_error");
         }
     }
 }

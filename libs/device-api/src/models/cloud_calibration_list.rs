@@ -10,7 +10,7 @@ use crate::models;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
-pub struct PlatformCalibrationList {
+pub struct CloudCalibrationList {
     /// The object type, which is always `list`.
     #[serde(rename = "object")]
     pub object: Object,
@@ -28,12 +28,12 @@ pub struct PlatformCalibrationList {
     pub has_more: bool,
     /// The list of calibrations.
     #[serde(rename = "data")]
-    pub data: Vec<models::PlatformCalibration>,
+    pub data: Vec<models::CloudCalibration>,
 }
 
-impl PlatformCalibrationList {
-    pub fn new(object: Object, limit: i32, offset: i32, has_more: bool, data: Vec<models::PlatformCalibration>) -> PlatformCalibrationList {
-        PlatformCalibrationList {
+impl CloudCalibrationList {
+    pub fn new(object: Object, limit: i32, offset: i32, has_more: bool, data: Vec<models::CloudCalibration>) -> CloudCalibrationList {
+        CloudCalibrationList {
             object,
             total_count: None,
             limit,
