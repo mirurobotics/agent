@@ -11,82 +11,237 @@ info:
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
-  x-release-version: v0.2.4
+  x-release-version: v0.2.5-beta.1
   x-git-commit:
-    sha: 13405ec342d31653d51698d8da8b860db728df18
-    url: https://github.com/mirurobotics/openapi/commit/13405ec342d31653d51698d8da8b860db728df18
-    message: 'chore(stlc): seal custom-code tracking files (#396)
+    sha: b1379e91e55f80c4addc371e4d77d5f2dc057b42
+    url: https://github.com/mirurobotics/openapi/commit/b1379e91e55f80c4addc371e4d77d5f2dc057b42
+    message: 'feat(device,agent): let device apps read their calibrations from Miru
+      via /cloud (#370)
 
 
-      Automated by the stlc generate workflow: a push-to-main or manual
+      <!-- claude-projects-attribution: {"github_login":"miru-agents"} -->
 
-      `workflow_dispatch` publish re-sealed custom code, updating the tracking
+      _Requested by **bens-agent** · [project
 
-      files under `sdkgen/*/stainless/custom-code/`. Publishing targets the
-
-      private staging repos. Safe to merge - this PR''s head branch
-
-      `stlc/seal-tracking` is skipped by the generate workflow''s skip-bot
-
-      guard in `detect`, and on merge the push loop-breaker `guard` sees only
-
-      custom-code changes and runs no rebuild.
+      thread](https://claude.ai/code/project/chan_015imaa8aZrnubYZcZCvjeHx?thread=cmsg_015imaa8aZrnubYZcZCvjeHxWGqHhKiQZQ2XvsvqiqABoN)_
 
 
-      <!-- codesmith:footer -->
-
-      ---
-
-      <a
-
-      href="https://app.blacksmith.sh/mirurobotics/codesmith/openapi/pr/396?autoLogin=true&ref=codesmith_pr_footer"><picture><source
-
-      media="(prefers-color-scheme: dark)"
-
-      srcset="https://pr-comments-assets.blacksmith.sh/codesmith/view-with-codesmith-dark-v3.svg"><source
-
-      media="(prefers-color-scheme: light)"
-
-      srcset="https://pr-comments-assets.blacksmith.sh/codesmith/view-with-codesmith-light-v3.svg"><img
-
-      alt="View with [code]smith"
-
-      src="https://pr-comments-assets.blacksmith.sh/codesmith/view-with-codesmith-dark-v3-3x.png"
-
-      width="162" height="28"></picture></a> <a
-
-      href="https://backend.blacksmith.sh/track/enable-autofix?expires=1795887387&installation_model_id=425273&pr_number=396&ref=codesmith_pr_footer&repository=mirurobotics%2Fopenapi&return_to=https%3A%2F%2Fgithub.com%2Fmirurobotics%2Fopenapi%2Fpull%2F396&signature=36ab39c5d717b3d9ff699ab6514ceba14c9fae2a8d4a356f380950ed197d6701"><picture><source
-
-      media="(prefers-color-scheme: dark)"
-
-      srcset="https://pr-comments-assets.blacksmith.sh/codesmith/autofix-with-codesmith-dark.svg"><source
-
-      media="(prefers-color-scheme: light)"
-
-      srcset="https://pr-comments-assets.blacksmith.sh/codesmith/autofix-with-codesmith-light.svg"><img
-
-      alt="Autofix with [code]smith"
-
-      src="https://pr-comments-assets.blacksmith.sh/codesmith/autofix-with-codesmith-dark-3x.png"
-
-      width="190" height="28"></picture></a>
-
-      <sup>Need help on this PR? Tag <code>@codesmith</code> with what you
-
-      need.</sup>
+      ## Summary
 
 
-      <!-- codesmith:autofix:disabled -->
+      On-device apps can report calibrations but cannot read them back, so a
 
-      <!-- /codesmith:footer -->
+      re-imaged or replaced station PC has no way to import its calibrations
+
+      from Miru. This adds read endpoints, scoped to the calling device''s own
+
+      calibrations. Miru is the source of truth: the agent reads from Miru on
+
+      each request, and a network error is an error.
 
 
-      Co-authored-by: stlc-sealback-bot[bot] <298483487+stlc-sealback-bot[bot]@users.noreply.github.com>'
-    author: stlc-sealback-bot[bot]
+      **Device API** (served by the agent)
+
+      - `GET /cloud/calibrations` (`listCloudCalibrations`): `offset`,
+
+      `limit`, `order_by`, `expand` (`content`, `total_count`), and array
+
+      filters `component`, `role`, `aspect` (slugs), `serial_number`,
+
+      `report_id`.
+
+      - `GET /cloud/calibrations/{calibration_id}` (`getCloudCalibration`):
+
+      `expand=content`.
+
+      - Both return a new device `CloudCalibration`: the platform
+
+      `Calibration` without `device_id` (`component`, `role`, `aspect` slugs,
+
+      `serial_number`, `digest`, `report_id`, timestamps, expandable
+
+      `content`). The `/cloud` prefix marks routes the agent serves by reading
+
+      from Miru with the device''s credentials; both say they require the agent
+
+      to reach Miru.
+
+      - SDK: `client.cloud.calibrations.list(...)` and
+
+      `client.cloud.calibrations.retrieve(...)` in
+
+      `tools/stainless/device.yml`. `client.calibrations.create(...)` is
+
+      unchanged. The `cloud` namespace leaves room for a device-side
+
+      `Calibration` model later without a name clash.
+
+      - A calibration appears only once the agent has uploaded it.
+
+
+      **Agent API** (backend, what the agent calls)
+
+      - `GET /calibrations` and `GET /calibrations/{calibration_id}`, same
+
+      parameters, Miru-Version header. The device is derived from the token;
+
+      another device''s calibration is not found.
+
+      - Agent `Calibration` gains the reported `component_slug`, `role_slug`,
+
+      `aspect_slug` and `reported_by_identifier` next to their IDs, and an
+
+      expandable `content`. This also applies to the existing `POST
+
+      /calibrations` response (additive).
+
+
+      **Shared filters** (platform, agent, device): `role=null` and
+
+      `aspect=null` match calibrations reported without a role or aspect. On
+
+      the Platform API this is a description change to existing params; the
+
+      backend implements it once for all three. The device and agent create
+
+      requests now say the slug `null` is reserved for `role` and `aspect`.
+
+
+      ## Precedent
+
+
+      - The device `CloudCalibration` is a copy of the platform `Calibration`
+
+      (#387) without `device_id`, per review. Per review, cloud calibrations
+
+      have their own files, separate from the device''s own calibrations:
+
+      `apps/device-server/paths/cloud-calibrations.yaml` (routes, `CalSearch`,
+
+      `CloudCalibrationExpansion` / `CloudCalibrationListExpansion`) and
+
+      `apps/device-server/components/schemas/cloud-calibration.yaml`, laid out
+
+      like the device `Deployment` and the Agent API''s `DplSearch` /
+
+      `DeploymentExpansion`. Cloud routes come last in `openapi.yaml` and in
+
+      `device.yml`. The Device API doesn''t reference backend-server files.
+
+      - List/get shape, `order_by` and the `calibration_search_*` array
+
+      filters mirror the Frontend API''s `listCalibrations` / `getCalibration`
+
+      in `apis/configs/paths/calibrations.yaml`, and reuse its
+
+      `calibration_order_bys` and `serial_number`/`report_id` params.
+
+      - The slug filters (`calibration_search_component`, `_role`, `_aspect`)
+
+      came from the platform path file (#387) and now live in the shared file,
+
+      used by platform, agent and device.
+
+      - `null` in a slug filter is new; elsewhere our API matches null only
+
+      through `search` (`role_id:null`). Chosen by the author for simpler
+
+      device calls, with `null` reserved as a slug.
+
+      - Agent names, per review: the slug fields are `*_slug` so they don''t
+
+      read as component objects next to `component_id`, and the reported text
+
+      is `reported_by_identifier`, matching `ExternalUser.identifier`, because
+
+      `reported_by` elsewhere is the expansion of `reported_by_id`. The agent
+
+      `CreateCalibrationRequest` (#395) keeps `component`, `role`, `aspect`
+
+      and `reported_by`.
+
+      - `/cloud` is new. Stainless namespacing with `subresources` follows
+
+      `users.settings` and `workspaces.settings` in
+
+      `tools/stainless/frontend.yml`.
+
+
+      ## Rollout plan
+
+
+      1. This PR, then cut `agent/`, `device/` and `platform/` releases.
+
+      2. `backend`: vendor the agent and platform specs; serve `GET
+
+      /calibrations` and `GET /calibrations/{id}` filtered to the token''s
+
+      device; add the reported fields to the agent `Calibration` (including
+
+      the POST response); treat `null` in the `role`/`aspect` filters as
+
+      "unset" on the agent and platform lists; reject `null` as a reported
+
+      role or aspect slug.
+
+      3. `agent`: vendor both specs, regenerate, and add
+
+      `/v0.2/cloud/calibrations` handlers that call the Agent API with the
+
+      device token and convert its `Calibration` to `CloudCalibration` in
+
+      `server/response.rs`. On a Miru 401 the agent refreshes its session and
+
+      retries; it maps upstream auth and network failures to its own errors,
+
+      so a Device API 401 still only means a bad local token. Reject `null`
+
+      for `role` and `aspect` at `POST /calibrations` intake with a 400;
+
+      reports already queued by older agents get the backend''s validation
+
+      error like any other rejected report.
+
+      4. Python device SDK release via Stainless; docs.
+
+
+      ## Reviewer notes
+
+
+      - Scope is this device''s own calibrations. Reprovisioning rebinds the
+
+      same device record, so a re-imaged station still sees its history.
+
+      Pulling another device''s calibrations by serial number is left out; it
+
+      can be added later without breaking anything.
+
+      - Open in review: whether the agent list filters should also be named
+
+      `*_slug`.
+
+      - Proposed follow-up: define the fields `CloudCalibration` shares with
+
+      the platform `Calibration` once in `apis/configs/` and compose both with
+
+      `allOf`. Left out here because it changes the public platform bundle.
+
+
+      🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+
+      https://claude.ai/code/session_01XHScKZhkExkUq1bYQfmimH
+
+
+      ---------
+
+
+      Co-authored-by: Claude <noreply@anthropic.com>'
+    author: Ben's Agent
     branch: HEAD
     dirty: false
   x-build:
-    built_at: '2026-10-29T20:27:44.269490+00:00'
+    built_at: '2026-11-02T03:00:11.824064+00:00'
 servers:
 - url: http://localhost/v0.2
   description: localhost
@@ -397,14 +552,14 @@ components:
     ReleaseVersion:
       type: string
       enum:
-      - v0.2.4
+      - v0.2.5-beta.1
       x-enum-varnames:
       - RELEASE_VERSION
       x-stainless-const: true
     APIGitCommit:
       type: string
       enum:
-      - 13405ec342d31653d51698d8da8b860db728df18
+      - b1379e91e55f80c4addc371e4d77d5f2dc057b42
       x-enum-varnames:
       - API_GIT_COMMIT
       x-stainless-const: true
@@ -560,7 +715,7 @@ components:
         api_release_version:
           type: string
           description: The API release version of the agent.
-          example: v0.2.4
+          example: v0.2.5-beta.1
         rust_version:
           type: string
           description: The version of Rust.
@@ -583,7 +738,7 @@ components:
         git_commit: a1b2c3d4
         api_version: v0.2
         api_git_commit: a1b2c3d4
-        api_release_version: v0.2.4
+        api_release_version: v0.2.5-beta.1
         rust_version: 1.93.0
         build_date: '2026-02-24T10:30:00Z'
         os: linux
