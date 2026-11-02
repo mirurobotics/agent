@@ -508,7 +508,7 @@ pub mod cloud_calibration_response {
             id: "cal_1".into(),
             device_id: "dvc_1".into(),
             component_id: "cmp_1".into(),
-            role_id: None,
+            role_id: Some("rol_1".into()),
             aspect_id: Some("asp_1".into()),
             serial_number: Some("SN-1".into()),
             digest: "sha256:abc".into(),
@@ -518,7 +518,7 @@ pub mod cloud_calibration_response {
             reported_at: "2026-10-19T12:00:00Z".into(),
             created_at: "2026-10-19T12:00:01Z".into(),
             component_slug: "arm".into(),
-            role_slug: None,
+            role_slug: Some("front-left".into()),
             aspect_slug: Some("pose".into()),
             reported_by_identifier: Some("Ada Lovelace".into()),
             content: content.map(Box::new),
@@ -530,7 +530,7 @@ pub mod cloud_calibration_response {
             object: openapi::cloud_calibration::Object::Calibration,
             id: "cal_1".into(),
             component: "arm".into(),
-            role: None,
+            role: Some("front-left".into()),
             aspect: Some("pose".into()),
             serial_number: Some("SN-1".into()),
             digest: "sha256:abc".into(),
@@ -569,7 +569,7 @@ pub mod cloud_calibration_response {
             total_count: Some(3),
             limit: 1,
             offset: 2,
-            has_more: false,
+            has_more: true,
             data: vec![calibration(None)],
         };
         let expected = openapi::CloudCalibrationList {
@@ -577,7 +577,7 @@ pub mod cloud_calibration_response {
             total_count: Some(3),
             limit: 1,
             offset: 2,
-            has_more: false,
+            has_more: true,
             data: vec![cloud_calibration(None)],
         };
 

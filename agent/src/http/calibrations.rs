@@ -5,8 +5,8 @@ use std::time::Duration;
 use crate::http::{errors::HTTPErr, path, request, ClientI};
 use backend_api::models::{Calibration, CalibrationList, CreateCalibrationRequest};
 
-/// Calibration content can be up to 1 MiB, so requests that may carry it get
-/// more time than the default request timeout.
+/// Calibration content can be up to 1 MiB, and a listed page can carry many,
+/// so requests that may carry it get more time than the default timeout.
 pub const CONTENT_TIMEOUT: Duration = Duration::from_secs(60);
 
 // ================================ PARAM STRUCTS ================================== //

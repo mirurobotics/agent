@@ -55,6 +55,7 @@ pub mod routes {
 
     use axum::body::{self, Body};
     use axum::http::{Request, StatusCode};
+    use axum::extract::RawQuery;
     use axum::routing::get;
     use axum::{Json, Router};
     use tower::ServiceExt;
@@ -85,11 +86,13 @@ pub mod routes {
         Utc.with_ymd_and_hms(2025, 6, 15, 12, 0, 0).unwrap()
     }
 
-    async fn list_calibrations() -> Json<backend_client::CalibrationList> {
+    /// Echoes the query it got as the component slug, so tests can check the
+    /// agent forwarded it.
+    async fn list_calibrations(RawQuery(query): RawQuery) -> Json<backend_client::CalibrationList> {
         Json(backend_client::CalibrationList {
             data: vec![backend_client::Calibration {
                 id: "cal_1".into(),
-                component_slug: "arm".into(),
+                component_slug: query.unwrap_or_default(),
                 ..Default::default()
             }],
             ..Default::default()
@@ -717,15 +720,18 @@ pub mod routes {
                 .iter()
                 .map(|c| (c.id.as_str(), c.component.as_str()))
                 .collect();
-            assert_eq!(ids, vec![("cal_1", "arm")]);
+            assert_eq!(ids, vec![("cal_1", "role=null&expand=content")]);
         }
 
         #[tokio::test]
         async fn get_cloud_calibration_returns_404_when_missing() {
             let f = Fixture::new("handler_get_cloud_calibration_missing").await;
 
-            let (status, _) = f.get("/v0.2/cloud/calibrations/cal_missing").await;
+            let (status, bytes) = f.get("/v0.2/cloud/calibrations/cal_missing").await;
             assert_eq!(status, StatusCode::NOT_FOUND);
+
+            let actual: openapi::ErrorResponse = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(actual.error.code, "internal_server_error");
         }
     }
 }
