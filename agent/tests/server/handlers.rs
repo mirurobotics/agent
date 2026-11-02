@@ -766,7 +766,10 @@ pub mod routes {
             assert_eq!(status, StatusCode::OK);
 
             let actual: openapi::CloudCalibration = serde_json::from_slice(&bytes).unwrap();
-            assert_eq!((actual.id.as_str(), actual.component.as_str()), ("cal_1", "arm"));
+            assert_eq!(
+                (actual.id.as_str(), actual.component.as_str()),
+                ("cal_1", "arm")
+            );
         }
 
         #[tokio::test]
