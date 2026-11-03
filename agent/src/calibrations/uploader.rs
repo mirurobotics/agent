@@ -6,7 +6,7 @@ use std::time::Duration;
 // internal crates
 use crate::calibrations::{
     errors::{CalibrationsErr, ReceiveActorMessageErr, SendActorMessageErr},
-    latest::{LatestCalibrations, LatestContent, LatestFilter, LatestIndexFile, LatestStore},
+    latest::{LatestCalibrations, LatestContent, LatestFilter, LatestStore},
     report::{QueueEntry, QueueSnapshotFile, Report},
     sender::Sender,
     uploader_impl::{NextAttempt, UploaderImpl, UploaderOptions},
@@ -26,10 +26,8 @@ pub struct UploaderArgs<S, F, N> {
     pub snapshot_file: Option<QueueSnapshotFile>,
     /// The directory holding one data file per queued report.
     pub reports: Dir,
-    /// Where the latest store's index persists; `None` keeps it in memory.
-    pub latest_index: Option<LatestIndexFile>,
-    /// The directory holding one content file per latest entry.
-    pub latest_contents: Dir,
+    /// The latest calibrations store, which the worker lends the uploader.
+    pub latest: LatestStore,
     pub sender: Arc<S>,
     pub options: UploaderOptions,
     pub sleep_fn: F,
@@ -205,11 +203,6 @@ impl CalibrationManager {
         N: Fn() -> DateTime<Utc> + Send + Sync + 'static,
     {
         let (sender, receiver) = mpsc::channel(buffer_size);
-        let latest = LatestStore::new(
-            args.latest_index,
-            args.latest_contents,
-            args.options.latest_capacity,
-        );
         let worker = Worker {
             receiver,
             uploader: UploaderImpl::new(
@@ -219,7 +212,7 @@ impl CalibrationManager {
                 args.options,
                 args.now_fn,
             ),
-            latest,
+            latest: args.latest,
             sleep_fn: args.sleep_fn,
         };
         (Self { sender }, tokio::spawn(worker.run()))

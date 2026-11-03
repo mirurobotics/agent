@@ -17,6 +17,9 @@ use serde::{Deserialize, Serialize};
 use tracing::warn;
 use uuid::Uuid;
 
+/// The most keys a [`LatestStore`] holds unless told otherwise.
+pub const DEFAULT_CAPACITY: usize = 1_000;
+
 /// What a latest entry is the newest report for.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct LatestKey {

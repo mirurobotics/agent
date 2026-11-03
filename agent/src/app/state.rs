@@ -305,8 +305,11 @@ impl AppState {
         let args = calibrations::UploaderArgs {
             snapshot_file,
             reports: layout.reports(),
-            latest_index,
-            latest_contents: latest_layout.contents(),
+            latest: calibrations::LatestStore::new(
+                latest_index,
+                latest_layout.contents(),
+                calibrations::latest::DEFAULT_CAPACITY,
+            ),
             sender: Arc::new(calibrations::HttpSender::new(http_client, token_mngr)),
             options: calibrations::UploaderOptions::default(),
             sleep_fn: tokio::time::sleep,

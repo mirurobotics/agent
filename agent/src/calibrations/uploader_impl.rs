@@ -27,9 +27,6 @@ pub struct UploaderOptions {
     pub capacity: usize,
     /// The largest report data accepted, in bytes.
     pub max_report_bytes: u64,
-    /// The most keys the latest store holds; a report for a new key is
-    /// rejected beyond it.
-    pub latest_capacity: usize,
     /// When a failed report is retried and when it is dropped. Its age is
     /// measured from `reported_at`.
     pub retry: RetryPolicy,
@@ -39,13 +36,11 @@ impl Default for UploaderOptions {
     /// At most 1,000 reports of up to 1 MiB of data each (1 GiB at worst),
     /// the most calibration data Miru accepts, retried as the data uploads
     /// are but kept far longer: a calibration is costly to redo, and the cap
-    /// already bounds the storage it holds. The latest store holds at most
-    /// 1,000 keys.
+    /// already bounds the storage it holds.
     fn default() -> Self {
         Self {
             capacity: 1000,
             max_report_bytes: 1024 * 1024,
-            latest_capacity: 1000,
             retry: RetryPolicy {
                 max_age: TimeDelta::days(90),
                 ..RetryPolicy::default()
@@ -338,7 +333,8 @@ mod tests {
     use crate::test_utils::calibrations::{latest_layout, layout, received_at, report};
     use crate::test_utils::filesys::dirs as test_dirs;
     use miru_agent::calibrations::{
-        CalibrationsErr, LatestIndexFile, LatestStore, Queue, QueueSnapshotFile,
+        latest::DEFAULT_CAPACITY, CalibrationsErr, LatestIndexFile, LatestStore, Queue,
+        QueueSnapshotFile,
     };
     use miru_agent::disk::layout::{CalibrationsLayout, LatestCalibrationsLayout};
     use miru_agent::filesys::{dirs, files, File, PathExt, WriteOptions};
@@ -423,9 +419,8 @@ mod tests {
         /// The latest store the worker would lend the uploader, saved under
         /// the fixture's directory.
         async fn latest_store(&self) -> LatestStore {
-            let capacity = UploaderOptions::default().latest_capacity;
             let index_file = Some(self.latest_index().await);
-            LatestStore::new(index_file, self.latest.contents(), capacity)
+            LatestStore::new(index_file, self.latest.contents(), DEFAULT_CAPACITY)
         }
 
         /// Move the uploader's clock forward by `by`.

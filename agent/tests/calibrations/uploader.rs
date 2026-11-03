@@ -13,7 +13,8 @@ use crate::mocks::error::SleepController;
 use crate::test_utils::calibrations::{latest_layout, layout, received_at, report};
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::calibrations::{
-    CalibrationManager, CalibrationsErr, Queue, QueueSnapshotFile, UploaderArgs, UploaderOptions,
+    latest::DEFAULT_CAPACITY, CalibrationManager, CalibrationsErr, LatestStore, Queue,
+    QueueSnapshotFile, UploaderArgs, UploaderOptions,
 };
 use miru_agent::disk::layout::{CalibrationsLayout, LatestCalibrationsLayout};
 use miru_agent::filesys::{dirs, files, File, PathExt, WriteOptions};
@@ -88,8 +89,7 @@ impl Harness {
         let args = UploaderArgs {
             snapshot_file,
             reports: self.layout.reports(),
-            latest_index: None,
-            latest_contents: self.latest.contents(),
+            latest: LatestStore::new(None, self.latest.contents(), DEFAULT_CAPACITY),
             sender: self.sender.clone(),
             options,
             sleep_fn: self.sleep_fn(),

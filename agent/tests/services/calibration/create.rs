@@ -9,8 +9,8 @@ use crate::mocks::calibration_sender::{MockCalibrationSender, Step};
 use crate::test_utils::calibrations::{latest_layout, layout, received_at};
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::calibrations::{
-    CalibrationManager, CalibrationsErr, QueueSnapshotFile, Report, ReportMetadata, UploaderArgs,
-    UploaderOptions,
+    latest::DEFAULT_CAPACITY, CalibrationManager, CalibrationsErr, LatestStore, QueueSnapshotFile,
+    Report, ReportMetadata, UploaderArgs, UploaderOptions,
 };
 use miru_agent::disk::{self, Layout};
 use miru_agent::models::{Deployment, DplActivity, InstanceFormat};
@@ -45,8 +45,7 @@ impl Fixture {
         let args = UploaderArgs {
             snapshot_file: Some(snapshot_file),
             reports: calibrations.reports(),
-            latest_index: None,
-            latest_contents: latest_layout(&dir).contents(),
+            latest: LatestStore::new(None, latest_layout(&dir).contents(), DEFAULT_CAPACITY),
             sender: sender.clone(),
             options,
             sleep_fn: tokio::time::sleep,
