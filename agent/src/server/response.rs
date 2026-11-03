@@ -167,19 +167,7 @@ impl From<&LatestCalibrations> for device_server::LatestCalibrationsResponse {
 /// The content's bytes, with the `Content-Type` of its format.
 impl IntoResponse for LatestContent {
     fn into_response(self) -> Response {
-        let content_type = [(header::CONTENT_TYPE, media_type(self.format))];
+        let content_type = [(header::CONTENT_TYPE, self.format.media_type())];
         (StatusCode::OK, content_type, self.data).into_response()
-    }
-}
-
-// Miru's content downloads send the same types.
-fn media_type(format: models::InstanceFormat) -> &'static str {
-    match format {
-        models::InstanceFormat::Json => "application/json",
-        models::InstanceFormat::Yaml => "application/yaml",
-        models::InstanceFormat::Jsonc => "application/jsonc",
-        models::InstanceFormat::Xml => "application/xml",
-        models::InstanceFormat::Csv => "text/csv",
-        models::InstanceFormat::Text => "application/octet-stream",
     }
 }
