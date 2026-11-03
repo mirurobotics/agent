@@ -12,7 +12,7 @@ use crate::test_utils::{
     sync::{create_storage, create_token_manager},
 };
 use device_api::models::ApiVersion;
-use miru_agent::calibrations::UploaderOptions;
+use miru_agent::calibrations::{latest::DEFAULT_CAPACITY, UploaderOptions};
 use miru_agent::events::hub::{EventHub, SpawnOptions};
 use miru_agent::server::{auth::BearerToken, routes, tcp, ServerErr, State};
 use miru_agent::sync::Syncer;
@@ -56,6 +56,7 @@ impl Fixture {
                 &dir,
                 MockCalibrationSender::new().0,
                 UploaderOptions::default(),
+                DEFAULT_CAPACITY,
             )),
             shutdown_tx.clone(),
         ));

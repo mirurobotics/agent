@@ -8,8 +8,7 @@ use std::sync::Arc;
 // internal crates
 use super::filesys::dirs::TempDir;
 use miru_agent::calibrations::{
-    latest::DEFAULT_CAPACITY, CalibrationManager, LatestStore, Report, ReportMetadata, Sender,
-    UploaderArgs, UploaderOptions,
+    CalibrationManager, LatestStore, Report, ReportMetadata, Sender, UploaderArgs, UploaderOptions,
 };
 use miru_agent::disk::layout::{CalibrationsLayout, LatestCalibrationsLayout};
 use miru_agent::models::InstanceFormat;
@@ -58,17 +57,18 @@ pub fn latest_layout(dir: &TempDir) -> LatestCalibrationsLayout {
     LatestCalibrationsLayout::new(dir.to_dir().subdir("resources").subdir("calibrations"))
 }
 
-/// An uploader under `dir` that keeps its queue and latest store in memory and
-/// uploads through `sender`.
+/// An uploader under `dir` that keeps its queue and latest store in memory, the
+/// store holding at most `latest_capacity` keys, and uploads through `sender`.
 pub fn uploader<S: Sender + 'static>(
     dir: &TempDir,
     sender: Arc<S>,
     options: UploaderOptions,
+    latest_capacity: usize,
 ) -> CalibrationManager {
     let args = UploaderArgs {
         snapshot_file: None,
         reports: layout(dir).reports(),
-        latest: LatestStore::new(None, latest_layout(dir).contents(), DEFAULT_CAPACITY),
+        latest: LatestStore::new(None, latest_layout(dir).contents(), latest_capacity),
         sender,
         options,
         sleep_fn: tokio::time::sleep,
