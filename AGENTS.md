@@ -101,7 +101,8 @@ processes. Each integration target uses the ordinary library; integration
 fixture imports use direct paths such as `crate::test_utils::...`.
 
 The real-GCS and real-S3 upload tests need cloud credentials, which CI's test
-jobs set, and fail without them.
+jobs set, and fail without them. CI skips them on Dependabot and fork PRs,
+which can't get the credentials.
 
 Keep unit tests in inline `#[cfg(test)] mod tests` modules at the bottom of the
 source files they test, not in separate files or nested test directories.
