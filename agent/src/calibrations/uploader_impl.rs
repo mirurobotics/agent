@@ -128,7 +128,10 @@ where
         if !self.persisted {
             return;
         }
-        let queued = self.queue.iter().map(|entry| entry.id.hyphenated().to_string());
+        let queued = self
+            .queue
+            .iter()
+            .map(|entry| entry.id.hyphenated().to_string());
         cleanup::prune(&self.reports, &queued.collect()).await;
     }
 

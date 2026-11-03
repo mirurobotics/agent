@@ -75,7 +75,9 @@ mod entry_list {
         deserializer: D,
     ) -> Result<BTreeMap<LatestKey, LatestEntry>, D::Error> {
         let entries = Vec::<LatestEntry>::deserialize(deserializer)?;
-        let keyed = entries.into_iter().map(|e| (LatestKey::from(&e.metadata), e));
+        let keyed = entries
+            .into_iter()
+            .map(|e| (LatestKey::from(&e.metadata), e));
         Ok(keyed.collect())
     }
 }
@@ -180,7 +182,9 @@ impl LatestStore {
             metadata,
             upload_status: CalibrationUploadStatus::Queued,
         };
-        let replaced = index.entries.insert(LatestKey::from(&entry.metadata), entry);
+        let replaced = index
+            .entries
+            .insert(LatestKey::from(&entry.metadata), entry);
         if let Err(e) = self.persist(index.clone()).await {
             cleanup::delete(&file).await;
             return Err(e.into());
