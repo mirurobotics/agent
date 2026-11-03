@@ -1,14 +1,10 @@
-// standard crates
-use std::collections::HashSet;
-
 // internal crates
 use crate::calibrations::{
+    cleanup,
     errors::{CalibrationNotFoundErr, CalibrationStoreFullErr, CalibrationsErr},
     report::ReportMetadata,
 };
-use crate::filesys::{
-    dirs, files, state_file::StateFile, Dir, File, FileSysErr, PathExt, WriteOptions,
-};
+use crate::filesys::{files, state_file::StateFile, Dir, File, FileSysErr, WriteOptions};
 use crate::models::{CalibrationUploadStatus, InstanceFormat, Patch};
 use crate::trace;
 
@@ -139,13 +135,13 @@ impl LatestStore {
         };
         let replaced = replace_or_append(&mut index.entries, entry);
         if let Err(e) = self.persist(index.clone()).await {
-            delete(&file).await;
+            cleanup::delete(&file).await;
             return Err(e.into());
         }
         self.index = index;
         let replaced_id = replaced.map(|entry| entry.metadata.report_id);
         if let Some(replaced_id) = replaced_id.filter(|id| *id != report_id) {
-            delete(&self.content_file(replaced_id)).await;
+            cleanup::delete(&self.content_file(replaced_id)).await;
         }
         Ok(())
     }
@@ -200,25 +196,12 @@ impl LatestStore {
     /// in-memory store prunes nothing: the index file it couldn't open may
     /// still name these files.
     pub async fn prune_orphans(&self) {
-        if self.index_file.is_none() || !self.contents.exists() {
+        if self.index_file.is_none() {
             return;
         }
-        let listing = match dirs::files(&self.contents).await {
-            Ok(listing) => listing,
-            Err(e) => {
-                warn!("calibrations: failed to list latest content files: {e}");
-                return;
-            }
-        };
         let entries = self.index.entries.iter();
-        let named: HashSet<String> = entries.map(|e| e.metadata.report_id.to_string()).collect();
-        for file in listing {
-            if file.name().is_ok_and(|name| named.contains(name)) {
-                continue;
-            }
-            warn!("calibrations: deleting latest content file {file}, which no entry names");
-            delete(&file).await;
-        }
+        let named = entries.map(|e| e.metadata.report_id.to_string());
+        cleanup::prune(&self.contents, &named.collect()).await;
     }
 
     /// Write `index` to the index file, if there is one.
@@ -264,11 +247,4 @@ fn not_found(report_id: Uuid) -> CalibrationsErr {
         report_id: report_id.to_string(),
         trace: trace!(),
     })
-}
-
-/// Delete `file`, logging a failure. A file that is already gone is fine.
-async fn delete(file: &File) {
-    if let Err(e) = files::delete(file).await {
-        warn!("calibrations: failed to delete latest content file {file}: {e}");
-    }
 }
