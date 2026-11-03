@@ -8,9 +8,9 @@ info:
     url: https://opensource.org/licenses/MIT
   x-release-version: v0.5.17-next
   x-git-commit:
-    sha: 6b8fc0db8e9a4d44421c1e80cab1e9e622cbd3c6
-    url: https://github.com/mirurobotics/openapi/commit/6b8fc0db8e9a4d44421c1e80cab1e9e622cbd3c6
-    message: 'docs(plans): credit the reviewer for the response rename
+    sha: f6a7abd45988637907e27b99f5682a7098eda17f
+    url: https://github.com/mirurobotics/openapi/commit/f6a7abd45988637907e27b99f5682a7098eda17f
+    message: 'docs(plans): reword the agent calibration step
 
 
       Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
@@ -20,7 +20,7 @@ info:
     branch: HEAD
     dirty: false
   x-build:
-    built_at: '2026-11-03T05:46:58.822976+00:00'
+    built_at: '2026-11-03T06:22:04.489701+00:00'
 servers:
 - url: https://staging.api.mirurobotics.com/agent/v1
   description: Staging
@@ -636,7 +636,7 @@ components:
     APIGitCommit:
       type: string
       enum:
-      - 6b8fc0db8e9a4d44421c1e80cab1e9e622cbd3c6
+      - f6a7abd45988637907e27b99f5682a7098eda17f
       x-enum-varnames:
       - API_GIT_COMMIT
       x-stainless-const: true
@@ -2376,6 +2376,7 @@ components:
         - component_slug
         - role_slug
         - aspect_slug
+        - format
         properties:
           component_slug:
             type: string
@@ -2394,6 +2395,8 @@ components:
             example: pose
             description: Slug of the aspect of the unit that was calibrated, as the
               device reported it; null if no aspect was reported.
+          format:
+            $ref: '#/components/schemas/InstanceFormat'
           reported_by:
             allOf:
             - $ref: '#/components/schemas/BaseExternalUser'
@@ -2410,6 +2413,7 @@ components:
         role_slug: front-left
         aspect_id: null
         aspect_slug: null
+        format: json
         serial_number: SN-1234
         digest: sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
         deployment_id: dpl_123

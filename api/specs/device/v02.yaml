@@ -13,9 +13,9 @@ info:
     url: https://opensource.org/licenses/MIT
   x-release-version: v0.2.5-beta.1-next
   x-git-commit:
-    sha: 6b8fc0db8e9a4d44421c1e80cab1e9e622cbd3c6
-    url: https://github.com/mirurobotics/openapi/commit/6b8fc0db8e9a4d44421c1e80cab1e9e622cbd3c6
-    message: 'docs(plans): credit the reviewer for the response rename
+    sha: f6a7abd45988637907e27b99f5682a7098eda17f
+    url: https://github.com/mirurobotics/openapi/commit/f6a7abd45988637907e27b99f5682a7098eda17f
+    message: 'docs(plans): reword the agent calibration step
 
 
       Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
@@ -25,7 +25,7 @@ info:
     branch: HEAD
     dirty: false
   x-build:
-    built_at: '2026-11-03T05:47:01.128652+00:00'
+    built_at: '2026-11-03T06:22:07.296937+00:00'
 servers:
 - url: http://localhost/v0.2
   description: localhost
@@ -332,7 +332,7 @@ components:
     APIGitCommit:
       type: string
       enum:
-      - 6b8fc0db8e9a4d44421c1e80cab1e9e622cbd3c6
+      - f6a7abd45988637907e27b99f5682a7098eda17f
       x-enum-varnames:
       - API_GIT_COMMIT
       x-stainless-const: true
