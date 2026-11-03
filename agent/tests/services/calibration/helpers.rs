@@ -32,10 +32,12 @@ pub struct Fixture {
 
 impl Fixture {
     pub async fn new() -> Self {
-        Self::with_options(UploaderOptions::default()).await
+        Self::with_options(UploaderOptions::default(), DEFAULT_CAPACITY).await
     }
 
-    pub async fn with_options(options: UploaderOptions) -> Self {
+    /// A fixture whose uploader takes `options` and whose latest store holds
+    /// at most `latest_capacity` keys.
+    pub async fn with_options(options: UploaderOptions, latest_capacity: usize) -> Self {
         let dir = test_dirs::temp("calibration_service_test").unwrap();
         let calibrations = layout(&dir);
         let snapshot_file =
@@ -46,7 +48,7 @@ impl Fixture {
         let args = UploaderArgs {
             snapshot_file: Some(snapshot_file),
             reports: calibrations.reports(),
-            latest: LatestStore::new(None, latest_layout(&dir).contents(), DEFAULT_CAPACITY),
+            latest: LatestStore::new(None, latest_layout(&dir).contents(), latest_capacity),
             sender: sender.clone(),
             options,
             sleep_fn: tokio::time::sleep,

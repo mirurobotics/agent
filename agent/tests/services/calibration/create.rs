@@ -4,7 +4,9 @@
 use crate::mocks::calibration_sender::Step;
 use crate::services::calibration::helpers::{params, Fixture};
 use crate::test_utils::calibrations::received_at;
-use miru_agent::calibrations::{CalibrationsErr, Report, ReportMetadata, UploaderOptions};
+use miru_agent::calibrations::{
+    latest::DEFAULT_CAPACITY, CalibrationsErr, Report, ReportMetadata, UploaderOptions,
+};
 use miru_agent::models::{DplActivity, InstanceFormat};
 use miru_agent::services::ServiceErr;
 
@@ -77,7 +79,7 @@ async fn an_uploader_rejection_fails_intake() {
         max_report_bytes: 100,
         ..UploaderOptions::default()
     };
-    let f = Fixture::with_options(options).await;
+    let f = Fixture::with_options(options, DEFAULT_CAPACITY).await;
     let mut big = params();
     big.data = "x".repeat(200);
 
@@ -90,4 +92,20 @@ async fn an_uploader_rejection_fails_intake() {
         ),
         "{err:?}"
     );
+}
+
+#[tokio::test]
+async fn a_full_latest_store_fails_intake() {
+    let f = Fixture::with_options(UploaderOptions::default(), 0).await;
+
+    let err = f.create(params()).await.unwrap_err();
+
+    assert!(
+        matches!(
+            err,
+            ServiceErr::CalibrationsErr(CalibrationsErr::StoreFullErr(_))
+        ),
+        "{err:?}"
+    );
+    assert_eq!(f.uploader.len().await.unwrap(), 0);
 }
