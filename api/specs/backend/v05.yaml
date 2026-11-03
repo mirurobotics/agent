@@ -6,54 +6,21 @@ info:
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
-  x-release-version: v0.5.15
+  x-release-version: v0.5.17-next
   x-git-commit:
-    sha: 67b58d48c00b0f92ccb6772344d9ef00f1e13027
-    url: https://github.com/mirurobotics/openapi/commit/67b58d48c00b0f92ccb6772344d9ef00f1e13027
-    message: "refactor(calibrations)!: name the calibration's external user reported_by\
-      \ (#395)\n\n<!-- claude-projects-attribution: {\"github_login\":\"miru-agents\"\
-      } -->\n_Requested by **bens-agent** · [project\nthread](https://claude.ai/code/project/chan_015imaa8aZrnubYZcZCvjeHx?thread=cmsg_015imaa8aZrnubYZcZCvjeHx6HTArhtGtMpoitqDXkyMq7)_\n\
-      \nFollows #386.\n\n## Summary\n\nEvery calibration field that points at the\
-      \ person who reported the\ncalibration is now named `reported_by`, across the\
-      \ device, agent and\nfrontend APIs. `user` and `external_user` read like a Miru\
-      \ account or an\nunrelated resource. `reported_by` pairs with the existing `reported_at`,\n\
-      and the field follows the `created_by` / `created_by_id` pattern.\n\n| API |\
-      \ Before | After |\n|---|---|---|\n| Device `CreateCalibrationRequest` | `user`\
-      \ | `reported_by` |\n| Agent `CreateCalibrationRequest` | `external_user` |\
-      \ `reported_by` |\n| `Calibration` (agent, frontend) | `external_user_id` |\n\
-      `reported_by_id` |\n| Calibration expansion (frontend) | `expand=external_user`\
-      \ |\n`expand=reported_by` |\n| Calibration list filter (frontend) | `external_user_id`\
-      \ |\n`reported_by_id` |\n\n- The external user resource is unchanged: `ExternalUser`,\n\
-      `/external_users`, `ext_usr_` IDs. `reported_by_id` holds an external\nuser\
-      \ ID and `reported_by` expands to an `ExternalUser`.\n- The platform API is\
-      \ unaffected, since #387 already dropped the field\nthere.\n- Source edits and\
-      \ `./scripts/regen.sh` output are in separate commits.\nAn earlier pair of commits\
-      \ used `calibrated_by`; the latest pair renames\nit to `reported_by`.\n\n##\
-      \ Reviewer notes\n\n- **Breaking for the device, agent and frontend APIs.**\n\
-      - Device: `user` is only in the `device/v0.2.4-beta.1` tag, and its only\nconsumer\
-      \ is mirurobotics/agent#409 (open).\n- Agent and frontend: backend#1062 serves\
-      \ `agent/v0.5.14` and\n`frontend/v0.9.21`. After this merges and is tagged,\
-      \ a backend follow-up\nre-vendors both specs and renames the fields, and agent#409\
-      \ re-vendors\nthe device and agent specs.\n  - No SDK, Dinghy or dashboard code\
-      \ uses these fields yet.\n\n\U0001F916 Generated with [Claude Code](https://claude.com/claude-code)\n\
-      \nhttps://claude.ai/code/session_01XHScKYffhVuSntTMwJK7xK\n\n<!-- codesmith:footer\
-      \ -->\n---\n<a\nhref=\"https://app.blacksmith.sh/mirurobotics/codesmith/openapi/pr/395?autoLogin=true&ref=codesmith_pr_footer\"\
-      ><picture>``&lt;source\nmedia=\"(prefers-color-scheme: dark)\"\nsrcset=\"https://pr-comments-assets.blacksmith.sh/codesmith/view-with-codesmith-dark-v3.svg\"\
-      &gt;&lt;source\nmedia=\"(prefers-color-scheme: light)\"\nsrcset=\"https://pr-comments-assets.blacksmith.sh/codesmith/view-with-codesmith-light-v3.svg\"\
-      &gt;&lt;img\nalt=\"View with [code]smith\"\nsrc=\"https://pr-comments-assets.blacksmith.sh/codesmith/view-with-codesmith-dark-v3-3x.png\"\
-      \nwidth=\"162\" height=\"28\"&gt;``</picture></a> <a\nhref=\"```https://backend.blacksmith.sh/track/enable-autofix?expires=1795886184&installation_model_id=425273&pr_number=395&ref=codesmith_pr_footer&repository=mirurobotics%2Fopenapi&return_to=https%3A%2F%2Fgithub.com%2Fmirurobotics%2Fopenapi%2Fpull%2F395&signature=a51fe152faa0c2be5b44701d20bfa1a755e654edd8049f267322f63a81f9e596\"\
-      &gt;&lt;picture&gt;&lt;source\nmedia=\"(prefers-color-scheme: dark)\"\nsrcset=\"\
-      https://pr-comments-assets.blacksmith.sh/codesmith/autofix-with-codesmith-dark.svg\"\
-      &gt;&lt;source\nmedia=\"(prefers-color-scheme: light)\"\nsrcset=\"https://pr-comments-assets.blacksmith.sh/codesmith/autofix-with-codesmith-light.svg\"\
-      &gt;&lt;img\nalt=\"Autofix with [code]smith\"\nsrc=\"https://pr-comments-assets.blacksmith.sh/codesmith/autofix-with-codesmith-dark-3x.png\"\
-      \nwidth=\"190\" height=\"28\"&gt;```</picture></a>\n<sup>Need help on this PR?\
-      \ Tag <code>@codesmith</code> with what you\nneed.</sup>\n\n<!-- codesmith:autofix:disabled\
-      \ -->\n<!-- /codesmith:footer -->\n\n---------\n\nCo-authored-by: Claude <noreply@anthropic.com>"
-    author: Ben's Agent
+    sha: 6b8fc0db8e9a4d44421c1e80cab1e9e622cbd3c6
+    url: https://github.com/mirurobotics/openapi/commit/6b8fc0db8e9a4d44421c1e80cab1e9e622cbd3c6
+    message: 'docs(plans): credit the reviewer for the response rename
+
+
+      Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+      Claude-Session: https://claude.ai/code/session_01XHScKYzk9naPpNDFHzWwcc'
+    author: Claude
     branch: HEAD
     dirty: false
   x-build:
-    built_at: '2026-10-29T17:51:40.848240+00:00'
+    built_at: '2026-11-03T05:46:58.822976+00:00'
 servers:
 - url: https://staging.api.mirurobotics.com/agent/v1
   description: Staging
@@ -313,6 +280,55 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Calibration'
+  /calibrations/latest:
+    parameters:
+    - $ref: '#/components/parameters/MiruVersion'
+    get:
+      tags:
+      - Calibrations
+      summary: List Latest
+      operationId: listLatestCalibrations
+      description: List the calibration with the latest `reported_at` for each component,
+        role and aspect the device reported, breaking ties by `created_at`. Results
+        are ordered by component, role and aspect.
+      parameters:
+      - $ref: '#/components/parameters/offset'
+      - $ref: '#/components/parameters/limit'
+      - $ref: '#/components/parameters/calibration_list_expansions'
+      responses:
+        '200':
+          description: Successfully listed the latest calibrations.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CalibrationList'
+  /calibrations/{calibration_id}/content:
+    parameters:
+    - $ref: '#/components/parameters/MiruVersion'
+    get:
+      tags:
+      - Calibrations
+      summary: Download Content
+      operationId: getCalibrationContent
+      description: Download the content of a calibration the device reported.
+      parameters:
+      - $ref: '#/components/parameters/calibration_id'
+      responses:
+        '200':
+          description: Successfully retrieved the calibration content. The Content-Type
+            header is set according to the content format.
+          headers:
+            Content-Type:
+              description: The MIME type of the calibration content.
+              schema:
+                type: string
+                example: application/json
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+                description: The raw calibration content, exactly as it was reported.
   /git_commits/{git_commit_id}:
     parameters:
     - $ref: '#/components/parameters/MiruVersion'
@@ -613,14 +629,14 @@ components:
     ReleaseVersion:
       type: string
       enum:
-      - v0.5.15
+      - v0.5.17-next
       x-enum-varnames:
       - RELEASE_VERSION
       x-stainless-const: true
     APIGitCommit:
       type: string
       enum:
-      - 67b58d48c00b0f92ccb6772344d9ef00f1e13027
+      - 6b8fc0db8e9a4d44421c1e80cab1e9e622cbd3c6
       x-enum-varnames:
       - API_GIT_COMMIT
       x-stainless-const: true
@@ -640,6 +656,12 @@ components:
       - activity_status
       x-enum-varnames:
       - DPL_SEARCH_ACTIVITY_STATUS
+    CalibrationExpansion:
+      type: string
+      enum:
+      - reported_by
+      x-enum-varnames:
+      - CALIBRATION_EXPAND_REPORTED_BY
     Version:
       title: Version
       type: object
@@ -1266,26 +1288,8 @@ components:
     BaseFileRule:
       title: Base File Rule
       type: object
-      description: 'A file rule declares which files on a device Miru manages and
-        what to do
-
-        with them: upload them to a bucket, delete the local copies once they
-
-        are no longer needed, or both. `retention` is optional and marks the
-
-        rules that delete: when it is absent the device keeps matching files
-
-        indefinitely — Miru never deletes them — and when it is present the rule
-
-        deletes each matching file once its retention guarantee ends. A rule
-
-        that both deletes and uploads always states `retention.require_upload`,
-
-        so whether local deletion waits for the upload is itself an explicit
-
-        decision.
-
-        '
+      description: A file rule declares which files on a device Miru manages and whether
+        to upload them, delete them, or both.
       required:
       - object
       - id
@@ -2193,8 +2197,9 @@ components:
           example: front-left
           description: Slug of the role the calibrated unit fills on the device, such
             as `left` or `front-left`. Distinguishes several units of one component
-            on a device. Validated like a slug. Miru resolves it to one of the component's
-            `roles`, creating the role the first time it is reported.
+            on a device. Validated like a slug; `null` is reserved. Miru resolves
+            it to one of the component's `roles`, creating the role the first time
+            it is reported.
         serial_number:
           type: string
           maxLength: 255
@@ -2212,8 +2217,8 @@ components:
           example: pose
           description: Slug of the aspect of the unit that was calibrated, when it
             has more than one, e.g. `intrinsics` vs `extrinsics`, or `pose` vs `joint-offsets`.
-            Validated like a slug. Miru resolves it to one of the component's `aspects`,
-            creating the aspect the first time it is reported.
+            Validated like a slug; `null` is reserved. Miru resolves it to one of
+            the component's `aspects`, creating the aspect the first time it is reported.
         content:
           allOf:
           - $ref: '#/components/schemas/InstanceContent'
@@ -2316,18 +2321,95 @@ components:
           format: date-time
           example: '2021-01-01T00:00:00Z'
           description: Timestamp of when Miru recorded the calibration.
+    BaseExternalUser:
+      title: External User
+      type: object
+      required:
+      - object
+      - id
+      - identifier
+      - user_id
+      - created_at
+      - updated_at
+      properties:
+        object:
+          type: string
+          enum:
+          - external_user
+          example: external_user
+          x-stainless-const: true
+          description: The object type, which is always `external_user`.
+        id:
+          type: string
+          example: ext_usr_123
+          description: ID of the external user.
+        identifier:
+          type: string
+          maxLength: 255
+          example: Benjamin Smidt
+          description: How devices identify the external user, such as `Benjamin Smidt`,
+            exactly as a device reported it. Unique within the workspace and immutable.
+        user_id:
+          type: string
+          nullable: true
+          example: usr_123
+          description: ID of the Miru user the external user is linked to; null if
+            the external user is not linked to a user.
+        created_at:
+          type: string
+          format: date-time
+          example: '2021-01-01T00:00:00Z'
+          description: Timestamp of when Miru created the external user, which is
+            when a device first reported its identifier.
+        updated_at:
+          type: string
+          format: date-time
+          example: '2021-01-01T00:00:00Z'
+          description: Timestamp of when the external user was last updated.
     Calibration:
       title: Calibration
       description: A calibration recorded by Miru.
       allOf:
       - $ref: '#/components/schemas/BaseCalibration'
+      - type: object
+        required:
+        - component_slug
+        - role_slug
+        - aspect_slug
+        properties:
+          component_slug:
+            type: string
+            example: arm
+            description: Slug of the component the calibrated unit belongs to, as
+              the device reported it.
+          role_slug:
+            type: string
+            nullable: true
+            example: front-left
+            description: Slug of the role the calibrated unit fills on the device,
+              as the device reported it; null if no role was reported.
+          aspect_slug:
+            type: string
+            nullable: true
+            example: pose
+            description: Slug of the aspect of the unit that was calibrated, as the
+              device reported it; null if no aspect was reported.
+          reported_by:
+            allOf:
+            - $ref: '#/components/schemas/BaseExternalUser'
+            nullable: true
+            description: The external user who reported the calibration; null if none
+              was reported. Returned only when expanded with `expand=reported_by`.
       example:
         object: calibration
         id: cal_123
         device_id: dvc_123
         component_id: cmp_123
+        component_slug: arm
         role_id: cmp_rol_123
+        role_slug: front-left
         aspect_id: null
+        aspect_slug: null
         serial_number: SN-1234
         digest: sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
         deployment_id: dpl_123
@@ -2335,6 +2417,27 @@ components:
         report_id: 0b6f3c2e-6a51-4e0f-9a43-2f1d7c9e8b10
         reported_at: '2021-01-01T00:00:00Z'
         created_at: '2021-01-01T00:00:00Z'
+    CalibrationListExpansion:
+      type: string
+      enum:
+      - reported_by
+      - total_count
+      x-enum-varnames:
+      - CALIBRATION_LIST_EXPAND_REPORTED_BY
+      - CALIBRATION_LIST_EXPAND_TOTAL_COUNT
+    CalibrationList:
+      title: Calibration List
+      allOf:
+      - $ref: '#/components/schemas/PaginatedList'
+      - type: object
+        required:
+        - data
+        properties:
+          data:
+            type: array
+            items:
+              $ref: '#/components/schemas/Calibration'
+            description: The newest calibration for each component, role and aspect.
     DeviceStatus:
       type: string
       description: 'The status of the device.
@@ -2845,6 +2948,25 @@ components:
       schema:
         type: string
         example: upl_123
+    calibration_list_expansions:
+      name: expand
+      in: query
+      required: false
+      description: Fields to expand on each calibration in the list.
+      schema:
+        type: array
+        items:
+          $ref: '#/components/schemas/CalibrationListExpansion'
+        example:
+        - reported_by
+    calibration_id:
+      name: calibration_id
+      in: path
+      required: true
+      description: The unique identifier of the calibration.
+      schema:
+        type: string
+        example: cal_123
     git_commit_id:
       name: git_commit_id
       in: path
