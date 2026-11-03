@@ -6,10 +6,10 @@ This ExecPlan is a living document. The sections Progress, Surprises & Discoveri
 
 | Repository | Access | Description |
 |-----------|--------|-------------|
-| `agent/` (mirurobotics/agent, crate `miru-agent` under `agent/agent/`) | read-write | The latest calibrations store, write-through on `POST /v0.2/calibrations`, upload status from the uploader, `GET /v0.2/calibrations/latest`, `GET /v0.2/calibrations/{report_id}/content`, the reserved `null` slug, tests and `ARCHITECTURE.md`. |
+| `agent/` (mirurobotics/agent at `/home/user/agent`; crate `miru-agent` in its `agent/` directory) | read-write | The latest calibrations store, write-through on `POST /v0.2/calibrations`, upload status from the uploader, `GET /v0.2/calibrations/latest`, `GET /v0.2/calibrations/{report_id}/content`, the reserved `null` slug, tests and `ARCHITECTURE.md`. |
 | `openapi/` | read-only | The Device API contract (openapi#416), already vendored in this branch. |
 
-This plan lives in `agent/plans/` because all code changes are in the agent. It is "agent PR A" of Linear ENG-1726, which implements "RFC: Latest Calibrations on the Device". Base branch `main`; working branch `claude/project-thread-j97cpg`. Paths below are relative to the agent repo root unless they start with `agent/src` or `agent/tests`, which are inside it too.
+This plan lives in `agent/plans/` because all code changes are in the agent. It is "agent PR A" of Linear ENG-1726, which implements "RFC: Latest Calibrations on the Device". Base branch `main`; working branch `claude/project-thread-j97cpg`. Every path below is relative to the agent repo root.
 
 ## Purpose / Big Picture
 
@@ -34,7 +34,7 @@ Device apps (ATI, Monarch's Dinghy) load calibrations at startup, often offline.
 | `calibrations::LatestCalibrations` (fields `is_confirmed`, `entries`) | `LatestList`, `LatestListing` | Mirrors the wire `LatestCalibrationsResponse`. |
 | `calibrations::LatestContent` (fields `format`, `data`) | `CalibrationContent`, `Content` | The content of a latest entry; `InstanceContent` already names the request's `{format, data}` wire type. |
 | `Uploader::list_latest`, `Uploader::latest_content` | `latest`, `get_latest`; `content` | Verb first like `enqueue`/`len`; `latest_content` says which content. |
-| `UploaderArgs::latest_index`, `UploaderArgs::latest_contents` | `latest: LatestStore` (prebuilt) | Mirror `snapshot_file`/`reports`, so `UploaderImpl::new` builds the store as it builds the queue. |
+| `UploaderArgs::latest_index`, `UploaderArgs::latest_contents` | `latest: LatestStore` (prebuilt); `index_file`/`contents` | Mirror `snapshot_file`/`reports`, so `UploaderImpl::new` builds the store as it builds the queue. |
 | `UploaderOptions::latest_capacity` | reuse `capacity`; `max_latest_keys` | Same shape as `capacity`; a separate field lets the queue and store caps differ and be tested apart. |
 | `models::CalibrationUploadStatus` (`Queued`, `Uploaded`, `Dropped`) | `UploadStatus`, `LatestStatus` | The device twin's name; `UploadStatus` is the backend upload ledger's enum. |
 | `Layout::latest_calibrations()` → `LatestCalibrationsLayout` with `index()` (`resources/calibrations/index.json`) and `contents()` (`resources/calibrations/contents/`) | `metadata.json` (as `config_instances`), `latest.json` | `CalibrationsLayout` is the sibling; `contents/` matches `config_instances`; `index.json` is the RFC's word, and the file holds `loaded_at` too, not only metadata. |
@@ -43,7 +43,7 @@ Device apps (ATI, Monarch's Dinghy) load calibrations at startup, often offline.
 | `CalibrationNotFoundErr` (`resource_not_found`, 404) | `LatestCalibrationNotFoundErr`; reuse `cache::errors::CacheElementNotFound` | Same code and status as `CacheElementNotFound`, but owned by `calibrations`. |
 | `services::calibration::list_latest`, `services::calibration::get_content` | `latest`, `content` | `get_*`/verb-first like `deployment::get_current`. |
 | `server::request::LatestCalibrationsQuery` | `ListLatestCalibrationsQuery`, `CalSearchQuery` | Mirrors `sse::EventsQuery` and the response name. |
-| `handlers::list_latest_calibrations`, `handlers::get_calibration_content` | `get_latest_calibrations` | The spec's operation ids `listLatestCalibrations` and `getCalibrationContent`. |
+| `handlers::list_latest_calibrations`, `handlers::get_calibration_content` | `get_latest_calibrations`, `latest_calibrations`; `calibration_content` | The spec's operation ids `listLatestCalibrations` and `getCalibrationContent`. |
 
 ### Precedent
 
@@ -66,7 +66,6 @@ The store is owned by the calibration uploader's actor, beside its queue, not by
 - Re-vendoring `api/specs/device/v02.yaml` and `api/specs/backend/v05.yaml` from tagged releases: follow-up once openapi#416 merges and `device`/`agent` are tagged.
 - Ordering the list: entries come back in index order (a key keeps its place when replaced, a new key goes last). The spec documents no order.
 - Reconciling the store with the queue at startup: a crash between the queue write and the store write leaves a queued report missing from the store. The app got no 200, so it reports again and the newer report wins. PR B's load also covers a reset.
-- A store-specific in-memory fallback beyond the queue's: the store follows the queue (no index file means an in-memory index).
 - A `reset` change or test: `disk::setup::reset` already deletes `resources/`, and `wipes_resources_subtree` in `agent/tests/disk/setup.rs` covers it.
 - Repeated query keys (`?component=a&component=b`): the spec uses `style: form, explode: false`, a comma-separated list. A repeated key is rejected with 422.
 - Fanning out a pattern: this change has one resource, so there is no exemplar/sibling split.
@@ -188,7 +187,7 @@ Commit (see Concrete Steps).
 
 `agent/src/app/state.rs` `init_calibration_uploader`: open `layout.latest_calibrations().index()` with `LatestIndexFile::new_with_default(.., Default::default())`, falling back to `None` with an error log as for the queue; pass it and `latest_calibrations().contents()` in `UploaderArgs`. Update the doc comment.
 
-Keep the other `UploaderArgs` construction sites compiling by adding the two fields, under each fixture's temp dir: `agent/tests/test_utils/calibrations.rs` (`uploader`: `latest_index: None`, `latest_contents` under `dir`), `agent/tests/calibrations/uploader.rs` (`Harness::spawn_on`), `agent/tests/services/calibration/create.rs` (`Fixture::with_options`). Add a `latest_layout(dir)` helper in `agent/tests/test_utils/calibrations.rs` beside `layout` if two or more sites need it.
+Keep the other `UploaderArgs` construction sites compiling by adding the two fields, under each fixture's temp dir: `agent/tests/test_utils/calibrations.rs` (`uploader`: `latest_index: None`, `latest_contents` under `dir`), `agent/tests/calibrations/uploader.rs` (`Harness::spawn_on`), `agent/tests/services/calibration/create.rs` (`Fixture::with_options`). Build the paths with `LatestCalibrationsLayout::new(..)` under the fixture's temp dir.
 
 Commit.
 
