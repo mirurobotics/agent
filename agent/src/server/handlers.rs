@@ -205,12 +205,7 @@ pub async fn list_latest_calibrations(
 ) -> impl IntoResponse {
     handle(
         async {
-            let Query(query) = query.map_err(|rejection| {
-                ServerErr::InvalidRequestErr(InvalidRequestErr {
-                    msg: rejection.body_text(),
-                    trace: trace!(),
-                })
-            })?;
+            let Query(query) = query.map_err(reject_query)?;
             let latest =
                 calibration_svc::list_latest(&state.calibration_mngr, query.into()).await?;
             Ok::<_, ServerErr>(device_server::LatestCalibrationsResponse::from(&latest))
@@ -239,6 +234,14 @@ fn reject_body(rejection: JsonRejection) -> ServerErr {
             trace: trace!(),
         });
     }
+    ServerErr::InvalidRequestErr(InvalidRequestErr {
+        msg: rejection.body_text(),
+        trace: trace!(),
+    })
+}
+
+/// An unreadable query, such as a repeated filter, is 422.
+fn reject_query(rejection: QueryRejection) -> ServerErr {
     ServerErr::InvalidRequestErr(InvalidRequestErr {
         msg: rejection.body_text(),
         trace: trace!(),
