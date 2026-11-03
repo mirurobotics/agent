@@ -1,5 +1,6 @@
-# Required AI review of every non-draft PR. Posts the `ai-review` status
-# checked by branch protection. See the reusable workflow for details.
+# Required AI review of every non-draft PR, and an advisory design review
+# of drafts. Posts the `ai-review` status checked by branch protection.
+# See the reusable workflow for details.
 #
 # pull_request_target runs this file from the base branch, so a PR cannot
 # edit or delete its own review.
@@ -11,7 +12,7 @@ name: AI Review
 
 on:
   pull_request_target:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
@@ -24,7 +25,7 @@ permissions:
 
 jobs:
   ai-review:
-    uses: mirurobotics/.github/.github/workflows/ai-review.yml@2c9acf17d2c1f2badf480c56892a10385801810f
+    uses: mirurobotics/.github/.github/workflows/ai-review.yml@ed45668befad583d23afb9770c4552a08a9ed169
     with:
       runs-on: blacksmith-2vcpu-ubuntu-2404
     secrets:
