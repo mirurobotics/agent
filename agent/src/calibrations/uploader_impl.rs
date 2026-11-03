@@ -298,8 +298,6 @@ where
     }
 }
 
-/// The queue entry id a report file is named after, or `None` for any other
-/// file.
 /// The data in report `file`. A missing file or one that isn't UTF-8 can
 /// never be sent, so either is a terminal [`InvalidReportErr`]; any other
 /// read error is retried.
