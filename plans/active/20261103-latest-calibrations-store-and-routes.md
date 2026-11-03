@@ -84,14 +84,22 @@ The store is owned by the calibration uploader's actor, beside its queue, not by
 - [ ] Milestone 3: services, request/response conversions, handlers, routes, `ARCHITECTURE.md` (source).
 - [ ] Milestone 4: tests.
 - [ ] Milestone 5: push and reach `CLEAN` via `$preflight` before the PR leaves draft.
+- [x] Source written
 
 ## Surprises & Discoveries
 
-(Add entries as you go.)
+- `agent/tests/errors/mod.rs` `test_code_as_str` matches `Code` exhaustively, so adding `Code::CalibrationStoreFull` breaks the test build. The source stage added the match arm only (in the Milestone 3 commit) so the suite compiles; the tests stage adds the `(Code::CalibrationStoreFull, "calibration_store_full")` case and bumps `EXPECTED_CODE_VARIANTS` from 8 to 9, without which that test fails its length check.
 
 ## Decision Log
 
-(Add entries as you go.)
+- `LatestStore::put` deletes the replaced entry's content file only when its `report_id` differs from the new one. Intake always mints a new id, but the test fixtures reuse a fixed `report_id` per slug, and deleting would remove the content just written.
+- `LatestStore::set_upload_status` sets the status in memory even when the index write fails (logged at warn), as `FileQueue::ack` keeps its in-memory change; the next index write saves it.
+- `UploaderImpl::prune_orphans` now calls `LatestStore::prune_orphans`, then the queue's old body, renamed `prune_reports`, so the queue's early returns never skip the store.
+- `LatestCalibrations` and `LatestContent` derive `Debug` and `PartialEq` so tests can compare them.
+- The query helpers in `server/request.rs` are two private functions: `split_list` (split on `,`, trim, drop empty items) and `split_slugs` (`split_list`, with `null` as `None`).
+- `handlers::get_calibration_content` returns `Response`; its error arm and `handle` share the extracted `error_response`, as planned.
+- Fixtures: `test_utils::calibrations::latest_layout(dir)` (a `LatestCalibrationsLayout` at `resources/calibrations` under the temp dir, beside `layout(dir)`) builds the store paths for every fixture. The inline `uploader_impl` fixture keeps the layout as `latest`, opens a latest index file in `uploader_with`, and `uploader_on` takes a `latest_index` argument (the two in-memory-queue call sites pass `None`). The `tests/calibrations/uploader.rs` harness (also keeping `latest`), `test_utils::calibrations::uploader` and the service `create.rs` fixture pass `latest_index: None`.
+- `ARCHITECTURE.md`: the latest store is a new paragraph right after the `calibrations/` paragraph, not inside it, which is already long; the `calibrations/` paragraph's "checks only the request's shape" now also names the reserved `null` slug.
 
 ## Outcomes & Retrospective
 
