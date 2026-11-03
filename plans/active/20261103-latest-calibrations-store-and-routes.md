@@ -113,6 +113,7 @@ The store is owned by the calibration uploader's actor (its `Worker`, beside the
 - Design review: `sse::parse_event_filter` reuses `request::split_list` (now `pub(crate)`), which the latest query introduced, instead of repeating the split, trim and drop-empty parsing.
 - AI review r4451473461: `LatestIndex::entries` is a `BTreeMap<LatestKey, LatestEntry>`, so a duplicate key can't be represented, and `has_key`/`replace_or_append` are gone. `indexmap` is only a transitive dependency, so a `BTreeMap` (key order; the spec defines none) avoids adding one. JSON object keys must be strings, so `index.json` stays a list of entries (a private `entry_list` serde module) and each is keyed again on load.
 - Self-review (AI design review r4461671627): `UploaderArgs` takes a prebuilt `latest: LatestStore` instead of `latest_index`, `latest_contents` and `UploaderOptions::latest_capacity`, which `UploaderImpl` never read. `AppState::init_calibration_mngr` and the fixtures build the store; the cap is `latest::DEFAULT_CAPACITY` (1,000) beside the store, as `events::store::DEFAULT_MAX_RETAINED` is, and `UploaderOptions` is back to its `main` fields.
+- Self-review: `LatestEntry::is_uploaded` and `LatestIndex::entries` drop `#[serde(default)]`, since every index write includes both (as `QueueSnapshot::entries` has none). This supersedes the `is_uploaded` default above; an index missing either is corrupt and is copied aside and started empty.
 - Design review: `LatestStore::put` always deletes the replaced entry's content; the same-`report_id` guard existed only for fixtures. `test_utils::calibrations::report(slug)` keeps its deterministic `report_id`, which existing tests compare against, and no existing test puts one key twice; the Milestone 4 tests that do give the second report a fresh `Uuid::new_v4()` id.
 
 ## Outcomes & Retrospective
@@ -156,13 +157,13 @@ These orders make every crash point leave a readable store and a queue that neve
 `agent/src/calibrations/latest.rs` (new; `pub mod latest;` in `agent/src/calibrations/mod.rs`, re-exporting the types below):
 
     #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-    pub struct LatestEntry { pub metadata: ReportMetadata, #[serde(default)] pub is_uploaded: bool }
+    pub struct LatestEntry { pub metadata: ReportMetadata, pub is_uploaded: bool }
 
     #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
     pub struct LatestIndex {
         /// When the store was last loaded from Miru; `None` until then.
         #[serde(default)] pub loaded_at: Option<DateTime<Utc>>,
-        #[serde(default, with = "entry_list")] pub entries: BTreeMap<LatestKey, LatestEntry>,
+        #[serde(with = "entry_list")] pub entries: BTreeMap<LatestKey, LatestEntry>,
     }
     impl Patch<LatestIndex> for LatestIndex { replace, as QueueSnapshot does }
     pub type LatestIndexFile = StateFile<LatestIndex, LatestIndex>;

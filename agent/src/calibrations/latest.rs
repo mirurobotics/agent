@@ -42,7 +42,6 @@ impl From<&ReportMetadata> for LatestKey {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LatestEntry {
     pub metadata: ReportMetadata,
-    #[serde(default)]
     pub is_uploaded: bool,
 }
 
@@ -66,7 +65,7 @@ pub struct LatestIndex {
     /// When the store was last loaded from Miru; `None` until then.
     #[serde(default)]
     pub loaded_at: Option<DateTime<Utc>>,
-    #[serde(default, with = "entry_list")]
+    #[serde(with = "entry_list")]
     pub entries: BTreeMap<LatestKey, LatestEntry>,
 }
 
