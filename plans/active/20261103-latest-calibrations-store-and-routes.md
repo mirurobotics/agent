@@ -34,7 +34,7 @@ Device apps (ATI, Monarch's Dinghy) load calibrations at startup, often offline.
 | `calibrations::LatestCalibrations` (fields `is_confirmed`, `entries`) | `LatestList`, `LatestListing` | Mirrors the wire `LatestCalibrationsResponse`. |
 | `calibrations::LatestContent` (fields `format`, `data`) | `CalibrationContent`, `Content` | The content of a latest entry; `InstanceContent` already names the request's `{format, data}` wire type. |
 | `Uploader::list_latest`, `Uploader::latest_content` | `latest`, `get_latest`; `content` | Verb first like `enqueue`/`len`; `latest_content` says which content. |
-| `UploaderArgs::latest_index`, `UploaderArgs::latest_contents` | `latest: LatestStore` (prebuilt); `index_file`/`contents` | Mirror `snapshot_file`/`reports`, so `UploaderImpl::new` builds the store as it builds the queue. |
+| `UploaderArgs::latest_index`, `UploaderArgs::latest_contents` | `latest: LatestStore` (prebuilt); `index_file`/`contents` | Mirror `snapshot_file`/`reports`, so `CalibrationManager::spawn` builds the store from its args as `UploaderImpl::new` builds the queue. |
 | `UploaderOptions::latest_capacity` | reuse `capacity`; `max_latest_keys` | Same shape as `capacity`; a separate field lets the queue and store caps differ and be tested apart. |
 | `models::CalibrationUploadStatus` (`Queued`, `Uploaded`, `Dropped`) | `UploadStatus`, `LatestStatus` | The device twin's name; `UploadStatus` is the backend upload ledger's enum. |
 | `Layout::latest_calibrations()` → `LatestCalibrationsLayout` with `index()` (`resources/calibrations/index.json`) and `contents()` (`resources/calibrations/contents/`) | `metadata.json` (as `config_instances`), `latest.json` | `CalibrationsLayout` is the sibling; `contents/` matches `config_instances`; `index.json` is the RFC's word, and the file holds `loaded_at` too, not only metadata. |
@@ -96,7 +96,7 @@ The store is owned by the calibration uploader's actor, beside its queue, not by
 
 - Keep the double copy of queued content and the `Uploader` name (see Left out), answering the AI design review of c1dfa7c and its thread r4451533096.
 - `LatestStore::set_upload_status` sets the status in memory even when the index write fails (logged at warn), as `FileQueue::ack` keeps its in-memory change; the next index write saves it.
-- `UploaderImpl::prune_orphans` now calls `LatestStore::prune_orphans`, then the queue's old body, renamed `prune_reports`, so the queue's early returns never skip the store.
+- ~~`UploaderImpl::prune_orphans` now calls `LatestStore::prune_orphans`, then the queue's old body, renamed `prune_reports`, so the queue's early returns never skip the store.~~ Superseded: the `Worker` prunes the store, then the queue, each with its own `prune_orphans`.
 - `LatestCalibrations` and `LatestContent` derive `Debug` and `PartialEq` so tests can compare them.
 - The query helpers in `server/request.rs` are two functions: `split_list` (split on `,`, trim, drop empty items) and `split_slugs` (`split_list`, with `null` as `None`).
 - `handlers::get_calibration_content` returns `Response`; its error arm and `handle` share the extracted `error_response`, as planned.
@@ -105,6 +105,7 @@ The store is owned by the calibration uploader's actor, beside its queue, not by
 - Design review: the content media types are `InstanceFormat::media_type` in `models/instance_format.rs`, a property of the format, not a private function in `server/response.rs`.
 - The user chose `CalibrationManager` for the actor; agent#423 renamed it on main, and the merge of main renamed this PR's new uses (the `list_latest` and `get_content` services and their handlers).
 - Ready mode starts by moving `LatestStore` from `UploaderImpl` to the `Worker` (AI design review thread r4460354923). The `Worker` answers both reads from it, `UploaderImpl::enqueue`/`finish_attempt` borrow `&mut LatestStore`, `UploaderImpl::new` loses `latest_index`/`latest_contents`, and `prune_reports` goes back to `prune_orphans`.
+- `UploaderArgs` keeps `latest_index`/`latest_contents` and `UploaderOptions` keeps `latest_capacity`: they are `CalibrationManager::spawn`'s arguments, which now build the store, so the fixtures and `AppState` need no change. `UploaderImpl` carries `latest_capacity` in its options unused.
 - Ready mode also stops storing `upload_status` (AI design review thread r4460399733). A latest entry stores `is_uploaded: bool`, and listing derives the status: `queued` if the queue holds the `report_id`, `uploaded` if marked, otherwise `dropped`. `drop_report` goes, and only a successful upload writes the store, before the dequeue. This settles which drops count as `dropped` (all of them, including reports lost with a corrupt or in-memory queue). PR B's load marks Miru's entries uploaded.
 - Design review: `LatestStore::prune_orphans` and `UploaderImpl::prune_reports` share `calibrations/cleanup.rs` (`prune(dir, kept)` deletes the files whose names `kept` lacks; `delete(file)` logs a failure), replacing their copies and both `delete` helpers. `filesys` had no such helper. Each caller keeps its in-memory guard, and the queue's keep set is the hyphenated entry ids, the names `report_file` writes.
 - Design review: `sse::parse_event_filter` reuses `request::split_list` (now `pub(crate)`), which the latest query introduced, instead of repeating the split, trim and drop-empty parsing.
@@ -190,17 +191,16 @@ Commit (see Concrete Steps).
 `agent/src/calibrations/uploader_impl.rs`:
 
 - `UploaderOptions` gains `latest_capacity: usize` (doc: the most keys the latest store holds; a new key past it is rejected), default 1000; update the `Default` doc comment.
-- `UploaderImpl` gains `latest: LatestStore`; `new` takes `latest_index: Option<LatestIndexFile>` and `latest_contents: Dir` and builds `LatestStore::new(latest_index, latest_contents, options.latest_capacity)`.
-- `prune_orphans` also awaits `self.latest.prune_orphans()` (keep the queue's early returns from skipping it: call the store first, or restructure the queue part into its own helper).
-- `enqueue`: after `verify_size`, call `self.latest.verify_capacity(&report.metadata)?`; enqueue a clone of the metadata; write the report file as today; then `self.latest.put(metadata, &bytes)`, and on error `self.remove(id).await` and return it. Update the doc comment: the report is in the latest store when this returns Ok, and on error nothing is queued or stored.
+- `UploaderImpl` does not own the store: the actor's `Worker` does, and lends it to `enqueue` and `finish_attempt` as `latest: &mut LatestStore` (the first argument after `&mut self`). `new` and `prune_orphans` are unchanged.
+- `enqueue`: after `verify_size`, call `latest.verify_capacity(&report.metadata)?`; enqueue a clone of the metadata; write the report file as today; then `latest.put(metadata, &bytes)`, and on error `self.remove(id).await` and return it. Update the doc comment: the report is in the latest store when this returns Ok, and on error nothing is queued or stored.
 - `finish_attempt`: on `Ok`, `self.latest.set_upload_status(entry.job.report_id, Uploaded)` before `self.remove`. In `handle_failure`, each drop arm (`Terminal`, `OutOfAttempts`, `TooOld`) sets `Dropped` before `self.remove`; add a small `drop_report(&mut self, entry: &QueueEntry)` helper if the three arms would repeat two lines.
-- Add `pub(crate) fn list_latest(&self, filter: &LatestFilter) -> LatestCalibrations` and `pub(crate) async fn latest_content(&self, report_id: Uuid) -> Result<LatestContent, CalibrationsErr>`, delegating to the store.
-- Update the inline test `Fixture` (`uploader_on`) to pass a latest index and contents dir under the temp dir so existing tests compile.
+- Update the inline test `Fixture` with a `latest_store()` that opens a store under the temp dir, and pass it to each `enqueue`/`finish_attempt` so existing tests compile.
 
 `agent/src/calibrations/uploader.rs`:
 
-- `UploaderArgs` gains `latest_index: Option<LatestIndexFile>` (doc: where the latest store's index persists; `None` keeps it in memory) and `latest_contents: Dir` (doc: one content file per latest entry); `spawn` passes them to `UploaderImpl::new`.
-- `Command` gains `ListLatest { filter: LatestFilter, respond_to: oneshot::Sender<LatestCalibrations> }` and `LatestContent { report_id: Uuid, respond_to: oneshot::Sender<Result<LatestContent, CalibrationsErr>> }`, served in `Worker::handle`.
+- `UploaderArgs` gains `latest_index: Option<LatestIndexFile>` (doc: where the latest store's index persists; `None` keeps it in memory) and `latest_contents: Dir` (doc: one content file per latest entry); `spawn` builds `LatestStore::new(latest_index, latest_contents, options.latest_capacity)` into the `Worker`'s `latest` field, beside `uploader`.
+- `Worker::run` awaits `self.latest.prune_orphans()`, then `self.uploader.prune_orphans()`.
+- `Command` gains `ListLatest { filter: LatestFilter, respond_to: oneshot::Sender<LatestCalibrations> }` and `LatestContent { report_id: Uuid, respond_to: oneshot::Sender<Result<LatestContent, CalibrationsErr>> }`, which `Worker::handle` answers from `self.latest`.
 - `Uploader` gains `pub async fn list_latest(&self, filter: LatestFilter) -> Result<LatestCalibrations, CalibrationsErr>` and `pub async fn latest_content(&self, report_id: Uuid) -> Result<LatestContent, CalibrationsErr>` via `send_command`. Update `enqueue`'s doc: it also writes the latest store, and a full store is the 507 `StoreFullErr`. Update the `Uploader` doc to say it also owns the latest store.
 
 `agent/src/app/state.rs` `init_calibration_uploader`: open `layout.latest_calibrations().index()` with `LatestIndexFile::new_with_default(.., Default::default())`, falling back to `None` with an error log as for the queue; pass it and `latest_calibrations().contents()` in `UploaderArgs`. Update the doc comment.

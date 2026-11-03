@@ -6,7 +6,7 @@ use std::time::Duration;
 // internal crates
 use crate::calibrations::{
     errors::{CalibrationsErr, ReceiveActorMessageErr, SendActorMessageErr},
-    latest::{LatestCalibrations, LatestContent, LatestFilter, LatestIndexFile},
+    latest::{LatestCalibrations, LatestContent, LatestFilter, LatestIndexFile, LatestStore},
     report::{QueueEntry, QueueSnapshotFile, Report},
     sender::Sender,
     uploader_impl::{NextAttempt, UploaderImpl, UploaderOptions},
@@ -67,6 +67,7 @@ enum Flow {
 struct Worker<S, F, N> {
     receiver: mpsc::Receiver<Command>,
     uploader: UploaderImpl<S, N>,
+    latest: LatestStore,
     sleep_fn: F,
 }
 
@@ -78,6 +79,7 @@ where
     N: Fn() -> DateTime<Utc> + Send + Sync + 'static,
 {
     async fn run(mut self) {
+        self.latest.prune_orphans().await;
         self.uploader.prune_orphans().await;
         loop {
             let flow = match self.uploader.next_attempt().await {
@@ -99,7 +101,9 @@ where
         let Some(result) = self.serve_until(upload).await else {
             return Flow::Shutdown;
         };
-        self.uploader.finish_attempt(entry, result).await;
+        self.uploader
+            .finish_attempt(&mut self.latest, entry, result)
+            .await;
         Flow::Continue
     }
 
@@ -146,19 +150,20 @@ where
         };
         match cmd {
             Command::Enqueue { report, respond_to } => {
-                let result = self.uploader.enqueue(*report).await.map(drop);
+                let enqueued = self.uploader.enqueue(&mut self.latest, *report).await;
+                let result = enqueued.map(drop);
                 respond(respond_to, result, "enqueue");
             }
             Command::Len { respond_to } => respond(respond_to, self.uploader.len(), "len"),
             Command::ListLatest { filter, respond_to } => {
-                let latest = self.uploader.list_latest(&filter);
+                let latest = self.latest.list(&filter);
                 respond(respond_to, latest, "list latest");
             }
             Command::LatestContent {
                 report_id,
                 respond_to,
             } => {
-                let content = self.uploader.latest_content(report_id).await;
+                let content = self.latest.content(report_id).await;
                 respond(respond_to, content, "latest content");
             }
             Command::Shutdown { respond_to } => {
@@ -199,17 +204,21 @@ impl CalibrationManager {
         N: Fn() -> DateTime<Utc> + Send + Sync + 'static,
     {
         let (sender, receiver) = mpsc::channel(buffer_size);
+        let latest = LatestStore::new(
+            args.latest_index,
+            args.latest_contents,
+            args.options.latest_capacity,
+        );
         let worker = Worker {
             receiver,
             uploader: UploaderImpl::new(
                 args.sender,
                 args.snapshot_file,
                 args.reports,
-                args.latest_index,
-                args.latest_contents,
                 args.options,
                 args.now_fn,
             ),
+            latest,
             sleep_fn: args.sleep_fn,
         };
         (Self { sender }, tokio::spawn(worker.run()))
