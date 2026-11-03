@@ -6,21 +6,438 @@ info:
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
-  x-release-version: v0.5.17-next
+  x-release-version: v0.5.18
   x-git-commit:
-    sha: f6a7abd45988637907e27b99f5682a7098eda17f
-    url: https://github.com/mirurobotics/openapi/commit/f6a7abd45988637907e27b99f5682a7098eda17f
-    message: 'docs(plans): reword the agent calibration step
+    sha: 2f22b25c28c397fbe5ce8c0f9da47d6b98671382
+    url: https://github.com/mirurobotics/openapi/commit/2f22b25c28c397fbe5ce8c0f9da47d6b98671382
+    message: 'feat(device,agent): read the latest calibrations on the device (#416)
 
 
-      Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+      <!-- claude-projects-attribution: {"github_login":"miru-agents"} -->
 
-      Claude-Session: https://claude.ai/code/session_01XHScKYzk9naPpNDFHzWwcc'
-    author: Claude
+      _Requested by **bens-agent** · [project
+
+      thread](https://claude.ai/code/project/chan_015imaa8aZrnubYZcZCvjeHx?thread=cmsg_015imaa8aZrnubYZcZCvjeHx36xcf18iv6t3BwQxEECTE9)_
+
+
+      Step 1 of
+
+      [ENG-1726](https://linear.app/mirurobotics/issue/ENG-1726/featdevice-api-read-the-latest-calibrations-on-the-device-including),
+
+      implementing [RFC: Latest Calibrations on the
+
+      Device](https://linear.app/mirurobotics/document/rfc-latest-calibrations-on-the-device-763bc5676fd0).
+
+      The agent answers from a store on disk, so nothing here proxies to Miru
+
+      (unlike the routes #413 reverted).
+
+
+      ## Summary
+
+      - **Device API** `GET /calibrations/latest` (`listLatestCalibrations`):
+
+      one `Calibration` per (component, role, aspect), uploaded or not, with
+
+      `upload_status` (`queued`, `uploaded`, `dropped`). Filters `component`,
+
+      `role`, `aspect`, where `null` matches calibrations reported without
+
+      one. No pagination. The body is a `LatestCalibrationsResponse`,
+
+      `{is_confirmed, calibrations: [...]}`, where `is_confirmed` is false
+
+      until the agent''s first load from Miru.
+
+      - **Device API** `GET /calibrations/{report_id}/content`
+
+      (`getCalibrationContent`) returns the raw bytes, `Content-Type` set from
+
+      the format, like the Agent API''s config instance content download. SDK:
+
+      `calibrations.latest`, `calibrations.download` and the `calibration`
+
+      model in `tools/stainless/device.yml`.
+
+      - **Agent API** `GET /calibrations/latest`: a `CalibrationList` of
+
+      Miru''s calibration with the latest `reported_at` per key for the calling
+
+      device (ties broken by `created_at`), which the agent loads its store
+
+      from after a reset. Paginated with `offset` and `limit`, like every
+
+      backend list, with `expand=reported_by` and `expand=total_count`, and no
+
+      stated order. It takes no filters and carries no content. The agent
+
+      `Calibration` gets back `component_slug`, `role_slug` and `aspect_slug`,
+
+      plus the expandable `reported_by` #406 had, and gains a required
+
+      `format` (`InstanceFormat`), so the initial load can set `Content-Type`
+
+      on the device download (agent#421 design review).
+
+      - **Agent API** `GET /calibrations/{calibration_id}/content`
+
+      (`getCalibrationContent`): the raw bytes of one calibration, which the
+
+      initial load downloads per key, the way the deployment sync downloads
+
+      each config instance''s content. Like `getConfigInstanceContent`, it
+
+      takes `disposition` and returns `Content-Disposition`.
+
+      - **Both** `POST /calibrations` say `null` is reserved for `role` and
+
+      `aspect` again. #413 removed that.
+
+
+      ## Decisions
+
+
+      ### Names
+
+
+      | New name | Alternatives | Why this one |
+
+      |----------|--------------|--------------|
+
+      | `GET /calibrations/latest` | `/calibrations/current`, `/calibrations`
+
+      | The RFC''s choice: `/deployments/current` means "in effect", and this
+
+      only knows the newest. A bare list would read as history. |
+
+      | `listLatestCalibrations` (device and agent operationId) |
+
+      `getLatestCalibrations`, `listCalibrationsLatest` | `list` prefix like
+
+      every list operation; `Latest` matches the path. |
+
+      | `Calibration` (device schema), `object: calibration` |
+
+      `LatestCalibration`, `DeviceCalibration` | The reviewer asked for
+
+      `Calibration`. It is a different schema from the Platform and Agent
+
+      `Calibration`, in another bundle; the device item has no `cal_` id or
+
+      `created_at`. |
+
+      | `CalibrationList` (agent `PaginatedList`) | `LatestCalibrationList`,
+
+      `LatestCalibrations` | The reviewer asked for `CalibrationList`; #413
+
+      removed the old agent `CalibrationList`, so the name is free. |
+
+      | `LatestCalibrationsResponse` with `is_confirmed` (boolean) and
+
+      `calibrations` (array) | `ListLatestCalibrationsResponse`; `seeded_at`,
+
+      `is_seeded`, `is_complete`, `is_trusted`, `is_synced`,
+
+      `is_cloud_loaded`; a `CalibrationList` envelope with `object` and `data`
+
+      | The reviewer asked to drop `List` from the name, and the author asked
+
+      for a plain response holding only the boolean and the array. The author
+
+      chose `is_confirmed`: the list has been checked against Miru.
+
+      `is_trusted` would hint at an integrity or security check. |
+
+      | `format` (agent `Calibration`, `InstanceFormat`) | `content_format`,
+
+      `media_type` | The name and enum the `InstanceContent` that every
+
+      calibration is reported with already uses. |
+
+      | `CalibrationUploadStatus` (`queued`, `uploaded`, `dropped`;
+
+      `CALIBRATION_UPLOAD_STATUS_*`) | `UploadStatus`,
+
+      `LatestCalibrationUploadStatus` | `UploadStatus` already names the
+
+      upload ledger''s `pending`/`uploaded` in
+
+      `apis/configs/components/enums/upload-status.yaml`. |
+
+      | `upload_status` (property) | `status`, `sync_status` | Says what the
+
+      status is about; a plain `status` would clash with a later Hardware
+
+      Manifest validity status. |
+
+      | Device `GET /calibrations/{report_id}/content`,
+
+      `getCalibrationContent` | `/calibrations/latest/{report_id}/content` |
+
+      The RFC''s lean; `report_id` is the only id every device calibration has,
+
+      and the Device API has no `calibration_id` route. |
+
+      | Agent `GET /calibrations/{calibration_id}/content`,
+
+      `getCalibrationContent` | `expand=content` on the list | Mirrors the
+
+      agent `getConfigInstanceContent`; on Miru every calibration has a `cal_`
+
+      id. |
+
+      | `report_id` (path parameter in `apis/configs/params.yaml`) |
+
+      `calibration_report_id` | Same name as the `report_id` field it takes. |
+
+      | `component_slug`, `role_slug`, `aspect_slug` (agent `Calibration`) |
+
+      `component`, `role`, `aspect` | The names the reviewer chose on #370 for
+
+      the agent object, so they don''t read as objects next to `component_id`.
+
+      |
+
+      | `CalibrationListExpansion` (agent, `reported_by`, `total_count`) and
+
+      `calibration_list_expansions` | `LatestCalibrationListExpansion` | What
+
+      the reverted #370 named the agent''s paginated calibration list
+
+      expansion. MIRU002 needs a `CalibrationExpansion` with the same values
+
+      but `total_count`, so `CalibrationExpansion` stays, registered in the
+
+      agent `openapi.yaml` like `DplSearch`; MIRU009 checks the values against
+
+      `Calibration`. |
+
+      | `calibration_search_component`, `_role`, `_aspect` and `CalSearch`
+
+      (device only, in `apis/apps/device-server/paths/calibrations.yaml`) |
+
+      shared copies in `apis/configs/paths/calibrations.yaml` | The device is
+
+      their only user, and the Platform API keeps its own copies without
+
+      `null` matching. MIRU005 fails without a `CalSearch` matching the three
+
+      filters. |
+
+      | SDK: `calibrations.latest`, `calibrations.download`, model
+
+      `calibration` | `calibrations.list_latest`, `calibrations.content` |
+
+      `latest` is the ENG-1726 SDK name; `download` matches the platform SDK''s
+
+      config instance content method. |
+
+
+      ### Precedent
+
+
+      | New file | Mirrors |
+
+      |----------|---------|
+
+      | `apis/apps/device-server/components/schemas/calibration.yaml` |
+
+      `apis/apps/backend-server/platform/components/schemas/calibration.yaml`
+
+      (fields, descriptions); file named for the resource like
+
+      `components/schemas/deployment.yaml`. |
+
+      |
+
+      `apis/apps/device-server/components/enums/calibration-upload-status.yaml`
+
+      | `apis/apps/device-server/components/enums/device-status.yaml` and
+
+      `apis/configs/components/enums/upload-status.yaml`. |
+
+
+      The device routes mirror the reverted
+
+      `apis/apps/device-server/paths/platform-calibrations.yaml` (#370/#409)
+
+      for filters and `CalSearch`, and the Agent API''s `GET
+
+      /config_instances/{config_instance_id}/content` for the download. The
+
+      agent content route mirrors that same config instance route,
+
+      `disposition` and `Content-Disposition` included.
+
+      `LatestCalibrationsResponse` sits next to `CreateCalibrationResponse` in
+
+      `apis/apps/device-server/components/responses/calibration.yaml`, and
+
+      like the other Device API responses it is a plain object with no list
+
+      envelope. The agent `Calibration` additions restore the slugs and
+
+      expandable `reported_by` that #406 left, with its
+
+      `.redocly.lint-ignore.yaml` entries. Its `format` deviates from the
+
+      agent `ConfigInstance`, which has none: the agent writes config
+
+      instances to a file path, but it serves calibrations with a
+
+      `Content-Type`. The agent list mirrors the agent `DeploymentList`
+
+      (`PaginatedList`, `offset`, `limit`, `*ListExpansion` with
+
+      `total_count`), which also states no order.
+
+
+      ### Left out
+
+
+      - Pagination on the device list, and `order_by`, `serial_number` and
+
+      `report_id` filters: one item per key, served locally (RFC).
+
+      - A stated order on the agent list: the author decided it isn''t needed.
+
+      Like the agent `DeploymentList`, it is served in backend''s default order
+
+      (`created_at` descending). The initial load relies on that only to avoid
+
+      skipping a key while paging, which holds because only the device creates
+
+      its calibrations, so a new one always lands first. The plan''s Decision
+
+      Log has the reasoning.
+
+      - A list envelope (`object: "list"`, `data`) on the device response: the
+
+      author asked for only `is_confirmed` and `calibrations`.
+
+      - `digest` on the device `Calibration`: the reviewer asked to leave it
+
+      out for now. A new report has a new `report_id`, and the field can be
+
+      added later without breaking clients.
+
+      - `format` on the device `Calibration`: the device download already sets
+
+      `Content-Type`. The Platform `Calibration` has its own `format` since
+
+      #374.
+
+      - Filters on the agent list: its only caller, the agent''s initial load,
+
+      always fetches every key.
+
+      - `expand=content` on either list: one page could carry up to 1 MiB per
+
+      item, so content is its own download on both APIs, like config
+
+      instances.
+
+      - A `calibration.reported` event: write-through already puts a report in
+
+      the list when POST returns, and apps load at startup. It is additive and
+
+      can come when an app needs live reloads.
+
+      - A Miru `id` on the device `Calibration`: it duplicated
+
+      `upload_status`, and nothing on the device takes a `cal_` id. Adding it
+
+      later does not break clients.
+
+      - The `disposition` query parameter and `Content-Disposition` header on
+
+      the device download: no Device API route has them, and device apps read
+
+      the bytes.
+
+      - Documented 4xx responses: no Device or Agent API route documents error
+
+      responses; the 404 is stated in the operation description.
+
+      - `null` matching on the Platform API''s slug filters: the platform keeps
+
+      its own filters; nothing in ENG-1726 needs it.
+
+      - A content field on the device `Calibration`, a `status` for Hardware
+
+      Manifest, and robot-level calibrations: RFC non-goals or later work.
+
+      - Release tags: `device` and `agent` are tagged by hand after merge, as
+
+      #370 and #406 did.
+
+
+      ### Open questions
+
+
+      - Should the agent `CreateCalibrationRequest` also document the reserved
+
+      `null`? Backend rejects it on the Agent API (ENG-1726 step 2). Default:
+
+      yes, on both the device and agent create requests, as #370 had it.
+
+
+      ## Rollout
+
+
+      Merge, then tag `device` and `agent` by hand. The backend (step 2) and
+
+      agent (steps 3 and 4) PRs vendor them. The cross-repo plan is in the
+
+      comment below.
+
+
+      ## Reviewer notes
+
+      - Q1 `apis/apps/backend-server/agent/openapi.yaml:47`:
+
+      `CalibrationExpansion` is registered although no route uses it. MIRU002
+
+      fails when `CalibrationListExpansion` has values other than
+
+      `total_count` and has no matching `*Expansion`. The registration follows
+
+      `DplSearch`, which is also registered only for lint.
+
+      - Q1 `apis/apps/device-server/paths/calibrations.yaml:8`: `CalSearch`
+
+      serves only MIRU005, which fails when the `calibration_search_*` filters
+
+      have no matching `*Search` enum.
+
+      - The agent `Calibration.format` is a bare `$ref` to `InstanceFormat`,
+
+      while the Platform `Calibration.format` that #374 added uses `allOf`
+
+      plus a description. I left it as is so the approved head stays put; it''s
+
+      a documentation-only difference.
+
+
+      ---
+
+      🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+
+      https://claude.ai/code/session_01XHScKYzk9naPpNDFHzWwcc
+
+
+      ---------
+
+
+      Co-authored-by: Claude <noreply@anthropic.com>
+
+      Co-authored-by: Ben <ben@mirurobotics.com>'
+    author: Ben's Agent
     branch: HEAD
     dirty: false
   x-build:
-    built_at: '2026-11-03T06:22:04.489701+00:00'
+    built_at: '2026-11-03T20:39:00.069450+00:00'
 servers:
 - url: https://staging.api.mirurobotics.com/agent/v1
   description: Staging
@@ -289,8 +706,7 @@ paths:
       summary: List Latest
       operationId: listLatestCalibrations
       description: List the calibration with the latest `reported_at` for each component,
-        role and aspect the device reported, breaking ties by `created_at`. Results
-        are ordered by component, role and aspect.
+        role and aspect the device reported, breaking ties by `created_at`.
       parameters:
       - $ref: '#/components/parameters/offset'
       - $ref: '#/components/parameters/limit'
@@ -313,11 +729,18 @@ paths:
       description: Download the content of a calibration the device reported.
       parameters:
       - $ref: '#/components/parameters/calibration_id'
+      - $ref: '#/components/parameters/disposition'
       responses:
         '200':
           description: Successfully retrieved the calibration content. The Content-Type
             header is set according to the content format.
           headers:
+            Content-Disposition:
+              description: Header indicating whether the file is returned inline or
+                as an attachment.
+              schema:
+                type: string
+                example: inline
             Content-Type:
               description: The MIME type of the calibration content.
               schema:
@@ -629,14 +1052,14 @@ components:
     ReleaseVersion:
       type: string
       enum:
-      - v0.5.17-next
+      - v0.5.18
       x-enum-varnames:
       - RELEASE_VERSION
       x-stainless-const: true
     APIGitCommit:
       type: string
       enum:
-      - f6a7abd45988637907e27b99f5682a7098eda17f
+      - 2f22b25c28c397fbe5ce8c0f9da47d6b98671382
       x-enum-varnames:
       - API_GIT_COMMIT
       x-stainless-const: true
@@ -1479,8 +1902,9 @@ components:
     InstanceFormat:
       title: Instance Format
       type: string
-      description: 'The serialization format of config content. A config instance
-        is written to the device filesystem in this format.
+      description: 'The serialization format of stored content, such as a config instance
+        or a calibration. A config instance is written to the device filesystem in
+        this format.
 
         - `json`: standard JSON.
 
