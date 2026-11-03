@@ -17,9 +17,7 @@ use device_api::models as device_server;
 use axum::{
     extract::{
         rejection::{JsonRejection, QueryRejection},
-        Path,
-        Query,
-        State as AxumState,
+        Path, Query, State as AxumState,
     },
     http::StatusCode,
     response::{IntoResponse, Response},
