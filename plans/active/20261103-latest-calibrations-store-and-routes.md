@@ -87,6 +87,7 @@ The store is owned by the calibration uploader's actor (its `Worker`, beside the
 - [ ] Milestone 4: tests.
 - [ ] Milestone 5: push and reach `CLEAN` via `$preflight` before the PR leaves draft.
 - [x] Source written
+- [x] Tests written
 
 ## Surprises & Discoveries
 
@@ -117,7 +118,16 @@ The store is owned by the calibration uploader's actor (its `Worker`, beside the
 
 ## Outcomes & Retrospective
 
-(Summarize at completion or major milestones.)
+Tests written (Milestone 4), not yet validated in CI. They follow the Milestone 4 list, with these changes:
+
+- `InstanceFormat::media_type` is a property of the format (Decision Log), so its six-format table is `media_type_matches_mirus_content_downloads` in `agent/tests/models/instance_format.rs`, and `agent/tests/server/response.rs` checks one format's response (`sends_the_bytes_with_the_content_type_of_the_format`).
+- The layout tests are a `latest_calibrations_layout` module (`root_dir`, `index_file`, `contents_dir`), as `calibrations_layout` is.
+- The request tests keep 7af92c8's names (`accepts_a_missing_role_and_aspect`, `rejects_a_null_role_or_aspect`); the query tests are `latest_calibrations_query::{splits_comma_separated_values, maps_a_null_role_or_aspect_to_none, an_empty_query_filters_nothing}`.
+- The service fixture moved to `agent/tests/services/calibration/helpers.rs` (as `agent/tests/sync/helpers.rs`) so `create.rs`, `latest.rs` and `content.rs` share it, and takes the latest store's capacity. `create_fails_when_the_latest_store_is_full` is `a_full_latest_store_fails_intake`, after its sibling `an_uploader_rejection_fails_intake`. `list_latest_fails_once_the_uploader_stops` and `get_content_of_an_unknown_report_id_is_not_found` cover the services' error arms, which the 100% `services/calibration` gate needs.
+- `test_utils::calibrations::uploader` takes the latest capacity, so the route test can fill the store with a capacity of 0; the handler fixture gains `get_with_content_type`, which `get` now calls.
+- The actor harness in `agent/tests/calibrations/uploader.rs` opens a latest index file so startup pruning runs, and `commands_after_shutdown_fail` also checks `latest_content`.
+- Extra store tests cover the error paths the `calibrations` gate needs: a content write failure, a mark the index can't save (kept in memory, per the Decision Log), a missing or unreadable content file, and an index entry without `is_uploaded` (corrupt, per the Decision Log).
+- `agent/tests/server/errors.rs` and `agent/tests/services/errors.rs` don't list `CalibrationsErr` variants, so they are unchanged.
 
 ## Context and Orientation
 
