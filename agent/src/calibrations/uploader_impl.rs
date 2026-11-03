@@ -1,4 +1,5 @@
 // standard crates
+use std::collections::HashSet;
 use std::future::Future;
 use std::sync::Arc;
 
@@ -12,7 +13,6 @@ use crate::calibrations::{
 };
 use crate::errors::Error;
 use crate::filesys::{files, Dir, File, FileSysErr, WriteOptions};
-use crate::models::CalibrationUploadStatus;
 use crate::queue::{self, Persistence, RetryPolicy, Verdict};
 use crate::trace;
 
@@ -153,6 +153,12 @@ where
         self.queue.len()
     }
 
+    /// The `report_id` of every queued report, including one being uploaded.
+    pub(crate) fn queued_report_ids(&self) -> HashSet<Uuid> {
+        let entries = self.queue.iter();
+        entries.map(|entry| entry.job.report_id).collect()
+    }
+
     /// The report to attempt now, or how long until one is due.
     pub(crate) async fn next_attempt(&mut self) -> NextAttempt {
         let now = (self.now_fn)();
@@ -178,8 +184,9 @@ where
     }
 
     /// Settle `entry` once its attempt ended in `result`: remove the report
-    /// when sent, otherwise retry or drop it as the retry policy says. Its
-    /// `latest` entry's status is set before the report is dequeued.
+    /// when sent, otherwise retry or drop it as the retry policy says. A sent
+    /// report's `latest` entry is marked uploaded before the report is
+    /// dequeued, so a crash in between re-sends it rather than losing the mark.
     pub(crate) async fn finish_attempt(
         &mut self,
         latest: &mut LatestStore,
@@ -189,24 +196,17 @@ where
         match result {
             Ok(()) => {
                 Self::log_success(&entry);
-                let report_id = entry.job.report_id;
-                let uploaded = CalibrationUploadStatus::Uploaded;
-                latest.set_upload_status(report_id, uploaded).await;
+                latest.mark_uploaded(entry.job.report_id).await;
                 self.remove(entry.id).await;
             }
-            Err(err) => self.handle_failure(latest, entry, err).await,
+            Err(err) => self.handle_failure(entry, err).await,
         }
     }
 
     /// Settle a failed attempt as the retry policy says. Network connection
     /// errors are expected and don't count toward the attempt budget; any
     /// other failure does.
-    async fn handle_failure(
-        &mut self,
-        latest: &mut LatestStore,
-        mut entry: QueueEntry,
-        err: CalibrationsErr,
-    ) {
+    async fn handle_failure(&mut self, mut entry: QueueEntry, err: CalibrationsErr) {
         let age = (self.now_fn)() - entry.job.reported_at;
         match self.options.retry.on_failure(&err, entry.attempts, age) {
             Verdict::Retry {
@@ -219,16 +219,16 @@ where
             }
             Verdict::Terminal { .. } => {
                 Self::log_terminal_drop(&entry, &err);
-                self.drop_report(latest, &entry).await;
+                self.remove(entry.id).await;
             }
             Verdict::OutOfAttempts { attempts } => {
                 entry.attempts = attempts;
                 Self::log_dropped(&entry, &err);
-                self.drop_report(latest, &entry).await;
+                self.remove(entry.id).await;
             }
             Verdict::TooOld { age, .. } => {
                 Self::log_age_drop(&entry, age, &err);
-                self.drop_report(latest, &entry).await;
+                self.remove(entry.id).await;
             }
         }
     }
@@ -237,14 +237,6 @@ where
     async fn retry_after(&mut self, id: Uuid, attempts: u32, wait_secs: i64) {
         let next_attempt_at = (self.now_fn)() + TimeDelta::seconds(wait_secs.max(0));
         self.queue.retry(id, attempts, next_attempt_at).await;
-    }
-
-    /// Mark the report queued as `entry` dropped in `latest`, then remove it.
-    async fn drop_report(&mut self, latest: &mut LatestStore, entry: &QueueEntry) {
-        let report_id = entry.job.report_id;
-        let dropped = CalibrationUploadStatus::Dropped;
-        latest.set_upload_status(report_id, dropped).await;
-        self.remove(entry.id).await;
     }
 
     /// Dequeue report `id`, then delete its file. The entry goes first, so a

@@ -1,5 +1,5 @@
 // standard crates
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 // internal crates
 use crate::calibrations::{
@@ -39,7 +39,22 @@ impl From<&ReportMetadata> for LatestKey {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LatestEntry {
     pub metadata: ReportMetadata,
-    pub upload_status: CalibrationUploadStatus,
+    #[serde(default)]
+    pub is_uploaded: bool,
+}
+
+impl LatestEntry {
+    /// Uploaded once marked, queued while the upload queue holds the report,
+    /// and dropped once the queue let it go without uploading it.
+    fn upload_status(&self, queued: &HashSet<Uuid>) -> CalibrationUploadStatus {
+        if self.is_uploaded {
+            CalibrationUploadStatus::Uploaded
+        } else if queued.contains(&self.metadata.report_id) {
+            CalibrationUploadStatus::Queued
+        } else {
+            CalibrationUploadStatus::Dropped
+        }
+    }
 }
 
 /// The latest store's index: one entry per key.
@@ -111,7 +126,14 @@ impl LatestFilter {
 #[derive(Debug, PartialEq)]
 pub struct LatestCalibrations {
     pub is_confirmed: bool,
-    pub entries: Vec<LatestEntry>,
+    pub entries: Vec<ListedEntry>,
+}
+
+/// A latest entry as listed, with its upload status.
+#[derive(Debug, PartialEq)]
+pub struct ListedEntry {
+    pub metadata: ReportMetadata,
+    pub upload_status: CalibrationUploadStatus,
 }
 
 /// A latest entry's content, as it was reported.
@@ -165,7 +187,7 @@ impl LatestStore {
         Err(err)
     }
 
-    /// Make `metadata` its key's entry, `queued`, with `data` as its content.
+    /// Make `metadata` its key's entry, not uploaded, with `data` as its content.
     /// The content file is written before the index and the replaced entry's
     /// content deleted after it, so a crash leaves at most a file no entry
     /// names, which [`Self::prune_orphans`] deletes. On error nothing changed.
@@ -180,7 +202,7 @@ impl LatestStore {
         let mut index = self.index.clone();
         let entry = LatestEntry {
             metadata,
-            upload_status: CalibrationUploadStatus::Queued,
+            is_uploaded: false,
         };
         let replaced = index
             .entries
@@ -196,28 +218,33 @@ impl LatestStore {
         Ok(())
     }
 
-    /// Set the upload status of the entry for `report_id`. A newer report may
-    /// have replaced it, or `reset` wiped the store; then this does nothing. A
-    /// failed index write is logged, and the next write saves the status.
-    pub async fn set_upload_status(&mut self, report_id: Uuid, status: CalibrationUploadStatus) {
+    /// Mark the entry for `report_id` uploaded. A newer report may have
+    /// replaced it, or `reset` wiped the store; then this does nothing. A
+    /// failed index write is logged, and the next write saves the mark.
+    pub async fn mark_uploaded(&mut self, report_id: Uuid) {
         let mut entries = self.index.entries.values_mut();
         let Some(entry) = entries.find(|e| e.metadata.report_id == report_id) else {
             return;
         };
-        entry.upload_status = status;
+        entry.is_uploaded = true;
         let index = self.index.clone();
         if let Err(e) = self.persist(index).await {
-            warn!("calibrations: failed to save the upload status of report {report_id}: {e}");
+            warn!("calibrations: failed to mark report {report_id} uploaded: {e}");
         }
     }
 
-    /// The entries `filter` matches, in key order.
-    pub fn list(&self, filter: &LatestFilter) -> LatestCalibrations {
+    /// The entries `filter` matches, in key order. `queued` holds the
+    /// `report_id` of every report still in the upload queue.
+    pub fn list(&self, filter: &LatestFilter, queued: &HashSet<Uuid>) -> LatestCalibrations {
         let entries = self.index.entries.values();
         let matched = entries.filter(|e| filter.is_match(&e.metadata));
+        let listed = matched.map(|e| ListedEntry {
+            metadata: e.metadata.clone(),
+            upload_status: e.upload_status(queued),
+        });
         LatestCalibrations {
             is_confirmed: self.index.loaded_at.is_some(),
-            entries: matched.cloned().collect(),
+            entries: listed.collect(),
         }
     }
 

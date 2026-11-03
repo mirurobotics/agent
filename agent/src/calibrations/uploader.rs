@@ -156,7 +156,8 @@ where
             }
             Command::Len { respond_to } => respond(respond_to, self.uploader.len(), "len"),
             Command::ListLatest { filter, respond_to } => {
-                let latest = self.latest.list(&filter);
+                let queued = self.uploader.queued_report_ids();
+                let latest = self.latest.list(&filter, &queued);
                 respond(respond_to, latest, "list latest");
             }
             Command::LatestContent {

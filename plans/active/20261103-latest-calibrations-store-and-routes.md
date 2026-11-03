@@ -29,7 +29,8 @@ Device apps (ATI, Monarch's Dinghy) load calibrations at startup, often offline.
 |----------|--------------|--------------|
 | `calibrations::LatestStore` (`agent/src/calibrations/latest.rs`) | `LatestCalibrations`, `CalibrationCache` | "Store" is the RFC's word. `Cache` would read as the `cache` module's LRU caches, which evict; this never evicts. |
 | `calibrations::LatestIndex` (fields `loaded_at`, `entries`) and `LatestIndexFile` | `LatestSnapshot`, `LatestMetadata` | The RFC and ENG-1726 call it the index. `QueueSnapshot`/`QueueSnapshotFile` set the type + `StateFile` alias pattern. |
-| `calibrations::LatestEntry` (fields `metadata: ReportMetadata`, `upload_status`) | `LatestCalibration`, `StoredCalibration` | One entry of the index, as `QueueEntry` is one entry of the queue. `Calibration` is the device wire type. |
+| `calibrations::LatestEntry` (fields `metadata: ReportMetadata`, `is_uploaded`) | `LatestCalibration`, `StoredCalibration` | One entry of the index, as `QueueEntry` is one entry of the queue. `Calibration` is the device wire type. |
+| `calibrations::ListedEntry` (fields `metadata`, `upload_status`) | `LatestCalibration`, `LatestItem` | A latest entry as `LatestStore::list` returns it, with the derived status; `Calibration` is the device wire type. |
 | `calibrations::LatestFilter` (fields `component`, `role`, `aspect`) and `LatestFilter::is_match` | `LatestQuery`, `CalibrationFilter`; `matches` | Domain filter, apart from the wire query below. `is_match` reads as a question (shared rule). |
 | `calibrations::LatestCalibrations` (fields `is_confirmed`, `entries`) | `LatestList`, `LatestListing` | Mirrors the wire `LatestCalibrationsResponse`. |
 | `calibrations::LatestContent` (fields `format`, `data`) | `CalibrationContent`, `Content` | The content of a latest entry; `InstanceContent` already names the request's `{format, data}` wire type. |
@@ -58,7 +59,7 @@ Device apps (ATI, Monarch's Dinghy) load calibrations at startup, often offline.
 
 The null-slug check copies agent#416 (commit 7af92c8, reverted by 60f93de) in `agent/src/server/request.rs`, with its request and route tests. No existing agent route serves raw bytes, so the content response mirrors Miru's `GET /config_instances/{id}/content`: `Content-Type` from `mirurobotics/core` `schemas.InstFormat.MediaType()` (json `application/json`, yaml `application/yaml`, jsonc `application/jsonc`, xml `application/xml`, csv `text/csv`, text `application/octet-stream`).
 
-The store is owned by the calibration uploader's actor, beside its queue, not by a new actor: intake, write-through and status updates then run on one thread with no locks, `enqueue` can roll the queue back when the store write fails, and the uploader sets status without messaging a second actor. A separate store actor was ruled out because the service would have to undo a queued report across two actors. Reads go through the same actor, which serves commands during uploads and backoffs, so they never wait on Miru.
+The store is owned by the calibration uploader's actor (its `Worker`, beside the `UploaderImpl` that holds the queue), not by a new actor: intake, write-through and upload marks then run on one thread with no locks, `enqueue` can roll the queue back when the store write fails, the uploader marks an upload without messaging a second actor, and a listing can ask the queue which reports are still queued. A separate store actor was ruled out because the service would have to undo a queued report across two actors. Reads go through the same actor, which serves commands during uploads and backoffs, so they never wait on Miru.
 
 ### Left out
 
@@ -76,7 +77,7 @@ The store is owned by the calibration uploader's actor, beside its queue, not by
 
 - How many keys may the store hold, and what happens past it? Default: `UploaderOptions::latest_capacity` 1,000 (the queue's cap, RFC lean); a report for a new key past it is rejected with 507 `calibration_store_full` and nothing is written; a report for an existing key always replaces it.
 - Should a full store reuse `calibration_buffer_full`? Default: no, `calibration_store_full`, since retrying after uploads drain never helps.
-- Which drops mark an entry `dropped`? Default: every drop (Miru rejected it, out of attempts, or still failing 90 days after `reported_at`), since none of them ever reaches Miru.
+- Which drops mark an entry `dropped`? Default: every drop (Miru rejected it, out of attempts, or still failing 90 days after `reported_at`), since none of them ever reaches Miru. Settled: listing derives `dropped` for every report the queue let go unsent (see Decision Log).
 - What does `GET /calibrations/{report_id}/content` return for a `report_id` that is not a UUID? Default: 404 `resource_not_found`, like any other id that is not a latest entry.
 
 ## Progress
@@ -95,7 +96,7 @@ The store is owned by the calibration uploader's actor, beside its queue, not by
 ## Decision Log
 
 - Keep the double copy of queued content and the `Uploader` name (see Left out), answering the AI design review of c1dfa7c and its thread r4451533096.
-- `LatestStore::set_upload_status` sets the status in memory even when the index write fails (logged at warn), as `FileQueue::ack` keeps its in-memory change; the next index write saves it.
+- `LatestStore::mark_uploaded` (formerly `set_upload_status`) sets the mark in memory even when the index write fails (logged at warn), as `FileQueue::ack` keeps its in-memory change; the next index write saves it.
 - ~~`UploaderImpl::prune_orphans` now calls `LatestStore::prune_orphans`, then the queue's old body, renamed `prune_reports`, so the queue's early returns never skip the store.~~ Superseded: the `Worker` prunes the store, then the queue, each with its own `prune_orphans`.
 - `LatestCalibrations` and `LatestContent` derive `Debug` and `PartialEq` so tests can compare them.
 - The query helpers in `server/request.rs` are two functions: `split_list` (split on `,`, trim, drop empty items) and `split_slugs` (`split_list`, with `null` as `None`).
@@ -106,7 +107,8 @@ The store is owned by the calibration uploader's actor, beside its queue, not by
 - The user chose `CalibrationManager` for the actor; agent#423 renamed it on main, and the merge of main renamed this PR's new uses (the `list_latest` and `get_content` services and their handlers).
 - Ready mode starts by moving `LatestStore` from `UploaderImpl` to the `Worker` (AI design review thread r4460354923). The `Worker` answers both reads from it, `UploaderImpl::enqueue`/`finish_attempt` borrow `&mut LatestStore`, `UploaderImpl::new` loses `latest_index`/`latest_contents`, and `prune_reports` goes back to `prune_orphans`.
 - `UploaderArgs` keeps `latest_index`/`latest_contents` and `UploaderOptions` keeps `latest_capacity`: they are `CalibrationManager::spawn`'s arguments, which now build the store, so the fixtures and `AppState` need no change. `UploaderImpl` carries `latest_capacity` in its options unused.
-- Ready mode also stops storing `upload_status` (AI design review thread r4460399733). A latest entry stores `is_uploaded: bool`, and listing derives the status: `queued` if the queue holds the `report_id`, `uploaded` if marked, otherwise `dropped`. `drop_report` goes, and only a successful upload writes the store, before the dequeue. This settles which drops count as `dropped` (all of them, including reports lost with a corrupt or in-memory queue). PR B's load marks Miru's entries uploaded.
+- Ready mode also stops storing `upload_status` (AI design review thread r4460405511). A latest entry stores `is_uploaded: bool`, and listing derives the status: `queued` if the queue holds the `report_id`, `uploaded` if marked, otherwise `dropped`. `drop_report` goes, and only a successful upload writes the store, before the dequeue. This settles which drops count as `dropped` (all of them, including reports lost with a corrupt or in-memory queue). PR B's load marks Miru's entries uploaded.
+- The derived status: `LatestStore::list(filter, queued)` takes the queued `report_id`s as a `HashSet<Uuid>` from `UploaderImpl::queued_report_ids`, so listing stays one pass over the entries, and returns `ListedEntry { metadata, upload_status }` items, which `server/response.rs` converts. `Uploaded` is checked first. `LatestEntry::is_uploaded` is `#[serde(default)]`, as `ReportMetadata`'s optional fields are.
 - Design review: `LatestStore::prune_orphans` and `UploaderImpl::prune_reports` share `calibrations/cleanup.rs` (`prune(dir, kept)` deletes the files whose names `kept` lacks; `delete(file)` logs a failure), replacing their copies and both `delete` helpers. `filesys` had no such helper. Each caller keeps its in-memory guard, and the queue's keep set is the hyphenated entry ids, the names `report_file` writes.
 - Design review: `sse::parse_event_filter` reuses `request::split_list` (now `pub(crate)`), which the latest query introduced, instead of repeating the split, trim and drop-empty parsing.
 - AI review r4451473461: `LatestIndex::entries` is a `BTreeMap<LatestKey, LatestEntry>`, so a duplicate key can't be represented, and `has_key`/`replace_or_append` are gone. `indexmap` is only a transitive dependency, so a `BTreeMap` (key order; the spec defines none) avoids adding one. JSON object keys must be strings, so `index.json` stays a list of entries (a private `entry_list` serde module) and each is keyed again on load.
@@ -138,7 +140,7 @@ These orders make every crash point leave a readable store and a queue that neve
 
 - Intake writes the queue entry and report file first, then the store. A failed store write removes the queued report (the existing `UploaderImpl::remove`) and fails POST, so nothing uploads that the app was told failed. Writing the store first would need the old entry and its content file restored when the queue write fails, and a crash between the two would leave a `queued` entry that never uploads. In this order a crash between the two leaves a report that uploads but is missing locally; the app got no 200, so it reports again and the newer report wins.
 - The store writes the new content file (named by `report_id`, so it never overwrites the content the index still names), then the index atomically, then deletes the replaced entry's content file. A crash leaves at most an unreferenced file, which `LatestStore::prune_orphans` deletes at startup, as `UploaderImpl::prune_orphans` does for report files.
-- The uploader sets an entry's status before it removes the report from the queue. A crash in between re-sends the report on the next boot (Miru records it once by `report_id`) and sets the status again; the reverse order could leave an uploaded report `queued` forever.
+- The uploader marks an entry uploaded before it removes the report from the queue. A crash in between re-sends the report on the next boot (Miru records it once by `report_id`) and marks it again; the reverse order would list an uploaded report as `dropped`.
 
 ### Milestone 1: model, layout, errors and the store
 
@@ -153,7 +155,7 @@ These orders make every crash point leave a readable store and a queue that neve
 `agent/src/calibrations/latest.rs` (new; `pub mod latest;` in `agent/src/calibrations/mod.rs`, re-exporting the types below):
 
     #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-    pub struct LatestEntry { pub metadata: ReportMetadata, pub upload_status: CalibrationUploadStatus }
+    pub struct LatestEntry { pub metadata: ReportMetadata, #[serde(default)] pub is_uploaded: bool }
 
     #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
     pub struct LatestIndex {
@@ -169,7 +171,8 @@ These orders make every crash point leave a readable store and a queue that neve
     pub struct LatestFilter { pub component: Vec<String>, pub role: Vec<Option<String>>, pub aspect: Vec<Option<String>> }
     impl LatestFilter { pub fn is_match(&self, metadata: &ReportMetadata) -> bool }
 
-    pub struct LatestCalibrations { pub is_confirmed: bool, pub entries: Vec<LatestEntry> }
+    pub struct LatestCalibrations { pub is_confirmed: bool, pub entries: Vec<ListedEntry> }
+    pub struct ListedEntry { pub metadata: ReportMetadata, pub upload_status: CalibrationUploadStatus }
     pub struct LatestContent { pub format: InstanceFormat, pub data: Vec<u8> }
 
     pub struct LatestStore { index: LatestIndex, index_file: Option<LatestIndexFile>, contents: Dir, capacity: usize }
@@ -178,9 +181,9 @@ These orders make every crash point leave a readable store and a queue that neve
 
 - `new(index_file: Option<LatestIndexFile>, contents: Dir, capacity: usize) -> Self`: the index is read from the file, or empty without one (in memory, like `Queue::new`).
 - `verify_capacity(&self, metadata: &ReportMetadata) -> Result<(), CalibrationStoreFullErr>`: Ok when the key already has an entry or there is room; otherwise log a warn and return the error. The key is a `LatestKey` (`component`, `role`, `aspect`), so this is `contains_key`.
-- `async put(&mut self, metadata: ReportMetadata, data: &[u8]) -> Result<(), CalibrationsErr>`: `verify_capacity`; write `contents/<report_id>` with `files::write_bytes(.., WriteOptions::OVERWRITE_ATOMIC)`; build the next index, inserting the entry under its key with `upload_status: Queued`; persist it (`index_file.write`, atomic); on a persist error delete the new content file and return the error with the in-memory index unchanged; then set the in-memory index and delete the replaced entry's content file (log a warn on failure).
-- `async set_upload_status(&mut self, report_id: Uuid, status: CalibrationUploadStatus)`: find the entry with that `report_id`; none (a newer report replaced it, or `reset` wiped the store) is a no-op; otherwise set the status and persist, logging a warn on failure like `FileQueue::ack`.
-- `list(&self, filter: &LatestFilter) -> LatestCalibrations`: `is_confirmed: index.loaded_at.is_some()`, entries that `filter.is_match`, in key order.
+- `async put(&mut self, metadata: ReportMetadata, data: &[u8]) -> Result<(), CalibrationsErr>`: `verify_capacity`; write `contents/<report_id>` with `files::write_bytes(.., WriteOptions::OVERWRITE_ATOMIC)`; build the next index, inserting the entry under its key with `is_uploaded: false`; persist it (`index_file.write`, atomic); on a persist error delete the new content file and return the error with the in-memory index unchanged; then set the in-memory index and delete the replaced entry's content file (log a warn on failure).
+- `async mark_uploaded(&mut self, report_id: Uuid)`: find the entry with that `report_id`; none (a newer report replaced it, or `reset` wiped the store) is a no-op; otherwise set `is_uploaded` and persist, logging a warn on failure like `FileQueue::ack`.
+- `list(&self, filter: &LatestFilter, queued: &HashSet<Uuid>) -> LatestCalibrations`: `is_confirmed: index.loaded_at.is_some()`, entries that `filter.is_match`, in key order, each a `ListedEntry` whose `upload_status` is `Uploaded` if marked, `Queued` if `queued` holds its `report_id`, else `Dropped`.
 - `async content(&self, report_id: Uuid) -> Result<LatestContent, CalibrationsErr>`: `CalibrationNotFoundErr` unless an entry has that `report_id`; else `files::read_bytes` of its content file, with the entry's format. A missing content file is `CalibrationNotFoundErr` too.
 - `async prune_orphans(&self)`: with an index file only, delete every file in `contents/` not named by an entry's `report_id`, as `UploaderImpl::prune_orphans` does (warn per deletion and on listing failure).
 
@@ -193,7 +196,8 @@ Commit (see Concrete Steps).
 - `UploaderOptions` gains `latest_capacity: usize` (doc: the most keys the latest store holds; a new key past it is rejected), default 1000; update the `Default` doc comment.
 - `UploaderImpl` does not own the store: the actor's `Worker` does, and lends it to `enqueue` and `finish_attempt` as `latest: &mut LatestStore` (the first argument after `&mut self`). `new` and `prune_orphans` are unchanged.
 - `enqueue`: after `verify_size`, call `latest.verify_capacity(&report.metadata)?`; enqueue a clone of the metadata; write the report file as today; then `latest.put(metadata, &bytes)`, and on error `self.remove(id).await` and return it. Update the doc comment: the report is in the latest store when this returns Ok, and on error nothing is queued or stored.
-- `finish_attempt`: on `Ok`, `self.latest.set_upload_status(entry.job.report_id, Uploaded)` before `self.remove`. In `handle_failure`, each drop arm (`Terminal`, `OutOfAttempts`, `TooOld`) sets `Dropped` before `self.remove`; add a small `drop_report(&mut self, entry: &QueueEntry)` helper if the three arms would repeat two lines.
+- `finish_attempt`: on `Ok`, `latest.mark_uploaded(entry.job.report_id)` before `self.remove`. Drops do not touch the store: `handle_failure` is unchanged.
+- Add `pub(crate) fn queued_report_ids(&self) -> HashSet<Uuid>`, the `report_id` of every queued report, which `Worker::handle` passes to `LatestStore::list`.
 - Update the inline test `Fixture` with a `latest_store()` that opens a store under the temp dir, and pass it to each `enqueue`/`finish_attempt` so existing tests compile.
 
 `agent/src/calibrations/uploader.rs`:
@@ -224,7 +228,7 @@ Commit.
 
 `agent/src/server/response.rs`:
 
-- `impl From<&LatestEntry> for device_server::Calibration` (object `calibration::Object::Calibration`, `report_id`, `upload_status: (&entry.upload_status).into()`, slugs, `serial_number`, `reported_by`, `reported_at.to_rfc3339()`).
+- `impl From<&ListedEntry> for device_server::Calibration` (object `calibration::Object::Calibration`, `report_id`, `upload_status: (&entry.upload_status).into()`, slugs, `serial_number`, `reported_by`, `reported_at.to_rfc3339()`).
 - `impl From<&LatestCalibrations> for device_server::LatestCalibrationsResponse`.
 - `impl IntoResponse for LatestContent`: 200, `Content-Type` from `InstanceFormat::media_type` (`models/instance_format.rs`) with core's mapping (see Precedent), body the bytes.
 
@@ -235,7 +239,7 @@ Commit.
 
 `agent/src/server/routes.rs`: under CALIBRATIONS add `GET /{api_version}/calibrations/latest` → `list_latest_calibrations` and `GET /{api_version}/calibrations/{{report_id}}/content` → `get_calibration_content`.
 
-`ARCHITECTURE.md`, `calibrations/` paragraph: add that the uploader also owns the latest store at `resources/calibrations/` (`index.json` with `loaded_at` and one entry per key, `contents/<report_id>`), written through by intake before `POST` returns (queue first, store second, queue rolled back on a store failure), marked `uploaded`/`dropped` by the uploader before it dequeues, served by `GET /v0.2/calibrations/latest` and `/{report_id}/content` without calling Miru, capped at 1,000 keys (507 `calibration_store_full`), wiped by `reset` with the rest of `resources/`, and that `null` is a reserved role/aspect slug. In the `services/` list, extend `calibration` to "(calibration intake and the latest calibrations)".
+`ARCHITECTURE.md`, `calibrations/` paragraph: add that the uploader also owns the latest store at `resources/calibrations/` (`index.json` with `loaded_at` and one entry per key, `contents/<report_id>`), written through by intake before `POST` returns (queue first, store second, queue rolled back on a store failure), marked uploaded by the uploader before it dequeues and otherwise listed `queued` while the queue holds it, else `dropped`, served by `GET /v0.2/calibrations/latest` and `/{report_id}/content` without calling Miru, capped at 1,000 keys (507 `calibration_store_full`), wiped by `reset` with the rest of `resources/`, and that `null` is a reserved role/aspect slug. In the `services/` list, extend `calibration` to "(calibration intake and the latest calibrations)".
 
 Commit.
 
@@ -253,12 +257,13 @@ Follow the repo's test rules (`CLAUDE.md` § Testing): route tests in `agent/tes
 
 `agent/tests/calibrations/latest.rs` (new, `pub mod latest;` in `agent/tests/calibrations/mod.rs`), against `LatestStore` with an index file under a temp dir:
 
-- `put_adds_a_queued_entry_and_its_content`
+- `put_adds_an_entry_not_uploaded_and_its_content`
 - `put_replaces_the_keys_entry_and_deletes_its_content` (the second report has a fresh `report_id`, as intake mints)
 - `role_and_aspect_are_part_of_the_key` (a missing role is its own key)
 - `put_rejects_a_new_key_at_capacity_and_writes_nothing`, `put_replaces_an_existing_key_at_capacity`
 - `put_fails_and_changes_nothing_when_the_index_cannot_be_written` (also: the new content file is gone)
-- `set_upload_status_marks_the_matching_report`, `set_upload_status_ignores_a_replaced_report`
+- `mark_uploaded_marks_the_matching_report`, `mark_uploaded_ignores_a_replaced_report`
+- `list_derives_the_upload_status` (uploaded if marked, else queued if `queued` holds the `report_id`, else dropped)
 - `list_filters_by_component_role_and_aspect`, `list_matches_null_role_and_aspect`, `an_empty_filter_lists_every_entry`
 - `is_confirmed_is_whether_loaded_at_is_set` (write an index with `loaded_at` and reopen)
 - `content_returns_the_bytes_and_format`, `content_of_an_unknown_report_is_not_found`
@@ -272,11 +277,11 @@ Inline tests in `agent/src/calibrations/uploader_impl.rs` (`mod tests`):
 - `enqueue_rolls_back_the_queue_when_the_store_write_fails`
 - `enqueue_rejects_a_new_key_when_the_store_is_full_and_queues_nothing`
 - `a_sent_report_is_marked_uploaded`
-- `a_dropped_report_is_marked_dropped` (cover `Terminal`, `OutOfAttempts` and `TooOld`)
+- `a_dropped_report_is_not_marked_uploaded` (cover `Terminal`, `OutOfAttempts` and `TooOld`)
+- `queued_report_ids_are_the_queued_reports`
 - `a_newer_report_for_the_key_is_not_marked` (upload the older report after a newer one replaced it)
-- `prune_orphans_also_prunes_latest_contents`
 
-`agent/tests/calibrations/uploader.rs`: `latest_reads_are_served_during_an_upload` (hold an upload with the mock sender's `Step`, then `list_latest` and `latest_content` answer).
+`agent/tests/calibrations/uploader.rs`: `startup_prunes_unreferenced_latest_contents`; `latest_reads_are_served_during_an_upload` (hold an upload with the mock sender's `Step`, then `list_latest` and `latest_content` answer).
 
 `agent/tests/app/state.rs`: in `calibration_uploader_spawned`, assert `layout.latest_calibrations().index()` exists; add `calibration_uploader_degrades_when_latest_index_path_unwritable` mirroring the queue test.
 
@@ -284,7 +289,7 @@ Inline tests in `agent/src/calibrations/uploader_impl.rs` (`mod tests`):
 
 `agent/tests/server/request.rs`: `a_null_role_is_rejected`, `a_null_aspect_is_rejected` (from 7af92c8); `latest_query_splits_comma_separated_values`, `latest_query_maps_null_to_none`, `an_empty_latest_query_filters_nothing`.
 
-`agent/tests/server/response.rs`: `latest_entry_converts_to_calibration`, `latest_calibrations_convert_to_the_response`, `content_response_sets_the_content_type_for_each_format` (table over the six formats).
+`agent/tests/server/response.rs`: `listed_entry_converts_to_calibration`, `latest_calibrations_convert_to_the_response`, `content_response_sets_the_content_type_for_each_format` (table over the six formats).
 
 `agent/tests/server/handlers.rs`, `mod calibrations`: `create_calibration_returns_422_for_a_null_role` (from 7af92c8); `list_latest_calibrations_returns_200_with_a_reported_calibration` (is_confirmed false, one item); `list_latest_calibrations_returns_422_for_a_repeated_filter`; `get_calibration_content_returns_200_with_the_bytes_and_content_type`; `get_calibration_content_returns_404_for_an_unknown_report_id`; `create_calibration_returns_507_when_the_store_is_full`.
 

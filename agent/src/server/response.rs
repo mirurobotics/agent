@@ -1,5 +1,5 @@
 // internal crates
-use crate::calibrations::{LatestCalibrations, LatestContent, LatestEntry};
+use crate::calibrations::{LatestCalibrations, LatestContent, ListedEntry};
 use crate::events;
 use crate::models;
 use crate::services::calibration;
@@ -138,8 +138,8 @@ impl From<&calibration::Created> for device_server::CreateCalibrationResponse {
     }
 }
 
-impl From<&LatestEntry> for device_server::Calibration {
-    fn from(entry: &LatestEntry) -> Self {
+impl From<&ListedEntry> for device_server::Calibration {
+    fn from(entry: &ListedEntry) -> Self {
         let metadata = &entry.metadata;
         device_server::Calibration {
             object: device_server::calibration::Object::Calibration,
