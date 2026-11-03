@@ -36,7 +36,7 @@ pub struct AppState {
     pub uploader: Arc<upload::Uploader>,
     pub token_mngr: Arc<authn::TokenManager>,
     pub event_hub: events::EventHub,
-    pub calibration_uploader: Arc<calibrations::Uploader>,
+    pub calibration_mngr: Arc<calibrations::CalibrationManager>,
 }
 
 impl AppState {
@@ -81,8 +81,8 @@ impl AppState {
             Self::init_data_uploads(layout, http_client.clone(), token_mngr.clone()).await?;
 
         // initialize the calibration uploader
-        let (calibration_uploader, calibration_uploader_handle) =
-            Self::init_calibration_uploader(layout, http_client.clone(), token_mngr.clone()).await;
+        let (calibration_mngr, calibration_mngr_handle) =
+            Self::init_calibration_mngr(layout, http_client.clone(), token_mngr.clone()).await;
 
         let shutdown_handle = async move {
             let handles = [
@@ -92,7 +92,7 @@ impl AppState {
                 scanner_handle,
                 deleter_handle,
                 uploader_handle,
-                calibration_uploader_handle,
+                calibration_mngr_handle,
             ];
             futures::future::join(futures::future::join_all(handles), storage_handle).await;
         };
@@ -107,7 +107,7 @@ impl AppState {
                 uploader,
                 token_mngr,
                 event_hub,
-                calibration_uploader,
+                calibration_mngr,
             },
             shutdown_handle,
         ))
@@ -262,11 +262,11 @@ impl AppState {
     /// token manager's token. A queue-file error degrades to a queue kept in
     /// memory (fail-open); the report files a previous boot queued are kept
     /// for the next boot that opens the queue file.
-    async fn init_calibration_uploader(
+    async fn init_calibration_mngr(
         layout: &disk::Layout,
         http_client: Arc<http::Client>,
         token_mngr: Arc<authn::TokenManager>,
-    ) -> (Arc<calibrations::Uploader>, tokio::task::JoinHandle<()>) {
+    ) -> (Arc<calibrations::CalibrationManager>, tokio::task::JoinHandle<()>) {
         let layout = layout.calibrations();
         let snapshot_file = match calibrations::QueueSnapshotFile::new_with_default(
             layout.queue(),
@@ -291,7 +291,7 @@ impl AppState {
             sleep_fn: tokio::time::sleep,
             now_fn: chrono::Utc::now,
         };
-        let (uploader, handle) = calibrations::Uploader::spawn(64, args);
+        let (uploader, handle) = calibrations::CalibrationManager::spawn(64, args);
         (Arc::new(uploader), handle)
     }
 
@@ -300,7 +300,7 @@ impl AppState {
 
         // shutdown the calibration uploader first: nothing else in the app
         // depends on it
-        if let Err(e) = self.calibration_uploader.shutdown().await {
+        if let Err(e) = self.calibration_mngr.shutdown().await {
             tracing::error!("failed to shutdown calibration uploader: {e}");
             first_err.get_or_insert(e.into());
         }

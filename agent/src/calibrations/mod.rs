@@ -14,5 +14,5 @@ pub use self::report::{
     Queue, QueueEntry, QueueSnapshot, QueueSnapshotFile, Report, ReportMetadata,
 };
 pub use self::sender::{HttpSender, Sender};
-pub use self::uploader::{Uploader, UploaderArgs};
+pub use self::uploader::{CalibrationManager, UploaderArgs};
 pub use self::uploader_impl::UploaderOptions;
