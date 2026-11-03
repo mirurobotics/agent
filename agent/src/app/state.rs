@@ -266,7 +266,10 @@ impl AppState {
         layout: &disk::Layout,
         http_client: Arc<http::Client>,
         token_mngr: Arc<authn::TokenManager>,
-    ) -> (Arc<calibrations::CalibrationManager>, tokio::task::JoinHandle<()>) {
+    ) -> (
+        Arc<calibrations::CalibrationManager>,
+        tokio::task::JoinHandle<()>,
+    ) {
         let layout = layout.calibrations();
         let snapshot_file = match calibrations::QueueSnapshotFile::new_with_default(
             layout.queue(),
