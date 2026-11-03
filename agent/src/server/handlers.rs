@@ -186,7 +186,7 @@ pub async fn create_calibration(
             let params = calibration_svc::CreateParams::try_from(request)
                 .map_err(ServerErr::InvalidRequestErr)?;
             let created = calibration_svc::create(
-                &state.calibration_uploader,
+                &state.calibration_mngr,
                 &state.storage.deployments,
                 params,
                 Utc::now(),
@@ -211,8 +211,7 @@ pub async fn list_latest_calibrations(
                     trace: trace!(),
                 })
             })?;
-            let latest =
-                calibration_svc::list_latest(&state.calibration_uploader, query.into()).await?;
+            let latest = calibration_svc::list_latest(&state.calibration_mngr, query.into()).await?;
             Ok::<_, ServerErr>(device_server::LatestCalibrationsResponse::from(&latest))
         },
         "Error listing latest calibrations",
@@ -225,7 +224,7 @@ pub async fn get_calibration_content(
     AxumState(state): AxumState<Arc<State>>,
     Path(report_id): Path<String>,
 ) -> Response {
-    match calibration_svc::get_content(&state.calibration_uploader, &report_id).await {
+    match calibration_svc::get_content(&state.calibration_mngr, &report_id).await {
         Ok(content) => content.into_response(),
         Err(e) => error_response(e.into(), "Error getting calibration content").into_response(),
     }

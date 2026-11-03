@@ -59,15 +59,15 @@ pub(crate) type NextAttempt = queue::NextAttempt<ReportMetadata>;
 
 /// Single-threaded calibration uploader state and logic: the queue of report
 /// metadata, the directory of report files, the latest store, and the sender
-/// that uploads them. [`Uploader`] runs it inside an actor and does the
-/// waiting.
+/// that uploads them. [`CalibrationManager`] runs it inside an actor and
+/// does the waiting.
 ///
 /// Each queued report's data is its own file, `<reports>/<entry id>`, so large
 /// data is never rewritten with the queue. A failed report is
 /// retried at the tail of the queue after its own backoff, as in
 /// `data_uploads::upload`, so one failing report never blocks the others.
 ///
-/// [`Uploader`]: crate::calibrations::Uploader
+/// [`CalibrationManager`]: crate::calibrations::CalibrationManager
 pub struct UploaderImpl<S, N> {
     sender: Arc<S>,
     queue: Queue,

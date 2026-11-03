@@ -1,5 +1,5 @@
 // internal crates
-use crate::calibrations::{Report, ReportMetadata, Uploader};
+use crate::calibrations::{CalibrationManager, Report, ReportMetadata};
 use crate::disk;
 use crate::models::InstanceFormat;
 use crate::services::errors::ServiceErr;
@@ -35,7 +35,7 @@ pub struct Created {
 /// deployments-cache error fails the call rather than dropping the
 /// deployment.
 pub async fn create(
-    uploader: &Uploader,
+    uploader: &CalibrationManager,
     deployments: &disk::Deployments,
     params: CreateParams,
     now: DateTime<Utc>,

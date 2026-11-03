@@ -121,7 +121,7 @@ pub mod routes {
                 .await
                 .unwrap();
 
-            let calibration_uploader = uploader(&dir, MockCalibrationSender::new().0, options);
+            let calibration_mngr = uploader(&dir, MockCalibrationSender::new().0, options);
 
             let (shutdown_tx, _) = broadcast::channel::<()>(1);
             let state = Arc::new(State::new(
@@ -130,7 +130,7 @@ pub mod routes {
                 syncer,
                 Arc::new(token_mngr),
                 event_hub,
-                Arc::new(calibration_uploader),
+                Arc::new(calibration_mngr),
                 shutdown_tx,
             ));
 
