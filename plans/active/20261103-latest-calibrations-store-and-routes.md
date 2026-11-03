@@ -34,7 +34,7 @@ Device apps (ATI, Monarch's Dinghy) load calibrations at startup, often offline.
 | `calibrations::LatestFilter` (fields `component`, `role`, `aspect`) and `LatestFilter::is_match` | `LatestQuery`, `CalibrationFilter`; `matches` | Domain filter, apart from the wire query below. `is_match` reads as a question (shared rule). |
 | `calibrations::LatestCalibrations` (fields `is_confirmed`, `entries`) | `LatestList`, `LatestListing` | Mirrors the wire `LatestCalibrationsResponse`. |
 | `calibrations::LatestContent` (fields `format`, `data`) | `CalibrationContent`, `Content` | The content of a latest entry; `InstanceContent` already names the request's `{format, data}` wire type. |
-| `Uploader::list_latest`, `Uploader::latest_content` | `latest`, `get_latest`; `content` | Verb first like `enqueue`/`len`; `latest_content` says which content. |
+| `CalibrationManager::list_latest`, `CalibrationManager::latest_content` | `latest`, `get_latest`; `content` | Verb first like `enqueue`/`len`; `latest_content` says which content. |
 | `UploaderArgs::latest` (a prebuilt `LatestStore`) | `latest_index`/`latest_contents` | The `Worker` owns the store, so `AppState` and the fixtures build it and `CalibrationManager::spawn` only hands it over. |
 | `calibrations::latest::DEFAULT_CAPACITY` (1,000 keys) | `UploaderOptions::latest_capacity`, `LatestStore::default` | The cap sits beside the store it bounds, as `events::store::DEFAULT_MAX_RETAINED` does; `UploaderImpl` never reads it. |
 | `models::CalibrationUploadStatus` (`Queued`, `Uploaded`, `Dropped`) | `UploadStatus`, `LatestStatus` | The device twin's name; `UploadStatus` is the backend upload ledger's enum. |
@@ -64,7 +64,6 @@ The store is owned by the calibration uploader's actor (its `Worker`, beside the
 ### Left out
 
 - The initial load from Miru (backend client for the Agent API `GET /calibrations/latest` and content, the sync step, merging queued reports, writing `loaded_at`): agent PR B. The store's API leaves room for a `LatestStore::load(entries, loaded_at)` that writes each content file, then the index with every entry and `loaded_at` in one atomic write, then prunes unreferenced content. Its merge keeps every entry already in the store and fills only the keys the store lacks: after a reset the store holds only this device's write-through reports, which are never older than Miru's, while a report that uploads during the load has left the queue and could otherwise be replaced by an older row Miru returned before the upload. Comparing `reported_at` was ruled out because it comes from the device clock.
-- Re-vendoring `api/specs/device/v02.yaml` and `api/specs/backend/v05.yaml` from tagged releases: follow-up once openapi#416 merges and `device`/`agent` are tagged.
 - Ordering the list: entries come back in key order (component, then role, then aspect, a missing slug first). The spec documents no order.
 - Reconciling the store with the queue at startup: a crash between the queue write and the store write leaves a queued report missing from the store. The app got no 200, so it reports again and the newer report wins. PR B's load also covers a reset.
 - A `reset` change or test: `disk::setup::reset` already deletes `resources/`, and `wipes_resources_subtree` in `agent/tests/disk/setup.rs` covers it.
@@ -236,7 +235,7 @@ Commit.
 
 `agent/src/server/handlers.rs`, under CALIBRATIONS:
 
-- `list_latest_calibrations(AxumState(state), query: Result<Query<request::LatestCalibrationsQuery>, QueryRejection>)` through `handle`: a rejection is `InvalidRequestErr` with `rejection.body_text()` (422); else `calibration_svc::list_latest(&state.calibration_uploader, filter)` and `LatestCalibrationsResponse::from(&latest)`.
+- `list_latest_calibrations(AxumState(state), query: Result<Query<request::LatestCalibrationsQuery>, QueryRejection>)` through `handle`: a rejection is `InvalidRequestErr` with `rejection.body_text()` (422); else `calibration_svc::list_latest(&state.calibration_mngr, filter)` and `LatestCalibrationsResponse::from(&latest)`.
 - `get_calibration_content(AxumState(state), Path(report_id): Path<String>) -> Response`: on Ok `content.into_response()`; on Err the JSON error. Extract the error arm of `handle` into `fn error_response(e: ServerErr, err_msg: &str) -> (StatusCode, Json<Value>)` and use it in both.
 
 `agent/src/server/routes.rs`: under CALIBRATIONS add `GET /{api_version}/calibrations/latest` → `list_latest_calibrations` and `GET /{api_version}/calibrations/{{report_id}}/content` → `get_calibration_content`.
