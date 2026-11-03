@@ -49,6 +49,7 @@ fn test_code_as_str() {
             | errors::Code::InvalidRequest
             | errors::Code::CalibrationBufferFull
             | errors::Code::CalibrationTooLarge
+            | errors::Code::CalibrationStoreFull
             | errors::Code::BackendError(_) => {}
         }
         assert_eq!(code.as_str(), *expected, "Code::{:?}", code);

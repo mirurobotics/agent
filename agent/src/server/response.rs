@@ -1,8 +1,15 @@
 // internal crates
+use crate::calibrations::{LatestCalibrations, LatestContent, LatestEntry};
 use crate::events;
 use crate::models;
 use crate::services::calibration;
 use device_api::models as device_server;
+
+// external crates
+use axum::{
+    http::{header, StatusCode},
+    response::{IntoResponse, Response},
+};
 
 impl From<&models::Device> for device_server::Device {
     fn from(device: &models::Device) -> Self {
@@ -128,5 +135,51 @@ impl From<&calibration::Created> for device_server::CreateCalibrationResponse {
             report_id: created.report_id,
             reported_at: created.reported_at.to_rfc3339(),
         }
+    }
+}
+
+impl From<&LatestEntry> for device_server::Calibration {
+    fn from(entry: &LatestEntry) -> Self {
+        let metadata = &entry.metadata;
+        device_server::Calibration {
+            object: device_server::calibration::Object::Calibration,
+            report_id: metadata.report_id,
+            upload_status: (&entry.upload_status).into(),
+            component: metadata.component.clone(),
+            role: metadata.role.clone(),
+            aspect: metadata.aspect.clone(),
+            serial_number: metadata.serial_number.clone(),
+            reported_by: metadata.reported_by.clone(),
+            reported_at: metadata.reported_at.to_rfc3339(),
+        }
+    }
+}
+
+impl From<&LatestCalibrations> for device_server::LatestCalibrationsResponse {
+    fn from(latest: &LatestCalibrations) -> Self {
+        device_server::LatestCalibrationsResponse {
+            is_confirmed: latest.is_confirmed,
+            calibrations: latest.entries.iter().map(Into::into).collect(),
+        }
+    }
+}
+
+/// The content's bytes, with the `Content-Type` of its format.
+impl IntoResponse for LatestContent {
+    fn into_response(self) -> Response {
+        let content_type = [(header::CONTENT_TYPE, media_type(self.format))];
+        (StatusCode::OK, content_type, self.data).into_response()
+    }
+}
+
+// Miru's content downloads send the same types.
+fn media_type(format: models::InstanceFormat) -> &'static str {
+    match format {
+        models::InstanceFormat::Json => "application/json",
+        models::InstanceFormat::Yaml => "application/yaml",
+        models::InstanceFormat::Jsonc => "application/jsonc",
+        models::InstanceFormat::Xml => "application/xml",
+        models::InstanceFormat::Csv => "text/csv",
+        models::InstanceFormat::Text => "application/octet-stream",
     }
 }
