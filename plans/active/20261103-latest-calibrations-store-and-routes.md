@@ -69,6 +69,8 @@ The store is owned by the calibration uploader's actor, beside its queue, not by
 - A `reset` change or test: `disk::setup::reset` already deletes `resources/`, and `wipes_resources_subtree` in `agent/tests/disk/setup.rs` covers it.
 - Repeated query keys (`?component=a&component=b`): the spec uses `style: form, explode: false`, a comma-separated list. A repeated key is rejected with 422.
 - Fanning out a pattern: this change has one resource, so there is no exemplar/sibling split.
+- Sharing one content file between the upload queue and the store: a report's bytes sit in both `calibrations/reports/` and `resources/calibrations/contents/` until it uploads, so worst-case disk use roughly doubles while reports are queued. The queue deletes its copy on upload and `reset` deletes the store's, so one shared file (or a hard link) would tie the two lifecycles together and make each delete and crash path depend on the other. Calibration files are small in practice (Monarch's are 1 to 17 KB).
+- Renaming the `calibrations::Uploader` actor and `AppState::calibration_uploader` now that the actor also owns the store: a rename touches about 20 files that this PR does not otherwise change, and the repo lands moves and renames as their own PR. `Uploader` also matches its sibling, `data_uploads::upload::Uploader`. Proposed follow-up PR, before or with agent PR B.
 
 ### Open questions
 
@@ -92,6 +94,7 @@ The store is owned by the calibration uploader's actor, beside its queue, not by
 
 ## Decision Log
 
+- Keep the double copy of queued content and the `Uploader` name (see Left out), answering the AI design review of c1dfa7c and its thread r4451533096.
 - `LatestStore::set_upload_status` sets the status in memory even when the index write fails (logged at warn), as `FileQueue::ack` keeps its in-memory change; the next index write saves it.
 - `UploaderImpl::prune_orphans` now calls `LatestStore::prune_orphans`, then the queue's old body, renamed `prune_reports`, so the queue's early returns never skip the store.
 - `LatestCalibrations` and `LatestContent` derive `Debug` and `PartialEq` so tests can compare them.
