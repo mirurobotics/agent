@@ -64,7 +64,7 @@ The store is owned by the calibration uploader's actor, beside its queue, not by
 
 - The initial load from Miru (backend client for the Agent API `GET /calibrations/latest` and content, the sync step, merging queued reports, writing `loaded_at`): agent PR B. The store's API leaves room for a `LatestStore::load(entries, loaded_at)` that writes each content file, then the index with every entry and `loaded_at` in one atomic write, then prunes unreferenced content.
 - Re-vendoring `api/specs/device/v02.yaml` and `api/specs/backend/v05.yaml` from tagged releases: follow-up once openapi#416 merges and `device`/`agent` are tagged.
-- Ordering the list: entries come back in index order (a key keeps its place when replaced, a new key goes last). The spec documents no order.
+- Ordering the list: entries come back in key order (component, then role, then aspect, a missing slug first). The spec documents no order.
 - Reconciling the store with the queue at startup: a crash between the queue write and the store write leaves a queued report missing from the store. The app got no 200, so it reports again and the newer report wins. PR B's load also covers a reset.
 - A `reset` change or test: `disk::setup::reset` already deletes `resources/`, and `wipes_resources_subtree` in `agent/tests/disk/setup.rs` covers it.
 - Repeated query keys (`?component=a&component=b`): the spec uses `style: form, explode: false`, a comma-separated list. A repeated key is rejected with 422.
@@ -92,14 +92,18 @@ The store is owned by the calibration uploader's actor, beside its queue, not by
 
 ## Decision Log
 
-- `LatestStore::put` deletes the replaced entry's content file only when its `report_id` differs from the new one. Intake always mints a new id, but the test fixtures reuse a fixed `report_id` per slug, and deleting would remove the content just written.
 - `LatestStore::set_upload_status` sets the status in memory even when the index write fails (logged at warn), as `FileQueue::ack` keeps its in-memory change; the next index write saves it.
 - `UploaderImpl::prune_orphans` now calls `LatestStore::prune_orphans`, then the queue's old body, renamed `prune_reports`, so the queue's early returns never skip the store.
 - `LatestCalibrations` and `LatestContent` derive `Debug` and `PartialEq` so tests can compare them.
-- The query helpers in `server/request.rs` are two private functions: `split_list` (split on `,`, trim, drop empty items) and `split_slugs` (`split_list`, with `null` as `None`).
+- The query helpers in `server/request.rs` are two functions: `split_list` (split on `,`, trim, drop empty items) and `split_slugs` (`split_list`, with `null` as `None`).
 - `handlers::get_calibration_content` returns `Response`; its error arm and `handle` share the extracted `error_response`, as planned.
 - Fixtures: `test_utils::calibrations::latest_layout(dir)` (a `LatestCalibrationsLayout` at `resources/calibrations` under the temp dir, beside `layout(dir)`) builds the store paths for every fixture. The inline `uploader_impl` fixture keeps the layout as `latest`, opens a latest index file in `uploader_with`, and `uploader_on` takes a `latest_index` argument (the two in-memory-queue call sites pass `None`). The `tests/calibrations/uploader.rs` harness (also keeping `latest`), `test_utils::calibrations::uploader` and the service `create.rs` fixture pass `latest_index: None`.
 - `ARCHITECTURE.md`: the latest store is a new paragraph right after the `calibrations/` paragraph, not inside it, which is already long; the `calibrations/` paragraph's "checks only the request's shape" now also names the reserved `null` slug.
+- Design review: the content media types are `InstanceFormat::media_type` in `models/instance_format.rs`, a property of the format, not a private function in `server/response.rs`.
+- Design review: `LatestStore::prune_orphans` and `UploaderImpl::prune_reports` share `calibrations/cleanup.rs` (`prune(dir, kept)` deletes the files whose names `kept` lacks; `delete(file)` logs a failure), replacing their copies and both `delete` helpers. `filesys` had no such helper. Each caller keeps its in-memory guard, and the queue's keep set is the hyphenated entry ids, the names `report_file` writes.
+- Design review: `sse::parse_event_filter` reuses `request::split_list` (now `pub(crate)`), which the latest query introduced, instead of repeating the split, trim and drop-empty parsing.
+- AI review r4451473461: `LatestIndex::entries` is a `BTreeMap<LatestKey, LatestEntry>`, so a duplicate key can't be represented, and `has_key`/`replace_or_append` are gone. `indexmap` is only a transitive dependency, so a `BTreeMap` (key order; the spec defines none) avoids adding one. JSON object keys must be strings, so `index.json` stays a list of entries (a private `entry_list` serde module) and each is keyed again on load.
+- Design review: `LatestStore::put` always deletes the replaced entry's content; the same-`report_id` guard existed only for fixtures. `test_utils::calibrations::report(slug)` keeps its deterministic `report_id`, which existing tests compare against, and no existing test puts one key twice; the Milestone 4 tests that do give the second report a fresh `Uuid::new_v4()` id.
 
 ## Outcomes & Retrospective
 
@@ -148,7 +152,7 @@ These orders make every crash point leave a readable store and a queue that neve
     pub struct LatestIndex {
         /// When the store was last loaded from Miru; `None` until then.
         #[serde(default)] pub loaded_at: Option<DateTime<Utc>>,
-        #[serde(default)] pub entries: Vec<LatestEntry>,
+        #[serde(default, with = "entry_list")] pub entries: BTreeMap<LatestKey, LatestEntry>,
     }
     impl Patch<LatestIndex> for LatestIndex { replace, as QueueSnapshot does }
     pub type LatestIndexFile = StateFile<LatestIndex, LatestIndex>;
@@ -166,10 +170,10 @@ These orders make every crash point leave a readable store and a queue that neve
 `LatestStore` methods, each with a short doc comment:
 
 - `new(index_file: Option<LatestIndexFile>, contents: Dir, capacity: usize) -> Self`: the index is read from the file, or empty without one (in memory, like `Queue::new`).
-- `verify_capacity(&self, metadata: &ReportMetadata) -> Result<(), CalibrationStoreFullErr>`: Ok when the key already has an entry or there is room; otherwise log a warn and return the error. Keys compare `component`, `role` and `aspect` (a private `has_key(entry, metadata) -> bool` helper).
-- `async put(&mut self, metadata: ReportMetadata, data: &[u8]) -> Result<(), CalibrationsErr>`: `verify_capacity`; write `contents/<report_id>` with `files::write_bytes(.., WriteOptions::OVERWRITE_ATOMIC)`; build the next index, replacing the key's entry in place or appending, with `upload_status: Queued`; persist it (`index_file.write`, atomic); on a persist error delete the new content file and return the error with the in-memory index unchanged; then set the in-memory index and delete the replaced entry's content file (log a warn on failure).
+- `verify_capacity(&self, metadata: &ReportMetadata) -> Result<(), CalibrationStoreFullErr>`: Ok when the key already has an entry or there is room; otherwise log a warn and return the error. The key is a `LatestKey` (`component`, `role`, `aspect`), so this is `contains_key`.
+- `async put(&mut self, metadata: ReportMetadata, data: &[u8]) -> Result<(), CalibrationsErr>`: `verify_capacity`; write `contents/<report_id>` with `files::write_bytes(.., WriteOptions::OVERWRITE_ATOMIC)`; build the next index, inserting the entry under its key with `upload_status: Queued`; persist it (`index_file.write`, atomic); on a persist error delete the new content file and return the error with the in-memory index unchanged; then set the in-memory index and delete the replaced entry's content file (log a warn on failure).
 - `async set_upload_status(&mut self, report_id: Uuid, status: CalibrationUploadStatus)`: find the entry with that `report_id`; none (a newer report replaced it, or `reset` wiped the store) is a no-op; otherwise set the status and persist, logging a warn on failure like `FileQueue::ack`.
-- `list(&self, filter: &LatestFilter) -> LatestCalibrations`: `is_confirmed: index.loaded_at.is_some()`, entries that `filter.is_match`, in index order.
+- `list(&self, filter: &LatestFilter) -> LatestCalibrations`: `is_confirmed: index.loaded_at.is_some()`, entries that `filter.is_match`, in key order.
 - `async content(&self, report_id: Uuid) -> Result<LatestContent, CalibrationsErr>`: `CalibrationNotFoundErr` unless an entry has that `report_id`; else `files::read_bytes` of its content file, with the entry's format. A missing content file is `CalibrationNotFoundErr` too.
 - `async prune_orphans(&self)`: with an index file only, delete every file in `contents/` not named by an entry's `report_id`, as `UploaderImpl::prune_orphans` does (warn per deletion and on listing failure).
 
@@ -216,7 +220,7 @@ Commit.
 
 - `impl From<&LatestEntry> for device_server::Calibration` (object `calibration::Object::Calibration`, `report_id`, `upload_status: (&entry.upload_status).into()`, slugs, `serial_number`, `reported_by`, `reported_at.to_rfc3339()`).
 - `impl From<&LatestCalibrations> for device_server::LatestCalibrationsResponse`.
-- `impl IntoResponse for LatestContent`: 200, `Content-Type` from a private `fn media_type(format: InstanceFormat) -> &'static str` with core's mapping (see Precedent), body the bytes. Comment the mapping's source in one line ("Miru's content downloads send the same types.").
+- `impl IntoResponse for LatestContent`: 200, `Content-Type` from `InstanceFormat::media_type` (`models/instance_format.rs`) with core's mapping (see Precedent), body the bytes.
 
 `agent/src/server/handlers.rs`, under CALIBRATIONS:
 
@@ -244,7 +248,7 @@ Follow the repo's test rules (`CLAUDE.md` § Testing): route tests in `agent/tes
 `agent/tests/calibrations/latest.rs` (new, `pub mod latest;` in `agent/tests/calibrations/mod.rs`), against `LatestStore` with an index file under a temp dir:
 
 - `put_adds_a_queued_entry_and_its_content`
-- `put_replaces_the_keys_entry_and_deletes_its_content`
+- `put_replaces_the_keys_entry_and_deletes_its_content` (the second report has a fresh `report_id`, as intake mints)
 - `role_and_aspect_are_part_of_the_key` (a missing role is its own key)
 - `put_rejects_a_new_key_at_capacity_and_writes_nothing`, `put_replaces_an_existing_key_at_capacity`
 - `put_fails_and_changes_nothing_when_the_index_cannot_be_written` (also: the new content file is gone)
