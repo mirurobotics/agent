@@ -6,7 +6,7 @@ use std::time::Duration;
 
 // internal crates
 use crate::mocks::calibration_sender::{MockCalibrationSender, Step};
-use crate::test_utils::calibrations::{layout, received_at};
+use crate::test_utils::calibrations::{latest_layout, layout, received_at};
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::calibrations::{
     CalibrationsErr, QueueSnapshotFile, Report, ReportMetadata, Uploader, UploaderArgs,
@@ -45,6 +45,8 @@ impl Fixture {
         let args = UploaderArgs {
             snapshot_file: Some(snapshot_file),
             reports: calibrations.reports(),
+            latest_index: None,
+            latest_contents: latest_layout(&dir).contents(),
             sender: sender.clone(),
             options,
             sleep_fn: tokio::time::sleep,

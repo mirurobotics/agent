@@ -129,7 +129,8 @@ impl LatestStore {
         data: &[u8],
     ) -> Result<(), CalibrationsErr> {
         self.verify_capacity(&metadata)?;
-        let file = self.content_file(metadata.report_id);
+        let report_id = metadata.report_id;
+        let file = self.content_file(report_id);
         files::write_bytes(&file, data, WriteOptions::OVERWRITE_ATOMIC).await?;
         let mut index = self.index.clone();
         let entry = LatestEntry {
@@ -142,8 +143,9 @@ impl LatestStore {
             return Err(e.into());
         }
         self.index = index;
-        if let Some(replaced) = replaced {
-            delete(&self.content_file(replaced.metadata.report_id)).await;
+        let replaced_id = replaced.map(|entry| entry.metadata.report_id);
+        if let Some(replaced_id) = replaced_id.filter(|id| *id != report_id) {
+            delete(&self.content_file(replaced_id)).await;
         }
         Ok(())
     }

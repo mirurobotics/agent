@@ -6,6 +6,7 @@ use std::time::Duration;
 // internal crates
 use crate::calibrations::{
     errors::{CalibrationsErr, ReceiveActorMessageErr, SendActorMessageErr},
+    latest::{LatestCalibrations, LatestContent, LatestFilter, LatestIndexFile},
     report::{QueueEntry, QueueSnapshotFile, Report},
     sender::Sender,
     uploader_impl::{NextAttempt, UploaderImpl, UploaderOptions},
@@ -18,12 +19,17 @@ use chrono::{DateTime, Utc};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{error, info};
+use uuid::Uuid;
 
 pub struct UploaderArgs<S, F, N> {
     /// Where the queue persists; `None` keeps it in memory only.
     pub snapshot_file: Option<QueueSnapshotFile>,
     /// The directory holding one data file per queued report.
     pub reports: Dir,
+    /// Where the latest store's index persists; `None` keeps it in memory.
+    pub latest_index: Option<LatestIndexFile>,
+    /// The directory holding one content file per latest entry.
+    pub latest_contents: Dir,
     pub sender: Arc<S>,
     pub options: UploaderOptions,
     pub sleep_fn: F,
@@ -39,6 +45,14 @@ enum Command {
     },
     Len {
         respond_to: oneshot::Sender<usize>,
+    },
+    ListLatest {
+        filter: LatestFilter,
+        respond_to: oneshot::Sender<LatestCalibrations>,
+    },
+    LatestContent {
+        report_id: Uuid,
+        respond_to: oneshot::Sender<Result<LatestContent, CalibrationsErr>>,
     },
     Shutdown {
         respond_to: oneshot::Sender<()>,
@@ -136,6 +150,17 @@ where
                 respond(respond_to, result, "enqueue");
             }
             Command::Len { respond_to } => respond(respond_to, self.uploader.len(), "len"),
+            Command::ListLatest { filter, respond_to } => {
+                let latest = self.uploader.list_latest(&filter);
+                respond(respond_to, latest, "list latest");
+            }
+            Command::LatestContent {
+                report_id,
+                respond_to,
+            } => {
+                let content = self.uploader.latest_content(report_id).await;
+                respond(respond_to, content, "latest content");
+            }
             Command::Shutdown { respond_to } => {
                 respond(respond_to, (), "shutdown");
                 return Flow::Shutdown;
@@ -153,9 +178,10 @@ fn respond<T>(respond_to: oneshot::Sender<T>, value: T, op: &str) {
 
 // ================================== HANDLE ======================================= //
 /// Handle to the calibration uploader: one task that owns the calibration
-/// queue, queues what intake sends it, and uploads reports to Miru one at a
-/// time, oldest due first, retrying a failed report at the tail after its own
-/// backoff. It keeps serving intake during an upload or a backoff.
+/// queue and the latest store, queues what intake sends it, and uploads
+/// reports to Miru one at a time, oldest due first, retrying a failed report at
+/// the tail after its own backoff. It keeps serving intake and latest reads
+/// during an upload or a backoff.
 #[derive(Debug)]
 pub struct Uploader {
     sender: mpsc::Sender<Command>,
@@ -179,6 +205,8 @@ impl Uploader {
                 args.sender,
                 args.snapshot_file,
                 args.reports,
+                args.latest_index,
+                args.latest_contents,
                 args.options,
                 args.now_fn,
             ),
@@ -187,8 +215,9 @@ impl Uploader {
         (Self { sender }, tokio::spawn(worker.run()))
     }
 
-    /// Queue `report` durably. A full queue is the 507
-    /// [`CalibrationsErr::QueueFullErr`], and a report over the size cap the
+    /// Queue `report` durably and write it to the latest store. A full queue
+    /// is the 507 [`CalibrationsErr::QueueFullErr`], a full store the 507
+    /// [`CalibrationsErr::StoreFullErr`], and a report over the size cap the
     /// 413 [`CalibrationsErr::TooLargeErr`].
     pub async fn enqueue(&self, report: Report) -> Result<(), CalibrationsErr> {
         self.send_command("enqueue", |respond_to| Command::Enqueue {
@@ -204,6 +233,27 @@ impl Uploader {
     pub async fn len(&self) -> Result<usize, CalibrationsErr> {
         self.send_command("len", |respond_to| Command::Len { respond_to })
             .await
+    }
+
+    /// The latest entries `filter` matches.
+    pub async fn list_latest(
+        &self,
+        filter: LatestFilter,
+    ) -> Result<LatestCalibrations, CalibrationsErr> {
+        self.send_command("list latest", |respond_to| Command::ListLatest {
+            filter,
+            respond_to,
+        })
+        .await
+    }
+
+    /// The content of the latest entry for `report_id`.
+    pub async fn latest_content(&self, report_id: Uuid) -> Result<LatestContent, CalibrationsErr> {
+        self.send_command("latest content", |respond_to| Command::LatestContent {
+            report_id,
+            respond_to,
+        })
+        .await?
     }
 
     /// Stop the uploader, dropping any in-flight upload. Queued reports,

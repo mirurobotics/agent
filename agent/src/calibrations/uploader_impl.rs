@@ -7,11 +7,13 @@ use std::sync::Arc;
 // internal crates
 use crate::calibrations::{
     errors::{CalibrationTooLargeErr, CalibrationsErr, InvalidReportErr},
+    latest::{LatestCalibrations, LatestContent, LatestFilter, LatestIndexFile, LatestStore},
     report::{Queue, QueueEntry, QueueSnapshotFile, Report, ReportMetadata},
     sender::Sender,
 };
 use crate::errors::Error;
 use crate::filesys::{dirs, files, Dir, File, FileSysErr, PathExt, WriteOptions};
+use crate::models::CalibrationUploadStatus;
 use crate::queue::{self, Persistence, RetryPolicy, Verdict};
 use crate::trace;
 
@@ -26,6 +28,9 @@ pub struct UploaderOptions {
     pub capacity: usize,
     /// The largest report data accepted, in bytes.
     pub max_report_bytes: u64,
+    /// The most keys the latest store holds; a report for a new key is
+    /// rejected beyond it.
+    pub latest_capacity: usize,
     /// When a failed report is retried and when it is dropped. Its age is
     /// measured from `reported_at`.
     pub retry: RetryPolicy,
@@ -35,11 +40,13 @@ impl Default for UploaderOptions {
     /// At most 1,000 reports of up to 1 MiB of data each (1 GiB at worst),
     /// the most calibration data Miru accepts, retried as the data uploads
     /// are but kept far longer: a calibration is costly to redo, and the cap
-    /// already bounds the storage it holds.
+    /// already bounds the storage it holds. The latest store holds at most
+    /// 1,000 keys.
     fn default() -> Self {
         Self {
             capacity: 1000,
             max_report_bytes: 1024 * 1024,
+            latest_capacity: 1000,
             retry: RetryPolicy {
                 max_age: TimeDelta::days(90),
                 ..RetryPolicy::default()
@@ -52,8 +59,9 @@ impl Default for UploaderOptions {
 pub(crate) type NextAttempt = queue::NextAttempt<ReportMetadata>;
 
 /// Single-threaded calibration uploader state and logic: the queue of report
-/// metadata, the directory of report files, and the sender that uploads them.
-/// [`Uploader`] runs it inside an actor and does the waiting.
+/// metadata, the directory of report files, the latest store, and the sender
+/// that uploads them. [`Uploader`] runs it inside an actor and does the
+/// waiting.
 ///
 /// Each queued report's data is its own file, `<reports>/<entry id>`, so large
 /// data is never rewritten with the queue. A failed report is
@@ -68,6 +76,7 @@ pub struct UploaderImpl<S, N> {
     /// that is still queued.
     persisted: bool,
     reports: Dir,
+    latest: LatestStore,
     options: UploaderOptions,
     now_fn: N,
 }
@@ -78,11 +87,14 @@ where
     N: Fn() -> DateTime<Utc> + Send + Sync + 'static,
 {
     /// Without a `snapshot_file` the queue lives in memory, so reports still
-    /// queued at a restart are lost.
+    /// queued at a restart are lost; without a `latest_index` the same holds
+    /// for the latest store.
     pub(crate) fn new(
         sender: Arc<S>,
         snapshot_file: Option<QueueSnapshotFile>,
         reports: Dir,
+        latest_index: Option<LatestIndexFile>,
+        latest_contents: Dir,
         options: UploaderOptions,
         now_fn: N,
     ) -> Self {
@@ -91,21 +103,29 @@ where
             Some(file) => Queue::from_snapshot(options.capacity, file, Persistence::Durable),
             None => Queue::new(options.capacity),
         };
+        let latest = LatestStore::new(latest_index, latest_contents, options.latest_capacity);
         Self {
             sender,
             queue,
             persisted,
             reports,
+            latest,
             options,
             now_fn,
         }
+    }
+
+    /// Delete report and latest content files that nothing names.
+    pub(crate) async fn prune_orphans(&self) {
+        self.latest.prune_orphans().await;
+        self.prune_reports().await;
     }
 
     /// Delete report files with no queue entry, left behind by a crash
     /// between dequeuing a report and deleting its file. Failures are logged
     /// and retried on the next boot. An in-memory queue prunes nothing: the
     /// queue file it couldn't open may still name these files.
-    pub(crate) async fn prune_orphans(&self) {
+    async fn prune_reports(&self) {
         if !self.persisted {
             return;
         }
@@ -129,24 +149,41 @@ where
         }
     }
 
-    /// Queue `report` and return its queue entry id. The entry is written
-    /// before the report file, so a crash between the two leaves an entry
-    /// without a file, which [`Self::attempt`] fails for good. On error nothing
-    /// is queued.
+    /// Queue `report`, write it to the latest store, and return its queue
+    /// entry id. The entry is written before the report file, so a crash
+    /// between the two leaves an entry without a file, which [`Self::attempt`]
+    /// fails for good. The store is written last, and a failed store write
+    /// removes the queued report. On error nothing is queued or stored.
     pub(crate) async fn enqueue(&mut self, report: Report) -> Result<Uuid, CalibrationsErr> {
         let bytes = report.data.into_bytes();
         self.verify_size(bytes.len() as u64)?;
-        let id = self.queue.enqueue(report.metadata).await?;
+        self.latest.verify_capacity(&report.metadata)?;
+        let id = self.queue.enqueue(report.metadata.clone()).await?;
         let file = self.report_file(id);
         if let Err(e) = files::write_bytes(&file, &bytes, WriteOptions::OVERWRITE_ATOMIC).await {
             self.queue.ack(id).await;
             return Err(e.into());
+        }
+        if let Err(e) = self.latest.put(report.metadata, &bytes).await {
+            self.remove(id).await;
+            return Err(e);
         }
         Ok(id)
     }
 
     pub(crate) fn len(&self) -> usize {
         self.queue.len()
+    }
+
+    pub(crate) fn list_latest(&self, filter: &LatestFilter) -> LatestCalibrations {
+        self.latest.list(filter)
+    }
+
+    pub(crate) async fn latest_content(
+        &self,
+        report_id: Uuid,
+    ) -> Result<LatestContent, CalibrationsErr> {
+        self.latest.content(report_id).await
     }
 
     /// The report to attempt now, or how long until one is due.
@@ -183,6 +220,9 @@ where
         match result {
             Ok(()) => {
                 Self::log_success(&entry);
+                let report_id = entry.job.report_id;
+                let uploaded = CalibrationUploadStatus::Uploaded;
+                self.latest.set_upload_status(report_id, uploaded).await;
                 self.remove(entry.id).await;
             }
             Err(err) => self.handle_failure(entry, err).await,
@@ -205,16 +245,16 @@ where
             }
             Verdict::Terminal { .. } => {
                 Self::log_terminal_drop(&entry, &err);
-                self.remove(entry.id).await;
+                self.drop_report(&entry).await;
             }
             Verdict::OutOfAttempts { attempts } => {
                 entry.attempts = attempts;
                 Self::log_dropped(&entry, &err);
-                self.remove(entry.id).await;
+                self.drop_report(&entry).await;
             }
             Verdict::TooOld { age, .. } => {
                 Self::log_age_drop(&entry, age, &err);
-                self.remove(entry.id).await;
+                self.drop_report(&entry).await;
             }
         }
     }
@@ -223,6 +263,15 @@ where
     async fn retry_after(&mut self, id: Uuid, attempts: u32, wait_secs: i64) {
         let next_attempt_at = (self.now_fn)() + TimeDelta::seconds(wait_secs.max(0));
         self.queue.retry(id, attempts, next_attempt_at).await;
+    }
+
+    /// Mark the report queued as `entry` dropped in the latest store, then
+    /// remove it.
+    async fn drop_report(&mut self, entry: &QueueEntry) {
+        let report_id = entry.job.report_id;
+        let dropped = CalibrationUploadStatus::Dropped;
+        self.latest.set_upload_status(report_id, dropped).await;
+        self.remove(entry.id).await;
     }
 
     /// Dequeue report `id`, then delete its file. The entry goes first, so a
@@ -332,10 +381,10 @@ mod tests {
     // internal crates
     use super::{NextAttempt, QueueEntry, UploaderImpl, UploaderOptions};
     use crate::test_utils::calibration_sender::{MockCalibrationSender, Step};
-    use crate::test_utils::calibrations::{layout, received_at, report};
+    use crate::test_utils::calibrations::{latest_layout, layout, received_at, report};
     use crate::test_utils::filesys::dirs as test_dirs;
-    use miru_agent::calibrations::{CalibrationsErr, Queue, QueueSnapshotFile};
-    use miru_agent::disk::layout::CalibrationsLayout;
+    use miru_agent::calibrations::{CalibrationsErr, LatestIndexFile, Queue, QueueSnapshotFile};
+    use miru_agent::disk::layout::{CalibrationsLayout, LatestCalibrationsLayout};
     use miru_agent::filesys::{dirs, files, File, PathExt, WriteOptions};
     use miru_agent::queue::{Persistence, RetryPolicy};
 
@@ -349,6 +398,7 @@ mod tests {
     struct Fixture {
         _dir: test_dirs::TempDir,
         layout: CalibrationsLayout,
+        latest: LatestCalibrationsLayout,
         sender: Arc<MockCalibrationSender>,
         /// The uploader's clock. It starts when the fixture reports were
         /// received and moves only when a test advances it.
@@ -359,10 +409,12 @@ mod tests {
         fn new() -> Self {
             let dir = test_dirs::temp("calibration_uploader_impl_test").unwrap();
             let layout = layout(&dir);
+            let latest = latest_layout(&dir);
             let (sender, _) = MockCalibrationSender::new();
             Self {
                 _dir: dir,
                 layout,
+                latest,
                 sender,
                 clock: Arc::new(Mutex::new(received_at())),
             }
@@ -370,6 +422,12 @@ mod tests {
 
         async fn snapshot_file(&self) -> QueueSnapshotFile {
             QueueSnapshotFile::new_with_default(self.layout.queue(), Default::default())
+                .await
+                .unwrap()
+        }
+
+        async fn latest_index(&self) -> LatestIndexFile {
+            LatestIndexFile::new_with_default(self.latest.index(), Default::default())
                 .await
                 .unwrap()
         }
@@ -387,12 +445,14 @@ mod tests {
 
         async fn uploader_with(&self, options: UploaderOptions) -> TestUploader {
             let snapshot_file = Some(self.snapshot_file().await);
-            self.uploader_on(snapshot_file, options)
+            let latest_index = Some(self.latest_index().await);
+            self.uploader_on(snapshot_file, latest_index, options)
         }
 
         fn uploader_on(
             &self,
             snapshot_file: Option<QueueSnapshotFile>,
+            latest_index: Option<LatestIndexFile>,
             options: UploaderOptions,
         ) -> TestUploader {
             let clock = self.clock.clone();
@@ -401,6 +461,8 @@ mod tests {
                 self.sender.clone(),
                 snapshot_file,
                 self.layout.reports(),
+                latest_index,
+                self.latest.contents(),
                 options,
                 now_fn,
             )
@@ -481,7 +543,7 @@ mod tests {
     #[tokio::test]
     async fn without_a_queue_file_the_queue_lives_in_memory() {
         let f = Fixture::new();
-        let mut u = f.uploader_on(None, UploaderOptions::default());
+        let mut u = f.uploader_on(None, None, UploaderOptions::default());
 
         u.enqueue(report("a")).await.unwrap();
 
@@ -494,7 +556,7 @@ mod tests {
     async fn an_in_memory_queue_prunes_no_report_files() {
         let f = Fixture::new();
         let ids = preloaded(&f, &["a"]).await;
-        let u = f.uploader_on(None, UploaderOptions::default());
+        let u = f.uploader_on(None, None, UploaderOptions::default());
 
         u.prune_orphans().await;
 

@@ -10,12 +10,12 @@ use std::time::Duration;
 // internal crates
 use crate::mocks::calibration_sender::{MockCalibrationSender, Step};
 use crate::mocks::error::SleepController;
-use crate::test_utils::calibrations::{layout, received_at, report};
+use crate::test_utils::calibrations::{latest_layout, layout, received_at, report};
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::calibrations::{
     CalibrationsErr, Queue, QueueSnapshotFile, Uploader, UploaderArgs, UploaderOptions,
 };
-use miru_agent::disk::layout::CalibrationsLayout;
+use miru_agent::disk::layout::{CalibrationsLayout, LatestCalibrationsLayout};
 use miru_agent::filesys::{dirs, files, File, PathExt, WriteOptions};
 use miru_agent::queue::Persistence;
 
@@ -33,6 +33,7 @@ const HANG_GUARD: Duration = Duration::from_secs(60);
 struct Harness {
     _dir: test_dirs::TempDir,
     layout: CalibrationsLayout,
+    latest: LatestCalibrationsLayout,
     sender: Arc<MockCalibrationSender>,
     started: mpsc::UnboundedReceiver<()>,
     sleep: Arc<SleepController>,
@@ -47,10 +48,12 @@ impl Harness {
     fn new() -> Self {
         let dir = test_dirs::temp("calibration_uploader_test").unwrap();
         let layout = layout(&dir);
+        let latest = latest_layout(&dir);
         let (sender, started) = MockCalibrationSender::new();
         Self {
             _dir: dir,
             layout,
+            latest,
             sender,
             started,
             sleep: Arc::new(SleepController::new()),
@@ -85,6 +88,8 @@ impl Harness {
         let args = UploaderArgs {
             snapshot_file,
             reports: self.layout.reports(),
+            latest_index: None,
+            latest_contents: self.latest.contents(),
             sender: self.sender.clone(),
             options,
             sleep_fn: self.sleep_fn(),
