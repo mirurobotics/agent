@@ -211,7 +211,8 @@ pub async fn list_latest_calibrations(
                     trace: trace!(),
                 })
             })?;
-            let latest = calibration_svc::list_latest(&state.calibration_mngr, query.into()).await?;
+            let latest =
+                calibration_svc::list_latest(&state.calibration_mngr, query.into()).await?;
             Ok::<_, ServerErr>(device_server::LatestCalibrationsResponse::from(&latest))
         },
         "Error listing latest calibrations",
