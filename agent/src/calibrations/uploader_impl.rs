@@ -322,20 +322,22 @@ fn invalid(reason: &str) -> CalibrationsErr {
 #[cfg(test)]
 mod tests {
     // standard crates
+    use std::collections::HashSet;
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
     // internal crates
     use super::{NextAttempt, QueueEntry, UploaderImpl, UploaderOptions};
     use crate::test_utils::calibration_sender::{MockCalibrationSender, Step};
-    use crate::test_utils::calibrations::{latest_layout, layout, received_at, report};
+    use crate::test_utils::calibrations::{latest_layout, layout, received_at, report, report_id};
     use crate::test_utils::filesys::dirs as test_dirs;
     use miru_agent::calibrations::{
-        latest::DEFAULT_CAPACITY, CalibrationsErr, LatestIndexFile, LatestStore, Queue,
-        QueueSnapshotFile,
+        latest::DEFAULT_CAPACITY, CalibrationsErr, LatestContent, LatestFilter, LatestIndexFile,
+        LatestStore, ListedEntry, Queue, QueueSnapshotFile,
     };
     use miru_agent::disk::layout::{CalibrationsLayout, LatestCalibrationsLayout};
     use miru_agent::filesys::{dirs, files, File, PathExt, WriteOptions};
+    use miru_agent::models::{CalibrationUploadStatus, InstanceFormat};
     use miru_agent::queue::{Persistence, RetryPolicy};
 
     // external crates
@@ -478,6 +480,17 @@ mod tests {
 
     async fn assert_empty(u: &mut TestUploader) {
         assert_eq!(u.next_attempt().await, NextAttempt::Empty);
+    }
+
+    /// The latest entries, with the status a listing derives from `u`'s queue.
+    fn listed(u: &TestUploader, latest: &LatestStore) -> Vec<ListedEntry> {
+        let queued = u.queued_report_ids();
+        latest.list(&LatestFilter::default(), &queued).entries
+    }
+
+    fn statuses(u: &TestUploader, latest: &LatestStore) -> Vec<CalibrationUploadStatus> {
+        let entries = listed(u, latest).into_iter();
+        entries.map(|entry| entry.upload_status).collect()
     }
 
     fn strings(names: &[&str]) -> Vec<String> {
@@ -653,6 +666,73 @@ mod tests {
         assert_eq!(u.len(), 0);
     }
 
+    #[tokio::test]
+    async fn enqueue_writes_the_report_through_to_the_latest_store() {
+        let f = Fixture::new();
+        let mut u = f.uploader().await;
+        let mut latest = f.latest_store().await;
+
+        u.enqueue(&mut latest, report("a")).await.unwrap();
+
+        let entry = ListedEntry {
+            metadata: report("a").metadata,
+            upload_status: CalibrationUploadStatus::Queued,
+        };
+        assert_eq!(listed(&u, &latest), [entry]);
+        let content = latest.content(report_id("a")).await.unwrap();
+        let want = LatestContent {
+            format: InstanceFormat::Json,
+            data: report("a").data.into_bytes(),
+        };
+        assert_eq!(content, want);
+    }
+
+    #[tokio::test]
+    async fn enqueue_rolls_back_the_queue_when_the_store_write_fails() {
+        let f = Fixture::new();
+        let mut u = f.uploader().await;
+        let mut latest = f.latest_store().await;
+        // a regular file where the latest contents directory should be
+        let blocker = File::new(f.latest.contents().path().clone());
+        files::write_string(&blocker, "x", WriteOptions::OVERWRITE_ATOMIC)
+            .await
+            .unwrap();
+
+        let err = u.enqueue(&mut latest, report("a")).await.unwrap_err();
+
+        assert!(matches!(err, CalibrationsErr::FileSysErr(_)), "{err:?}");
+        assert!(f.queued_on_disk().await.is_empty());
+        assert!(dirs::files(&f.layout.reports()).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn enqueue_rejects_a_new_key_when_the_store_is_full_and_queues_nothing() {
+        let f = Fixture::new();
+        let mut u = f.uploader().await;
+        let mut latest = LatestStore::new(None, f.latest.contents(), 0);
+
+        let err = u.enqueue(&mut latest, report("a")).await.unwrap_err();
+
+        assert!(matches!(err, CalibrationsErr::StoreFullErr(_)), "{err:?}");
+        assert_eq!(u.len(), 0);
+        assert!(!f.layout.reports().exists());
+    }
+
+    // ========================== QUEUED REPORT IDS =========================== //
+    #[tokio::test]
+    async fn queued_report_ids_are_the_queued_reports() {
+        let f = Fixture::new();
+        let mut u = f.uploader().await;
+        let mut latest = f.latest_store().await;
+        for slug in ["a", "b"] {
+            u.enqueue(&mut latest, report(slug)).await.unwrap();
+        }
+
+        let ids = u.queued_report_ids();
+
+        assert_eq!(ids, HashSet::from([report_id("a"), report_id("b")]));
+    }
+
     // ============================= NEXT ATTEMPT ============================= //
     #[tokio::test]
     async fn a_deadline_past_the_longest_backoff_is_pulled_in() {
@@ -749,6 +829,38 @@ mod tests {
 
         assert!(f.queued_on_disk().await.is_empty());
         assert!(!f.report_file(id).exists());
+    }
+
+    #[tokio::test]
+    async fn a_sent_report_is_marked_uploaded() {
+        let f = Fixture::new();
+        let mut u = f.uploader().await;
+        let mut latest = f.latest_store().await;
+        u.enqueue(&mut latest, report("a")).await.unwrap();
+
+        run_next_attempt(&mut u, &mut latest).await;
+
+        assert_eq!(statuses(&u, &latest), [CalibrationUploadStatus::Uploaded]);
+    }
+
+    #[tokio::test]
+    async fn a_newer_report_for_the_key_is_not_marked() {
+        let f = Fixture::new();
+        let mut u = f.uploader().await;
+        let mut latest = f.latest_store().await;
+        let mut newer = report("a");
+        newer.metadata.report_id = Uuid::new_v4();
+        u.enqueue(&mut latest, report("a")).await.unwrap();
+        u.enqueue(&mut latest, newer.clone()).await.unwrap();
+
+        // the older report uploads after the newer one replaced it
+        run_next_attempt(&mut u, &mut latest).await;
+
+        let entry = ListedEntry {
+            metadata: newer.metadata,
+            upload_status: CalibrationUploadStatus::Queued,
+        };
+        assert_eq!(listed(&u, &latest), [entry]);
     }
 
     /// A report file that can't be deleted is left for `prune_orphans` on the
@@ -940,5 +1052,38 @@ mod tests {
         run_next_attempt(&mut u, &mut latest).await;
 
         assert_empty(&mut u).await;
+    }
+
+    /// A dropped report is never marked, so its entry lists as dropped once
+    /// the queue lets it go.
+    #[tokio::test]
+    async fn a_dropped_report_is_not_marked_uploaded() {
+        let out_of_attempts = UploaderOptions {
+            retry: RetryPolicy {
+                attempts: 1,
+                ..RetryPolicy::default()
+            },
+            ..UploaderOptions::default()
+        };
+        // rejected for good, out of attempts, and unsent 90 days after
+        // reported_at
+        let cases = [
+            (Step::Terminal, UploaderOptions::default(), 0),
+            (Step::Server, out_of_attempts, 0),
+            (Step::Network, UploaderOptions::default(), 90),
+        ];
+        for (step, options, age_days) in cases {
+            let f = Fixture::new();
+            f.sender.push(step);
+            f.advance(TimeDelta::days(age_days));
+            let mut u = f.uploader_with(options).await;
+            let mut latest = f.latest_store().await;
+            u.enqueue(&mut latest, report("a")).await.unwrap();
+
+            run_next_attempt(&mut u, &mut latest).await;
+
+            assert_empty(&mut u).await;
+            assert_eq!(statuses(&u, &latest), [CalibrationUploadStatus::Dropped]);
+        }
     }
 }
