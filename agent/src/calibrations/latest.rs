@@ -1,3 +1,6 @@
+// standard crates
+use std::collections::BTreeMap;
+
 // internal crates
 use crate::calibrations::{
     cleanup,
@@ -14,22 +17,67 @@ use serde::{Deserialize, Serialize};
 use tracing::warn;
 use uuid::Uuid;
 
-/// The newest report for one key (component, role and aspect) and whether it
-/// reached Miru.
+/// What a latest entry is the newest report for.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct LatestKey {
+    pub component: String,
+    pub role: Option<String>,
+    pub aspect: Option<String>,
+}
+
+impl From<&ReportMetadata> for LatestKey {
+    fn from(metadata: &ReportMetadata) -> Self {
+        Self {
+            component: metadata.component.clone(),
+            role: metadata.role.clone(),
+            aspect: metadata.aspect.clone(),
+        }
+    }
+}
+
+/// The newest report for one key and whether it reached Miru.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LatestEntry {
     pub metadata: ReportMetadata,
     pub upload_status: CalibrationUploadStatus,
 }
 
-/// The latest store's index: one entry per key, in the order keys arrived.
+/// The latest store's index: one entry per key.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct LatestIndex {
     /// When the store was last loaded from Miru; `None` until then.
     #[serde(default)]
     pub loaded_at: Option<DateTime<Utc>>,
-    #[serde(default)]
-    pub entries: Vec<LatestEntry>,
+    #[serde(default, with = "entry_list")]
+    pub entries: BTreeMap<LatestKey, LatestEntry>,
+}
+
+/// Saves the index's entries as a list, since a JSON object's keys are
+/// strings, and keys each one by its metadata on load.
+mod entry_list {
+    // standard crates
+    use std::collections::BTreeMap;
+
+    // internal crates
+    use super::{LatestEntry, LatestKey};
+
+    // external crates
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(
+        entries: &BTreeMap<LatestKey, LatestEntry>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        serializer.collect_seq(entries.values())
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<BTreeMap<LatestKey, LatestEntry>, D::Error> {
+        let entries = Vec::<LatestEntry>::deserialize(deserializer)?;
+        let keyed = entries.into_iter().map(|e| (LatestKey::from(&e.metadata), e));
+        Ok(keyed.collect())
+    }
 }
 
 impl Patch<LatestIndex> for LatestIndex {
@@ -104,7 +152,7 @@ impl LatestStore {
         metadata: &ReportMetadata,
     ) -> Result<(), CalibrationStoreFullErr> {
         let entries = &self.index.entries;
-        if entries.len() < self.capacity || entries.iter().any(|e| has_key(e, metadata)) {
+        if entries.len() < self.capacity || entries.contains_key(&LatestKey::from(metadata)) {
             return Ok(());
         }
         let err = CalibrationStoreFullErr {
@@ -125,23 +173,21 @@ impl LatestStore {
         data: &[u8],
     ) -> Result<(), CalibrationsErr> {
         self.verify_capacity(&metadata)?;
-        let report_id = metadata.report_id;
-        let file = self.content_file(report_id);
+        let file = self.content_file(metadata.report_id);
         files::write_bytes(&file, data, WriteOptions::OVERWRITE_ATOMIC).await?;
         let mut index = self.index.clone();
         let entry = LatestEntry {
             metadata,
             upload_status: CalibrationUploadStatus::Queued,
         };
-        let replaced = replace_or_append(&mut index.entries, entry);
+        let replaced = index.entries.insert(LatestKey::from(&entry.metadata), entry);
         if let Err(e) = self.persist(index.clone()).await {
             cleanup::delete(&file).await;
             return Err(e.into());
         }
         self.index = index;
-        let replaced_id = replaced.map(|entry| entry.metadata.report_id);
-        if let Some(replaced_id) = replaced_id.filter(|id| *id != report_id) {
-            cleanup::delete(&self.content_file(replaced_id)).await;
+        if let Some(replaced) = replaced {
+            cleanup::delete(&self.content_file(replaced.metadata.report_id)).await;
         }
         Ok(())
     }
@@ -150,11 +196,8 @@ impl LatestStore {
     /// have replaced it, or `reset` wiped the store; then this does nothing. A
     /// failed index write is logged, and the next write saves the status.
     pub async fn set_upload_status(&mut self, report_id: Uuid, status: CalibrationUploadStatus) {
-        let entries = &mut self.index.entries;
-        let Some(entry) = entries
-            .iter_mut()
-            .find(|e| e.metadata.report_id == report_id)
-        else {
+        let mut entries = self.index.entries.values_mut();
+        let Some(entry) = entries.find(|e| e.metadata.report_id == report_id) else {
             return;
         };
         entry.upload_status = status;
@@ -164,9 +207,9 @@ impl LatestStore {
         }
     }
 
-    /// The entries `filter` matches, in index order.
+    /// The entries `filter` matches, in key order.
     pub fn list(&self, filter: &LatestFilter) -> LatestCalibrations {
-        let entries = self.index.entries.iter();
+        let entries = self.index.entries.values();
         let matched = entries.filter(|e| filter.is_match(&e.metadata));
         LatestCalibrations {
             is_confirmed: self.index.loaded_at.is_some(),
@@ -177,8 +220,8 @@ impl LatestStore {
     /// The content of the entry for `report_id`. Not found unless an entry has
     /// that `report_id` and its content file exists.
     pub async fn content(&self, report_id: Uuid) -> Result<LatestContent, CalibrationsErr> {
-        let entries = &self.index.entries;
-        let Some(entry) = entries.iter().find(|e| e.metadata.report_id == report_id) else {
+        let mut entries = self.index.entries.values();
+        let Some(entry) = entries.find(|e| e.metadata.report_id == report_id) else {
             return Err(not_found(report_id));
         };
         match files::read_bytes(&self.content_file(report_id)).await {
@@ -199,7 +242,7 @@ impl LatestStore {
         if self.index_file.is_none() {
             return;
         }
-        let entries = self.index.entries.iter();
+        let entries = self.index.entries.values();
         let named = entries.map(|e| e.metadata.report_id.to_string());
         cleanup::prune(&self.contents, &named.collect()).await;
     }
@@ -220,26 +263,6 @@ impl LatestStore {
 /// Whether `value` is in `allowed`, where an empty list allows any value.
 fn is_allowed<T: PartialEq>(allowed: &[T], value: &T) -> bool {
     allowed.is_empty() || allowed.contains(value)
-}
-
-/// Whether `entry` is for the key `metadata` reports.
-fn has_key(entry: &LatestEntry, metadata: &ReportMetadata) -> bool {
-    let key = &entry.metadata;
-    key.component == metadata.component
-        && key.role == metadata.role
-        && key.aspect == metadata.aspect
-}
-
-/// Put `entry` in its key's place, or last for a new key, and return the entry
-/// it replaced.
-fn replace_or_append(entries: &mut Vec<LatestEntry>, entry: LatestEntry) -> Option<LatestEntry> {
-    match entries.iter_mut().find(|e| has_key(e, &entry.metadata)) {
-        Some(slot) => Some(std::mem::replace(slot, entry)),
-        None => {
-            entries.push(entry);
-            None
-        }
-    }
 }
 
 fn not_found(report_id: Uuid) -> CalibrationsErr {

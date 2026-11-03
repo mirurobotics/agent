@@ -15,7 +15,7 @@ pub use self::errors::{
 };
 pub use self::latest::{
     LatestCalibrations, LatestContent, LatestEntry, LatestFilter, LatestIndex, LatestIndexFile,
-    LatestStore,
+    LatestKey, LatestStore,
 };
 pub use self::report::{
     Queue, QueueEntry, QueueSnapshot, QueueSnapshotFile, Report, ReportMetadata,
