@@ -12,7 +12,7 @@ use miru_agent::http::request;
 use miru_agent::http::HTTPErr;
 
 /// Number of variants in errors::Code; keep in sync so every arm has a test case.
-const EXPECTED_CODE_VARIANTS: usize = 8;
+const EXPECTED_CODE_VARIANTS: usize = 9;
 
 #[test]
 fn test_code_as_str() {
@@ -27,6 +27,7 @@ fn test_code_as_str() {
             "calibration_buffer_full",
         ),
         (errors::Code::CalibrationTooLarge, "calibration_too_large"),
+        (errors::Code::CalibrationStoreFull, "calibration_store_full"),
         (
             errors::Code::BackendError("custom_code".to_string()),
             "custom_code",
