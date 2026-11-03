@@ -157,11 +157,11 @@ fn respond<T>(respond_to: oneshot::Sender<T>, value: T, op: &str) {
 /// time, oldest due first, retrying a failed report at the tail after its own
 /// backoff. It keeps serving intake during an upload or a backoff.
 #[derive(Debug)]
-pub struct Uploader {
+pub struct CalibrationManager {
     sender: mpsc::Sender<Command>,
 }
 
-impl Uploader {
+impl CalibrationManager {
     pub fn spawn<S, F, Fut, N>(
         buffer_size: usize,
         args: UploaderArgs<S, F, N>,

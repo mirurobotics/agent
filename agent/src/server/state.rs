@@ -19,7 +19,7 @@ pub struct State {
     pub syncer: Arc<sync::Syncer>,
     pub token_mngr: Arc<authn::TokenManager>,
     pub event_hub: events::EventHub,
-    pub calibration_uploader: Arc<calibrations::Uploader>,
+    pub calibration_mngr: Arc<calibrations::CalibrationManager>,
     pub shutdown_tx: broadcast::Sender<()>,
 }
 
@@ -30,7 +30,7 @@ impl State {
         syncer: Arc<sync::Syncer>,
         token_mngr: Arc<authn::TokenManager>,
         event_hub: events::EventHub,
-        calibration_uploader: Arc<calibrations::Uploader>,
+        calibration_mngr: Arc<calibrations::CalibrationManager>,
         shutdown_tx: broadcast::Sender<()>,
     ) -> Self {
         State {
@@ -39,7 +39,7 @@ impl State {
             syncer,
             token_mngr,
             event_hub,
-            calibration_uploader,
+            calibration_mngr,
             shutdown_tx,
         }
     }

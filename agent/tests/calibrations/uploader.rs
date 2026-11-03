@@ -13,7 +13,7 @@ use crate::mocks::error::SleepController;
 use crate::test_utils::calibrations::{layout, received_at, report};
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::calibrations::{
-    CalibrationsErr, Queue, QueueSnapshotFile, Uploader, UploaderArgs, UploaderOptions,
+    CalibrationManager, CalibrationsErr, Queue, QueueSnapshotFile, UploaderArgs, UploaderOptions,
 };
 use miru_agent::disk::layout::CalibrationsLayout;
 use miru_agent::filesys::{dirs, files, File, PathExt, WriteOptions};
@@ -39,7 +39,7 @@ struct Harness {
     /// The uploader's clock. It starts when the fixture reports were received
     /// and moves only when a backoff sleep completes.
     clock: Arc<Mutex<DateTime<Utc>>>,
-    uploader: Option<Uploader>,
+    uploader: Option<CalibrationManager>,
     handle: Option<JoinHandle<()>>,
 }
 
@@ -90,7 +90,7 @@ impl Harness {
             sleep_fn: self.sleep_fn(),
             now_fn: self.now_fn(),
         };
-        let (uploader, handle) = Uploader::spawn(64, args);
+        let (uploader, handle) = CalibrationManager::spawn(64, args);
         self.uploader = Some(uploader);
         self.handle = Some(handle);
     }
@@ -115,7 +115,7 @@ impl Harness {
         move || *clock.lock().unwrap()
     }
 
-    fn uploader(&self) -> &Uploader {
+    fn uploader(&self) -> &CalibrationManager {
         self.uploader.as_ref().expect("spawned")
     }
 

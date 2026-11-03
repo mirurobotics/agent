@@ -9,7 +9,7 @@ use crate::mocks::calibration_sender::{MockCalibrationSender, Step};
 use crate::test_utils::calibrations::{layout, received_at};
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::calibrations::{
-    CalibrationsErr, QueueSnapshotFile, Report, ReportMetadata, Uploader, UploaderArgs,
+    CalibrationManager, CalibrationsErr, QueueSnapshotFile, Report, ReportMetadata, UploaderArgs,
     UploaderOptions,
 };
 use miru_agent::disk::{self, Layout};
@@ -23,7 +23,7 @@ use tokio::sync::{mpsc, oneshot};
 
 struct Fixture {
     _dir: test_dirs::TempDir,
-    uploader: Uploader,
+    uploader: CalibrationManager,
     sender: Arc<MockCalibrationSender>,
     started: mpsc::UnboundedReceiver<()>,
     deployments: disk::Deployments,
@@ -50,7 +50,7 @@ impl Fixture {
             sleep_fn: tokio::time::sleep,
             now_fn: Utc::now,
         };
-        let (uploader, _) = Uploader::spawn(64, args);
+        let (uploader, _) = CalibrationManager::spawn(64, args);
         let deployments_file = Layout::new(dir.to_dir()).deployments();
         let (deployments, _) = disk::Deployments::spawn(64, deployments_file, 1000)
             .await
