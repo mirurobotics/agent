@@ -9,7 +9,7 @@ use crate::events::{
     errors::{EventsErr, MalformedCursorErr},
     model::EventTypeFilter,
 };
-use crate::server::state::State;
+use crate::server::{request, state::State};
 use crate::services::{events as events_svc, ServiceErr};
 use crate::trace;
 use device_api::models as device_server;
@@ -119,16 +119,6 @@ fn resolve_cursor(params: &EventsQuery, headers: &HeaderMap) -> Result<Option<i6
 }
 
 fn parse_event_filter(types: Option<String>) -> Option<EventTypeFilter> {
-    types.and_then(|t| {
-        let set: EventTypeFilter = t
-            .split(',')
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect();
-        if set.is_empty() {
-            None
-        } else {
-            Some(set)
-        }
-    })
+    let set: EventTypeFilter = request::split_list(types).into_iter().collect();
+    (!set.is_empty()).then_some(set)
 }

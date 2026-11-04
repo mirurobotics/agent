@@ -1,17 +1,16 @@
 // standard crates
-use std::collections::HashSet;
 use std::future::Future;
-use std::str::FromStr;
 use std::sync::Arc;
 
 // internal crates
 use crate::calibrations::{
+    cleanup,
     errors::{CalibrationTooLargeErr, CalibrationsErr, InvalidReportErr},
     report::{Queue, QueueEntry, QueueSnapshotFile, Report, ReportMetadata},
     sender::Sender,
 };
 use crate::errors::Error;
-use crate::filesys::{dirs, files, Dir, File, FileSysErr, PathExt, WriteOptions};
+use crate::filesys::{files, Dir, File, FileSysErr, WriteOptions};
 use crate::queue::{self, Persistence, RetryPolicy, Verdict};
 use crate::trace;
 
@@ -109,24 +108,11 @@ where
         if !self.persisted {
             return;
         }
-        if !self.reports.exists() {
-            return;
-        }
-        let listing = match dirs::files(&self.reports).await {
-            Ok(listing) => listing,
-            Err(e) => {
-                warn!("calibrations: failed to list report files: {e}");
-                return;
-            }
-        };
-        let queued: HashSet<Uuid> = self.queue.iter().map(|entry| entry.id).collect();
-        for file in listing {
-            if entry_id(&file).is_some_and(|id| queued.contains(&id)) {
-                continue;
-            }
-            warn!("calibrations: deleting report file {file}, which is not queued");
-            delete(&file).await;
-        }
+        let queued = self
+            .queue
+            .iter()
+            .map(|entry| entry.id.hyphenated().to_string());
+        cleanup::prune(&self.reports, &queued.collect()).await;
     }
 
     /// Queue `report` and return its queue entry id. The entry is written
@@ -229,7 +215,7 @@ where
     /// crash between the two leaves a file that [`Self::prune_orphans`] deletes.
     async fn remove(&mut self, id: Uuid) {
         self.queue.ack(id).await;
-        delete(&self.report_file(id)).await;
+        cleanup::delete(&self.report_file(id)).await;
     }
 
     fn verify_size(&self, report_bytes: u64) -> Result<(), CalibrationTooLargeErr> {
@@ -286,19 +272,6 @@ where
     fn log_terminal_drop(entry: &QueueEntry, err: &CalibrationsErr) {
         let id = entry.id;
         error!("calibrations: dropping report {id}, which can never be uploaded: {err}");
-    }
-}
-
-/// The queue entry id a report file is named after, or `None` for any other
-/// file.
-fn entry_id(file: &File) -> Option<Uuid> {
-    file.name().ok().and_then(|name| Uuid::from_str(name).ok())
-}
-
-/// Delete `file`, logging a failure. A file that is already gone is fine.
-async fn delete(file: &File) {
-    if let Err(e) = files::delete(file).await {
-        warn!("calibrations: failed to delete report file {file}: {e}");
     }
 }
 
