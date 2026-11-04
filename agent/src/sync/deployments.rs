@@ -394,15 +394,12 @@ async fn push_deployments<HTTPClientT: http::ClientI>(
     let dirty_entries = storage.get_dirty_entries().await?;
     debug!("found {} dirty deployments to push", dirty_entries.len(),);
 
-    let mut errors = Vec::new();
-
-    for dirty_entry in dirty_entries {
-        let deployment = dirty_entry.value;
-        if let Err(e) = push_deployment(http_client, storage, deployment, token).await {
-            errors.push(e);
-            continue;
-        }
-    }
+    let results: Vec<Result<(), SyncErr>> = stream::iter(dirty_entries)
+        .map(move |entry| push_deployment(http_client, storage, entry.value, token))
+        .buffer_unordered(MAX_CONCURRENT_REQUESTS)
+        .collect()
+        .await;
+    let errors: Vec<SyncErr> = results.into_iter().filter_map(Result::err).collect();
 
     if errors.is_empty() {
         Ok(())
