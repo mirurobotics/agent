@@ -167,26 +167,12 @@ async fn pull_content_for_cfg_insts<'a, HTTPClientT: http::ClientI>(
         .collect();
 
     let cfg_insts = &storage.cfg_insts;
-    let results: Vec<Result<(), SyncErr>> = stream::iter(cfg_inst_ids)
-        .map(move |id| pull_cfg_inst_content(http_client, cfg_insts, id, token))
-        .buffer_unordered(MAX_CONCURRENT_REQUESTS)
-        .collect()
-        .await;
-
-    let mut errors = Vec::new();
-    for e in results.into_iter().filter_map(Result::err) {
-        error!("Failed to pull content for config instance: {e}");
-        errors.push(e);
-    }
-
-    if errors.is_empty() {
-        Ok(())
-    } else {
-        Err(SyncErr::SyncErrors(SyncErrors {
-            errors,
-            trace: trace!(),
-        }))
-    }
+    run_bounded(cfg_inst_ids, move |id| async move {
+        pull_cfg_inst_content(http_client, cfg_insts, id, token)
+            .await
+            .inspect_err(|e| error!("Failed to pull content for config instance: {e}"))
+    })
+    .await
 }
 
 async fn pull_cfg_inst_content<HTTPClientT: http::ClientI>(
@@ -394,21 +380,10 @@ async fn push_deployments<HTTPClientT: http::ClientI>(
     let dirty_entries = storage.get_dirty_entries().await?;
     debug!("found {} dirty deployments to push", dirty_entries.len(),);
 
-    let results: Vec<Result<(), SyncErr>> = stream::iter(dirty_entries)
-        .map(move |entry| push_deployment(http_client, storage, entry.value, token))
-        .buffer_unordered(MAX_CONCURRENT_REQUESTS)
-        .collect()
-        .await;
-    let errors: Vec<SyncErr> = results.into_iter().filter_map(Result::err).collect();
-
-    if errors.is_empty() {
-        Ok(())
-    } else {
-        Err(SyncErr::SyncErrors(SyncErrors {
-            errors,
-            trace: trace!(),
-        }))
-    }
+    run_bounded(dirty_entries, |entry| {
+        push_deployment(http_client, storage, entry.value, token)
+    })
+    .await
 }
 
 async fn push_deployment<HTTPClientT: http::ClientI>(
@@ -451,4 +426,28 @@ async fn push_deployment<HTTPClientT: http::ClientI>(
         )
         .await
         .map_err(SyncErr::from)
+}
+
+// ================================== HELPERS ====================================== //
+/// Runs `f` on every item, a bounded number at a time, and gathers every error.
+async fn run_bounded<T, F, Fut>(items: Vec<T>, f: F) -> Result<(), SyncErr>
+where
+    F: FnMut(T) -> Fut,
+    Fut: std::future::Future<Output = Result<(), SyncErr>>,
+{
+    let errors: Vec<SyncErr> = stream::iter(items)
+        .map(f)
+        .buffer_unordered(MAX_CONCURRENT_REQUESTS)
+        .filter_map(|result| async move { result.err() })
+        .collect()
+        .await;
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(SyncErr::SyncErrors(SyncErrors {
+            errors,
+            trace: trace!(),
+        }))
+    }
 }
