@@ -1,3 +1,4 @@
+pub mod calibration_upload_status;
 pub mod config_instance;
 pub mod deployment;
 pub mod device;
@@ -11,6 +12,7 @@ pub(crate) mod status;
 pub mod system_metadata;
 
 // internal crates
+pub use self::calibration_upload_status::CalibrationUploadStatus;
 pub use self::config_instance::CfgInstID;
 pub use self::config_instance::ConfigInstance;
 pub use self::deployment::Deployment;

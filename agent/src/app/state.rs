@@ -259,9 +259,10 @@ impl AppState {
     }
 
     /// Spawn the calibration uploader, which sends reports to Miru with the
-    /// token manager's token. A queue-file error degrades to a queue kept in
-    /// memory (fail-open); the report files a previous boot queued are kept
-    /// for the next boot that opens the queue file.
+    /// token manager's token and owns the latest calibrations store. A
+    /// queue-file error degrades to a queue kept in memory (fail-open); the
+    /// report files a previous boot queued are kept for the next boot that
+    /// opens the queue file. A latest-index error degrades the same way.
     async fn init_calibration_mngr(
         layout: &disk::Layout,
         http_client: Arc<http::Client>,
@@ -270,6 +271,7 @@ impl AppState {
         Arc<calibrations::CalibrationManager>,
         tokio::task::JoinHandle<()>,
     ) {
+        let latest_layout = layout.latest_calibrations();
         let layout = layout.calibrations();
         let snapshot_file = match calibrations::QueueSnapshotFile::new_with_default(
             layout.queue(),
@@ -285,10 +287,29 @@ impl AppState {
                 None
             }
         };
+        let latest_index = match calibrations::LatestIndexFile::new_with_default(
+            latest_layout.index(),
+            Default::default(),
+        )
+        .await
+        {
+            Ok(file) => Some(file),
+            Err(e) => {
+                tracing::error!(
+                    "failed to initialize latest calibrations index file; latest calibrations will run without persistence: {e}"
+                );
+                None
+            }
+        };
 
         let args = calibrations::UploaderArgs {
             snapshot_file,
             reports: layout.reports(),
+            latest: calibrations::LatestStore::new(
+                latest_index,
+                latest_layout.contents(),
+                calibrations::latest::DEFAULT_CAPACITY,
+            ),
             sender: Arc::new(calibrations::HttpSender::new(http_client, token_mngr)),
             options: calibrations::UploaderOptions::default(),
             sleep_fn: tokio::time::sleep,

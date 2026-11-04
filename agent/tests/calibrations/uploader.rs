@@ -10,13 +10,16 @@ use std::time::Duration;
 // internal crates
 use crate::mocks::calibration_sender::{MockCalibrationSender, Step};
 use crate::mocks::error::SleepController;
-use crate::test_utils::calibrations::{layout, received_at, report};
+use crate::test_utils::calibrations::{latest_layout, layout, received_at, report, report_id};
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::calibrations::{
-    CalibrationManager, CalibrationsErr, Queue, QueueSnapshotFile, UploaderArgs, UploaderOptions,
+    latest::DEFAULT_CAPACITY, CalibrationManager, CalibrationsErr, LatestContent, LatestFilter,
+    LatestIndexFile, LatestStore, ListedEntry, Queue, QueueSnapshotFile, UploaderArgs,
+    UploaderOptions,
 };
-use miru_agent::disk::layout::CalibrationsLayout;
+use miru_agent::disk::layout::{CalibrationsLayout, LatestCalibrationsLayout};
 use miru_agent::filesys::{dirs, files, File, PathExt, WriteOptions};
+use miru_agent::models::{CalibrationUploadStatus, InstanceFormat};
 use miru_agent::queue::Persistence;
 
 // external crates
@@ -33,6 +36,7 @@ const HANG_GUARD: Duration = Duration::from_secs(60);
 struct Harness {
     _dir: test_dirs::TempDir,
     layout: CalibrationsLayout,
+    latest: LatestCalibrationsLayout,
     sender: Arc<MockCalibrationSender>,
     started: mpsc::UnboundedReceiver<()>,
     sleep: Arc<SleepController>,
@@ -47,10 +51,12 @@ impl Harness {
     fn new() -> Self {
         let dir = test_dirs::temp("calibration_uploader_test").unwrap();
         let layout = layout(&dir);
+        let latest = latest_layout(&dir);
         let (sender, started) = MockCalibrationSender::new();
         Self {
             _dir: dir,
             layout,
+            latest,
             sender,
             started,
             sleep: Arc::new(SleepController::new()),
@@ -62,6 +68,12 @@ impl Harness {
 
     async fn snapshot_file(&self) -> QueueSnapshotFile {
         QueueSnapshotFile::new_with_default(self.layout.queue(), Default::default())
+            .await
+            .unwrap()
+    }
+
+    async fn latest_index(&self) -> LatestIndexFile {
+        LatestIndexFile::new_with_default(self.latest.index(), Default::default())
             .await
             .unwrap()
     }
@@ -78,13 +90,21 @@ impl Harness {
 
     async fn spawn_with(&mut self, options: UploaderOptions) {
         let snapshot_file = Some(self.snapshot_file().await);
-        self.spawn_on(snapshot_file, options);
+        let latest_index = Some(self.latest_index().await);
+        self.spawn_on(snapshot_file, latest_index, options);
     }
 
-    fn spawn_on(&mut self, snapshot_file: Option<QueueSnapshotFile>, options: UploaderOptions) {
+    fn spawn_on(
+        &mut self,
+        snapshot_file: Option<QueueSnapshotFile>,
+        latest_index: Option<LatestIndexFile>,
+        options: UploaderOptions,
+    ) {
+        let latest = LatestStore::new(latest_index, self.latest.contents(), DEFAULT_CAPACITY);
         let args = UploaderArgs {
             snapshot_file,
             reports: self.layout.reports(),
+            latest,
             sender: self.sender.clone(),
             options,
             sleep_fn: self.sleep_fn(),
@@ -216,6 +236,24 @@ async fn startup_prunes_orphaned_report_files() {
 }
 
 #[tokio::test]
+async fn startup_prunes_unreferenced_latest_contents() {
+    let mut h = Harness::new();
+    preloaded(&h, &["a"]).await;
+    let orphan = h.latest.contents().file(&Uuid::new_v4().to_string());
+    files::write_string(&orphan, "{}", WriteOptions::OVERWRITE_ATOMIC)
+        .await
+        .unwrap();
+    let (_hold, hang) = oneshot::channel();
+    h.sender.push(Step::Hang(hang));
+
+    h.spawn().await;
+
+    // the worker prunes before it starts the first upload
+    h.await_started().await;
+    assert!(!orphan.exists());
+}
+
+#[tokio::test]
 async fn drains_reports_buffered_before_start_in_order() {
     let mut h = Harness::new();
     preloaded(&h, &["a", "b", "c"]).await;
@@ -254,6 +292,32 @@ async fn intake_is_served_during_an_upload() {
 
     release.send(()).unwrap();
     h.await_drained(&["a", "b"]).await;
+}
+
+#[tokio::test]
+async fn latest_reads_are_served_during_an_upload() {
+    let mut h = Harness::new();
+    let (_hold, hang) = oneshot::channel();
+    h.sender.push(Step::Hang(hang));
+    h.spawn().await;
+    h.enqueue("a").await;
+    h.await_started().await;
+
+    // the send of "a" is still in flight
+    let uploader = h.uploader();
+    let latest = guard(uploader.list_latest(LatestFilter::default())).await;
+    let content = guard(uploader.latest_content(report_id("a"))).await;
+
+    let entry = ListedEntry {
+        metadata: report("a").metadata,
+        upload_status: CalibrationUploadStatus::Queued,
+    };
+    assert_eq!(latest.unwrap().entries, [entry]);
+    let want = LatestContent {
+        format: InstanceFormat::Json,
+        data: report("a").data.into_bytes(),
+    };
+    assert_eq!(content.unwrap(), want);
 }
 
 #[tokio::test]
@@ -323,10 +387,16 @@ async fn commands_after_shutdown_fail() {
     h.stop().await;
 
     let err = h.uploader().enqueue(report("a")).await.unwrap_err();
+    let read = h.uploader().latest_content(report_id("a"));
+    let read_err = read.await.unwrap_err();
 
     assert!(
         matches!(err, CalibrationsErr::SendActorMessageErr(_)),
         "{err:?}"
+    );
+    assert!(
+        matches!(read_err, CalibrationsErr::SendActorMessageErr(_)),
+        "{read_err:?}"
     );
 }
 

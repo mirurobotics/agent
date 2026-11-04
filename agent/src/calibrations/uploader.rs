@@ -6,6 +6,7 @@ use std::time::Duration;
 // internal crates
 use crate::calibrations::{
     errors::{CalibrationsErr, ReceiveActorMessageErr, SendActorMessageErr},
+    latest::{LatestCalibrations, LatestContent, LatestFilter, LatestStore},
     report::{QueueEntry, QueueSnapshotFile, Report},
     sender::Sender,
     uploader_impl::{NextAttempt, UploaderImpl, UploaderOptions},
@@ -18,12 +19,15 @@ use chrono::{DateTime, Utc};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{error, info};
+use uuid::Uuid;
 
 pub struct UploaderArgs<S, F, N> {
     /// Where the queue persists; `None` keeps it in memory only.
     pub snapshot_file: Option<QueueSnapshotFile>,
     /// The directory holding one data file per queued report.
     pub reports: Dir,
+    /// The latest calibrations store, which the worker lends the uploader.
+    pub latest: LatestStore,
     pub sender: Arc<S>,
     pub options: UploaderOptions,
     pub sleep_fn: F,
@@ -40,6 +44,14 @@ enum Command {
     Len {
         respond_to: oneshot::Sender<usize>,
     },
+    ListLatest {
+        filter: LatestFilter,
+        respond_to: oneshot::Sender<LatestCalibrations>,
+    },
+    LatestContent {
+        report_id: Uuid,
+        respond_to: oneshot::Sender<Result<LatestContent, CalibrationsErr>>,
+    },
     Shutdown {
         respond_to: oneshot::Sender<()>,
     },
@@ -53,6 +65,7 @@ enum Flow {
 struct Worker<S, F, N> {
     receiver: mpsc::Receiver<Command>,
     uploader: UploaderImpl<S, N>,
+    latest: LatestStore,
     sleep_fn: F,
 }
 
@@ -64,6 +77,7 @@ where
     N: Fn() -> DateTime<Utc> + Send + Sync + 'static,
 {
     async fn run(mut self) {
+        self.latest.prune_orphans().await;
         self.uploader.prune_orphans().await;
         loop {
             let flow = match self.uploader.next_attempt().await {
@@ -85,7 +99,9 @@ where
         let Some(result) = self.serve_until(upload).await else {
             return Flow::Shutdown;
         };
-        self.uploader.finish_attempt(entry, result).await;
+        self.uploader
+            .finish_attempt(&mut self.latest, entry, result)
+            .await;
         Flow::Continue
     }
 
@@ -132,10 +148,23 @@ where
         };
         match cmd {
             Command::Enqueue { report, respond_to } => {
-                let result = self.uploader.enqueue(*report).await.map(drop);
+                let enqueued = self.uploader.enqueue(&mut self.latest, *report).await;
+                let result = enqueued.map(drop);
                 respond(respond_to, result, "enqueue");
             }
             Command::Len { respond_to } => respond(respond_to, self.uploader.len(), "len"),
+            Command::ListLatest { filter, respond_to } => {
+                let queued = self.uploader.queued_report_ids();
+                let latest = self.latest.list(&filter, &queued);
+                respond(respond_to, latest, "list latest");
+            }
+            Command::LatestContent {
+                report_id,
+                respond_to,
+            } => {
+                let content = self.latest.content(report_id).await;
+                respond(respond_to, content, "latest content");
+            }
             Command::Shutdown { respond_to } => {
                 respond(respond_to, (), "shutdown");
                 return Flow::Shutdown;
@@ -153,9 +182,10 @@ fn respond<T>(respond_to: oneshot::Sender<T>, value: T, op: &str) {
 
 // ================================== HANDLE ======================================= //
 /// Handle to the calibration uploader: one task that owns the calibration
-/// queue, queues what intake sends it, and uploads reports to Miru one at a
-/// time, oldest due first, retrying a failed report at the tail after its own
-/// backoff. It keeps serving intake during an upload or a backoff.
+/// queue and the latest store, queues what intake sends it, and uploads
+/// reports to Miru one at a time, oldest due first, retrying a failed report at
+/// the tail after its own backoff. It keeps serving intake and latest reads
+/// during an upload or a backoff.
 #[derive(Debug)]
 pub struct CalibrationManager {
     sender: mpsc::Sender<Command>,
@@ -182,13 +212,15 @@ impl CalibrationManager {
                 args.options,
                 args.now_fn,
             ),
+            latest: args.latest,
             sleep_fn: args.sleep_fn,
         };
         (Self { sender }, tokio::spawn(worker.run()))
     }
 
-    /// Queue `report` durably. A full queue is the 507
-    /// [`CalibrationsErr::QueueFullErr`], and a report over the size cap the
+    /// Queue `report` durably and write it to the latest store. A full queue
+    /// is the 507 [`CalibrationsErr::QueueFullErr`], a full store the 507
+    /// [`CalibrationsErr::StoreFullErr`], and a report over the size cap the
     /// 413 [`CalibrationsErr::TooLargeErr`].
     pub async fn enqueue(&self, report: Report) -> Result<(), CalibrationsErr> {
         self.send_command("enqueue", |respond_to| Command::Enqueue {
@@ -204,6 +236,27 @@ impl CalibrationManager {
     pub async fn len(&self) -> Result<usize, CalibrationsErr> {
         self.send_command("len", |respond_to| Command::Len { respond_to })
             .await
+    }
+
+    /// The latest entries `filter` matches.
+    pub async fn list_latest(
+        &self,
+        filter: LatestFilter,
+    ) -> Result<LatestCalibrations, CalibrationsErr> {
+        self.send_command("list latest", |respond_to| Command::ListLatest {
+            filter,
+            respond_to,
+        })
+        .await
+    }
+
+    /// The content of the latest entry for `report_id`.
+    pub async fn latest_content(&self, report_id: Uuid) -> Result<LatestContent, CalibrationsErr> {
+        self.send_command("latest content", |respond_to| Command::LatestContent {
+            report_id,
+            respond_to,
+        })
+        .await?
     }
 
     /// Stop the uploader, dropping any in-flight upload. Queued reports,
