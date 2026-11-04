@@ -81,11 +81,11 @@ The store is owned by the calibration uploader's actor (its `Worker`, beside the
 
 ## Progress
 
-- [ ] Milestone 1: model enum, layout, errors and `LatestStore` (source).
-- [ ] Milestone 2: uploader write-through, upload status, handle commands, `AppState` wiring (source).
-- [ ] Milestone 3: services, request/response conversions, handlers, routes, `ARCHITECTURE.md` (source).
-- [ ] Milestone 4: tests.
-- [ ] Milestone 5: push and reach `CLEAN` via `$preflight` before the PR leaves draft.
+- [x] Milestone 1: model enum, layout, errors and `LatestStore` (source).
+- [x] Milestone 2: uploader write-through, upload status, handle commands, `AppState` wiring (source).
+- [x] Milestone 3: services, request/response conversions, handlers, routes, `ARCHITECTURE.md` (source).
+- [x] Milestone 4: tests.
+- [x] Milestone 5: push and reach `CLEAN` via `$preflight` before the PR leaves draft.
 - [x] Source written
 - [x] Tests written
 

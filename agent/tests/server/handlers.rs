@@ -757,7 +757,7 @@ pub mod routes {
         }
 
         #[tokio::test]
-        async fn get_calibration_content_returns_404_for_an_unknown_report_id() {
+        async fn get_calibration_content_returns_404_for_a_non_uuid_report_id() {
             let f = Fixture::new("handler_get_calibration_content_404").await;
 
             let (status, bytes) = f.get("/v0.2/calibrations/not-a-report/content").await;
