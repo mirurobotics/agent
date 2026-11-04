@@ -1,6 +1,7 @@
 //! Calibration reports accepted from the Device API and queued on disk until
 //! they reach Miru.
 
+mod cleanup;
 pub mod errors;
 pub mod report;
 pub mod sender;
