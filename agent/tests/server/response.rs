@@ -494,3 +494,88 @@ pub mod create_calibration_response {
         assert_eq!(sdk, expected);
     }
 }
+
+pub mod latest_calibrations_response {
+    use super::*;
+    use miru_agent::calibrations::{LatestCalibrations, ListedEntry, ReportMetadata};
+    use miru_agent::models::{CalibrationUploadStatus, InstanceFormat};
+
+    fn listed_entry(report_id: Uuid) -> ListedEntry {
+        ListedEntry {
+            metadata: ReportMetadata {
+                report_id,
+                component: "arm".into(),
+                format: InstanceFormat::Yaml,
+                role: Some("left".into()),
+                aspect: None,
+                serial_number: Some("SN-1".into()),
+                reported_by: Some("Ada Lovelace".into()),
+                deployment_id: Some("dpl_1".into()),
+                reported_at: fixed_time(),
+            },
+            upload_status: CalibrationUploadStatus::Uploaded,
+        }
+    }
+
+    #[test]
+    fn converts_a_listed_entry() {
+        let report_id = Uuid::new_v4();
+        let entry = listed_entry(report_id);
+
+        let expected = openapi::Calibration {
+            object: openapi::calibration::Object::Calibration,
+            report_id,
+            upload_status: openapi::CalibrationUploadStatus::CALIBRATION_UPLOAD_STATUS_UPLOADED,
+            component: "arm".into(),
+            role: Some("left".into()),
+            aspect: None,
+            serial_number: Some("SN-1".into()),
+            reported_by: Some("Ada Lovelace".into()),
+            reported_at: fixed_time().to_rfc3339(),
+        };
+
+        let sdk: openapi::Calibration = (&entry).into();
+        assert_eq!(sdk, expected);
+    }
+
+    #[test]
+    fn converts_latest_calibrations() {
+        let entry = listed_entry(Uuid::new_v4());
+        let calibration = openapi::Calibration::from(&entry);
+        let latest = LatestCalibrations {
+            is_confirmed: true,
+            entries: vec![entry],
+        };
+
+        let expected = openapi::LatestCalibrationsResponse {
+            is_confirmed: true,
+            calibrations: vec![calibration],
+        };
+
+        let sdk: openapi::LatestCalibrationsResponse = (&latest).into();
+        assert_eq!(sdk, expected);
+    }
+}
+
+pub mod latest_content_response {
+    use axum::body;
+    use axum::http::{header, StatusCode};
+    use axum::response::IntoResponse;
+    use miru_agent::calibrations::LatestContent;
+    use miru_agent::models::InstanceFormat;
+
+    #[tokio::test]
+    async fn sends_the_bytes_with_the_content_type_of_the_format() {
+        let content = LatestContent {
+            format: InstanceFormat::Csv,
+            data: b"a,b\n".to_vec(),
+        };
+
+        let response = content.into_response();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()[header::CONTENT_TYPE], "text/csv");
+        let bytes = body::to_bytes(response.into_body(), 1024).await.unwrap();
+        assert_eq!(bytes, b"a,b\n".to_vec());
+    }
+}

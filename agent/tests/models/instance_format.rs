@@ -113,3 +113,18 @@ fn from_device_api_rejects_an_unknown_format() {
     let unknown = agent_server::InstanceFormat::InstanceFormatUnknown;
     assert_eq!(InstanceFormat::from_device_api(unknown), None);
 }
+
+#[test]
+fn media_type_matches_mirus_content_downloads() {
+    let cases = [
+        (InstanceFormat::Json, "application/json"),
+        (InstanceFormat::Yaml, "application/yaml"),
+        (InstanceFormat::Jsonc, "application/jsonc"),
+        (InstanceFormat::Xml, "application/xml"),
+        (InstanceFormat::Csv, "text/csv"),
+        (InstanceFormat::Text, "application/octet-stream"),
+    ];
+    for (format, want) in cases {
+        assert_eq!(format.media_type(), want, "{format:?}");
+    }
+}
