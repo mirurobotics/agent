@@ -2,7 +2,7 @@
 use crate::errors::harnesses::{assert_error, Expected};
 use miru_agent::calibrations::{
     CalibrationBufferFullErr, CalibrationNotFoundErr, CalibrationStoreFullErr,
-    CalibrationTooLargeErr,
+    CalibrationTooLargeErr, CalibrationsErr,
 };
 use miru_agent::errors::{Code, HTTPCode};
 use miru_agent::queue::QueueFullErr;
@@ -46,10 +46,10 @@ fn a_full_store_is_507_with_its_cap() {
 
 #[test]
 fn a_missing_latest_calibration_is_404() {
-    let err = CalibrationNotFoundErr {
+    let err = CalibrationsErr::from(CalibrationNotFoundErr {
         report_id: "not-a-report".to_string(),
         trace: miru_agent::trace!(),
-    };
+    });
 
     assert_error(
         &err,
