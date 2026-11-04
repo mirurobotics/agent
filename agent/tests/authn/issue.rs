@@ -152,7 +152,9 @@ mod mint_jwt {
     #[tokio::test]
     async fn has_three_parts() {
         let (_dir, private_key_file, public_key_file) = generate_keys().await;
-        let jwt = mint_jwt(&private_key_file, &public_key_file).await.unwrap();
+        let jwt = mint_jwt(&private_key_file, &public_key_file, Utc::now())
+            .await
+            .unwrap();
 
         assert_eq!(3, jwt.split('.').count());
     }
@@ -160,7 +162,9 @@ mod mint_jwt {
     #[tokio::test]
     async fn header_decodes_to_rs512_with_kid() {
         let (_dir, private_key_file, public_key_file) = generate_keys().await;
-        let jwt = mint_jwt(&private_key_file, &public_key_file).await.unwrap();
+        let jwt = mint_jwt(&private_key_file, &public_key_file, Utc::now())
+            .await
+            .unwrap();
         let parts: Vec<&str> = jwt.split('.').collect();
         let header_bytes = base64::decode_bytes_url_safe_no_pad(parts[0]).unwrap();
         let header: Value = serde_json::from_slice(&header_bytes).unwrap();
@@ -181,7 +185,9 @@ mod mint_jwt {
     async fn payload_decodes_with_jti_iat_exp() {
         let (_dir, private_key_file, public_key_file) = generate_keys().await;
         let before = Utc::now().timestamp();
-        let jwt = mint_jwt(&private_key_file, &public_key_file).await.unwrap();
+        let jwt = mint_jwt(&private_key_file, &public_key_file, Utc::now())
+            .await
+            .unwrap();
         let after = Utc::now().timestamp();
         let parts: Vec<&str> = jwt.split('.').collect();
         let payload_bytes = base64::decode_bytes_url_safe_no_pad(parts[1]).unwrap();
@@ -204,7 +210,9 @@ mod mint_jwt {
     #[tokio::test]
     async fn signature_verifies_with_public_key() {
         let (_dir, private_key_file, public_key_file) = generate_keys().await;
-        let jwt = mint_jwt(&private_key_file, &public_key_file).await.unwrap();
+        let jwt = mint_jwt(&private_key_file, &public_key_file, Utc::now())
+            .await
+            .unwrap();
         let parts: Vec<&str> = jwt.split('.').collect();
         let signing_input = format!("{}.{}", parts[0], parts[1]);
         let signature = base64::decode_bytes_url_safe_no_pad(parts[2]).unwrap();
@@ -225,8 +233,12 @@ mod mint_jwt {
     #[tokio::test]
     async fn generates_unique_jti_across_calls() {
         let (_dir, private_key_file, public_key_file) = generate_keys().await;
-        let jwt_a = mint_jwt(&private_key_file, &public_key_file).await.unwrap();
-        let jwt_b = mint_jwt(&private_key_file, &public_key_file).await.unwrap();
+        let jwt_a = mint_jwt(&private_key_file, &public_key_file, Utc::now())
+            .await
+            .unwrap();
+        let jwt_b = mint_jwt(&private_key_file, &public_key_file, Utc::now())
+            .await
+            .unwrap();
 
         let parts_a: Vec<&str> = jwt_a.split('.').collect();
         let parts_b: Vec<&str> = jwt_b.split('.').collect();
@@ -255,7 +267,7 @@ mod mint_jwt {
         .unwrap();
         files::delete(&public_key_file).await.unwrap();
 
-        let result = mint_jwt(&private_key_file, &public_key_file).await;
+        let result = mint_jwt(&private_key_file, &public_key_file, Utc::now()).await;
 
         assert!(result.is_err());
     }
@@ -275,8 +287,136 @@ mod mint_jwt {
         .unwrap();
         files::delete(&private_key_file).await.unwrap();
 
-        let result = mint_jwt(&private_key_file, &public_key_file).await;
+        let result = mint_jwt(&private_key_file, &public_key_file, Utc::now()).await;
 
         assert!(result.is_err());
+    }
+}
+
+mod wrong_system_clock {
+    use super::*;
+
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    use crate::mocks::http_client as mock;
+    use axum::http::{HeaderMap, StatusCode};
+    use axum::routing::post;
+    use axum::{Json, Router};
+    use chrono::DateTime;
+    use miru_agent::clock::Clock;
+    use miru_agent::http::{self, ClientI};
+
+    /// A backend that, like the real one, rejects a JWT whose `exp` has passed
+    /// by its own clock.
+    fn backend(calls: Arc<AtomicUsize>) -> Router {
+        backend_with(calls, false)
+    }
+
+    fn backend_with(calls: Arc<AtomicUsize>, reject_all: bool) -> Router {
+        Router::new().route(
+            "/devices/token",
+            post(move |headers: HeaderMap| {
+                let calls = calls.clone();
+                async move {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    let bearer = headers["authorization"].to_str().unwrap();
+                    let jwt = bearer.trim_start_matches("Bearer ");
+                    let payload = jwt.split('.').nth(1).unwrap();
+                    let payload: Value = serde_json::from_slice(
+                        &base64::decode_bytes_url_safe_no_pad(payload).unwrap(),
+                    )
+                    .unwrap();
+                    if reject_all || payload["exp"].as_i64().unwrap() < Utc::now().timestamp() {
+                        return Err(StatusCode::UNAUTHORIZED);
+                    }
+                    Ok(Json(TokenResponse {
+                        token: "issued-token".to_string(),
+                        expires_at: (Utc::now() + Duration::days(1)).to_rfc3339(),
+                    }))
+                }
+            }),
+        )
+    }
+
+    fn client_with_system_clock(base_url: &str, system: DateTime<Utc>) -> http::Client {
+        let clock =
+            Clock::from_sources(Arc::new(move || system), Arc::new(std::time::Instant::now));
+        http::Client::with_clock(base_url, clock).unwrap()
+    }
+
+    #[tokio::test]
+    async fn system_clock_at_1970_retries_once_with_server_time() {
+        let (_dir, private_key_file, public_key_file) = generate_keys().await;
+        let calls = Arc::new(AtomicUsize::new(0));
+        let server = mock::run_server(backend(calls.clone())).await;
+        let client = client_with_system_clock(&server.base_url, DateTime::UNIX_EPOCH);
+
+        let token = issue_token(&client, &private_key_file, &public_key_file)
+            .await
+            .unwrap();
+
+        assert_eq!(token.token, "issued-token");
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn a_second_rejection_is_returned_without_further_retries() {
+        let (_dir, private_key_file, public_key_file) = generate_keys().await;
+        let calls = Arc::new(AtomicUsize::new(0));
+        let server = mock::run_server(backend_with(calls.clone(), true)).await;
+        let client = client_with_system_clock(&server.base_url, DateTime::UNIX_EPOCH);
+
+        let result = issue_token(&client, &private_key_file, &public_key_file).await;
+
+        assert!(matches!(result, Err(AuthnErr::HTTPErr(_))));
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn known_server_time_signs_correctly_the_first_time() {
+        let (_dir, private_key_file, public_key_file) = generate_keys().await;
+        let calls = Arc::new(AtomicUsize::new(0));
+        let server = mock::run_server(backend(calls.clone())).await;
+        let client = client_with_system_clock(&server.base_url, DateTime::UNIX_EPOCH);
+        client.clock().observe_server_time(Utc::now());
+
+        issue_token(&client, &private_key_file, &public_key_file)
+            .await
+            .unwrap();
+
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn a_rejection_with_server_time_already_known_is_not_retried() {
+        let (_dir, private_key_file, public_key_file) = generate_keys().await;
+        let calls = Arc::new(AtomicUsize::new(0));
+        let server = mock::run_server(backend(calls.clone())).await;
+        let client = client_with_system_clock(&server.base_url, DateTime::UNIX_EPOCH);
+        // a stale reading: server time is known but a day behind
+        client
+            .clock()
+            .observe_server_time(Utc::now() - Duration::days(1));
+
+        let result = issue_token(&client, &private_key_file, &public_key_file).await;
+
+        assert!(matches!(result, Err(AuthnErr::HTTPErr(_))));
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn mint_jwt_signs_with_the_given_time() {
+        let (_dir, private_key_file, public_key_file) = generate_keys().await;
+        let now = DateTime::from_timestamp(1_800_000_000, 0).unwrap();
+        let jwt = mint_jwt(&private_key_file, &public_key_file, now)
+            .await
+            .unwrap();
+        let payload = jwt.split('.').nth(1).unwrap();
+        let payload: Value =
+            serde_json::from_slice(&base64::decode_bytes_url_safe_no_pad(payload).unwrap())
+                .unwrap();
+        assert_eq!(payload["iat"].as_i64(), Some(now.timestamp()));
+        assert_eq!(payload["exp"].as_i64(), Some(now.timestamp() + 120));
     }
 }

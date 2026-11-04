@@ -69,7 +69,7 @@ All source lives under `agent/src/`. The binary entry point is `main.rs`.
 
 `cooldown` — exponential backoff. Type `Backoff` with configurable base, growth factor, and max.
 
-`clock` — time sources that do not trust the robot's system clock. `Clock` gives monotonic elapsed time, server time anchored to the `Date` header of backend responses (`server_now`; `http::Client` parses the header with `http::date` and records it), and the system clock as-is for logs (`system_now`).
+`clock` — time sources that do not trust the robot's system clock. `Clock` gives monotonic elapsed time, the best available time with a trust tier (`now`, and `trusted_now` for synced or corrected time only), server time anchored to the `Date` header of backend responses (`server_now`; `http::Client` parses the header with `http::date` and records it), and the system clock as-is for logs (`system_now`).
 
 ### Observability
 
