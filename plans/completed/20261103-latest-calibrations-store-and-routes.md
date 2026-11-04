@@ -118,7 +118,7 @@ The store is owned by the calibration uploader's actor (its `Worker`, beside the
 
 ## Outcomes & Retrospective
 
-Tests written (Milestone 4), not yet validated in CI. They follow the Milestone 4 list, with these changes:
+Tests written (Milestone 4) and green in CI. They follow the Milestone 4 list, with these changes:
 
 - `InstanceFormat::media_type` is a property of the format (Decision Log), so its six-format table is `media_type_matches_mirus_content_downloads` in `agent/tests/models/instance_format.rs`, and `agent/tests/server/response.rs` checks one format's response (`sends_the_bytes_with_the_content_type_of_the_format`).
 - The layout tests are a `latest_calibrations_layout` module (`root_dir`, `index_file`, `contents_dir`), as `calibrations_layout` is.
@@ -302,7 +302,7 @@ Inline tests in `agent/src/calibrations/uploader_impl.rs` (`mod tests`):
 
 `agent/tests/server/response.rs`: `listed_entry_converts_to_calibration`, `latest_calibrations_convert_to_the_response`, `content_response_sets_the_content_type_for_each_format` (table over the six formats).
 
-`agent/tests/server/handlers.rs`, `mod calibrations`: `create_calibration_returns_422_for_a_null_role` (from 7af92c8); `list_latest_calibrations_returns_200_with_a_reported_calibration` (is_confirmed false, one item); `list_latest_calibrations_returns_422_for_a_repeated_filter`; `get_calibration_content_returns_200_with_the_bytes_and_content_type`; `get_calibration_content_returns_404_for_an_unknown_report_id`; `create_calibration_returns_507_when_the_store_is_full`.
+`agent/tests/server/handlers.rs`, `mod calibrations`: `create_calibration_returns_422_for_a_null_role` (from 7af92c8); `list_latest_calibrations_returns_200_with_a_reported_calibration` (is_confirmed false, one item); `list_latest_calibrations_returns_422_for_a_repeated_filter`; `get_calibration_content_returns_200_with_the_bytes_and_content_type`; `get_calibration_content_returns_404_for_a_non_uuid_report_id`; `create_calibration_returns_507_when_the_store_is_full`.
 
 `agent/tests/server/errors.rs` and `agent/tests/services/errors.rs`: extend the calibration error mapping cases if they enumerate `CalibrationsErr` variants.
 
