@@ -6,7 +6,8 @@
 //!
 //! - [`GcsInterceptor`] sets `Authorization: Bearer <token>` on every attempt,
 //!   renames `x-amz-meta-*` headers to `x-goog-meta-*` (GCS silently drops the
-//!   AWS form under bearer auth), and makes object writes create-only.
+//!   AWS form under bearer auth), and sends the store's create-only
+//!   `If-None-Match: *` as `x-goog-if-generation-match: 0`.
 //! - [`TooManyRequests`] retries every HTTP 429. GCS's 429 codes
 //!   (`TooManyRequests`, `RateLimitExceeded`) are not in the SDK's throttling
 //!   list, so without it they get a single attempt.
@@ -32,7 +33,6 @@ use aws_sdk_s3::config::{
 };
 use aws_sdk_s3::error::BoxError;
 use aws_sdk_s3::primitives::ByteStream;
-use aws_smithy_runtime_api::client::orchestrator::Metadata;
 use aws_smithy_runtime_api::http::Headers;
 use base64::Engine;
 use md5::{Digest, Md5};
@@ -43,9 +43,6 @@ const ENDPOINT: &str = "https://storage.googleapis.com";
 
 const AMZ_META: &str = "x-amz-meta-";
 const GOOG_META: &str = "x-goog-meta-";
-
-/// The operations that write an object, and so are sent create-only.
-const OBJECT_WRITES: [&str; 2] = ["PutObject", "CompleteMultipartUpload"];
 
 /// The backend's OAuth2 access token for one upload.
 #[derive(Debug)]
@@ -89,16 +86,10 @@ pub(crate) async fn content_md5(mut body: ByteStream) -> std::io::Result<String>
     Ok(base64::engine::general_purpose::STANDARD.encode(hasher.finalize()))
 }
 
-/// Sets the bearer token and GCS metadata header names on each attempt, right
-/// before it is sent, and makes object writes create-only
-/// (`x-goog-if-generation-match: 0`).
-///
-/// The upload token has `roles/storage.objectCreator`, which can't overwrite,
-/// and can't read the object to check it. Without create-only, a write retried
-/// after a lost success response gets the same 403 as a token for the wrong
-/// object. With it, GCS answers an existing object with 412 instead, and the
-/// store treats that as done: object keys are per upload, GCS only creates the
-/// object once the whole upload completes, and every part was MD5-checked.
+/// Sets the bearer token and GCS's header names on each attempt, right before
+/// it is sent: `x-goog-meta-*` for metadata, and
+/// `x-goog-if-generation-match: 0` for the store's create-only
+/// `If-None-Match: *`.
 #[derive(Debug)]
 pub(crate) struct GcsInterceptor {
     token: Token,
@@ -113,26 +104,22 @@ impl Intercept for GcsInterceptor {
         &self,
         context: &mut BeforeTransmitInterceptorContextMut<'_>,
         _runtime_components: &RuntimeComponents,
-        cfg: &mut ConfigBag,
+        _cfg: &mut ConfigBag,
     ) -> Result<(), BoxError> {
         let headers = context.request_mut().headers_mut();
-        if is_object_write(cfg) {
-            set_create_only(headers);
-        }
+        rename_create_only(headers);
         rename_amz_metadata(headers)?;
         set_bearer(headers, &self.token)
     }
 }
 
-/// Whether this attempt is one of [`OBJECT_WRITES`].
-fn is_object_write(cfg: &ConfigBag) -> bool {
-    let operation = cfg.load::<Metadata>().map(Metadata::name);
-    operation.is_some_and(|op| OBJECT_WRITES.contains(&op))
-}
-
-/// Makes GCS write the object only if none exists at its key yet.
-fn set_create_only(headers: &mut Headers) {
-    headers.insert("x-goog-if-generation-match", "0");
+/// Renames `If-None-Match: *` to `x-goog-if-generation-match: 0`, so GCS
+/// writes the object only if none exists at its key yet.
+fn rename_create_only(headers: &mut Headers) {
+    if headers.get("if-none-match") == Some("*") {
+        headers.remove("if-none-match");
+        headers.insert("x-goog-if-generation-match", "0");
+    }
 }
 
 /// Renames each `x-amz-meta-*` header to `x-goog-meta-*`.
@@ -429,7 +416,7 @@ mod tests {
             let replay = put_small_and_big(&HashMap::new()).await;
 
             // PutObject and CompleteMultipartUpload write the object; create and
-            // the parts don't.
+            // the parts don't. GCS gets its own precondition, not S3's.
             let precondition = replay
                 .actual_requests()
                 .map(|r| {
@@ -440,6 +427,9 @@ mod tests {
                 .collect::<Vec<_>>();
             let zero = Some("0".to_string());
             assert_eq!(precondition, vec![zero.clone(), None, None, None, zero]);
+            assert!(replay
+                .actual_requests()
+                .all(|r| r.headers().get("if-none-match").is_none()));
         }
 
         #[tokio::test]

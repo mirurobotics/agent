@@ -22,7 +22,7 @@ pub(crate) const PART_SIZE: u64 = 8 * 1024 * 1024; // 8 MiB
 #[derive(Debug)]
 pub(super) enum WriteOutcome {
     Created,
-    /// An earlier attempt already stored the object (GCS create-only).
+    /// An earlier attempt already stored the object (writes are create-only).
     AlreadyExists,
 }
 
@@ -45,7 +45,7 @@ pub struct Options {
     pub config: aws_sdk_s3::Config,
     /// Set for a [`gcs::config`](crate::s3::gcs::config). Bodies then carry a
     /// `Content-MD5` the store computes, since the GCS client turns the SDK's
-    /// own request checksums off, and object writes are create-only.
+    /// own request checksums off.
     pub gcs: bool,
 }
 
@@ -65,9 +65,8 @@ impl Store {
         }
     }
 
-    /// Creates or overwrites an object from a local file, sized once as a
-    /// [`Source`]. GCS never overwrites: an existing object counts as written
-    /// (see [`gcs`](crate::s3::gcs)).
+    /// Creates an object from a local file, sized once as a [`Source`]. It
+    /// never overwrites: an object already at `dst` counts as written.
     ///
     /// Files at or below [`PART_SIZE`] go through one `PutObject`
     /// ([`Self::put_singlepart`]); larger files go part-by-part through a
@@ -103,6 +102,7 @@ impl Store {
             .body(body)
             .set_content_md5(content_md5)
             .set_metadata((!metadata.is_empty()).then(|| metadata.clone()))
+            .if_none_match("*")
             .customize()
             .config_override(sdk::timeout(sdk::upload_timeout(src.size)))
             .send()
@@ -131,10 +131,12 @@ impl Store {
         Ok((body, content_md5))
     }
 
-    /// Finishes an object write (PutObject or CompleteMultipartUpload). On GCS
-    /// the client sends writes create-only (see [`gcs`](crate::s3::gcs)), so a 412 means an
-    /// earlier attempt already stored the object at this key, which counts as
-    /// done.
+    /// Finishes an object write (PutObject or CompleteMultipartUpload). Writes
+    /// are create-only (`If-None-Match: *`), and the upload credentials can't
+    /// read the object, so a 412 is how a retry learns that an earlier attempt,
+    /// say one whose success response was lost, already stored it. That counts
+    /// as done: object keys are per upload, and an object only appears once
+    /// its whole upload completes.
     pub(super) fn finish_write<E>(
         &self,
         operation: &str,
@@ -146,7 +148,7 @@ impl Store {
     {
         match result {
             Ok(()) => Ok(WriteOutcome::Created),
-            Err(e) if self.gcs && errors::status(&e) == Some(HTTPCode::PRECONDITION_FAILED) => {
+            Err(e) if errors::status(&e) == Some(HTTPCode::PRECONDITION_FAILED) => {
                 tracing::info!("upload: {dst} already exists, so an earlier {operation} landed");
                 Ok(WriteOutcome::AlreadyExists)
             }
@@ -385,6 +387,15 @@ pub(super) mod tests {
     /// service error, which the common mapper turns into `RequestFailedErr`.
     pub(crate) fn access_denied_resp() -> http::Response<SdkBody> {
         resp_xml(403, ACCESS_DENIED_XML)
+    }
+
+    const PRECONDITION_FAILED_XML: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>PreconditionFailed</Code><Message>At least one of the pre-conditions you specified did not hold</Message><Condition>If-None-Match</Condition><RequestId>REQ412</RequestId></Error>"#;
+
+    /// Canned 412 PreconditionFailed response, as S3 answers a create-only
+    /// write to a key that already holds an object.
+    pub(crate) fn precondition_failed_resp() -> http::Response<SdkBody> {
+        resp_xml(412, PRECONDITION_FAILED_XML)
     }
 
     /// Wires a `Store` to a replay client expecting exactly one request/response
@@ -667,6 +678,62 @@ pub(super) mod tests {
                     &err,
                     Expected::new(Code::InternalServerError, HTTPCode::INTERNAL_SERVER_ERROR),
                 );
+            }
+        }
+
+        pub mod create_only {
+            use super::*;
+
+            const CONFLICT_XML: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>ConditionalRequestConflict</Code><Message>A conflicting conditional operation is currently in progress against this resource. Please try again.</Message><RequestId>REQ409</RequestId></Error>"#;
+
+            #[tokio::test]
+            async fn put_sends_if_none_match() {
+                let src = temp_file_with(b"x").await;
+                let (store, replay) =
+                    store_expecting(req("PUT", "k?x-id=PutObject"), resp(200, &[]));
+
+                store
+                    .put(src.to_file(), &obj("k"), &HashMap::new())
+                    .await
+                    .unwrap();
+
+                let requests = replay.actual_requests().collect::<Vec<_>>();
+                assert_eq!(requests[0].headers().get("if-none-match"), Some("*"));
+            }
+
+            #[tokio::test]
+            async fn existing_object_counts_as_uploaded() {
+                // A retry after a lost success: the object is already there, so
+                // the create-only write gets 412.
+                let src = temp_file_with(b"x").await;
+                let (store, _replay) =
+                    store_expecting(req("PUT", "k?x-id=PutObject"), precondition_failed_resp());
+
+                store
+                    .put(src.to_file(), &obj("k"), &HashMap::new())
+                    .await
+                    .unwrap();
+            }
+
+            #[tokio::test]
+            async fn conflict_is_a_failed_request() {
+                // S3 answers a write that races another operation on the key
+                // with 409. That doesn't mean the object exists, so it stays a
+                // failed request for the uploader to retry.
+                let src = temp_file_with(b"x").await;
+                let (store, _replay) =
+                    store_expecting(req("PUT", "k?x-id=PutObject"), resp_xml(409, CONFLICT_XML));
+
+                let err = store
+                    .put(src.to_file(), &obj("k"), &HashMap::new())
+                    .await
+                    .unwrap_err();
+
+                let S3Err::RequestFailedErr(inner) = &err else {
+                    panic!("expected RequestFailedErr, got {err:?}");
+                };
+                assert_eq!(inner.status, Some(409));
             }
         }
 
