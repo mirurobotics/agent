@@ -628,6 +628,7 @@ mod tests {
 
         assert!(matches!(err, CalibrationsErr::QueueFullErr(_)), "{err:?}");
         assert_eq!(u.len(), 1);
+        assert_eq!(statuses(&u, &latest), [CalibrationUploadStatus::Queued]);
     }
 
     #[tokio::test]
@@ -647,6 +648,7 @@ mod tests {
         assert!(matches!(err, CalibrationsErr::FileSysErr(_)), "{err:?}");
         assert_eq!(u.len(), 0);
         assert!(!f.layout.reports().exists());
+        assert!(listed(&u, &latest).is_empty());
     }
 
     #[tokio::test]
@@ -664,6 +666,7 @@ mod tests {
 
         assert!(matches!(err, CalibrationsErr::FileSysErr(_)), "{err:?}");
         assert_eq!(u.len(), 0);
+        assert!(listed(&u, &latest).is_empty());
     }
 
     #[tokio::test]
