@@ -222,7 +222,8 @@ impl LatestStore {
 
     /// Mark the entry for `report_id` uploaded. A newer report may have
     /// replaced it, or `reset` wiped the store; then this does nothing. A
-    /// failed index write is logged, and the next write saves the mark.
+    /// failed index write is logged; a restart before the next write loses
+    /// the mark, and the entry is then listed as dropped.
     pub async fn mark_uploaded(&mut self, report_id: Uuid) {
         let mut entries = self.index.entries.values_mut();
         let Some(entry) = entries.find(|e| e.metadata.report_id == report_id) else {
