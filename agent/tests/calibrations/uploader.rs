@@ -389,6 +389,8 @@ async fn commands_after_shutdown_fail() {
     let err = h.uploader().enqueue(report("a")).await.unwrap_err();
     let read = h.uploader().latest_content(report_id("a"));
     let read_err = read.await.unwrap_err();
+    let list = h.uploader().list_latest(LatestFilter::default());
+    let list_err = list.await.unwrap_err();
 
     assert!(
         matches!(err, CalibrationsErr::SendActorMessageErr(_)),
@@ -397,6 +399,10 @@ async fn commands_after_shutdown_fail() {
     assert!(
         matches!(read_err, CalibrationsErr::SendActorMessageErr(_)),
         "{read_err:?}"
+    );
+    assert!(
+        matches!(list_err, CalibrationsErr::SendActorMessageErr(_)),
+        "{list_err:?}"
     );
 }
 
