@@ -1,5 +1,6 @@
 // standard crates
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
 
 // internal crates
 use crate::test_utils::filesys::dirs as test_dirs;
@@ -606,6 +607,35 @@ mod pull_failure {
             }
             other => panic!("expected SyncErrors, got: {other:?}"),
         }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn content_fetches_run_concurrently() {
+        let f = Fixture::new("sync_content_concurrent").await;
+        let ids = ["cfg_inst_1", "cfg_inst_2", "cfg_inst_3", "cfg_inst_4"];
+        let backend_dep = make_deployment("dpl_1", cfg_inst_args(&f, &ids));
+        f.http_client
+            .set_list_all_deployments(move || Ok(vec![backend_dep.clone()]));
+        f.http_client.set_get_config_instance_content(|_id| {
+            Err(HTTPErr::MockErr(MockErr {
+                is_network_conn_err: true,
+            }))
+        });
+
+        let start = tokio::time::Instant::now();
+        f.sync().await.unwrap_err();
+
+        // one after another, the four fetches' retry backoffs would take at least 4s
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed < Duration::from_secs(3),
+            "content fetches should overlap, took {elapsed:?}"
+        );
+        assert_eq!(
+            f.http_client.call_count(Call::GetConfigInstanceContent),
+            12,
+            "each fetch should make 3 attempts"
+        );
     }
 
     #[tokio::test]

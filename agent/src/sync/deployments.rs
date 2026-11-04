@@ -13,7 +13,11 @@ use backend_api::models::{
 };
 
 // external crates
+use futures::stream::{self, StreamExt};
 use tracing::{debug, error};
+
+// Bounds in-flight backend requests per sync phase on a constrained device.
+const MAX_CONCURRENT_REQUESTS: usize = 4;
 
 // =================================== SYNC ======================================== //
 pub struct SyncArgs<'a, HTTPClientT> {
@@ -156,20 +160,23 @@ async fn pull_content_for_cfg_insts<'a, HTTPClientT: http::ClientI>(
 ) -> Result<(), SyncErr> {
     let deployments = storage.deployments.entries().await?;
     let mut seen = std::collections::HashSet::new();
-    let mut errors = Vec::new();
+    let cfg_inst_ids: Vec<String> = deployments
+        .into_iter()
+        .flat_map(|deployment| deployment.value.config_instance_ids)
+        .filter(|id| seen.insert(id.clone()))
+        .collect();
 
-    for deployment in deployments {
-        for cfg_inst_id in deployment.value.config_instance_ids.clone() {
-            if !seen.insert(cfg_inst_id.clone()) {
-                continue;
-            }
-            if let Err(e) =
-                pull_cfg_inst_content(http_client, &storage.cfg_insts, cfg_inst_id, token).await
-            {
-                error!("Failed to pull content for config instance: {e}");
-                errors.push(e);
-            }
-        }
+    let cfg_insts = &storage.cfg_insts;
+    let results: Vec<Result<(), SyncErr>> = stream::iter(cfg_inst_ids)
+        .map(move |id| pull_cfg_inst_content(http_client, cfg_insts, id, token))
+        .buffer_unordered(MAX_CONCURRENT_REQUESTS)
+        .collect()
+        .await;
+
+    let mut errors = Vec::new();
+    for e in results.into_iter().filter_map(Result::err) {
+        error!("Failed to pull content for config instance: {e}");
+        errors.push(e);
     }
 
     if errors.is_empty() {
