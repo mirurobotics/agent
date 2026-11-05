@@ -15,6 +15,7 @@ use miru_agent::s3::{Object, Options, S3Err, Source, Store};
 
 // external crates
 use aws_sdk_s3::primitives::ByteStream;
+use aws_sdk_s3::types::ChecksumAlgorithm;
 use aws_sdk_s3::Client;
 use uuid::Uuid;
 
@@ -99,7 +100,14 @@ async fn temp_file_with(bytes: &[u8]) -> test_files::TempFile {
     tf
 }
 
-/// Single-part and multipart uploads store the exact bytes and the metadata.
+/// The CRC32C the agent uploads `file` with.
+async fn crc32c_of(file: &test_files::TempFile) -> Option<u32> {
+    let (_, crc32c) = files::sha256_and_crc32c(file.file()).await.unwrap();
+    Some(crc32c)
+}
+
+/// Single-part and multipart uploads store the exact bytes and the metadata,
+/// and pass the bucket's checks against the file's CRC32C.
 pub async fn put_stores_exact_bytes_and_metadata<B: RealBucket>() {
     let bucket = B::load();
     for (name, len) in [("single.bin", SMALL), ("multi.bin", LARGE)] {
@@ -109,46 +117,72 @@ pub async fn put_stores_exact_bytes_and_metadata<B: RealBucket>() {
 
         let store = bucket.upload_store(&obj).await;
         store
-            .put(file.to_file(), &obj, &metadata())
+            .put(file.to_file(), crc32c_of(&file).await, &obj, &metadata())
             .await
             .expect(name);
         bucket.assert_stored(&obj, &bytes).await;
     }
 }
 
-/// Resuming an upload another client started, with new credentials as after
-/// an agent restart, completes it with the exact bytes.
+/// A file that no longer matches its CRC32C is refused, single-part and
+/// multipart, so the bucket never stores the changed bytes.
+pub async fn put_of_a_file_changed_since_its_crc32c_is_refused<B: RealBucket>() {
+    let bucket = B::load();
+    for (name, len) in [("stale-single.bin", SMALL), ("stale-multi.bin", LARGE)] {
+        let obj = bucket.object(name);
+        let file = temp_file_with(&test_bytes(len)).await;
+        let crc32c = crc32c_of(&file).await;
+        // Same size, other bytes.
+        let changed = vec![0; len];
+        files::write_bytes(file.file(), &changed, WriteOptions::OVERWRITE_NONATOMIC)
+            .await
+            .unwrap();
+
+        let store = bucket.upload_store(&obj).await;
+        let err = store
+            .put(file.to_file(), crc32c, &obj, &metadata())
+            .await
+            .expect_err(name);
+        assert!(matches!(err, S3Err::ChecksumMismatchErr(_)), "{err:?}");
+    }
+}
+
+/// Resuming an upload that an earlier attempt started and landed a part of,
+/// with new credentials as after an agent restart, completes it with the exact
+/// bytes and passes the bucket's checks against the file's CRC32C.
 pub async fn resume_completes_a_started_upload<B: RealBucket>() {
     let bucket = B::load();
     let obj = bucket.object("resume.bin");
     let bytes = test_bytes(LARGE);
     let file = temp_file_with(&bytes).await;
-
-    let client = bucket.upload_client(&obj).await;
-    let upload = client
-        .create_multipart_upload()
-        .bucket(&obj.bucket)
-        .key(&obj.key)
-        .set_metadata(Some(metadata()))
-        .send()
+    let src = Source::open(file.to_file(), crc32c_of(&file).await, &obj)
         .await
         .unwrap();
-    let upload_id = upload.upload_id().unwrap();
-    client
+
+    let upload_id = bucket
+        .upload_store(&obj)
+        .await
+        .create_multipart_upload(&src, &obj, &metadata())
+        .await
+        .unwrap();
+    // Part 1 carries a CRC32C on S3, as the store's parts do there.
+    let options = bucket.upload_options(&obj).await;
+    let checksum = (!options.gcs).then_some(ChecksumAlgorithm::Crc32C);
+    Client::from_conf(options.config)
         .upload_part()
         .bucket(&obj.bucket)
         .key(&obj.key)
-        .upload_id(upload_id)
+        .upload_id(&upload_id)
         .part_number(1)
         .body(ByteStream::from(bytes[..PART].to_vec()))
+        .set_checksum_algorithm(checksum)
         .send()
         .await
         .unwrap();
 
     let store = bucket.upload_store(&obj).await;
-    let src = Source::open(file.to_file(), &obj).await.unwrap();
     store
-        .resume_multipart_upload(src, &obj, upload_id)
+        .resume_multipart_upload(src, &obj, &upload_id)
         .await
         .unwrap();
     bucket.assert_stored(&obj, &bytes).await;
@@ -180,7 +214,7 @@ pub async fn resuming_an_aborted_upload_fails_with_no_such_upload<B: RealBucket>
         .unwrap();
 
     let store = bucket.upload_store(&obj).await;
-    let src = Source::open(file.to_file(), &obj).await.unwrap();
+    let src = Source::open(file.to_file(), None, &obj).await.unwrap();
     let err = store
         .resume_multipart_upload(src, &obj, upload_id)
         .await
@@ -201,7 +235,7 @@ pub async fn put_of_an_existing_object_succeeds<B: RealBucket>() {
         for _ in 0..2 {
             let store = bucket.upload_store(&obj).await;
             store
-                .put(file.to_file(), &obj, &metadata())
+                .put(file.to_file(), crc32c_of(&file).await, &obj, &metadata())
                 .await
                 .expect(name);
         }
@@ -224,6 +258,11 @@ macro_rules! real_bucket_tests {
             #[tokio::test]
             async fn put_stores_exact_bytes_and_metadata() {
                 harnesses::put_stores_exact_bytes_and_metadata::<$bucket>().await;
+            }
+
+            #[tokio::test]
+            async fn put_of_a_file_changed_since_its_crc32c_is_refused() {
+                harnesses::put_of_a_file_changed_since_its_crc32c_is_refused::<$bucket>().await;
             }
 
             #[tokio::test]

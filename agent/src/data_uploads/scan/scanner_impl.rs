@@ -807,6 +807,7 @@ mod tests {
                 file: file.clone(),
                 size: 4,
                 digest,
+                crc32c: Some(0x6A52_EEB0), // CRC32C of b"aaaa"
                 mtime: DateTime::<Utc>::from(mtime),
                 mtime_aliases: vec![],
                 first_observed_at: DateTime::from_timestamp(1000, 0).unwrap(),
@@ -1560,6 +1561,7 @@ mod tests {
                 size: 4,
                 digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
                     .to_string(),
+                crc32c: Some(0),
                 mtime: DateTime::from_timestamp(0, 0).unwrap(),
                 mtime_aliases: vec![],
                 first_observed_at: DateTime::from_timestamp(900, 0).unwrap(),
