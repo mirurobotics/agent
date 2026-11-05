@@ -3,13 +3,19 @@
 
 mod cleanup;
 pub mod errors;
+pub mod latest;
 pub mod report;
 pub mod sender;
 pub mod uploader;
 mod uploader_impl;
 
 pub use self::errors::{
-    CalibrationBufferFullErr, CalibrationTooLargeErr, CalibrationsErr, InvalidReportErr, TokenErr,
+    CalibrationBufferFullErr, CalibrationNotFoundErr, CalibrationStoreFullErr,
+    CalibrationTooLargeErr, CalibrationsErr, InvalidReportErr, TokenErr,
+};
+pub use self::latest::{
+    LatestCalibrations, LatestContent, LatestEntry, LatestFilter, LatestIndex, LatestIndexFile,
+    LatestKey, LatestStore, ListedEntry,
 };
 pub use self::report::{
     Queue, QueueEntry, QueueSnapshot, QueueSnapshotFile, Report, ReportMetadata,

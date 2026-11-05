@@ -1,5 +1,6 @@
 pub mod harnesses;
 
+pub mod calibration_upload_status;
 pub mod config_instance;
 pub mod deployment;
 pub mod device;
