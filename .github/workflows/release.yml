@@ -248,3 +248,17 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GORELEASER_KEY: ${{ secrets.GORELEASER_KEY }}
+
+  notify:
+    name: 'Notify #deploys'
+    needs: release
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    permissions: {}
+    steps:
+      - name: Post to Slack
+        uses: mirurobotics/.github/actions/notify-deploys@92b69ccbe0df53724fd15970c53eae1db77fab14 # main
+        with:
+          webhook-url: ${{ secrets.SLACK_DEPLOYS_WEBHOOK_URL }}
+          summary: Release the agent ${{ github.ref_name }}
+          link: https://github.com/mirurobotics/agent/releases/tag/${{ github.ref_name }}
+          results: ${{ needs.release.result }}
