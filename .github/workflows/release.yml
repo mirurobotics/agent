@@ -258,11 +258,8 @@ jobs:
     permissions: {}
     steps:
       - name: Post to Slack
-        env:
-          WEBHOOK_URL: ${{ secrets.SLACK_DEPLOYS_WEBHOOK_URL }}
-          TAG: ${{ github.ref_name }}
-          RELEASE_URL: https://github.com/mirurobotics/agent/releases/tag/${{ github.ref_name }}
-        run: |
-          text=":package: Released the agent ${TAG} (<${RELEASE_URL}|release notes>)"
-          jq -n --arg text "$text" '{text: $text}' \
-            | curl -fsS -X POST -H 'Content-Type: application/json' --data @- "$WEBHOOK_URL"
+        uses: mirurobotics/.github/actions/notify-deploys@ee27a1e5eb43b8fb3aa692422d9b925c9896f959
+        with:
+          webhook-url: ${{ secrets.SLACK_DEPLOYS_WEBHOOK_URL }}
+          summary: Release the agent ${{ github.ref_name }}
+          link: https://github.com/mirurobotics/agent/releases/tag/${{ github.ref_name }}
