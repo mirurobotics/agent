@@ -253,22 +253,16 @@ jobs:
   notify:
     name: Notify #deploys
     needs: release
-    if: ${{ always() && needs.release.result != 'skipped' && !contains(github.ref_name, '-') }}
+    if: ${{ !contains(github.ref_name, '-') }}
     runs-on: blacksmith-2vcpu-ubuntu-2404
     permissions: {}
     steps:
       - name: Post to Slack
         env:
           WEBHOOK_URL: ${{ secrets.SLACK_DEPLOYS_WEBHOOK_URL }}
-          RESULT: ${{ needs.release.result }}
           TAG: ${{ github.ref_name }}
           RELEASE_URL: https://github.com/mirurobotics/agent/releases/tag/${{ github.ref_name }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          if [[ "$RESULT" == "success" ]]; then
-            text=":package: Released the agent ${TAG} (<${RELEASE_URL}|release notes>)"
-          else
-            text=":x: Release of the agent ${TAG} did not finish (<${RUN_URL}|run>)"
-          fi
+          text=":package: Released the agent ${TAG} (<${RELEASE_URL}|release notes>)"
           jq -n --arg text "$text" '{text: $text}' \
             | curl -fsS -X POST -H 'Content-Type: application/json' --data @- "$WEBHOOK_URL"
