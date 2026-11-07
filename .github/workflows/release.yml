@@ -251,7 +251,9 @@ jobs:
 
   notify:
     name: 'Notify #deploys'
-    needs: release
+    # Every release job, so a failure before `release` still posts.
+    needs: [check-main, ci, windows-release-build, windows-sign, release]
+    if: ${{ always() && needs.check-main.outputs.on_main == 'true' }}
     runs-on: blacksmith-2vcpu-ubuntu-2404
     permissions: {}
     steps:
@@ -260,5 +262,10 @@ jobs:
         with:
           webhook-url: ${{ secrets.SLACK_DEPLOYS_WEBHOOK_URL }}
           summary: Release the agent ${{ github.ref_name }}
-          link: https://github.com/mirurobotics/agent/releases/tag/${{ github.ref_name }}
-          results: ${{ needs.release.result }}
+          link: >-
+            ${{ needs.release.result == 'success' &&
+            format('{0}/{1}/releases/tag/{2}', github.server_url,
+            github.repository, github.ref_name) ||
+            format('{0}/{1}/actions/runs/{2}', github.server_url,
+            github.repository, github.run_id) }}
+          results: ${{ join(needs.*.result, ' ') }}
