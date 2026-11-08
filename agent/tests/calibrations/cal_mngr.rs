@@ -370,9 +370,12 @@ async fn a_rejected_report_is_not_stored() {
     let err = guard(h.cal_mngr().report(report("b"))).await.unwrap_err();
 
     assert!(matches!(err, CalibrationsErr::QueueFullErr(_)), "{err:?}");
-    let latest = guard(h.cal_mngr().list_latest(LatestFilter::default())).await.unwrap();
-    let components: Vec<_> = latest.entries.into_iter().map(|e| e.metadata.component).collect();
-    assert_eq!(components, ["a"]);
+    let latest = guard(h.cal_mngr().list_latest(LatestFilter::default())).await;
+    let entry = ListedEntry {
+        metadata: report("a").metadata,
+        upload_status: CalibrationUploadStatus::Queued,
+    };
+    assert_eq!(latest.unwrap().entries, [entry]);
 }
 
 #[tokio::test]
