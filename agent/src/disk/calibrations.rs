@@ -2,7 +2,7 @@
 use std::collections::{HashMap, HashSet};
 
 // internal crates
-use crate::cache::{self, CacheEntry};
+use crate::cache::{self, dir_impl::entry_file_name, CacheEntry};
 use crate::calibrations::{cleanup, LatestEntry};
 use crate::disk::layout::CalibrationsLayout;
 use crate::filesys::{files, File, FileSysErr, Overwrite};
@@ -50,10 +50,9 @@ pub async fn prune_unnamed_contents(layout: &CalibrationsLayout) {
             return;
         }
     };
-    // the content cache names each file `<key>.json`
     let named: HashSet<String> = index
         .values()
-        .map(|entry| format!("{}.json", entry.value.metadata.report_id))
+        .map(|entry| entry_file_name(&entry.value.metadata.report_id.to_string()))
         .collect();
     cleanup::prune(&layout.contents(), &named).await;
 }
