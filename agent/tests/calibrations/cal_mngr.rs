@@ -1,6 +1,6 @@
 //! The calibration manager actor: drain order, serving intake while busy
-//! or backing off, and shutdown. `UploaderImpl`'s queue, storage and retry
-//! rules are unit-tested in `uploader_impl.rs`.
+//! or backing off, and shutdown. `Uploader`'s queue, storage and retry
+//! rules are unit-tested in `uploader.rs`.
 
 // standard crates
 use std::future::Future;

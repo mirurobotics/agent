@@ -8,7 +8,7 @@ use crate::calibrations::{
     errors::{CalibrationsErr, ReceiveActorMessageErr, SendActorMessageErr},
     report::{QueueEntry, QueueSnapshotFile, Report},
     sender::Sender,
-    uploader_impl::{NextAttempt, UploaderImpl, UploaderOptions},
+    uploader::{NextAttempt, Uploader, UploaderOptions},
 };
 use crate::filesys::Dir;
 use crate::trace;
@@ -52,7 +52,7 @@ enum Flow {
 
 struct Worker<S, F, N> {
     receiver: mpsc::Receiver<Command>,
-    uploader: UploaderImpl<S, N>,
+    uploader: Uploader<S, N>,
     sleep_fn: F,
 }
 
@@ -175,7 +175,7 @@ impl CalibrationManager {
         let (sender, receiver) = mpsc::channel(buffer_size);
         let worker = Worker {
             receiver,
-            uploader: UploaderImpl::new(
+            uploader: Uploader::new(
                 args.sender,
                 args.snapshot_file,
                 args.reports,

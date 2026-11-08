@@ -6,7 +6,7 @@ mod cleanup;
 pub mod errors;
 pub mod report;
 pub mod sender;
-mod uploader_impl;
+mod uploader;
 
 pub use self::cal_mngr::{CalMngrArgs, CalibrationManager};
 pub use self::errors::{
@@ -16,4 +16,4 @@ pub use self::report::{
     Queue, QueueEntry, QueueSnapshot, QueueSnapshotFile, Report, ReportMetadata,
 };
 pub use self::sender::{HttpSender, Sender};
-pub use self::uploader_impl::UploaderOptions;
+pub use self::uploader::UploaderOptions;

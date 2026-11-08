@@ -60,7 +60,7 @@ pub(crate) type NextAttempt = queue::NextAttempt<ReportMetadata>;
 /// `data_uploads::upload`, so one failing report never blocks the others.
 ///
 /// [`CalibrationManager`]: crate::calibrations::CalibrationManager
-pub struct UploaderImpl<S, N> {
+pub struct Uploader<S, N> {
     sender: Arc<S>,
     queue: Queue,
     /// Whether the queue is saved to a file, so it names every report file
@@ -71,7 +71,7 @@ pub struct UploaderImpl<S, N> {
     now_fn: N,
 }
 
-impl<S, N> UploaderImpl<S, N>
+impl<S, N> Uploader<S, N>
 where
     S: Sender + 'static,
     N: Fn() -> DateTime<Utc> + Send + Sync + 'static,
@@ -303,7 +303,7 @@ mod tests {
     use std::time::Duration;
 
     // internal crates
-    use super::{NextAttempt, QueueEntry, UploaderImpl, UploaderOptions};
+    use super::{NextAttempt, QueueEntry, Uploader, UploaderOptions};
     use crate::test_utils::calibration_sender::{MockCalibrationSender, Step};
     use crate::test_utils::calibrations::{layout, received_at, report};
     use crate::test_utils::filesys::dirs as test_dirs;
@@ -317,7 +317,7 @@ mod tests {
     use uuid::Uuid;
 
     type Clock = Box<dyn Fn() -> DateTime<Utc> + Send + Sync>;
-    type TestUploader = UploaderImpl<MockCalibrationSender, Clock>;
+    type TestUploader = Uploader<MockCalibrationSender, Clock>;
 
     struct Fixture {
         _dir: test_dirs::TempDir,
@@ -330,7 +330,7 @@ mod tests {
 
     impl Fixture {
         fn new() -> Self {
-            let dir = test_dirs::temp("calibration_uploader_impl_test").unwrap();
+            let dir = test_dirs::temp("calibration_uploader_test").unwrap();
             let layout = layout(&dir);
             let (sender, _) = MockCalibrationSender::new();
             Self {
@@ -370,7 +370,7 @@ mod tests {
         ) -> TestUploader {
             let clock = self.clock.clone();
             let now_fn: Clock = Box::new(move || *clock.lock().unwrap());
-            UploaderImpl::new(
+            Uploader::new(
                 self.sender.clone(),
                 snapshot_file,
                 self.layout.reports(),
