@@ -369,6 +369,23 @@ async fn a_rejected_report_is_not_stored() {
 }
 
 #[tokio::test]
+async fn an_oversized_report_is_not_stored() {
+    let mut h = Harness::new();
+    let options = UploaderOptions {
+        max_report_bytes: 1,
+        ..UploaderOptions::default()
+    };
+    h.spawn_with(options).await;
+
+    let err = guard(h.cal_mngr().report(report("a"))).await.unwrap_err();
+
+    assert!(matches!(err, CalibrationsErr::TooLargeErr(_)), "{err:?}");
+    assert_eq!(h.num_queued_uploads().await, 0);
+    let latest = guard(h.cal_mngr().list_latest(LatestFilter::default())).await;
+    assert!(latest.unwrap().entries.is_empty());
+}
+
+#[tokio::test]
 async fn a_sent_report_is_marked_uploaded() {
     let mut h = Harness::new();
     h.spawn().await;
