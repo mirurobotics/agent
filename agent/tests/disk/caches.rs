@@ -1,6 +1,5 @@
 // internal crates
-use crate::test_utils::calibrations::report;
-use crate::test_utils::filesys::dirs as test_dirs;
+use crate::test_utils::{calibrations::report, filesys::dirs as test_dirs};
 use miru_agent::calibrations::LatestStore;
 use miru_agent::disk::{Capacities, DiskErr, Layout, Storage};
 use miru_agent::filesys::{dirs, files, Overwrite, WriteOptions};
