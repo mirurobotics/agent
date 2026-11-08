@@ -2,11 +2,12 @@
 use std::ffi::{OsStr, OsString};
 use std::fs::FileType;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::time::SystemTime;
 
 // internal crates
 use crate::filesys::{
+    dir::Dir,
     dirs,
     errors::*,
     file::{File, Metadata},
@@ -43,24 +44,25 @@ pub async fn read_bytes(file: &File) -> Result<Vec<u8>, FileSysErr> {
 }
 
 /// Computes the SHA-256 content digest of `file`, returned as `sha256:<lowercase-hex>`.
+/// The file is opened beneath `root` with [`open_regular_file`].
 ///
 /// Streams the file through a fixed 8 KiB buffer, so memory use is constant
 /// regardless of file size (the whole file is never materialized). Hashing is
 /// CPU-heavy, so callers may wrap this in `tokio::task::spawn_blocking` for very
 /// large files to avoid stalling the async runtime.
-pub async fn sha256(file: &File) -> Result<String, FileSysErr> {
+pub async fn sha256(root: &Dir, file: &File) -> Result<String, FileSysErr> {
     let mut hasher = Sha256::new();
-    read_chunks(file, |chunk| hasher.update(chunk)).await?;
+    read_chunks(root, file, |chunk| hasher.update(chunk)).await?;
     let digest = hasher.finalize();
     Ok(format!("sha256:{digest:x}"))
 }
 
 /// Computes `file`'s [`sha256`] digest and its CRC32C (Castagnoli) checksum in
 /// one read.
-pub async fn sha256_and_crc32c(file: &File) -> Result<(String, u32), FileSysErr> {
+pub async fn sha256_and_crc32c(root: &Dir, file: &File) -> Result<(String, u32), FileSysErr> {
     let mut hasher = Sha256::new();
     let mut crc32c = crc_fast::Digest::new(CrcAlgorithm::Crc32Iscsi);
-    read_chunks(file, |chunk| {
+    read_chunks(root, file, |chunk| {
         hasher.update(chunk);
         crc32c.update(chunk);
     })
@@ -72,8 +74,12 @@ pub async fn sha256_and_crc32c(file: &File) -> Result<(String, u32), FileSysErr>
 
 /// Reads `file` through a fixed 8 KiB buffer, passing each chunk to `on_chunk`.
 /// The file is opened with [`open_regular_file`].
-async fn read_chunks(file: &File, mut on_chunk: impl FnMut(&[u8])) -> Result<(), FileSysErr> {
-    let mut f = open_regular_file(file)
+async fn read_chunks(
+    root: &Dir,
+    file: &File,
+    mut on_chunk: impl FnMut(&[u8]),
+) -> Result<(), FileSysErr> {
+    let mut f = open_regular_file(root, file)
         .await
         .map_err(|e| map_io_err_for_open(e, file))?;
 
@@ -95,20 +101,76 @@ async fn read_chunks(file: &File, mut on_chunk: impl FnMut(&[u8])) -> Result<(),
 }
 
 /// Opens `file` for reading and refuses anything but a regular file. On Unix it
-/// also refuses a symlink (`O_NOFOLLOW`), so a link planted in a watched
-/// directory is never read through; Windows follows links.
-pub async fn open_regular_file(file: &File) -> std::io::Result<TokioFile> {
-    let mut opts = tokio::fs::OpenOptions::new();
-    opts.read(true);
-    // O_NONBLOCK keeps a FIFO from blocking the open until it's refused
-    #[cfg(unix)]
-    opts.custom_flags(nix::libc::O_NOFOLLOW | nix::libc::O_NONBLOCK);
-    let f = opts.open(file.path()).await?;
+/// also refuses a symlink at `file` or at any directory between `root` and
+/// `file`, so a link planted in a watched directory, or swapped in for one of
+/// its directories, is never read through. `root` itself may be a symlink.
+/// Windows follows links.
+pub async fn open_regular_file(root: &Dir, file: &File) -> std::io::Result<TokioFile> {
+    let f = open_beneath(root, file).await?;
     if !f.metadata().await?.is_file() {
         let kind = std::io::ErrorKind::InvalidInput;
         return Err(std::io::Error::new(kind, "not a regular file"));
     }
     Ok(f)
+}
+
+#[cfg(unix)]
+async fn open_beneath(root: &Dir, file: &File) -> std::io::Result<TokioFile> {
+    use nix::fcntl::{openat, OFlag};
+    use nix::sys::stat::Mode;
+    use std::os::fd::OwnedFd;
+
+    let (root, file) = (root.clone(), file.clone());
+    let fd = tokio::task::spawn_blocking(move || -> std::io::Result<OwnedFd> {
+        let (dir, name) = open_parent_beneath(&root, &file)?;
+        // O_NONBLOCK keeps a FIFO from blocking the open until it's refused
+        let flags = OFlag::O_RDONLY | OFlag::O_NOFOLLOW | OFlag::O_NONBLOCK | OFlag::O_CLOEXEC;
+        Ok(openat(dir, name, flags, Mode::empty())?)
+    })
+    .await??;
+    Ok(TokioFile::from_std(std::fs::File::from(fd)))
+}
+
+#[cfg(windows)]
+async fn open_beneath(_root: &Dir, file: &File) -> std::io::Result<TokioFile> {
+    TokioFile::open(file.path()).await
+}
+
+/// Opens the directory holding `file` and returns it with `file`'s name. It
+/// opens `root`, following links, then each directory below it without
+/// following one, so a symlink below `root` fails the walk. A `file` that
+/// isn't a plain path below `root` is refused.
+#[cfg(unix)]
+fn open_parent_beneath<'f>(
+    root: &Dir,
+    file: &'f File,
+) -> std::io::Result<(std::os::fd::OwnedFd, &'f OsStr)> {
+    use nix::fcntl::{openat, OFlag, AT_FDCWD};
+    use nix::sys::stat::Mode;
+
+    let outside = || std::io::Error::new(std::io::ErrorKind::InvalidInput, "not below its root");
+    let below = file.path().strip_prefix(root.path()).map_err(|_| outside())?;
+    let names = below
+        .components()
+        .map(|c| match c {
+            Component::Normal(name) => Ok(name),
+            _ => Err(outside()),
+        })
+        .collect::<std::io::Result<Vec<_>>>()?;
+    let Some((name, parents)) = names.split_last() else {
+        return Err(outside());
+    };
+    // an empty root is the current directory, as in `glob`
+    let root = match root.path().as_os_str().is_empty() {
+        true => Path::new("."),
+        false => root.path().as_path(),
+    };
+    let flags = OFlag::O_RDONLY | OFlag::O_DIRECTORY | OFlag::O_CLOEXEC;
+    let mut dir = openat(AT_FDCWD, root, flags, Mode::empty())?;
+    for parent in parents {
+        dir = openat(&dir, *parent, flags | OFlag::O_NOFOLLOW, Mode::empty())?;
+    }
+    Ok((dir, *name))
 }
 
 pub async fn read_secret_bytes(file: &File) -> Result<SecretBox<Vec<u8>>, FileSysErr> {
@@ -319,6 +381,36 @@ pub async fn delete(file: &File) -> Result<(), FileSysErr> {
     }
 }
 
+/// Deletes `file` like [`delete`]. On Unix it reaches `file` as
+/// [`open_regular_file`] does, so a symlink swapped in for a directory between
+/// `root` and `file` fails the delete instead of being followed. Windows
+/// follows links.
+#[cfg(unix)]
+pub async fn delete_beneath(root: &Dir, file: &File) -> Result<(), FileSysErr> {
+    use nix::unistd::{unlinkat, UnlinkatFlags};
+
+    let (owned_root, owned_file) = (root.clone(), file.clone());
+    let unlinked = tokio::task::spawn_blocking(move || -> std::io::Result<()> {
+        let (dir, name) = open_parent_beneath(&owned_root, &owned_file)?;
+        Ok(unlinkat(dir, name, UnlinkatFlags::NoRemoveDir)?)
+    })
+    .await;
+    match unlinked.unwrap_or_else(|e| Err(e.into())) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(FileSysErr::DeleteFileErr(DeleteFileErr {
+            source: Box::new(e),
+            file: file.clone(),
+            trace: trace!(),
+        })),
+    }
+}
+
+#[cfg(windows)]
+pub async fn delete_beneath(_root: &Dir, file: &File) -> Result<(), FileSysErr> {
+    delete(file).await
+}
+
 /// Copy `file` to `dst`. Permissions follow `tokio::fs::copy` (Unix mode bits
 /// and Windows attributes).
 pub async fn copy_to(file: &File, dst: &File, overwrite: Overwrite) -> Result<(), FileSysErr> {
@@ -463,6 +555,15 @@ pub fn glob(pattern: &str) -> Result<Vec<File>, FileSysErr> {
     Ok(matches.into_iter().map(File::new).collect())
 }
 
+/// The directory [`glob`] walks `pattern` from: its literal prefix, the
+/// directories before the first wildcard. No file [`glob`] returns has a
+/// symlink between this directory and itself.
+pub fn glob_root(pattern: &str) -> Dir {
+    let components: Vec<_> = Path::new(pattern).components().collect();
+    let literal = literal_prefix_len(&components);
+    Dir::new(components[..literal].iter().collect::<PathBuf>())
+}
+
 /// Checks that `pattern` is a glob [`glob`] accepts, without walking the
 /// filesystem. An invalid pattern returns [`FileSysErr::InvalidGlobErr`].
 pub fn validate_glob(pattern: &str) -> Result<(), FileSysErr> {
@@ -518,13 +619,19 @@ fn parse_glob(pattern: &str) -> Result<(PathBuf, Vec<GlobComponent>), FileSysErr
                 trace: trace!(),
             })
         })?;
-    let literal = parsed
-        .iter()
-        .take(parsed.len().saturating_sub(1))
-        .take_while(|c| matches!(c, GlobComponent::Literal(_)))
-        .count();
+    let literal = literal_prefix_len(&components);
     let root = components[..literal].iter().collect();
     Ok((root, parsed.split_off(literal)))
+}
+
+/// How many of a glob's `components` form its literal prefix: the leading ones
+/// with no wildcard, never the last, since it names the files to match.
+fn literal_prefix_len(components: &[Component]) -> usize {
+    components
+        .iter()
+        .take(components.len().saturating_sub(1))
+        .take_while(|c| !c.as_os_str().to_string_lossy().contains(GLOB_META))
+        .count()
 }
 
 /// A glob walk's state. It keeps its own work list rather than recursing, so a

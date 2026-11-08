@@ -45,7 +45,7 @@ No new files. `delete_beneath` mirrors `files::delete` (`NotFound` is success). 
 
 ## Progress
 
-- [ ] Source written
+- [x] Source written
 - [ ] Tests written
 
 ## Surprises & Discoveries
@@ -56,6 +56,10 @@ No new files. `delete_beneath` mirrors `files::delete` (`NotFound` is success). 
 
 - Decision: Thread the glob root through the jobs instead of canonicalizing scanned paths.
   Rationale: Canonical paths would change the `file_path` users see and the ledger keys, re-uploading files under a symlinked prefix after an upgrade. Upload and delete jobs are persisted and outlive rule changes, so they must carry the root themselves.
+  Date/Author: 2026-11-08, Claude.
+
+- Decision: The source stage leaves the existing tests' calls and job literals on the old signatures; the tests stage updates them, so the draft's test targets don't compile yet.
+  Rationale: Draft mode settles the design before any test edits, and those updates follow mechanically from the settled signatures.
   Date/Author: 2026-11-08, Claude.
 
 ## Outcomes & Retrospective

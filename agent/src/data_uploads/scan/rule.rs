@@ -275,7 +275,8 @@ async fn differs_from_previous(
     observation: &Observation,
 ) -> Result<Outcome, ScanErr> {
     // A new digest (or no prior ledger entry at all) is a new stable version.
-    let digest = files::sha256(&candidate.file).await?;
+    let root = files::glob_root(&state.cfg.rule.source.glob);
+    let digest = files::sha256(&root, &candidate.file).await?;
     if let Some(previous) = find_previous_stable_file(state, candidate) {
         if digest == previous.digest {
             // Content unchanged since the latest ledger entry.

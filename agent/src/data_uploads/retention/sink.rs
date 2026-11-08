@@ -8,6 +8,7 @@ use crate::data_uploads::{
     retention::{DeleterExt, Job},
     scan::{scanner::StableFile, sink::StableFileSink},
 };
+use crate::filesys::files;
 use crate::models::FileRule;
 
 // external crates
@@ -59,6 +60,7 @@ impl<D: DeleterExt> StableFileSink for RetentionStableFileSink<D> {
                 ttl_secs: retention.ttl_secs,
                 file_rule_id: file.file_rule_id,
                 deployment_id: file.deployment_id,
+                glob_root: Some(files::glob_root(&rule.source.glob)),
             };
 
             if let Err(e) = self.deleter.enqueue(job).await {

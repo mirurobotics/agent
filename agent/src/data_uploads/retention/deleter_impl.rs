@@ -173,7 +173,7 @@ impl DeleterImpl {
     }
 
     async fn check_digest_mismatch(entry: &Job) -> Option<SweepOutcome> {
-        match files::sha256(&entry.file).await {
+        match files::sha256(&entry.root(), &entry.file).await {
             Ok(digest) if digest == entry.digest => None,
             Ok(_) => {
                 info!(
@@ -194,7 +194,7 @@ impl DeleterImpl {
     }
 
     async fn delete_file(entry: &Job) -> SweepOutcome {
-        match files::delete(&entry.file).await {
+        match files::delete_beneath(&entry.root(), &entry.file).await {
             Ok(()) => {
                 info!(
                     "delete: deleted {} (rule {}, deployment {})",
