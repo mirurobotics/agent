@@ -72,7 +72,7 @@ pub mod routes {
 
     use crate::mocks::calibration_sender::MockCalibrationSender;
     use crate::mocks::http_client::{self as mock, MockClient};
-    use crate::test_utils::calibrations::uploader;
+    use crate::test_utils::calibrations::cal_mngr;
     use crate::test_utils::filesys::dirs as test_dirs;
     use crate::test_utils::sync::{create_storage, create_token_manager};
 
@@ -121,7 +121,7 @@ pub mod routes {
                 .await
                 .unwrap();
 
-            let calibration_mngr = uploader(&dir, MockCalibrationSender::new().0, options);
+            let cal_mngr = cal_mngr(&dir, MockCalibrationSender::new().0, options);
 
             let (shutdown_tx, _) = broadcast::channel::<()>(1);
             let state = Arc::new(State::new(
@@ -130,7 +130,7 @@ pub mod routes {
                 syncer,
                 Arc::new(token_mngr),
                 event_hub,
-                Arc::new(calibration_mngr),
+                Arc::new(cal_mngr),
                 shutdown_tx,
             ));
 

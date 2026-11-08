@@ -1,4 +1,4 @@
-//! Calibration intake: stamping a report and handing it to the uploader.
+//! Calibration intake: stamping a report and handing it to the calibration manager.
 
 // standard crates
 use std::sync::Arc;
@@ -9,7 +9,7 @@ use crate::mocks::calibration_sender::{MockCalibrationSender, Step};
 use crate::test_utils::calibrations::{layout, received_at};
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::calibrations::{
-    CalibrationManager, CalibrationsErr, QueueSnapshotFile, Report, ReportMetadata, UploaderArgs,
+    CalMngrArgs, CalibrationManager, CalibrationsErr, QueueSnapshotFile, Report, ReportMetadata,
     UploaderOptions,
 };
 use miru_agent::disk::{self, Layout};
@@ -23,7 +23,7 @@ use tokio::sync::{mpsc, oneshot};
 
 struct Fixture {
     _dir: test_dirs::TempDir,
-    uploader: CalibrationManager,
+    cal_mngr: CalibrationManager,
     sender: Arc<MockCalibrationSender>,
     started: mpsc::UnboundedReceiver<()>,
     deployments: disk::Deployments,
@@ -42,7 +42,7 @@ impl Fixture {
                 .await
                 .unwrap();
         let (sender, started) = MockCalibrationSender::new();
-        let args = UploaderArgs {
+        let args = CalMngrArgs {
             snapshot_file: Some(snapshot_file),
             reports: calibrations.reports(),
             sender: sender.clone(),
@@ -50,14 +50,14 @@ impl Fixture {
             sleep_fn: tokio::time::sleep,
             now_fn: Utc::now,
         };
-        let (uploader, _) = CalibrationManager::spawn(64, args);
+        let (cal_mngr, _) = CalibrationManager::spawn(64, args);
         let deployments_file = Layout::new(dir.to_dir()).deployments();
         let (deployments, _) = disk::Deployments::spawn(64, deployments_file, 1000)
             .await
             .unwrap();
         Self {
             _dir: dir,
-            uploader,
+            cal_mngr,
             sender,
             started,
             deployments,
@@ -77,10 +77,10 @@ impl Fixture {
     }
 
     async fn create(&self, params: CreateParams) -> Result<Created, ServiceErr> {
-        calibration::create(&self.uploader, &self.deployments, params, received_at()).await
+        calibration::create(&self.cal_mngr, &self.deployments, params, received_at()).await
     }
 
-    /// The first report the uploader sends.
+    /// The first report the calibration manager sends.
     async fn uploaded(&mut self) -> Report {
         tokio::time::timeout(Duration::from_secs(60), self.started.recv())
             .await
@@ -152,7 +152,7 @@ async fn stamps_no_deployment_when_none_is_deployed() {
 #[tokio::test]
 async fn a_deployments_cache_error_queues_nothing() {
     let f = Fixture::new().await;
-    // a report queued by mistake would stay in flight, so `len` would count it
+    // a report queued by mistake would stay in flight, so `num_queued_uploads` would count it
     let (_hold, hang) = oneshot::channel();
     f.sender.push(Step::Hang(hang));
     f.deployments.shutdown().await.unwrap();
@@ -160,11 +160,11 @@ async fn a_deployments_cache_error_queues_nothing() {
     let err = f.create(params()).await.unwrap_err();
 
     assert!(matches!(err, ServiceErr::DiskErr(_)), "{err:?}");
-    assert_eq!(f.uploader.len().await.unwrap(), 0);
+    assert_eq!(f.cal_mngr.num_queued_uploads().await.unwrap(), 0);
 }
 
 #[tokio::test]
-async fn an_uploader_rejection_fails_intake() {
+async fn a_cal_mngr_rejection_fails_intake() {
     let options = UploaderOptions {
         max_report_bytes: 100,
         ..UploaderOptions::default()
