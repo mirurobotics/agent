@@ -1,5 +1,6 @@
 // standard crates
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
 
 // internal crates
 use crate::test_utils::filesys::dirs as test_dirs;
@@ -608,6 +609,35 @@ mod pull_failure {
         }
     }
 
+    #[tokio::test(start_paused = true)]
+    async fn content_fetches_run_concurrently() {
+        let f = Fixture::new("sync_content_concurrent").await;
+        let ids = ["cfg_inst_1", "cfg_inst_2", "cfg_inst_3", "cfg_inst_4"];
+        let backend_dep = make_deployment("dpl_1", cfg_inst_args(&f, &ids));
+        f.http_client
+            .set_list_all_deployments(move || Ok(vec![backend_dep.clone()]));
+        f.http_client.set_get_config_instance_content(|_id| {
+            Err(HTTPErr::MockErr(MockErr {
+                is_network_conn_err: true,
+            }))
+        });
+
+        let start = tokio::time::Instant::now();
+        f.sync().await.unwrap_err();
+
+        // one after another, the four fetches' retry backoffs would take at least 4s
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed < Duration::from_secs(3),
+            "content fetches should overlap, took {elapsed:?}"
+        );
+        assert_eq!(
+            f.http_client.call_count(Call::GetConfigInstanceContent),
+            12,
+            "each fetch should make 3 attempts"
+        );
+    }
+
     #[tokio::test]
     async fn failure_still_applies_and_pushes() {
         let f = Fixture::new("sync_pull_fail_push").await;
@@ -1194,6 +1224,39 @@ mod push_failure {
             f.http_client.call_count(Call::UpdateDeployment),
             3,
             "should make 3 total attempts before giving up"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn pushes_run_concurrently() {
+        let f = Fixture::new("push_concurrent").await;
+        let dpls = vec![
+            make_deployment("dpl_1", cfg_inst_args(&f, &["cfg_inst_1"])),
+            make_archived_dpl("dpl_2", cfg_inst_args(&f, &["cfg_inst_2"])),
+            make_archived_dpl("dpl_3", cfg_inst_args(&f, &["cfg_inst_3"])),
+            make_archived_dpl("dpl_4", cfg_inst_args(&f, &["cfg_inst_4"])),
+        ];
+        f.http_client
+            .set_list_all_deployments(move || Ok(dpls.clone()));
+        f.http_client.set_update_deployment(|| {
+            Err(HTTPErr::MockErr(MockErr {
+                is_network_conn_err: true,
+            }))
+        });
+
+        let start = tokio::time::Instant::now();
+        f.sync().await.unwrap_err();
+
+        // one after another, the four pushes' retry backoffs would take at least 4s
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed < Duration::from_secs(3),
+            "pushes should overlap, took {elapsed:?}"
+        );
+        assert_eq!(
+            f.http_client.call_count(Call::UpdateDeployment),
+            12,
+            "each push should make 3 attempts"
         );
     }
 

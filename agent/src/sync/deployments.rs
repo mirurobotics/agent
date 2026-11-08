@@ -13,7 +13,11 @@ use backend_api::models::{
 };
 
 // external crates
+use futures::stream::{self, StreamExt};
 use tracing::{debug, error};
+
+// Bounds in-flight backend requests per sync phase on a constrained device.
+const MAX_CONCURRENT_REQUESTS: usize = 4;
 
 // =================================== SYNC ======================================== //
 pub struct SyncArgs<'a, HTTPClientT> {
@@ -156,30 +160,19 @@ async fn pull_content_for_cfg_insts<'a, HTTPClientT: http::ClientI>(
 ) -> Result<(), SyncErr> {
     let deployments = storage.deployments.entries().await?;
     let mut seen = std::collections::HashSet::new();
-    let mut errors = Vec::new();
+    let cfg_inst_ids: Vec<String> = deployments
+        .into_iter()
+        .flat_map(|deployment| deployment.value.config_instance_ids)
+        .filter(|id| seen.insert(id.clone()))
+        .collect();
 
-    for deployment in deployments {
-        for cfg_inst_id in deployment.value.config_instance_ids.clone() {
-            if !seen.insert(cfg_inst_id.clone()) {
-                continue;
-            }
-            if let Err(e) =
-                pull_cfg_inst_content(http_client, &storage.cfg_insts, cfg_inst_id, token).await
-            {
-                error!("Failed to pull content for config instance: {e}");
-                errors.push(e);
-            }
-        }
-    }
-
-    if errors.is_empty() {
-        Ok(())
-    } else {
-        Err(SyncErr::SyncErrors(SyncErrors {
-            errors,
-            trace: trace!(),
-        }))
-    }
+    let cfg_insts = &storage.cfg_insts;
+    run_bounded(cfg_inst_ids, move |id| async move {
+        pull_cfg_inst_content(http_client, cfg_insts, id, token)
+            .await
+            .inspect_err(|e| error!("Failed to pull content for config instance: {e}"))
+    })
+    .await
 }
 
 async fn pull_cfg_inst_content<HTTPClientT: http::ClientI>(
@@ -387,24 +380,10 @@ async fn push_deployments<HTTPClientT: http::ClientI>(
     let dirty_entries = storage.get_dirty_entries().await?;
     debug!("found {} dirty deployments to push", dirty_entries.len(),);
 
-    let mut errors = Vec::new();
-
-    for dirty_entry in dirty_entries {
-        let deployment = dirty_entry.value;
-        if let Err(e) = push_deployment(http_client, storage, deployment, token).await {
-            errors.push(e);
-            continue;
-        }
-    }
-
-    if errors.is_empty() {
-        Ok(())
-    } else {
-        Err(SyncErr::SyncErrors(SyncErrors {
-            errors,
-            trace: trace!(),
-        }))
-    }
+    run_bounded(dirty_entries, |entry| {
+        push_deployment(http_client, storage, entry.value, token)
+    })
+    .await
 }
 
 async fn push_deployment<HTTPClientT: http::ClientI>(
@@ -447,4 +426,28 @@ async fn push_deployment<HTTPClientT: http::ClientI>(
         )
         .await
         .map_err(SyncErr::from)
+}
+
+// ================================== HELPERS ====================================== //
+/// Runs `f` on every item, a bounded number at a time, and gathers every error.
+async fn run_bounded<T, F, Fut>(items: Vec<T>, f: F) -> Result<(), SyncErr>
+where
+    F: FnMut(T) -> Fut,
+    Fut: std::future::Future<Output = Result<(), SyncErr>>,
+{
+    let errors: Vec<SyncErr> = stream::iter(items)
+        .map(f)
+        .buffer_unordered(MAX_CONCURRENT_REQUESTS)
+        .filter_map(|result| async move { result.err() })
+        .collect()
+        .await;
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(SyncErr::SyncErrors(SyncErrors {
+            errors,
+            trace: trace!(),
+        }))
+    }
 }

@@ -248,3 +248,24 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GORELEASER_KEY: ${{ secrets.GORELEASER_KEY }}
+
+  notify:
+    name: 'Notify #deploys'
+    # Every release job, so a failure before `release` still posts.
+    needs: [check-main, ci, windows-release-build, windows-sign, release]
+    if: >-
+      ${{ always() && (needs.check-main.result == 'failure' ||
+      needs.check-main.outputs.on_main == 'true') }}
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    permissions: {}
+    steps:
+      - name: Post to Slack
+        uses: mirurobotics/.github/actions/notify-deploys@f28d0cc569b006bee3e4600f3653f1f3772ec09f # main
+        with:
+          webhook-url: ${{ secrets.SLACK_DEPLOYS_WEBHOOK_URL }}
+          application: Agent
+          version: ${{ github.ref_name }}
+          link: >-
+            ${{ format('{0}/{1}/releases/tag/{2}', github.server_url,
+            github.repository, github.ref_name) }}
+          results: ${{ join(needs.*.result, ' ') }}
