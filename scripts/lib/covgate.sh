@@ -105,10 +105,9 @@ while read -r covgate_file; do
     if [ "$(awk -v c="$coverage" -v m="$MIN" 'BEGIN {print (c >= m)}')" -eq 0 ]; then
         echo "❌ ${module_display}: ${coverage}% (requires ${MIN}%)"
         echo "$COV_JSON" | jq -r --arg mod "$module_dir_abs" '
-            [.data[0].functions[] | select(.filenames[0] | startswith($mod)) | .filenames as $fs
-             | .regions[] | select(.[5] == 0 and .[7] == 0)
-             | {k: "\($fs[0]):\(.[0]):\(.[1])-\(.[2]):\(.[3])", c: .[4]}]
-            | group_by(.k) | map(select(map(.c) | max == 0)) | .[] | "    never run: \(.[0].k) (\(length) instances)"'
+            .data[0].files[] | select(.filename | startswith($mod)) | select(.summary.regions.notcovered > 0)
+            | .filename as $f | "    file: \($f) notcovered=\(.summary.regions.notcovered)",
+              (.segments[] | select(.[2] == 0 and .[3] and .[4] and (.[5] | not)) | "      zero segment: \($f):\(.[0]):\(.[1])")'
         HAS_FAILURES=1
     else
         echo "✅ ${module_display}: ${coverage}% (requires ${MIN}%)"
