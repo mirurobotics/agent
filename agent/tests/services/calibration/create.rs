@@ -9,7 +9,7 @@ use crate::mocks::calibration_sender::{MockCalibrationSender, Step};
 use crate::test_utils::calibrations::{layout, received_at};
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::calibrations::{
-    CalibrationManager, CalibrationsErr, QueueSnapshotFile, Report, ReportMetadata, UploaderArgs,
+    CalMngrArgs, CalibrationManager, CalibrationsErr, QueueSnapshotFile, Report, ReportMetadata,
     UploaderOptions,
 };
 use miru_agent::disk::{self, Layout};
@@ -42,7 +42,7 @@ impl Fixture {
                 .await
                 .unwrap();
         let (sender, started) = MockCalibrationSender::new();
-        let args = UploaderArgs {
+        let args = CalMngrArgs {
             snapshot_file: Some(snapshot_file),
             reports: calibrations.reports(),
             sender: sender.clone(),

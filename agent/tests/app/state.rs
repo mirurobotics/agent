@@ -292,13 +292,13 @@ pub mod init {
     }
 
     #[tokio::test]
-    async fn calibration_mngr_spawned() {
+    async fn cal_mngr_spawned() {
         let env = TestEnv::valid().await;
 
         let (state, state_handle) = env.init().await.unwrap();
 
         // the actor is spawned and its queue snapshot file is seeded on disk
-        state.calibration_mngr.len().await.unwrap();
+        state.cal_mngr.len().await.unwrap();
         assert!(env.layout.calibrations().queue().exists());
 
         state.shutdown().await.unwrap();
@@ -306,7 +306,7 @@ pub mod init {
     }
 
     #[tokio::test]
-    async fn calibration_mngr_degrades_when_queue_path_unwritable() {
+    async fn cal_mngr_degrades_when_queue_path_unwritable() {
         let env = TestEnv::valid().await;
         // a directory at the queue FILE path makes
         // QueueSnapshotFile::new_with_default fail on both read and create
@@ -316,7 +316,7 @@ pub mod init {
         let (state, state_handle) = env.init().await.unwrap();
 
         // fail-open: the agent boots and the uploader runs without persistence
-        state.calibration_mngr.len().await.unwrap();
+        state.cal_mngr.len().await.unwrap();
 
         state.shutdown().await.unwrap();
         state_handle.await;
@@ -399,7 +399,7 @@ pub mod shutdown {
     }
 
     #[tokio::test]
-    async fn calibration_mngr_shutdown_error_does_not_abort_teardown() {
+    async fn cal_mngr_shutdown_error_does_not_abort_teardown() {
         let env = TestEnv::valid().await;
         let (state, state_handle) = env.init().await.unwrap();
 
@@ -414,7 +414,7 @@ pub mod shutdown {
 
         // stop the calibration uploader directly so AppState::shutdown errors
         // on it (it is torn down first, so its error is the one surfaced)
-        state.calibration_mngr.shutdown().await.unwrap();
+        state.cal_mngr.shutdown().await.unwrap();
 
         let err = state
             .shutdown()

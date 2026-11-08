@@ -13,7 +13,7 @@ use crate::mocks::error::SleepController;
 use crate::test_utils::calibrations::{layout, received_at, report};
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::calibrations::{
-    CalibrationManager, CalibrationsErr, Queue, QueueSnapshotFile, UploaderArgs, UploaderOptions,
+    CalMngrArgs, CalibrationManager, CalibrationsErr, Queue, QueueSnapshotFile, UploaderOptions,
 };
 use miru_agent::disk::layout::CalibrationsLayout;
 use miru_agent::filesys::{dirs, files, File, PathExt, WriteOptions};
@@ -82,7 +82,7 @@ impl Harness {
     }
 
     fn spawn_on(&mut self, snapshot_file: Option<QueueSnapshotFile>, options: UploaderOptions) {
-        let args = UploaderArgs {
+        let args = CalMngrArgs {
             snapshot_file,
             reports: self.layout.reports(),
             sender: self.sender.clone(),

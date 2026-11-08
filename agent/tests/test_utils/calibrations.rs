@@ -8,7 +8,7 @@ use std::sync::Arc;
 // internal crates
 use super::filesys::dirs::TempDir;
 use miru_agent::calibrations::{
-    CalibrationManager, Report, ReportMetadata, Sender, UploaderArgs, UploaderOptions,
+    CalMngrArgs, CalibrationManager, Report, ReportMetadata, Sender, UploaderOptions,
 };
 use miru_agent::disk::layout::CalibrationsLayout;
 use miru_agent::models::InstanceFormat;
@@ -52,14 +52,14 @@ pub fn layout(dir: &TempDir) -> CalibrationsLayout {
     CalibrationsLayout::new(dir.to_dir().subdir("calibrations"))
 }
 
-/// An uploader under `dir` that keeps its queue in memory and uploads through
-/// `sender`.
-pub fn uploader<S: Sender + 'static>(
+/// A calibration manager under `dir` that keeps its queue in memory and
+/// uploads through `sender`.
+pub fn cal_mngr<S: Sender + 'static>(
     dir: &TempDir,
     sender: Arc<S>,
     options: UploaderOptions,
 ) -> CalibrationManager {
-    let args = UploaderArgs {
+    let args = CalMngrArgs {
         snapshot_file: None,
         reports: layout(dir).reports(),
         sender,

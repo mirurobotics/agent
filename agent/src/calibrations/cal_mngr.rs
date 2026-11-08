@@ -19,7 +19,7 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{error, info};
 
-pub struct UploaderArgs<S, F, N> {
+pub struct CalMngrArgs<S, F, N> {
     /// Where the queue persists; `None` keeps it in memory only.
     pub snapshot_file: Option<QueueSnapshotFile>,
     /// The directory holding one data file per queued report.
@@ -164,7 +164,7 @@ pub struct CalibrationManager {
 impl CalibrationManager {
     pub fn spawn<S, F, Fut, N>(
         buffer_size: usize,
-        args: UploaderArgs<S, F, N>,
+        args: CalMngrArgs<S, F, N>,
     ) -> (Self, JoinHandle<()>)
     where
         S: Sender + 'static,

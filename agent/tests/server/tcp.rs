@@ -7,7 +7,7 @@ use std::time::Duration;
 use crate::logs::CapturingWriter;
 use crate::mocks::{calibration_sender::MockCalibrationSender, http_client::MockClient};
 use crate::test_utils::{
-    calibrations::uploader,
+    calibrations::cal_mngr,
     filesys::dirs as test_dirs,
     sync::{create_storage, create_token_manager},
 };
@@ -52,7 +52,7 @@ impl Fixture {
             syncer,
             Arc::new(token_mngr),
             event_hub,
-            Arc::new(uploader(
+            Arc::new(cal_mngr(
                 &dir,
                 MockCalibrationSender::new().0,
                 UploaderOptions::default(),
