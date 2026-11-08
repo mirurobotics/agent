@@ -1,4 +1,4 @@
-//! The calibration uploader actor: drain order, serving intake while busy
+//! The calibration manager actor: drain order, serving intake while busy
 //! or backing off, and shutdown. `UploaderImpl`'s queue, storage and retry
 //! rules are unit-tested in `uploader_impl.rs`.
 
@@ -36,16 +36,16 @@ struct Harness {
     sender: Arc<MockCalibrationSender>,
     started: mpsc::UnboundedReceiver<()>,
     sleep: Arc<SleepController>,
-    /// The uploader's clock. It starts when the fixture reports were received
+    /// The manager's clock. It starts when the fixture reports were received
     /// and moves only when a backoff sleep completes.
     clock: Arc<Mutex<DateTime<Utc>>>,
-    uploader: Option<CalibrationManager>,
+    cal_mngr: Option<CalibrationManager>,
     handle: Option<JoinHandle<()>>,
 }
 
 impl Harness {
     fn new() -> Self {
-        let dir = test_dirs::temp("calibration_uploader_test").unwrap();
+        let dir = test_dirs::temp("cal_mngr_test").unwrap();
         let layout = layout(&dir);
         let (sender, started) = MockCalibrationSender::new();
         Self {
@@ -55,7 +55,7 @@ impl Harness {
             started,
             sleep: Arc::new(SleepController::new()),
             clock: Arc::new(Mutex::new(received_at())),
-            uploader: None,
+            cal_mngr: None,
             handle: None,
         }
     }
@@ -71,7 +71,7 @@ impl Harness {
         Queue::from_snapshot(1000, self.snapshot_file().await, Persistence::Durable).len()
     }
 
-    /// Run an uploader on the queue at the layout until the test ends.
+    /// Run a calibration manager on the queue at the layout until the test ends.
     async fn spawn(&mut self) {
         self.spawn_with(UploaderOptions::default()).await;
     }
@@ -90,8 +90,8 @@ impl Harness {
             sleep_fn: self.sleep_fn(),
             now_fn: self.now_fn(),
         };
-        let (uploader, handle) = CalibrationManager::spawn(64, args);
-        self.uploader = Some(uploader);
+        let (cal_mngr, handle) = CalibrationManager::spawn(64, args);
+        self.cal_mngr = Some(cal_mngr);
         self.handle = Some(handle);
     }
 
@@ -115,16 +115,16 @@ impl Harness {
         move || *clock.lock().unwrap()
     }
 
-    fn uploader(&self) -> &CalibrationManager {
-        self.uploader.as_ref().expect("spawned")
+    fn cal_mngr(&self) -> &CalibrationManager {
+        self.cal_mngr.as_ref().expect("spawned")
     }
 
     async fn enqueue(&self, slug: &str) {
-        guard(self.uploader().enqueue(report(slug))).await.unwrap();
+        guard(self.cal_mngr().enqueue(report(slug))).await.unwrap();
     }
 
     async fn len(&self) -> usize {
-        guard(self.uploader().len()).await.unwrap()
+        guard(self.cal_mngr().len()).await.unwrap()
     }
 
     fn report_file(&self, id: Uuid) -> File {
@@ -150,7 +150,7 @@ impl Harness {
     }
 
     async fn stop(&mut self) {
-        guard(self.uploader().shutdown()).await.unwrap();
+        guard(self.cal_mngr().shutdown()).await.unwrap();
         guard(self.handle.take().unwrap()).await.unwrap();
     }
 }
@@ -311,7 +311,7 @@ async fn dropping_every_handle_stops_the_uploader() {
     let mut h = Harness::new();
     h.spawn().await;
 
-    h.uploader = None;
+    h.cal_mngr = None;
 
     guard(h.handle.take().unwrap()).await.unwrap();
 }
@@ -322,7 +322,7 @@ async fn commands_after_shutdown_fail() {
     h.spawn().await;
     h.stop().await;
 
-    let err = h.uploader().enqueue(report("a")).await.unwrap_err();
+    let err = h.cal_mngr().enqueue(report("a")).await.unwrap_err();
 
     assert!(
         matches!(err, CalibrationsErr::SendActorMessageErr(_)),
@@ -336,7 +336,7 @@ async fn a_caller_that_stops_waiting_does_not_stop_the_uploader() {
     h.spawn().await;
 
     // polled once: the command is sent, then its reply is abandoned
-    assert!(h.uploader().len().now_or_never().is_none());
+    assert!(h.cal_mngr().len().now_or_never().is_none());
 
     h.enqueue("a").await;
     h.await_drained(&["a"]).await;
@@ -347,8 +347,8 @@ async fn a_command_queued_behind_shutdown_fails() {
     let mut h = Harness::new();
     h.spawn().await;
 
-    let uploader = h.uploader();
-    let (stopped, enqueued) = tokio::join!(uploader.shutdown(), uploader.enqueue(report("a")));
+    let cal_mngr = h.cal_mngr();
+    let (stopped, enqueued) = tokio::join!(cal_mngr.shutdown(), cal_mngr.enqueue(report("a")));
 
     stopped.unwrap();
     let err = enqueued.unwrap_err();

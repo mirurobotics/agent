@@ -80,7 +80,7 @@ impl AppState {
         let (deleter, uploader, scanner, [scanner_handle, deleter_handle, uploader_handle]) =
             Self::init_data_uploads(layout, http_client.clone(), token_mngr.clone()).await?;
 
-        // initialize the calibration uploader
+        // initialize the calibration manager
         let (cal_mngr, cal_mngr_handle) =
             Self::init_cal_mngr(layout, http_client.clone(), token_mngr.clone()).await;
 
@@ -258,7 +258,7 @@ impl AppState {
         Ok((Arc::new(uploader), handle))
     }
 
-    /// Spawn the calibration uploader, which sends reports to Miru with the
+    /// Spawn the calibration manager, which sends reports to Miru with the
     /// token manager's token. A queue-file error degrades to a queue kept in
     /// memory (fail-open); the report files a previous boot queued are kept
     /// for the next boot that opens the queue file.
@@ -294,17 +294,17 @@ impl AppState {
             sleep_fn: tokio::time::sleep,
             now_fn: chrono::Utc::now,
         };
-        let (uploader, handle) = calibrations::CalibrationManager::spawn(64, args);
-        (Arc::new(uploader), handle)
+        let (cal_mngr, handle) = calibrations::CalibrationManager::spawn(64, args);
+        (Arc::new(cal_mngr), handle)
     }
 
     pub async fn shutdown(&self) -> Result<(), server::ServerErr> {
         let mut first_err: Option<server::ServerErr> = None;
 
-        // shutdown the calibration uploader first: nothing else in the app
+        // shutdown the calibration manager first: nothing else in the app
         // depends on it
         if let Err(e) = self.cal_mngr.shutdown().await {
-            tracing::error!("failed to shutdown calibration uploader: {e}");
+            tracing::error!("failed to shutdown calibration manager: {e}");
             first_err.get_or_insert(e.into());
         }
 

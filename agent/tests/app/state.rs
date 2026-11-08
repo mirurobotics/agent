@@ -404,7 +404,7 @@ pub mod shutdown {
         let (state, state_handle) = env.init().await.unwrap();
 
         // set the device online so the offline assertion below proves teardown
-        // continued through storage after the calibration uploader error
+        // continued through storage after the calibration manager error
         state
             .storage
             .device
@@ -412,14 +412,14 @@ pub mod shutdown {
             .await
             .unwrap();
 
-        // stop the calibration uploader directly so AppState::shutdown errors
+        // stop the calibration manager directly so AppState::shutdown errors
         // on it (it is torn down first, so its error is the one surfaced)
         state.cal_mngr.shutdown().await.unwrap();
 
         let err = state
             .shutdown()
             .await
-            .expect_err("calibration uploader error surfaces");
+            .expect_err("calibration manager error surfaces");
         assert!(matches!(err, ServerErr::CalibrationsErr(_)));
         state_handle.await;
 

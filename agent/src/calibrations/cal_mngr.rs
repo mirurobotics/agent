@@ -152,7 +152,7 @@ fn respond<T>(respond_to: oneshot::Sender<T>, value: T, op: &str) {
 }
 
 // ================================== HANDLE ======================================= //
-/// Handle to the calibration uploader: one task that owns the calibration
+/// Handle to the calibration manager: one task that owns the calibration
 /// queue, queues what intake sends it, and uploads reports to Miru one at a
 /// time, oldest due first, retrying a failed report at the tail after its own
 /// backoff. It keeps serving intake during an upload or a backoff.
