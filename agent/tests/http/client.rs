@@ -202,6 +202,16 @@ pub mod arc_delegation {
     }
 
     #[tokio::test]
+    async fn clock_delegates() {
+        let server = mock::run_server(router()).await;
+        let client = Arc::new(http::Client::new(&server.base_url).unwrap());
+        assert_eq!(ClientI::clock(&client).server_now(), None);
+        let url = format!("{}/fixed-date", server.base_url);
+        let _ = client.execute(Params::get(&url)).await.unwrap();
+        assert!(ClientI::clock(&client).server_now().is_some());
+    }
+
+    #[tokio::test]
     async fn execute_delegates() {
         let server = mock::run_server(router()).await;
         let client = Arc::new(http::Client::new(&server.base_url).unwrap());
