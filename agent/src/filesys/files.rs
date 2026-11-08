@@ -423,104 +423,109 @@ pub async fn set_permissions(
 ///
 /// A pattern-syntax error (an invalid glob) returns [`FileSysErr::InvalidGlobErr`].
 /// The walk starts at the pattern's literal prefix (the directories before the
-/// first wildcard) and never follows a symlink below it: symlinked files and
-/// directories are skipped, so a match can't resolve outside the prefix.
-/// Directories that error mid-walk (e.g. unreadable ones) are skipped rather
-/// than aborting the walk.
+/// first wildcard) and matches each level below it against that level's
+/// pattern component, so it only enters directories that can hold a match. It
+/// never follows a symlink below the prefix: symlinked files and directories
+/// are skipped, so a match can't resolve outside the prefix. Directories that
+/// error mid-walk (e.g. unreadable ones) are skipped rather than aborting the
+/// walk.
 pub fn glob(pattern: &str) -> Result<Vec<File>, FileSysErr> {
-    compile_glob(pattern)?;
-    let matcher = glob::Pattern::new(pattern).map_err(|e| {
-        FileSysErr::InvalidGlobErr(InvalidGlobErr {
-            pattern: pattern.to_string(),
-            source: Box::new(e),
-            trace: trace!(),
-        })
-    })?;
-    let (root, max_depth) = glob_root(pattern);
-    let walk = GlobWalk {
-        matcher: &matcher,
-        max_depth,
-    };
+    let (root, patterns) = parse_glob(pattern)?;
     let mut matches = Vec::new();
-    walk.visit(Path::new(root), 1, &mut matches);
+    walk_glob(&root, &patterns, &mut matches);
     matches.sort();
+    // two `**` components can reach one file by two routes
+    matches.dedup();
     Ok(matches.into_iter().map(File::new).collect())
-}
-
-const GLOB_META: [char; 3] = ['*', '?', '['];
-
-/// The directory a walk for `pattern` starts at, and how many levels below it a
-/// match can sit (`None` when a `**` makes the depth unbounded).
-fn glob_root(pattern: &str) -> (&str, Option<usize>) {
-    let first_meta = pattern.find(GLOB_META).unwrap_or(pattern.len());
-    let root = match pattern[..first_meta].rfind('/') {
-        Some(0) => "/",
-        Some(i) => &pattern[..i],
-        None => ".",
-    };
-    let rest = pattern[root.len()..].trim_start_matches('/');
-    if rest.contains("**") {
-        return (root, None);
-    }
-    (
-        root,
-        Some(rest.split('/').filter(|c| !c.is_empty()).count()),
-    )
-}
-
-struct GlobWalk<'a> {
-    matcher: &'a glob::Pattern,
-    max_depth: Option<usize>,
-}
-
-impl GlobWalk<'_> {
-    fn options() -> glob::MatchOptions {
-        // match component by component, like glob::glob's own walk
-        glob::MatchOptions {
-            require_literal_separator: true,
-            ..glob::MatchOptions::new()
-        }
-    }
-
-    fn visit(&self, dir: &Path, depth: usize, matches: &mut Vec<PathBuf>) {
-        let Ok(entries) = std::fs::read_dir(dir) else {
-            return;
-        };
-        for entry in entries.flatten() {
-            // DirEntry::file_type doesn't follow symlinks
-            let Ok(file_type) = entry.file_type() else {
-                continue;
-            };
-            let path = match dir == Path::new(".") {
-                true => PathBuf::from(entry.file_name()),
-                false => entry.path(),
-            };
-            if file_type.is_dir() {
-                if self.max_depth.is_none_or(|max| depth < max) {
-                    self.visit(&path, depth + 1, matches);
-                }
-            } else if file_type.is_file() && self.matcher.matches_path_with(&path, Self::options())
-            {
-                matches.push(path);
-            }
-        }
-    }
 }
 
 /// Checks that `pattern` is a glob [`glob`] accepts, without walking the
 /// filesystem. An invalid pattern returns [`FileSysErr::InvalidGlobErr`].
 pub fn validate_glob(pattern: &str) -> Result<(), FileSysErr> {
-    compile_glob(pattern).map(drop)
+    parse_glob(pattern).map(drop)
 }
 
-fn compile_glob(pattern: &str) -> Result<glob::Paths, FileSysErr> {
-    glob::glob(pattern).map_err(|e| {
-        FileSysErr::InvalidGlobErr(InvalidGlobErr {
-            pattern: pattern.to_string(),
-            source: Box::new(e),
-            trace: trace!(),
-        })
-    })
+const GLOB_META: [char; 3] = ['*', '?', '['];
+
+/// Splits `pattern` into its literal prefix, where a walk starts, and one
+/// compiled pattern per path component below it. The last component is
+/// always a pattern, since it names the files to match.
+fn parse_glob(pattern: &str) -> Result<(PathBuf, Vec<glob::Pattern>), FileSysErr> {
+    let components: Vec<_> = Path::new(pattern).components().collect();
+    let literal = components
+        .iter()
+        .take(components.len().saturating_sub(1))
+        .take_while(|c| !c.as_os_str().to_string_lossy().contains(GLOB_META))
+        .count();
+    let root = components[..literal].iter().collect();
+    let patterns = components[literal..]
+        .iter()
+        .map(|c| glob::Pattern::new(&c.as_os_str().to_string_lossy()))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| {
+            FileSysErr::InvalidGlobErr(InvalidGlobErr {
+                pattern: pattern.to_string(),
+                source: Box::new(e),
+                trace: trace!(),
+            })
+        })?;
+    Ok((root, patterns))
+}
+
+/// Pushes the regular files in `dir` that match `patterns`.
+fn walk_glob(dir: &Path, patterns: &[glob::Pattern], matches: &mut Vec<PathBuf>) {
+    for (path, file_type) in read_dir_entries(dir) {
+        match_glob_entry(path, file_type, patterns, matches);
+    }
+}
+
+/// Pushes `path` if it's a regular file that matches `patterns`, or walks
+/// into it if it's a directory that matches their first.
+fn match_glob_entry(
+    path: PathBuf,
+    file_type: std::fs::FileType,
+    patterns: &[glob::Pattern],
+    matches: &mut Vec<PathBuf>,
+) {
+    let Some((first, rest)) = patterns.split_first() else {
+        return;
+    };
+    if first.as_str() == "**" {
+        // `**` matches zero directories, or this one and any below it
+        match_glob_entry(path.clone(), file_type, rest, matches);
+        if file_type.is_dir() {
+            walk_glob(&path, patterns, matches);
+        }
+        return;
+    }
+    let name = path.file_name().unwrap_or_default();
+    if !first.matches_path(Path::new(name)) {
+        return;
+    }
+    if file_type.is_symlink() {
+        debug!("glob: skipping symlink {}", path.display());
+    } else if rest.is_empty() && file_type.is_file() {
+        matches.push(path);
+    } else if !rest.is_empty() && file_type.is_dir() {
+        walk_glob(&path, rest, matches);
+    }
+}
+
+/// The entries of `dir` (the current directory when empty) with their own
+/// types: a symlink is reported as one, not as its target. They're collected
+/// before returning so a recursive walk holds no directory handles open.
+fn read_dir_entries(dir: &Path) -> Vec<(PathBuf, std::fs::FileType)> {
+    let read_from = match dir.as_os_str().is_empty() {
+        true => Path::new("."),
+        false => dir,
+    };
+    let Ok(entries) = std::fs::read_dir(read_from) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter_map(|entry| Some((dir.join(entry.file_name()), entry.file_type().ok()?)))
+        .collect()
 }
 
 pub async fn metadata(file: &File) -> Result<Metadata, FileSysErr> {

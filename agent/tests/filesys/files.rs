@@ -1294,6 +1294,20 @@ pub mod glob {
     }
 
     #[test]
+    fn wildcard_does_not_cross_directories() {
+        let tmp = test_dirs::temp("testing").unwrap();
+        fs::create_dir_all(tmp.path().join("x/logs/sub")).unwrap();
+        let direct = tmp.path().join("x/logs/1.log");
+        fs::write(&direct, b"x").unwrap();
+        fs::write(tmp.path().join("x/logs/sub/2.log"), b"x").unwrap();
+
+        let pattern = tmp.path().join("**/logs/*.log");
+        let matches = files::glob(pattern.to_str().unwrap()).unwrap();
+
+        assert_eq!(matches, vec![filesys::File::new(direct)]);
+    }
+
+    #[test]
     fn literal_path_matches_itself() {
         let tmp = test_dirs::temp("testing").unwrap();
         let path = tmp.path().join("data.txt");
@@ -1319,6 +1333,21 @@ pub mod glob {
         let matches = files::glob(pattern.to_str().unwrap()).unwrap();
 
         assert_eq!(matches, vec![filesys::File::new(real)]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_literal_prefix_followed() {
+        let tmp = test_dirs::temp("testing").unwrap();
+        let real = test_dirs::temp("real").unwrap();
+        fs::write(real.path().join("1.log"), b"x").unwrap();
+        std::os::unix::fs::symlink(real.path(), tmp.path().join("logs")).unwrap();
+
+        let pattern = tmp.path().join("logs/*.log");
+        let matches = files::glob(pattern.to_str().unwrap()).unwrap();
+
+        let expected = tmp.path().join("logs/1.log");
+        assert_eq!(matches, vec![filesys::File::new(expected)]);
     }
 
     #[cfg(unix)]
