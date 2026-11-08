@@ -114,11 +114,7 @@ pub async fn open_regular_file(file: &File) -> std::io::Result<TokioFile> {
     opts.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
     let f = opts.open(file.path()).await?;
     let meta = f.metadata().await?;
-    #[cfg(unix)]
-    let is_regular = meta.is_file();
-    #[cfg(windows)]
-    let is_regular = meta.is_file() && !is_reparse_point(&meta);
-    if !is_regular {
+    if !meta.is_file() || is_reparse_point(&meta) {
         let kind = std::io::ErrorKind::InvalidInput;
         return Err(std::io::Error::new(kind, "not a regular file"));
     }
@@ -130,6 +126,11 @@ pub async fn open_regular_file(file: &File) -> std::io::Result<TokioFile> {
 #[cfg(windows)]
 fn is_reparse_point(meta: &std::fs::Metadata) -> bool {
     meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+}
+
+#[cfg(unix)]
+fn is_reparse_point(_meta: &std::fs::Metadata) -> bool {
+    false
 }
 
 pub async fn read_secret_bytes(file: &File) -> Result<SecretBox<Vec<u8>>, FileSysErr> {
@@ -576,12 +577,6 @@ impl<'p> GlobWalk<'p> {
         } else if file_type.is_symlink() {
             debug!("glob: skipping symlink {}", path.display());
         } else if rest.is_empty() && file_type.is_file() {
-            // `open_regular_file` refuses these, so they're never candidates
-            #[cfg(windows)]
-            if std::fs::symlink_metadata(&path).is_ok_and(|m| is_reparse_point(&m)) {
-                debug!("glob: skipping reparse point {}", path.display());
-                return;
-            }
             self.matches.push(path);
         } else if !rest.is_empty() && file_type.is_dir() {
             self.todo.push((path, rest));
@@ -591,7 +586,8 @@ impl<'p> GlobWalk<'p> {
 
 /// The entries of `dir` that `component` matches, with their own types: a
 /// symlink is reported as one, not as its target. A literal is looked up
-/// directly, so it needs only traverse permission on `dir`.
+/// directly, so it needs only traverse permission on `dir`. Reparse points are
+/// left out, since `open_regular_file` refuses them.
 fn glob_entries(dir: &Path, component: &GlobComponent) -> Vec<(PathBuf, FileType)> {
     if let GlobComponent::Literal(name) = component {
         // `..` would lead the walk back out of the prefix
@@ -600,8 +596,8 @@ fn glob_entries(dir: &Path, component: &GlobComponent) -> Vec<(PathBuf, FileType
         }
         let path = dir.join(name);
         return match std::fs::symlink_metadata(&path) {
-            Ok(metadata) => vec![(path, metadata.file_type())],
-            Err(_) => Vec::new(),
+            Ok(meta) if !is_reparse_point(&meta) => vec![(path, meta.file_type())],
+            _ => Vec::new(),
         };
     }
     // an empty `dir` is the current directory
@@ -612,9 +608,14 @@ fn glob_entries(dir: &Path, component: &GlobComponent) -> Vec<(PathBuf, FileType
     let Ok(entries) = std::fs::read_dir(read_from) else {
         return Vec::new();
     };
-    entries
+    let entries = entries
         .flatten()
-        .filter(|entry| component.matches(&entry.file_name()))
+        .filter(|entry| component.matches(&entry.file_name()));
+    // on Windows the listing already holds each entry's attributes, so this
+    // needs no extra system call
+    #[cfg(windows)]
+    let entries = entries.filter(|e| !e.metadata().is_ok_and(|m| is_reparse_point(&m)));
+    entries
         .filter_map(|entry| Some((dir.join(entry.file_name()), entry.file_type().ok()?)))
         .collect()
 }
