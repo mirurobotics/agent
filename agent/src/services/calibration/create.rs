@@ -31,11 +31,11 @@ pub struct Created {
 }
 
 /// Accept a calibration: stamp it with `now` and the deployed deployment, if
-/// any, and hand it to the uploader to queue. Nothing here waits on Miru. A
-/// deployments-cache error fails the call rather than dropping the
+/// any, and hand it to the calibration manager to queue. Nothing here waits on
+/// Miru. A deployments-cache error fails the call rather than dropping the
 /// deployment.
 pub async fn create(
-    uploader: &CalibrationManager,
+    cal_mngr: &CalibrationManager,
     deployments: &disk::Deployments,
     params: CreateParams,
     now: DateTime<Utc>,
@@ -58,7 +58,7 @@ pub async fn create(
         },
         data: params.data,
     };
-    uploader.enqueue(report).await?;
+    cal_mngr.report(report).await?;
     Ok(Created {
         report_id,
         reported_at: now,

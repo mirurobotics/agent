@@ -292,13 +292,13 @@ pub mod init {
     }
 
     #[tokio::test]
-    async fn calibration_mngr_spawned() {
+    async fn cal_mngr_spawned() {
         let env = TestEnv::valid().await;
 
         let (state, state_handle) = env.init().await.unwrap();
 
         // the actor is spawned and its queue and latest index are seeded on disk
-        state.calibration_mngr.len().await.unwrap();
+        state.cal_mngr.num_queued_uploads().await.unwrap();
         assert!(env.layout.calibration_reports().queue().exists());
         assert!(env.layout.latest_calibrations().index().exists());
 
@@ -307,7 +307,7 @@ pub mod init {
     }
 
     #[tokio::test]
-    async fn calibration_mngr_degrades_when_queue_path_unwritable() {
+    async fn cal_mngr_degrades_when_queue_path_unwritable() {
         let env = TestEnv::valid().await;
         // a directory at the queue FILE path makes
         // QueueSnapshotFile::new_with_default fail on both read and create
@@ -317,7 +317,7 @@ pub mod init {
         let (state, state_handle) = env.init().await.unwrap();
 
         // fail-open: the agent boots and the uploader runs without persistence
-        state.calibration_mngr.len().await.unwrap();
+        state.cal_mngr.num_queued_uploads().await.unwrap();
 
         state.shutdown().await.unwrap();
         state_handle.await;
@@ -327,7 +327,7 @@ pub mod init {
     }
 
     #[tokio::test]
-    async fn calibration_mngr_degrades_when_latest_index_path_unwritable() {
+    async fn cal_mngr_degrades_when_latest_index_path_unwritable() {
         let env = TestEnv::valid().await;
         // a directory at the index FILE path makes
         // LatestIndexFile::new_with_default fail on both read and create
@@ -337,7 +337,7 @@ pub mod init {
         let (state, state_handle) = env.init().await.unwrap();
 
         // fail-open: the agent boots and the store runs without persistence
-        let latest = state.calibration_mngr.list_latest(Default::default());
+        let latest = state.cal_mngr.list_latest(Default::default());
         latest.await.unwrap();
 
         state.shutdown().await.unwrap();
@@ -421,12 +421,12 @@ pub mod shutdown {
     }
 
     #[tokio::test]
-    async fn calibration_mngr_shutdown_error_does_not_abort_teardown() {
+    async fn cal_mngr_shutdown_error_does_not_abort_teardown() {
         let env = TestEnv::valid().await;
         let (state, state_handle) = env.init().await.unwrap();
 
         // set the device online so the offline assertion below proves teardown
-        // continued through storage after the calibration uploader error
+        // continued through storage after the calibration manager error
         state
             .storage
             .device
@@ -434,14 +434,14 @@ pub mod shutdown {
             .await
             .unwrap();
 
-        // stop the calibration uploader directly so AppState::shutdown errors
+        // stop the calibration manager directly so AppState::shutdown errors
         // on it (it is torn down first, so its error is the one surfaced)
-        state.calibration_mngr.shutdown().await.unwrap();
+        state.cal_mngr.shutdown().await.unwrap();
 
         let err = state
             .shutdown()
             .await
-            .expect_err("calibration uploader error surfaces");
+            .expect_err("calibration manager error surfaces");
         assert!(matches!(err, ServerErr::CalibrationsErr(_)));
         state_handle.await;
 

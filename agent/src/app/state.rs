@@ -36,7 +36,7 @@ pub struct AppState {
     pub uploader: Arc<upload::Uploader>,
     pub token_mngr: Arc<authn::TokenManager>,
     pub event_hub: events::EventHub,
-    pub calibration_mngr: Arc<calibrations::CalibrationManager>,
+    pub cal_mngr: Arc<calibrations::CalibrationManager>,
 }
 
 impl AppState {
@@ -80,9 +80,9 @@ impl AppState {
         let (deleter, uploader, scanner, [scanner_handle, deleter_handle, uploader_handle]) =
             Self::init_data_uploads(layout, http_client.clone(), token_mngr.clone()).await?;
 
-        // initialize the calibration uploader
-        let (calibration_mngr, calibration_mngr_handle) =
-            Self::init_calibration_mngr(layout, http_client.clone(), token_mngr.clone()).await;
+        // initialize the calibration manager
+        let (cal_mngr, cal_mngr_handle) =
+            Self::init_cal_mngr(layout, http_client.clone(), token_mngr.clone()).await;
 
         let shutdown_handle = async move {
             let handles = [
@@ -92,7 +92,7 @@ impl AppState {
                 scanner_handle,
                 deleter_handle,
                 uploader_handle,
-                calibration_mngr_handle,
+                cal_mngr_handle,
             ];
             futures::future::join(futures::future::join_all(handles), storage_handle).await;
         };
@@ -107,7 +107,7 @@ impl AppState {
                 uploader,
                 token_mngr,
                 event_hub,
-                calibration_mngr,
+                cal_mngr,
             },
             shutdown_handle,
         ))
@@ -258,12 +258,12 @@ impl AppState {
         Ok((Arc::new(uploader), handle))
     }
 
-    /// Spawn the calibration uploader, which sends reports to Miru with the
+    /// Spawn the calibration manager, which sends reports to Miru with the
     /// token manager's token and owns the latest calibrations store. A
     /// queue-file error degrades to a queue kept in memory (fail-open); the
     /// report files a previous boot queued are kept for the next boot that
     /// opens the queue file. A latest-index error degrades the same way.
-    async fn init_calibration_mngr(
+    async fn init_cal_mngr(
         layout: &disk::Layout,
         http_client: Arc<http::Client>,
         token_mngr: Arc<authn::TokenManager>,
@@ -302,7 +302,7 @@ impl AppState {
             }
         };
 
-        let args = calibrations::UploaderArgs {
+        let args = calibrations::CalMngrArgs {
             snapshot_file,
             reports: layout.reports(),
             latest: calibrations::LatestStore::new(
@@ -315,17 +315,17 @@ impl AppState {
             sleep_fn: tokio::time::sleep,
             now_fn: chrono::Utc::now,
         };
-        let (uploader, handle) = calibrations::CalibrationManager::spawn(64, args);
-        (Arc::new(uploader), handle)
+        let (cal_mngr, handle) = calibrations::CalibrationManager::spawn(64, args);
+        (Arc::new(cal_mngr), handle)
     }
 
     pub async fn shutdown(&self) -> Result<(), server::ServerErr> {
         let mut first_err: Option<server::ServerErr> = None;
 
-        // shutdown the calibration uploader first: nothing else in the app
+        // shutdown the calibration manager first: nothing else in the app
         // depends on it
-        if let Err(e) = self.calibration_mngr.shutdown().await {
-            tracing::error!("failed to shutdown calibration uploader: {e}");
+        if let Err(e) = self.cal_mngr.shutdown().await {
+            tracing::error!("failed to shutdown calibration manager: {e}");
             first_err.get_or_insert(e.into());
         }
 

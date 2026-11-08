@@ -1,4 +1,4 @@
-//! Calibration intake: stamping a report and handing it to the uploader.
+//! Calibration intake: stamping a report and handing it to the calibration manager.
 
 // internal crates
 use crate::mocks::calibration_sender::Step;
@@ -62,7 +62,7 @@ async fn stamps_no_deployment_when_none_is_deployed() {
 #[tokio::test]
 async fn a_deployments_cache_error_queues_nothing() {
     let f = Fixture::new().await;
-    // a report queued by mistake would stay in flight, so `len` would count it
+    // a report queued by mistake would stay in flight, so `num_queued_uploads` would count it
     let (_hold, hang) = oneshot::channel();
     f.sender.push(Step::Hang(hang));
     f.deployments.shutdown().await.unwrap();
@@ -70,11 +70,11 @@ async fn a_deployments_cache_error_queues_nothing() {
     let err = f.create(params()).await.unwrap_err();
 
     assert!(matches!(err, ServiceErr::DiskErr(_)), "{err:?}");
-    assert_eq!(f.uploader.len().await.unwrap(), 0);
+    assert_eq!(f.cal_mngr.num_queued_uploads().await.unwrap(), 0);
 }
 
 #[tokio::test]
-async fn an_uploader_rejection_fails_intake() {
+async fn a_cal_mngr_rejection_fails_intake() {
     let options = UploaderOptions {
         max_report_bytes: 100,
         ..UploaderOptions::default()
@@ -107,5 +107,5 @@ async fn a_full_latest_store_fails_intake() {
         ),
         "{err:?}"
     );
-    assert_eq!(f.uploader.len().await.unwrap(), 0);
+    assert_eq!(f.cal_mngr.num_queued_uploads().await.unwrap(), 0);
 }
