@@ -75,7 +75,7 @@ where
                 break;
             }
         }
-        info!("calibrations: uploader shutdown complete");
+        info!("calibrations: manager shutdown complete");
     }
 
     /// Upload the report queued as `entry` and settle it. A shutdown
@@ -206,10 +206,10 @@ impl CalibrationManager {
             .await
     }
 
-    /// Stop the uploader, dropping any in-flight upload. Queued reports,
+    /// Stop the manager, dropping any in-flight upload. Queued reports,
     /// including the interrupted one, stay on disk for the next boot.
     pub async fn shutdown(&self) -> Result<(), CalibrationsErr> {
-        info!("calibrations: shutting down uploader...");
+        info!("calibrations: shutting down manager...");
         self.send_command("shutdown", |respond_to| Command::Shutdown { respond_to })
             .await
     }
@@ -221,14 +221,14 @@ impl CalibrationManager {
     ) -> Result<R, CalibrationsErr> {
         let (send, recv) = oneshot::channel();
         self.sender.send(make_cmd(send)).await.map_err(|e| {
-            error!("calibrations: failed to send the {op} command to the uploader: {e}");
+            error!("calibrations: failed to send the {op} command to the manager: {e}");
             CalibrationsErr::SendActorMessageErr(SendActorMessageErr {
                 source: Box::new(e),
                 trace: trace!(),
             })
         })?;
         recv.await.map_err(|e| {
-            error!("calibrations: failed to receive the {op} response from the uploader: {e}");
+            error!("calibrations: failed to receive the {op} response from the manager: {e}");
             CalibrationsErr::ReceiveActorMessageErr(ReceiveActorMessageErr {
                 source: Box::new(e),
                 trace: trace!(),
