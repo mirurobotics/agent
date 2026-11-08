@@ -12,13 +12,12 @@ use std::time::Duration;
 use crate::mocks::calibration_sender::{MockCalibrationSender, Step};
 use crate::mocks::error::SleepController;
 use crate::test_utils::calibrations::{
-    calibrations_layout, received_at, report, report_id, reports_layout,
+    calibrations_layout, latest_store, received_at, report, report_id, reports_layout,
 };
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::calibrations::{
     latest::DEFAULT_CAPACITY, CalMngrArgs, CalibrationManager, CalibrationsErr, LatestContent,
-    LatestFilter, LatestIndexFile, LatestStore, ListedEntry, Queue, QueueSnapshotFile,
-    UploaderOptions,
+    LatestFilter, ListedEntry, Queue, QueueSnapshotFile, UploaderOptions,
 };
 use miru_agent::disk::layout::{CalibrationReportsLayout, CalibrationsLayout};
 use miru_agent::filesys::{dirs, files, File, PathExt, WriteOptions};
@@ -37,7 +36,7 @@ use uuid::Uuid;
 const HANG_GUARD: Duration = Duration::from_secs(60);
 
 struct Harness {
-    _dir: test_dirs::TempDir,
+    dir: test_dirs::TempDir,
     layout: CalibrationReportsLayout,
     latest: CalibrationsLayout,
     sender: Arc<MockCalibrationSender>,
@@ -57,7 +56,7 @@ impl Harness {
         let latest = calibrations_layout(&dir);
         let (sender, started) = MockCalibrationSender::new();
         Self {
-            _dir: dir,
+            dir,
             layout,
             latest,
             sender,
@@ -75,12 +74,6 @@ impl Harness {
             .unwrap()
     }
 
-    async fn latest_index(&self) -> LatestIndexFile {
-        LatestIndexFile::new_with_default(self.latest.index(), Default::default())
-            .await
-            .unwrap()
-    }
-
     /// The number of reports in the queue file, as the next boot would load it.
     async fn queued_on_disk(&self) -> usize {
         Queue::from_snapshot(1000, self.snapshot_file().await, Persistence::Durable).len()
@@ -93,17 +86,7 @@ impl Harness {
 
     async fn spawn_with(&mut self, options: UploaderOptions) {
         let snapshot_file = Some(self.snapshot_file().await);
-        let latest_index = Some(self.latest_index().await);
-        self.spawn_on(snapshot_file, latest_index, options);
-    }
-
-    fn spawn_on(
-        &mut self,
-        snapshot_file: Option<QueueSnapshotFile>,
-        latest_index: Option<LatestIndexFile>,
-        options: UploaderOptions,
-    ) {
-        let latest = LatestStore::new(latest_index, self.latest.contents(), DEFAULT_CAPACITY);
+        let latest = latest_store(&self.dir, DEFAULT_CAPACITY).await;
         let args = CalMngrArgs {
             snapshot_file,
             reports: self.layout.reports(),
@@ -249,24 +232,6 @@ async fn startup_prunes_orphaned_report_files() {
 }
 
 #[tokio::test]
-async fn startup_prunes_unreferenced_latest_contents() {
-    let mut h = Harness::new();
-    preloaded(&h, &["a"]).await;
-    let orphan = h.latest.contents().file(&Uuid::new_v4().to_string());
-    files::write_string(&orphan, "{}", WriteOptions::OVERWRITE_ATOMIC)
-        .await
-        .unwrap();
-    let (_hold, hang) = oneshot::channel();
-    h.sender.push(Step::Hang(hang));
-
-    h.spawn().await;
-
-    // the worker prunes before it starts the first upload
-    h.await_started().await;
-    assert!(!orphan.exists());
-}
-
-#[tokio::test]
 async fn drains_reports_buffered_before_start_in_order() {
     let mut h = Harness::new();
     preloaded(&h, &["a", "b", "c"]).await;
@@ -336,19 +301,21 @@ async fn latest_reads_are_served_during_an_upload() {
 #[tokio::test]
 async fn a_failed_store_write_queues_nothing() {
     let mut h = Harness::new();
-    // a regular file where the latest contents directory should be
-    let blocker = File::new(h.latest.contents().path().clone());
-    files::write_string(&blocker, "x", WriteOptions::OVERWRITE_ATOMIC)
-        .await
-        .unwrap();
     // a report left queued would hang here rather than upload and leave
     let (_hold, hang) = oneshot::channel();
     h.sender.push(Step::Hang(hang));
     h.spawn().await;
+    // a regular file where the latest contents directory should be
+    let contents = h.latest.contents();
+    dirs::delete(&contents).await.unwrap();
+    let blocker = File::new(contents.path().clone());
+    files::write_string(&blocker, "x", WriteOptions::OVERWRITE_ATOMIC)
+        .await
+        .unwrap();
 
     let err = guard(h.cal_mngr().report(report("a"))).await.unwrap_err();
 
-    assert!(matches!(err, CalibrationsErr::FileSysErr(_)), "{err:?}");
+    assert!(matches!(err, CalibrationsErr::CacheErr(_)), "{err:?}");
     assert_eq!(h.num_queued_uploads().await, 0);
     assert_eq!(h.queued_on_disk().await, 0);
     assert!(dirs::files(&h.layout.reports()).await.unwrap().is_empty());

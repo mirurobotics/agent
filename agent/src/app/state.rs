@@ -81,8 +81,10 @@ impl AppState {
             Self::init_data_uploads(layout, http_client.clone(), token_mngr.clone()).await?;
 
         // initialize the calibration manager
+        let latest =
+            calibrations::LatestStore::new(storage.calibrations.clone(), capacities.calibrations);
         let (cal_mngr, cal_mngr_handle) =
-            Self::init_cal_mngr(layout, http_client.clone(), token_mngr.clone()).await;
+            Self::init_cal_mngr(layout, latest, http_client.clone(), token_mngr.clone()).await;
 
         let shutdown_handle = async move {
             let handles = [
@@ -262,16 +264,16 @@ impl AppState {
     /// token manager's token and owns the latest calibrations store. A
     /// queue-file error degrades to a queue kept in memory (fail-open); the
     /// report files a previous boot queued are kept for the next boot that
-    /// opens the queue file. A latest-index error degrades the same way.
+    /// opens the queue file.
     async fn init_cal_mngr(
         layout: &disk::Layout,
+        latest: calibrations::LatestStore,
         http_client: Arc<http::Client>,
         token_mngr: Arc<authn::TokenManager>,
     ) -> (
         Arc<calibrations::CalibrationManager>,
         tokio::task::JoinHandle<()>,
     ) {
-        let latest_layout = layout.calibrations();
         let layout = layout.calibration_reports();
         let snapshot_file = match calibrations::QueueSnapshotFile::new_with_default(
             layout.queue(),
@@ -287,29 +289,11 @@ impl AppState {
                 None
             }
         };
-        let latest_index = match calibrations::LatestIndexFile::new_with_default(
-            latest_layout.index(),
-            Default::default(),
-        )
-        .await
-        {
-            Ok(file) => Some(file),
-            Err(e) => {
-                tracing::error!(
-                    "failed to initialize latest calibrations index file; latest calibrations will run without persistence: {e}"
-                );
-                None
-            }
-        };
 
         let args = calibrations::CalMngrArgs {
             snapshot_file,
             reports: layout.reports(),
-            latest: calibrations::LatestStore::new(
-                latest_index,
-                latest_layout.contents(),
-                calibrations::latest::DEFAULT_CAPACITY,
-            ),
+            latest,
             sender: Arc::new(calibrations::HttpSender::new(http_client, token_mngr)),
             options: calibrations::UploaderOptions::default(),
             sleep_fn: tokio::time::sleep,

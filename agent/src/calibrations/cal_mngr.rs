@@ -46,7 +46,7 @@ enum Command {
     },
     ListLatest {
         filter: LatestFilter,
-        respond_to: oneshot::Sender<LatestCalibrations>,
+        respond_to: oneshot::Sender<Result<LatestCalibrations, CalibrationsErr>>,
     },
     LatestContent {
         report_id: Uuid,
@@ -77,7 +77,6 @@ where
     N: Fn() -> DateTime<Utc> + Send + Sync + 'static,
 {
     async fn run(mut self) {
-        self.latest.prune_orphans().await;
         self.uploader.prune_orphans().await;
         loop {
             let flow = match self.uploader.next_attempt().await {
@@ -113,11 +112,10 @@ where
     /// stored. Size goes first, so an oversized report is a 413 even when the
     /// store is full.
     async fn enqueue(&mut self, report: Report) -> Result<(), CalibrationsErr> {
-        let data = report.data.as_bytes();
-        self.uploader.verify_size(data.len() as u64)?;
-        self.latest.verify_capacity(&report.metadata)?;
+        self.uploader.verify_size(report.data.len() as u64)?;
+        self.latest.verify_capacity(&report.metadata).await?;
         let id = self.uploader.enqueue(&report).await?;
-        if let Err(e) = self.latest.put(report.metadata, data).await {
+        if let Err(e) = self.latest.put(report.metadata, &report.data).await {
             self.uploader.remove(id).await;
             return Err(e);
         }
@@ -173,7 +171,7 @@ where
             Command::Len { respond_to } => respond(respond_to, self.uploader.len(), "len"),
             Command::ListLatest { filter, respond_to } => {
                 let queued = self.uploader.queued_report_ids();
-                let latest = self.latest.list(&filter, &queued);
+                let latest = self.latest.list(&filter, &queued).await;
                 respond(respond_to, latest, "list latest");
             }
             Command::LatestContent {
@@ -263,7 +261,7 @@ impl CalibrationManager {
             filter,
             respond_to,
         })
-        .await
+        .await?
     }
 
     /// The content of the latest entry for `report_id`.

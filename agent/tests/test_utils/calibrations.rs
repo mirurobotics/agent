@@ -8,9 +8,11 @@ use std::sync::Arc;
 // internal crates
 use super::filesys::dirs::TempDir;
 use miru_agent::calibrations::{
-    CalMngrArgs, CalibrationManager, LatestStore, Report, ReportMetadata, Sender, UploaderOptions,
+    latest::DEFAULT_CAPACITY, CalMngrArgs, CalibrationManager, LatestStore, Report,
+    ReportMetadata, Sender, UploaderOptions,
 };
 use miru_agent::disk::layout::{CalibrationReportsLayout, CalibrationsLayout};
+use miru_agent::disk::{CalibrationContent, CalibrationStor, Calibrations};
 use miru_agent::models::InstanceFormat;
 
 // external crates
@@ -57,10 +59,30 @@ pub fn calibrations_layout(dir: &TempDir) -> CalibrationsLayout {
     CalibrationsLayout::new(dir.to_dir().subdir("resources").subdir("calibrations"))
 }
 
-/// A calibration manager under `dir` that keeps its queue and latest store in
-/// memory, the store holding at most `latest_capacity` keys, and uploads
-/// through `sender`.
-pub fn cal_mngr<S: Sender + 'static>(
+/// The latest calibration caches under `dir`.
+pub async fn calibration_stor(dir: &TempDir) -> CalibrationStor {
+    let layout = calibrations_layout(dir);
+    let (meta, _) = Calibrations::spawn(64, layout.index(), DEFAULT_CAPACITY)
+        .await
+        .unwrap();
+    let (content, _) = CalibrationContent::spawn(64, layout.contents(), DEFAULT_CAPACITY)
+        .await
+        .unwrap();
+    CalibrationStor {
+        meta: Arc::new(meta),
+        content: Arc::new(content),
+    }
+}
+
+/// A latest store under `dir` holding at most `capacity` keys.
+pub async fn latest_store(dir: &TempDir, capacity: usize) -> LatestStore {
+    LatestStore::new(calibration_stor(dir).await, capacity)
+}
+
+/// A calibration manager under `dir` that keeps its queue in memory, holds at
+/// most `latest_capacity` keys in its latest store, and uploads through
+/// `sender`.
+pub async fn cal_mngr<S: Sender + 'static>(
     dir: &TempDir,
     sender: Arc<S>,
     options: UploaderOptions,
@@ -69,7 +91,7 @@ pub fn cal_mngr<S: Sender + 'static>(
     let args = CalMngrArgs {
         snapshot_file: None,
         reports: reports_layout(dir).reports(),
-        latest: LatestStore::new(None, calibrations_layout(dir).contents(), latest_capacity),
+        latest: latest_store(dir, latest_capacity).await,
         sender,
         options,
         sleep_fn: tokio::time::sleep,

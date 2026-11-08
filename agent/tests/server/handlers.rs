@@ -131,7 +131,8 @@ pub mod routes {
                 MockCalibrationSender::new().0,
                 options,
                 latest_capacity,
-            );
+            )
+            .await;
 
             let (shutdown_tx, _) = broadcast::channel::<()>(1);
             let state = Arc::new(State::new(

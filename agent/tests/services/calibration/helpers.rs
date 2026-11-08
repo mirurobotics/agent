@@ -7,11 +7,11 @@ use std::time::Duration;
 
 // internal crates
 use crate::mocks::calibration_sender::MockCalibrationSender;
-use crate::test_utils::calibrations::{calibrations_layout, received_at, reports_layout};
+use crate::test_utils::calibrations::{latest_store, received_at, reports_layout};
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::calibrations::{
-    latest::DEFAULT_CAPACITY, CalMngrArgs, CalibrationManager, LatestStore, QueueSnapshotFile,
-    Report, UploaderOptions,
+    latest::DEFAULT_CAPACITY, CalMngrArgs, CalibrationManager, QueueSnapshotFile, Report,
+    UploaderOptions,
 };
 use miru_agent::disk::{self, Layout};
 use miru_agent::models::{Deployment, DplActivity, InstanceFormat};
@@ -48,7 +48,7 @@ impl Fixture {
         let args = CalMngrArgs {
             snapshot_file: Some(snapshot_file),
             reports: calibrations.reports(),
-            latest: LatestStore::new(None, calibrations_layout(&dir).contents(), latest_capacity),
+            latest: latest_store(&dir, latest_capacity).await,
             sender: sender.clone(),
             options,
             sleep_fn: tokio::time::sleep,

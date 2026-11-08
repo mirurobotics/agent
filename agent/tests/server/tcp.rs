@@ -44,6 +44,13 @@ impl Fixture {
         let (event_hub, _handle) = EventHub::spawn(log_file, SpawnOptions::default())
             .await
             .unwrap();
+        let cal_mngr = cal_mngr(
+            &dir,
+            MockCalibrationSender::new().0,
+            UploaderOptions::default(),
+            DEFAULT_CAPACITY,
+        )
+        .await;
         let (shutdown_tx, _) = broadcast::channel::<()>(1);
 
         let state = Arc::new(State::new(
@@ -52,12 +59,7 @@ impl Fixture {
             syncer,
             Arc::new(token_mngr),
             event_hub,
-            Arc::new(cal_mngr(
-                &dir,
-                MockCalibrationSender::new().0,
-                UploaderOptions::default(),
-                DEFAULT_CAPACITY,
-            )),
+            Arc::new(cal_mngr),
             shutdown_tx.clone(),
         ));
         Self {

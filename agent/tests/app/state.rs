@@ -297,7 +297,8 @@ pub mod init {
 
         let (state, state_handle) = env.init().await.unwrap();
 
-        // the actor is spawned and its queue and latest index are seeded on disk
+        // the actor is spawned, its queue is seeded on disk, and storage seeds
+        // the latest index
         state.cal_mngr.num_queued_uploads().await.unwrap();
         assert!(env.layout.calibration_reports().queue().exists());
         assert!(env.layout.calibrations().index().exists());
@@ -324,27 +325,6 @@ pub mod init {
 
         // nothing replaced the blocking directory with a snapshot file
         assert!(queue.path().is_dir());
-    }
-
-    #[tokio::test]
-    async fn cal_mngr_degrades_when_latest_index_path_unwritable() {
-        let env = TestEnv::valid().await;
-        // a directory at the index FILE path makes
-        // LatestIndexFile::new_with_default fail on both read and create
-        let index = env.layout.calibrations().index();
-        dirs::create(&Dir::new(index.path().clone())).await.unwrap();
-
-        let (state, state_handle) = env.init().await.unwrap();
-
-        // fail-open: the agent boots and the store runs without persistence
-        let latest = state.cal_mngr.list_latest(Default::default());
-        latest.await.unwrap();
-
-        state.shutdown().await.unwrap();
-        state_handle.await;
-
-        // nothing replaced the blocking directory with an index file
-        assert!(index.path().is_dir());
     }
 }
 

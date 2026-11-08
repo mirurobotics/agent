@@ -1,42 +1,24 @@
 // standard crates
-use std::collections::{BTreeMap, HashSet};
+use std::collections::HashSet;
 
 // internal crates
+use crate::cache::CacheErr;
 use crate::calibrations::{
-    cleanup,
     errors::{CalibrationNotFoundErr, CalibrationStoreFullErr, CalibrationsErr},
     report::ReportMetadata,
 };
-use crate::filesys::{files, state_file::StateFile, Dir, File, FileSysErr, WriteOptions};
-use crate::models::{CalibrationUploadStatus, InstanceFormat, Patch};
+use crate::disk::CalibrationStor;
+use crate::filesys::Overwrite;
+use crate::models::{CalibrationUploadStatus, InstanceFormat};
 use crate::trace;
 
 // external crates
-use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 use uuid::Uuid;
 
 /// The most keys a [`LatestStore`] holds unless told otherwise.
 pub const DEFAULT_CAPACITY: usize = 1_000;
-
-/// What a latest entry is the newest report for.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct LatestKey {
-    pub component: String,
-    pub role: Option<String>,
-    pub aspect: Option<String>,
-}
-
-impl From<&ReportMetadata> for LatestKey {
-    fn from(metadata: &ReportMetadata) -> Self {
-        Self {
-            component: metadata.component.clone(),
-            role: metadata.role.clone(),
-            aspect: metadata.aspect.clone(),
-        }
-    }
-}
 
 /// The newest report for one key and whether it reached Miru.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -58,54 +40,6 @@ impl LatestEntry {
         }
     }
 }
-
-/// The latest store's index: one entry per key.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct LatestIndex {
-    /// When the store was last loaded from Miru; `None` until then.
-    #[serde(default)]
-    pub loaded_at: Option<DateTime<Utc>>,
-    #[serde(with = "entry_list")]
-    pub entries: BTreeMap<LatestKey, LatestEntry>,
-}
-
-/// Saves the index's entries as a list, since a JSON object's keys are
-/// strings, and keys each one by its metadata on load.
-mod entry_list {
-    // standard crates
-    use std::collections::BTreeMap;
-
-    // internal crates
-    use super::{LatestEntry, LatestKey};
-
-    // external crates
-    use serde::{Deserialize, Deserializer, Serializer};
-
-    pub fn serialize<S: Serializer>(
-        entries: &BTreeMap<LatestKey, LatestEntry>,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
-        serializer.collect_seq(entries.values())
-    }
-
-    pub fn deserialize<'de, D: Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<BTreeMap<LatestKey, LatestEntry>, D::Error> {
-        let entries = Vec::<LatestEntry>::deserialize(deserializer)?;
-        let keyed = entries
-            .into_iter()
-            .map(|e| (LatestKey::from(&e.metadata), e));
-        Ok(keyed.collect())
-    }
-}
-
-impl Patch<LatestIndex> for LatestIndex {
-    fn patch(&mut self, patch: LatestIndex) {
-        *self = patch;
-    }
-}
-
-pub type LatestIndexFile = StateFile<LatestIndex, LatestIndex>;
 
 /// Which entries to list. Empty means any; `None` in `role`/`aspect` matches an
 /// entry without one.
@@ -145,40 +79,26 @@ pub struct LatestContent {
     pub data: Vec<u8>,
 }
 
-/// The newest calibration for each key: an index plus one content file per
-/// entry, `<contents>/<report_id>`. It never evicts; a report replaces its
-/// key's entry, and a new key past the capacity is rejected.
+/// The newest calibration for each component, role and aspect, kept in the
+/// calibration caches: one entry per key in the metadata cache, and each
+/// entry's data in the content cache under its `report_id`. A report replaces
+/// its key's entry, and a new key past the capacity is rejected rather than
+/// evicting another.
 pub struct LatestStore {
-    index: LatestIndex,
-    index_file: Option<LatestIndexFile>,
-    contents: Dir,
+    stor: CalibrationStor,
     capacity: usize,
 }
 
 impl LatestStore {
-    /// Without an `index_file` the index lives in memory, so it starts empty at
-    /// the next restart.
-    pub fn new(index_file: Option<LatestIndexFile>, contents: Dir, capacity: usize) -> Self {
-        let index = match &index_file {
-            Some(file) => (*file.read()).clone(),
-            None => LatestIndex::default(),
-        };
-        Self {
-            index,
-            index_file,
-            contents,
-            capacity,
-        }
+    pub fn new(stor: CalibrationStor, capacity: usize) -> Self {
+        Self { stor, capacity }
     }
 
     /// Ok when the key `metadata` reports already has an entry or there is
     /// room for a new key.
-    pub fn verify_capacity(
-        &self,
-        metadata: &ReportMetadata,
-    ) -> Result<(), CalibrationStoreFullErr> {
-        let entries = &self.index.entries;
-        if entries.len() < self.capacity || entries.contains_key(&LatestKey::from(metadata)) {
+    pub async fn verify_capacity(&self, metadata: &ReportMetadata) -> Result<(), CalibrationsErr> {
+        let entries = self.stor.meta.entry_map().await?;
+        if entries.len() < self.capacity || entries.contains_key(&key(metadata)) {
             return Ok(());
         }
         let err = CalibrationStoreFullErr {
@@ -186,112 +106,115 @@ impl LatestStore {
             trace: trace!(),
         };
         warn!("calibrations: rejecting report: {err}");
-        Err(err)
+        Err(err.into())
     }
 
-    /// Make `metadata` its key's entry, not uploaded, with `data` as its content.
-    /// The content file is written before the index and the replaced entry's
-    /// content deleted after it, so a crash leaves at most a file no entry
-    /// names, which [`Self::prune_orphans`] deletes. On error nothing changed.
-    pub async fn put(
-        &mut self,
-        metadata: ReportMetadata,
-        data: &[u8],
-    ) -> Result<(), CalibrationsErr> {
-        self.verify_capacity(&metadata)?;
-        let file = self.content_file(metadata.report_id);
-        files::write_bytes(&file, data, WriteOptions::OVERWRITE_ATOMIC).await?;
-        let mut index = self.index.clone();
+    /// Make `metadata` its key's entry, not uploaded, with `data` as its
+    /// content. The content is written before the entry and the replaced
+    /// entry's content deleted after it, so a failure leaves at most content
+    /// that no entry names. On error the key's entry is unchanged.
+    pub async fn put(&self, metadata: ReportMetadata, data: &str) -> Result<(), CalibrationsErr> {
+        let key = key(&metadata);
+        let replaced = self.stor.meta.entry_map().await?.remove(&key);
+        let content_key = metadata.report_id.to_string();
+        let content = data.to_string();
+        self.stor
+            .content
+            .write(content_key.clone(), content, |_, _| false, Overwrite::Allow)
+            .await?;
         let entry = LatestEntry {
             metadata,
             is_uploaded: false,
         };
-        let replaced = index
-            .entries
-            .insert(LatestKey::from(&entry.metadata), entry);
-        if let Err(e) = self.persist(index.clone()).await {
-            cleanup::delete(&file).await;
+        let meta = &self.stor.meta;
+        if let Err(e) = meta.write(key, entry, |_, _| false, Overwrite::Allow).await {
+            self.delete_content(content_key).await;
             return Err(e.into());
         }
-        self.index = index;
         if let Some(replaced) = replaced {
-            cleanup::delete(&self.content_file(replaced.metadata.report_id)).await;
+            let replaced_id = replaced.value.metadata.report_id;
+            self.delete_content(replaced_id.to_string()).await;
         }
         Ok(())
     }
 
     /// Mark the entry for `report_id` uploaded. A newer report may have
-    /// replaced it, or `reset` wiped the store; then this does nothing. A
-    /// failed index write is logged; a restart before the next write loses
-    /// the mark, and the entry is then listed as dropped.
-    pub async fn mark_uploaded(&mut self, report_id: Uuid) {
-        let mut entries = self.index.entries.values_mut();
-        let Some(entry) = entries.find(|e| e.metadata.report_id == report_id) else {
-            return;
-        };
-        entry.is_uploaded = true;
-        let index = self.index.clone();
-        if let Err(e) = self.persist(index).await {
+    /// replaced it; then this does nothing. A failure is logged, and the entry
+    /// then lists as dropped.
+    pub async fn mark_uploaded(&self, report_id: Uuid) {
+        if let Err(e) = self.try_mark_uploaded(report_id).await {
             warn!("calibrations: failed to mark report {report_id} uploaded: {e}");
         }
     }
 
-    /// The entries `filter` matches, in key order. `queued` holds the
-    /// `report_id` of every report still in the upload queue.
-    pub fn list(&self, filter: &LatestFilter, queued: &HashSet<Uuid>) -> LatestCalibrations {
-        let entries = self.index.entries.values();
-        let matched = entries.filter(|e| filter.is_match(&e.metadata));
-        let listed = matched.map(|e| ListedEntry {
-            metadata: e.metadata.clone(),
+    async fn try_mark_uploaded(&self, report_id: Uuid) -> Result<(), CacheErr> {
+        let entries = self.stor.meta.value_map().await?;
+        let mut entries = entries.into_iter();
+        let Some((key, mut entry)) = entries.find(|(_, e)| e.metadata.report_id == report_id)
+        else {
+            return Ok(());
+        };
+        entry.is_uploaded = true;
+        let meta = &self.stor.meta;
+        meta.write(key, entry, |_, _| false, Overwrite::Allow).await
+    }
+
+    /// The entries `filter` matches, ordered by component, role and aspect.
+    /// `queued` holds the `report_id` of every report still in the upload
+    /// queue.
+    pub async fn list(
+        &self,
+        filter: &LatestFilter,
+        queued: &HashSet<Uuid>,
+    ) -> Result<LatestCalibrations, CalibrationsErr> {
+        let mut entries = self.stor.meta.values().await?;
+        entries.retain(|e| filter.is_match(&e.metadata));
+        entries.sort_by(|a, b| key_parts(&a.metadata).cmp(&key_parts(&b.metadata)));
+        let listed = entries.into_iter().map(|e| ListedEntry {
             upload_status: e.upload_status(queued),
+            metadata: e.metadata,
         });
-        LatestCalibrations {
-            is_confirmed: self.index.loaded_at.is_some(),
+        Ok(LatestCalibrations {
+            // nothing loads the store from Miru yet
+            is_confirmed: false,
             entries: listed.collect(),
-        }
+        })
     }
 
     /// The content of the entry for `report_id`. Not found unless an entry has
-    /// that `report_id` and its content file exists.
+    /// that `report_id` and its content exists.
     pub async fn content(&self, report_id: Uuid) -> Result<LatestContent, CalibrationsErr> {
-        let mut entries = self.index.entries.values();
+        let entries = self.stor.meta.values().await?;
+        let mut entries = entries.into_iter();
         let Some(entry) = entries.find(|e| e.metadata.report_id == report_id) else {
             return Err(not_found(report_id));
         };
-        match files::read_bytes(&self.content_file(report_id)).await {
-            Ok(data) => Ok(LatestContent {
-                format: entry.metadata.format,
-                data,
-            }),
-            Err(FileSysErr::PathDoesNotExistErr(_)) => Err(not_found(report_id)),
-            Err(e) => Err(e.into()),
-        }
+        let content = self.stor.content.read_optional(report_id.to_string());
+        let Some(data) = content.await? else {
+            return Err(not_found(report_id));
+        };
+        Ok(LatestContent {
+            format: entry.metadata.format,
+            data: data.into_bytes(),
+        })
     }
 
-    /// Delete content files no entry names, left by a crash during
-    /// [`Self::put`]. Failures are logged and retried on the next boot. An
-    /// in-memory store prunes nothing: the index file it couldn't open may
-    /// still name these files.
-    pub async fn prune_orphans(&self) {
-        if self.index_file.is_none() {
-            return;
-        }
-        let entries = self.index.entries.values();
-        let named = entries.map(|e| e.metadata.report_id.to_string());
-        cleanup::prune(&self.contents, &named.collect()).await;
-    }
-
-    /// Write `index` to the index file, if there is one.
-    async fn persist(&mut self, index: LatestIndex) -> Result<(), FileSysErr> {
-        match &mut self.index_file {
-            Some(file) => file.write(index).await,
-            None => Ok(()),
+    /// Delete the content under `content_key`, logging a failure.
+    async fn delete_content(&self, content_key: String) {
+        if let Err(e) = self.stor.content.delete(content_key.clone()).await {
+            warn!("calibrations: failed to delete latest content {content_key}: {e}");
         }
     }
+}
 
-    fn content_file(&self, report_id: Uuid) -> File {
-        self.contents.file(&report_id.to_string())
-    }
+/// The metadata cache's key for `metadata`: its component, role and aspect as
+/// a JSON array, so no two keys collide.
+fn key(metadata: &ReportMetadata) -> String {
+    serde_json::json!(key_parts(metadata)).to_string()
+}
+
+fn key_parts(metadata: &ReportMetadata) -> (&String, &Option<String>, &Option<String>) {
+    (&metadata.component, &metadata.role, &metadata.aspect)
 }
 
 /// Whether `value` is in `allowed`, where an empty list allows any value.

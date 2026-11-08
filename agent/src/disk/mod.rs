@@ -3,6 +3,7 @@ use std::future::Future;
 use std::sync::Arc;
 
 pub mod agent_version;
+pub mod calibrations;
 pub mod config_instances;
 pub mod deployments;
 pub mod device;
@@ -16,6 +17,7 @@ pub mod settings;
 pub mod setup;
 pub mod system_metadata;
 
+pub use self::calibrations::{CalibrationContent, Calibrations};
 pub use self::config_instances::{CfgInstContent, CfgInsts};
 pub use self::deployments::{Deployments, DplEntry};
 pub use self::device::{activation_state, assert_activated, resolve_device_id, Activation, Device};
@@ -44,6 +46,7 @@ pub struct Capacities {
     pub releases: usize,
     pub file_rules: usize,
     pub git_commits: usize,
+    pub calibrations: usize,
 }
 
 impl Default for Capacities {
@@ -55,6 +58,7 @@ impl Default for Capacities {
             releases: 1000,
             file_rules: 1000,
             git_commits: 100,
+            calibrations: crate::calibrations::latest::DEFAULT_CAPACITY,
         }
     }
 }
@@ -80,6 +84,12 @@ impl CfgInstStor {
 }
 
 #[derive(Clone, Debug)]
+pub struct CalibrationStor {
+    pub meta: Arc<Calibrations>,
+    pub content: Arc<CalibrationContent>,
+}
+
+#[derive(Clone, Debug)]
 pub struct Storage {
     pub device: Arc<DeviceStorage>,
     pub cfg_insts: CfgInstStor,
@@ -87,6 +97,7 @@ pub struct Storage {
     pub releases: Arc<Releases>,
     pub file_rules: Arc<FileRules>,
     pub git_commits: Arc<GitCommits>,
+    pub calibrations: CalibrationStor,
 }
 
 impl Storage {
@@ -119,6 +130,10 @@ impl Storage {
             GitCommits::spawn(64, layout.git_commits(), capacities.git_commits).await?;
         let git_commits = Arc::new(git_commit_stor);
 
+        // latest calibrations (metadata + content)
+        let (calibrations, calibration_handles) =
+            init_calibration_storage(layout, capacities).await?;
+
         let shutdown_handle = async move {
             let mut handles = vec![device_handle];
             handles.extend(cfg_inst_handles);
@@ -128,6 +143,7 @@ impl Storage {
                 file_rule_handle,
                 git_commit_handle,
             ]);
+            handles.extend(calibration_handles);
 
             futures::future::join_all(handles).await;
         };
@@ -140,6 +156,7 @@ impl Storage {
                 releases,
                 file_rules,
                 git_commits,
+                calibrations,
             },
             shutdown_handle,
         ))
@@ -205,6 +222,16 @@ impl Storage {
             first_err,
             "git commits store",
             self.git_commits.shutdown().await,
+        );
+        first_err = record(
+            first_err,
+            "calibration metadata store",
+            self.calibrations.meta.shutdown().await,
+        );
+        first_err = record(
+            first_err,
+            "calibration content store",
+            self.calibrations.content.shutdown().await,
         );
 
         match first_err {
@@ -281,6 +308,26 @@ async fn init_cfg_inst_storage(
         cfg_insts,
         [cfg_inst_stor_handle, cfg_inst_content_stor_handle],
     ))
+}
+
+async fn init_calibration_storage(
+    layout: &StorLayout,
+    capacities: Capacities,
+) -> Result<(CalibrationStor, [JoinHandle<()>; 2]), StorErr> {
+    let calibrations_layout = layout.calibrations();
+    let (meta, meta_handle) =
+        Calibrations::spawn(64, calibrations_layout.index(), capacities.calibrations).await?;
+    let (content, content_handle) = CalibrationContent::spawn(
+        64,
+        calibrations_layout.contents(),
+        capacities.calibrations,
+    )
+    .await?;
+    let calibrations = CalibrationStor {
+        meta: Arc::new(meta),
+        content: Arc::new(content),
+    };
+    Ok((calibrations, [meta_handle, content_handle]))
 }
 
 async fn init_deployment_storage(
