@@ -34,10 +34,10 @@ fn an_oversized_report_is_413_with_its_cap() {
 
 #[test]
 fn a_full_store_is_507_with_its_cap() {
-    let err = CalibrationStoreFullErr {
+    let err = CalibrationsErr::from(CalibrationStoreFullErr {
         capacity: 1000,
         trace: miru_agent::trace!(),
-    };
+    });
 
     let want = Expected::new(Code::CalibrationStoreFull, HTTPCode::INSUFFICIENT_STORAGE)
         .with_params(json!({ "max_keys": 1000 }));
