@@ -439,9 +439,9 @@ pub async fn set_permissions(
 /// first wildcard) and matches each level below it against that level's
 /// pattern component, so it only enters directories that can hold a match. It
 /// never follows a symlink below the prefix: symlinked files and directories
-/// are skipped, so a match can't resolve outside the prefix. Directories that
-/// error mid-walk (e.g. unreadable ones) are skipped rather than aborting the
-/// walk.
+/// are skipped, and a `..` below the prefix matches nothing, so a match can't
+/// resolve outside the prefix. Directories that error mid-walk (e.g.
+/// unreadable ones) are skipped rather than aborting the walk.
 pub fn glob(pattern: &str) -> Result<Vec<File>, FileSysErr> {
     let (root, components) = parse_glob(pattern)?;
     let mut walk = GlobWalk {
@@ -473,7 +473,7 @@ const GLOB_META: [char; 3] = ['*', '?', '['];
 
 /// One path component of a glob pattern.
 enum GlobComponent {
-    /// A name with no wildcards, looked up directly.
+    /// A name with no wildcards, matched exactly.
     Literal(OsString),
     /// A name pattern such as `*.log`.
     Wildcard(glob::Pattern),
@@ -567,6 +567,10 @@ impl<'p> GlobWalk<'p> {
 /// directly, so it needs only traverse permission on `dir`.
 fn glob_entries(dir: &Path, component: &GlobComponent) -> Vec<(PathBuf, FileType)> {
     if let GlobComponent::Literal(name) = component {
+        // `..` would lead the walk back out of the prefix
+        if name == ".." {
+            return Vec::new();
+        }
         let path = dir.join(name);
         return match std::fs::symlink_metadata(&path) {
             Ok(metadata) => vec![(path, metadata.file_type())],

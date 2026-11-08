@@ -1289,6 +1289,19 @@ pub mod glob {
     }
 
     #[test]
+    fn parent_dir_below_prefix_matches_nothing() {
+        let tmp = test_dirs::temp("testing").unwrap();
+        fs::create_dir_all(tmp.path().join("data/x")).unwrap();
+        fs::create_dir_all(tmp.path().join("home")).unwrap();
+        fs::write(tmp.path().join("home/op.log"), b"x").unwrap();
+
+        let pattern = tmp.path().join("data/*/../../home/*.log");
+        let matches = files::glob(pattern.to_str().unwrap()).unwrap();
+
+        assert!(matches.is_empty());
+    }
+
+    #[test]
     fn recursive_wildcard_matches_any_depth() {
         let tmp = test_dirs::temp("testing").unwrap();
         fs::create_dir_all(tmp.path().join("x/y")).unwrap();
