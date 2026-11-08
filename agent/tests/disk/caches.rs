@@ -2,7 +2,7 @@
 use crate::test_utils::{calibrations::report, filesys::dirs as test_dirs};
 use miru_agent::calibrations::LatestStore;
 use miru_agent::disk::{Capacities, DiskErr, Layout, Storage};
-use miru_agent::filesys::{dirs, files, Overwrite, WriteOptions};
+use miru_agent::filesys::{dirs, files, Overwrite, PathExt, WriteOptions};
 use miru_agent::models::{self, device};
 
 // external crates
@@ -164,16 +164,24 @@ pub mod init {
     }
 
     #[tokio::test]
-    async fn init_fails_when_the_latest_index_is_a_directory() {
+    async fn init_keeps_the_latest_contents_when_the_index_cannot_be_read() {
         let dir = dirs::create_temp("testing").await.unwrap();
         let layout = Layout::new(dir);
-
-        // the index can be neither read, to prune the contents, nor opened
-        let index = layout.calibrations().root.subdir("index.json");
+        let calibrations = layout.calibrations();
+        let index = calibrations.root.subdir("index.json");
         dirs::create(&index).await.unwrap();
+        dirs::create(&calibrations.contents()).await.unwrap();
+        let name = format!("{}.json", Uuid::new_v4());
+        let content = calibrations.contents().file(&name);
+        files::write_string(&content, "x", WriteOptions::OVERWRITE_ATOMIC)
+            .await
+            .unwrap();
 
         let result = Storage::init(&layout, Capacities::default(), "test_device".to_string()).await;
-        assert!(result.is_err());
+
+        // with no index to check them against, no content is deleted
+        assert!(content.exists());
+        result.unwrap().0.shutdown().await.unwrap();
     }
 
     #[tokio::test]
