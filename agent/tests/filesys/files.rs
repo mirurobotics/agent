@@ -1413,7 +1413,14 @@ pub mod glob {
         std::os::unix::fs::symlink(outside.path(), y.join("logs")).unwrap();
         std::os::unix::fs::symlink(outside.path().join("op.log"), y.join("op.log")).unwrap();
 
-        for pattern in ["**/*.log", "*/*.log", "*/logs/*.log", "*/op.log"] {
+        for pattern in [
+            "**/*.log",
+            "*/*.log",
+            "*/logs/*.log",
+            "*/op.log",
+            "**/logs/*.log",
+            "**/op.log",
+        ] {
             let pattern = tmp.path().join(pattern);
             let matches = files::glob(pattern.to_str().unwrap()).unwrap();
             assert!(matches.is_empty(), "{pattern:?} matched {matches:?}");
