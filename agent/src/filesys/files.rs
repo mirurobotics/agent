@@ -114,7 +114,7 @@ pub async fn open_regular_file(file: &File) -> std::io::Result<TokioFile> {
     opts.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
     let f = opts.open(file.path()).await?;
     let meta = f.metadata().await?;
-    // the flag above also skips a placeholder's filter, so its stub would be read
+    // on Windows the flag also skips a placeholder's filter, so its stub would be read
     if !meta.is_file() || is_reparse_point(&meta) {
         let kind = std::io::ErrorKind::InvalidInput;
         return Err(std::io::Error::new(kind, "not a regular file"));
@@ -463,8 +463,8 @@ pub async fn set_permissions(
 /// never follows a symlink below the prefix: symlinked files and directories
 /// are skipped, and a `..` below the prefix matches nothing, so a match can't
 /// resolve outside the prefix. On Windows, entries behind any other reparse
-/// point, such as cloud placeholders, are skipped too. Directories that error mid-walk (e.g.
-/// unreadable ones) are skipped rather than aborting the walk.
+/// point, such as cloud placeholders, are skipped too. Directories that error
+/// mid-walk (e.g. unreadable ones) are skipped rather than aborting the walk.
 pub fn glob(pattern: &str) -> Result<Vec<File>, FileSysErr> {
     let (root, components) = parse_glob(pattern)?;
     let mut walk = GlobWalk {
@@ -587,8 +587,8 @@ impl<'p> GlobWalk<'p> {
 
 /// The entries of `dir` that `component` matches, with their own types: a
 /// symlink is reported as one, not as its target. A literal is looked up
-/// directly, so it needs only traverse permission on `dir`. Reparse points are
-/// left out, since `open_regular_file` refuses them.
+/// directly, so it needs only traverse permission on `dir`. On Windows, every
+/// reparse-point entry, file or directory, links included, is left out.
 fn glob_entries(dir: &Path, component: &GlobComponent) -> Vec<(PathBuf, FileType)> {
     if let GlobComponent::Literal(name) = component {
         // `..` would lead the walk back out of the prefix
@@ -597,9 +597,7 @@ fn glob_entries(dir: &Path, component: &GlobComponent) -> Vec<(PathBuf, FileType
         }
         let path = dir.join(name);
         return match std::fs::symlink_metadata(&path) {
-            Ok(meta) if !is_skipped_reparse_point(&path, &meta) => {
-                vec![(path, meta.file_type())]
-            }
+            Ok(meta) if !is_skipped_reparse_point(&path, &meta) => vec![(path, meta.file_type())],
             _ => Vec::new(),
         };
     }
