@@ -31,7 +31,11 @@ pub struct Fixture {
 
 impl Fixture {
     pub async fn new() -> Self {
-        Self::with_options(UploaderOptions::default(), Capacities::default().calibrations).await
+        Self::with_options(
+            UploaderOptions::default(),
+            Capacities::default().calibrations,
+        )
+        .await
     }
 
     /// A fixture whose calibration manager takes `options` and whose latest store holds

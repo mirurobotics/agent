@@ -152,9 +152,7 @@ pub mod init {
             .unwrap();
         storage.shutdown().await.unwrap();
 
-        let (storage, _) = Storage::init(&layout, capacities, device_id)
-            .await
-            .unwrap();
+        let (storage, _) = Storage::init(&layout, capacities, device_id).await.unwrap();
 
         let entries = storage.calibrations.meta.values().await.unwrap();
         let reported: Vec<_> = entries.into_iter().map(|e| e.metadata).collect();
