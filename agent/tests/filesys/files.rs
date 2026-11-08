@@ -485,6 +485,22 @@ pub mod sha256 {
             FileSysErr::PathDoesNotExistErr { .. }
         ));
     }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn refuses_symlink() {
+        let dir = test_dirs::temp("testing").unwrap();
+        let target = dir.file("target");
+        files::write_string(&target, "secret", WriteOptions::default())
+            .await
+            .unwrap();
+        let link = dir.file("link");
+        std::os::unix::fs::symlink(target.path(), link.path()).unwrap();
+        assert!(matches!(
+            files::sha256(&link).await.unwrap_err(),
+            FileSysErr::OpenFileErr { .. }
+        ));
+    }
 }
 
 pub mod sha256_and_crc32c {
@@ -1236,6 +1252,102 @@ pub mod glob {
 
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0], filesys::File::new(file_path));
+    }
+
+    #[test]
+    fn wildcard_directory_component() {
+        let tmp = test_dirs::temp("testing").unwrap();
+        fs::create_dir_all(tmp.path().join("a/logs")).unwrap();
+        fs::create_dir_all(tmp.path().join("b/logs/deeper")).unwrap();
+        let a = tmp.path().join("a/logs/1.log");
+        let b = tmp.path().join("b/logs/2.log");
+        fs::write(&a, b"x").unwrap();
+        fs::write(&b, b"x").unwrap();
+        fs::write(tmp.path().join("b/logs/deeper/3.log"), b"x").unwrap();
+
+        let pattern = tmp.path().join("*/logs/*.log");
+        let matches = files::glob(pattern.to_str().unwrap()).unwrap();
+
+        assert_eq!(matches, vec![filesys::File::new(a), filesys::File::new(b)]);
+    }
+
+    #[test]
+    fn recursive_wildcard_matches_any_depth() {
+        let tmp = test_dirs::temp("testing").unwrap();
+        fs::create_dir_all(tmp.path().join("x/y")).unwrap();
+        let top = tmp.path().join("0.log");
+        let mid = tmp.path().join("x/1.log");
+        let deep = tmp.path().join("x/y/2.log");
+        for path in [&top, &mid, &deep] {
+            fs::write(path, b"x").unwrap();
+        }
+        fs::write(tmp.path().join("x/y/2.txt"), b"x").unwrap();
+
+        let pattern = tmp.path().join("**/*.log");
+        let matches = files::glob(pattern.to_str().unwrap()).unwrap();
+
+        let expected: Vec<_> = [top, mid, deep]
+            .into_iter()
+            .map(filesys::File::new)
+            .collect();
+        assert_eq!(matches, expected);
+    }
+
+    #[test]
+    fn literal_path_matches_itself() {
+        let tmp = test_dirs::temp("testing").unwrap();
+        let path = tmp.path().join("data.txt");
+        fs::write(&path, b"x").unwrap();
+
+        let matches = files::glob(path.to_str().unwrap()).unwrap();
+
+        assert_eq!(matches, vec![filesys::File::new(path)]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_file_skipped() {
+        let tmp = test_dirs::temp("testing").unwrap();
+        let outside = test_dirs::temp("outside").unwrap();
+        let secret = outside.path().join("key.pem");
+        fs::write(&secret, b"secret").unwrap();
+        std::os::unix::fs::symlink(&secret, tmp.path().join("x.log")).unwrap();
+        let real = tmp.path().join("real.log");
+        fs::write(&real, b"x").unwrap();
+
+        let pattern = tmp.path().join("*.log");
+        let matches = files::glob(pattern.to_str().unwrap()).unwrap();
+
+        assert_eq!(matches, vec![filesys::File::new(real)]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_directory_not_walked() {
+        let tmp = test_dirs::temp("testing").unwrap();
+        let outside = test_dirs::temp("outside").unwrap();
+        fs::write(outside.path().join("op.log"), b"x").unwrap();
+        std::os::unix::fs::symlink(outside.path(), tmp.path().join("x")).unwrap();
+
+        for pattern in ["**/*.log", "*/*.log"] {
+            let pattern = tmp.path().join(pattern);
+            let matches = files::glob(pattern.to_str().unwrap()).unwrap();
+            assert!(matches.is_empty(), "{pattern:?} matched {matches:?}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlink_loop_terminates() {
+        let tmp = test_dirs::temp("testing").unwrap();
+        std::os::unix::fs::symlink(tmp.path(), tmp.path().join("loop")).unwrap();
+        let real = tmp.path().join("real.log");
+        fs::write(&real, b"x").unwrap();
+
+        let pattern = tmp.path().join("**/*.log");
+        let matches = files::glob(pattern.to_str().unwrap()).unwrap();
+
+        assert_eq!(matches, vec![filesys::File::new(real)]);
     }
 
     #[test]

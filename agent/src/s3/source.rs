@@ -17,20 +17,29 @@ pub struct Source {
 }
 
 impl Source {
-    /// Sizes `file` for upload. A missing file is [`S3Err::FileSysErr`]; any
-    /// other metadata failure is [`S3Err::LocalIoErr`].
+    /// Sizes `file` for upload. A missing file is [`S3Err::FileSysErr`]; a
+    /// symlink or any other metadata failure is [`S3Err::LocalIoErr`].
     pub async fn open(file: File, dst: &Object) -> Result<Self, S3Err> {
-        let metadata = tokio::fs::metadata(file.path()).await.map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                FileSysErr::PathDoesNotExistErr(PathDoesNotExistErr {
-                    path: file.path().clone(),
-                    trace: trace!(),
-                })
-                .into()
-            } else {
-                errors::map_body_io_err("open_source", dst, &file, e)
-            }
-        })?;
+        let metadata = tokio::fs::symlink_metadata(file.path())
+            .await
+            .map_err(|e| {
+                if e.kind() == std::io::ErrorKind::NotFound {
+                    FileSysErr::PathDoesNotExistErr(PathDoesNotExistErr {
+                        path: file.path().clone(),
+                        trace: trace!(),
+                    })
+                    .into()
+                } else {
+                    errors::map_body_io_err("open_source", dst, &file, e)
+                }
+            })?;
+        if metadata.file_type().is_symlink() {
+            let e = std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "refusing to upload a symlink",
+            );
+            return Err(errors::map_body_io_err("open_source", dst, &file, e));
+        }
         Ok(Self {
             file,
             size: metadata.len(),
@@ -70,5 +79,32 @@ impl Source {
         gcs::content_md5(range)
             .await
             .map_err(|e| errors::map_body_io_err(operation, dst, &self.file, e))
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use crate::s3::store::tests::{obj, temp_file_with};
+
+    #[tokio::test]
+    async fn open_refuses_symlink() {
+        let target = temp_file_with(b"secret").await;
+        let dir = tempfile::tempdir().unwrap();
+        let link = dir.path().join("x.log");
+        std::os::unix::fs::symlink(target.to_file().path(), &link).unwrap();
+
+        let err = Source::open(File::new(link), &obj("k"))
+            .await
+            .err()
+            .unwrap();
+        assert!(matches!(err, S3Err::LocalIoErr(_)), "got {err:?}");
+    }
+
+    #[tokio::test]
+    async fn open_sizes_regular_file() {
+        let tf = temp_file_with(b"hello").await;
+        let src = Source::open(tf.to_file(), &obj("k")).await.unwrap();
+        assert_eq!(src.size, 5);
     }
 }

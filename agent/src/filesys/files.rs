@@ -1,5 +1,6 @@
 // standard crates
 use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 // internal crates
@@ -68,8 +69,15 @@ pub async fn sha256_and_crc32c(file: &File) -> Result<(String, u32), FileSysErr>
 }
 
 /// Reads `file` through a fixed 8 KiB buffer, passing each chunk to `on_chunk`.
+/// A symlink is refused (`O_NOFOLLOW`) so hashing never reads through a link
+/// planted in a watched directory.
 async fn read_chunks(file: &File, mut on_chunk: impl FnMut(&[u8])) -> Result<(), FileSysErr> {
-    let mut f = TokioFile::open(file.path())
+    let mut open_opts = tokio::fs::OpenOptions::new();
+    open_opts.read(true);
+    #[cfg(unix)]
+    open_opts.custom_flags(nix::libc::O_NOFOLLOW);
+    let mut f = open_opts
+        .open(file.path())
         .await
         .map_err(|e| map_io_err_for_open(e, file))?;
 
@@ -411,28 +419,92 @@ pub async fn set_permissions(
     Ok(())
 }
 
-/// Returns the regular files matching a shell-style glob `pattern`.
+/// Returns the regular files matching a shell-style glob `pattern`, sorted by path.
 ///
 /// A pattern-syntax error (an invalid glob) returns [`FileSysErr::InvalidGlobErr`].
-/// Entries that error mid-traversal (e.g. an unreadable directory) are skipped
-/// rather than aborting the walk (skip-and-continue). Matching follows symlinks
-/// and returns only regular files (per [`Path::is_file`]), so directories are
-/// excluded from the results.
+/// The walk starts at the pattern's literal prefix (the directories before the
+/// first wildcard) and never follows a symlink below it: symlinked files and
+/// directories are skipped, so a match can't resolve outside the prefix.
+/// Directories that error mid-walk (e.g. unreadable ones) are skipped rather
+/// than aborting the walk.
 pub fn glob(pattern: &str) -> Result<Vec<File>, FileSysErr> {
+    compile_glob(pattern)?;
+    let matcher = glob::Pattern::new(pattern).map_err(|e| {
+        FileSysErr::InvalidGlobErr(InvalidGlobErr {
+            pattern: pattern.to_string(),
+            source: Box::new(e),
+            trace: trace!(),
+        })
+    })?;
+    let (root, max_depth) = glob_root(pattern);
+    let walk = GlobWalk {
+        matcher: &matcher,
+        max_depth,
+    };
     let mut matches = Vec::new();
+    walk.visit(Path::new(root), 1, &mut matches);
+    matches.sort();
+    Ok(matches.into_iter().map(File::new).collect())
+}
 
-    for entry in compile_glob(pattern)? {
-        let path = match entry {
-            Ok(path) => path,
-            Err(_) => continue,
-        };
-        if !path.is_file() {
-            continue;
+const GLOB_META: [char; 3] = ['*', '?', '['];
+
+/// The directory a walk for `pattern` starts at, and how many levels below it a
+/// match can sit (`None` when a `**` makes the depth unbounded).
+fn glob_root(pattern: &str) -> (&str, Option<usize>) {
+    let first_meta = pattern.find(GLOB_META).unwrap_or(pattern.len());
+    let root = match pattern[..first_meta].rfind('/') {
+        Some(0) => "/",
+        Some(i) => &pattern[..i],
+        None => ".",
+    };
+    let rest = pattern[root.len()..].trim_start_matches('/');
+    if rest.contains("**") {
+        return (root, None);
+    }
+    (
+        root,
+        Some(rest.split('/').filter(|c| !c.is_empty()).count()),
+    )
+}
+
+struct GlobWalk<'a> {
+    matcher: &'a glob::Pattern,
+    max_depth: Option<usize>,
+}
+
+impl GlobWalk<'_> {
+    fn options() -> glob::MatchOptions {
+        // match component by component, like glob::glob's own walk
+        glob::MatchOptions {
+            require_literal_separator: true,
+            ..glob::MatchOptions::new()
         }
-        matches.push(File::new(path));
     }
 
-    Ok(matches)
+    fn visit(&self, dir: &Path, depth: usize, matches: &mut Vec<PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            // DirEntry::file_type doesn't follow symlinks
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            let path = match dir == Path::new(".") {
+                true => PathBuf::from(entry.file_name()),
+                false => entry.path(),
+            };
+            if file_type.is_dir() {
+                if self.max_depth.is_none_or(|max| depth < max) {
+                    self.visit(&path, depth + 1, matches);
+                }
+            } else if file_type.is_file() && self.matcher.matches_path_with(&path, Self::options())
+            {
+                matches.push(path);
+            }
+        }
+    }
 }
 
 /// Checks that `pattern` is a glob [`glob`] accepts, without walking the
