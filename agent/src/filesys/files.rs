@@ -1,4 +1,5 @@
 // standard crates
+use std::ffi::{OsStr, OsString};
 use std::fs::FileType;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -442,17 +443,17 @@ pub async fn set_permissions(
 /// error mid-walk (e.g. unreadable ones) are skipped rather than aborting the
 /// walk.
 pub fn glob(pattern: &str) -> Result<Vec<File>, FileSysErr> {
-    let (root, patterns) = parse_glob(pattern)?;
+    let (root, components) = parse_glob(pattern)?;
     let mut walk = GlobWalk {
-        todo: vec![(root, patterns.as_slice())],
+        todo: vec![(root, components.as_slice())],
         matches: Vec::new(),
     };
-    while let Some((dir, patterns)) = walk.todo.pop() {
-        let Some(first) = patterns.first() else {
+    while let Some((dir, components)) = walk.todo.pop() {
+        let Some(first) = components.first() else {
             continue;
         };
         for (path, file_type) in glob_entries(&dir, first) {
-            walk.visit(path, file_type, patterns);
+            walk.visit(path, file_type, components);
         }
     }
     let mut matches = walk.matches;
@@ -470,20 +471,45 @@ pub fn validate_glob(pattern: &str) -> Result<(), FileSysErr> {
 
 const GLOB_META: [char; 3] = ['*', '?', '['];
 
-/// Splits `pattern` into its literal prefix, where a walk starts, and one
-/// compiled pattern per path component below it. The last component is
-/// always a pattern, since it names the files to match.
-fn parse_glob(pattern: &str) -> Result<(PathBuf, Vec<glob::Pattern>), FileSysErr> {
+/// One path component of a glob pattern.
+enum GlobComponent {
+    /// A name with no wildcards, looked up directly.
+    Literal(OsString),
+    /// A name pattern such as `*.log`.
+    Wildcard(glob::Pattern),
+    /// `**`: zero or more directories.
+    AnyDirs,
+}
+
+impl GlobComponent {
+    fn parse(name: &OsStr) -> Result<Self, glob::PatternError> {
+        let text = name.to_string_lossy();
+        if text == "**" {
+            return Ok(Self::AnyDirs);
+        }
+        if !text.contains(GLOB_META) {
+            return Ok(Self::Literal(name.to_os_string()));
+        }
+        glob::Pattern::new(&text).map(Self::Wildcard)
+    }
+
+    fn matches(&self, name: &OsStr) -> bool {
+        match self {
+            Self::Literal(literal) => name == literal,
+            Self::Wildcard(pattern) => pattern.matches_path(Path::new(name)),
+            Self::AnyDirs => true,
+        }
+    }
+}
+
+/// Splits `pattern` into its literal prefix, where a walk starts, and its
+/// components below that. The last component always stays below the prefix,
+/// since it names the files to match.
+fn parse_glob(pattern: &str) -> Result<(PathBuf, Vec<GlobComponent>), FileSysErr> {
     let components: Vec<_> = Path::new(pattern).components().collect();
-    let literal = components
+    let mut parsed = components
         .iter()
-        .take(components.len().saturating_sub(1))
-        .take_while(|c| !c.as_os_str().to_string_lossy().contains(GLOB_META))
-        .count();
-    let root = components[..literal].iter().collect();
-    let patterns = components[literal..]
-        .iter()
-        .map(|c| glob::Pattern::new(&c.as_os_str().to_string_lossy()))
+        .map(|c| GlobComponent::parse(c.as_os_str()))
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| {
             FileSysErr::InvalidGlobErr(InvalidGlobErr {
@@ -492,37 +518,41 @@ fn parse_glob(pattern: &str) -> Result<(PathBuf, Vec<glob::Pattern>), FileSysErr
                 trace: trace!(),
             })
         })?;
-    Ok((root, patterns))
+    let literal = parsed
+        .iter()
+        .take(parsed.len().saturating_sub(1))
+        .take_while(|c| matches!(c, GlobComponent::Literal(_)))
+        .count();
+    let root = components[..literal].iter().collect();
+    Ok((root, parsed.split_off(literal)))
 }
 
 /// A glob walk's state. It keeps its own work list rather than recursing, so a
 /// deep tree can't overflow the stack.
 struct GlobWalk<'p> {
-    /// Directories still to read, each with the patterns left for its entries.
-    todo: Vec<(PathBuf, &'p [glob::Pattern])>,
+    /// Directories still to read, each with the components left for its entries.
+    todo: Vec<(PathBuf, &'p [GlobComponent])>,
     matches: Vec<PathBuf>,
 }
 
 impl<'p> GlobWalk<'p> {
-    /// Keeps `path` if it's a regular file that matches `patterns`, or queues
-    /// it if it's a directory that matches their first.
-    fn visit(&mut self, path: PathBuf, file_type: FileType, patterns: &'p [glob::Pattern]) {
-        let Some((first, rest)) = patterns.split_first() else {
+    /// Handles `path`, which matches the first of `components`: keeps it if
+    /// it's a regular file that matches them all, or queues it if it's a
+    /// directory with more to match.
+    fn visit(&mut self, path: PathBuf, file_type: FileType, components: &'p [GlobComponent]) {
+        let Some((first, rest)) = components.split_first() else {
             return;
         };
-        if first.as_str() == "**" {
+        if matches!(first, GlobComponent::AnyDirs) {
             // `**` matches zero directories, or this one and any below it
-            self.visit(path.clone(), file_type, rest);
-            if file_type.is_dir() {
-                self.todo.push((path, patterns));
+            let name = path.file_name().unwrap_or_default();
+            if rest.first().is_some_and(|next| next.matches(name)) {
+                self.visit(path.clone(), file_type, rest);
             }
-            return;
-        }
-        let name = path.file_name().unwrap_or_default();
-        if !first.matches_path(Path::new(name)) {
-            return;
-        }
-        if file_type.is_symlink() {
+            if file_type.is_dir() {
+                self.todo.push((path, components));
+            }
+        } else if file_type.is_symlink() {
             debug!("glob: skipping symlink {}", path.display());
         } else if rest.is_empty() && file_type.is_file() {
             self.matches.push(path);
@@ -532,12 +562,12 @@ impl<'p> GlobWalk<'p> {
     }
 }
 
-/// The entries of `dir` that `pattern` may match, with their own types: a
-/// symlink is reported as one, not as its target. A literal component is
-/// looked up directly, so it needs only traverse permission on `dir`.
-fn glob_entries(dir: &Path, pattern: &glob::Pattern) -> Vec<(PathBuf, FileType)> {
-    if !pattern.as_str().contains(GLOB_META) {
-        let path = dir.join(pattern.as_str());
+/// The entries of `dir` that `component` matches, with their own types: a
+/// symlink is reported as one, not as its target. A literal is looked up
+/// directly, so it needs only traverse permission on `dir`.
+fn glob_entries(dir: &Path, component: &GlobComponent) -> Vec<(PathBuf, FileType)> {
+    if let GlobComponent::Literal(name) = component {
+        let path = dir.join(name);
         return match std::fs::symlink_metadata(&path) {
             Ok(metadata) => vec![(path, metadata.file_type())],
             Err(_) => Vec::new(),
@@ -553,6 +583,7 @@ fn glob_entries(dir: &Path, pattern: &glob::Pattern) -> Vec<(PathBuf, FileType)>
     };
     entries
         .flatten()
+        .filter(|entry| component.matches(&entry.file_name()))
         .filter_map(|entry| Some((dir.join(entry.file_name()), entry.file_type().ok()?)))
         .collect()
 }
