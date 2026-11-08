@@ -60,8 +60,8 @@ impl Layout {
         CalibrationReportsLayout::new(self.root().subdir("calibrations"))
     }
 
-    pub fn latest_calibrations(&self) -> LatestCalibrationsLayout {
-        LatestCalibrationsLayout::new(self.resources().subdir("calibrations"))
+    pub fn calibrations(&self) -> CalibrationsLayout {
+        CalibrationsLayout::new(self.resources().subdir("calibrations"))
     }
 
     fn config_instances(&self) -> filesys::Dir {
@@ -174,11 +174,11 @@ impl CalibrationReportsLayout {
 }
 
 /// The latest calibrations store, a cache of Miru that `reset` wipes.
-pub struct LatestCalibrationsLayout {
+pub struct CalibrationsLayout {
     pub root: filesys::Dir,
 }
 
-impl LatestCalibrationsLayout {
+impl CalibrationsLayout {
     pub fn new(root: filesys::Dir) -> Self {
         Self { root }
     }

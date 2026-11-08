@@ -10,7 +10,7 @@ use super::filesys::dirs::TempDir;
 use miru_agent::calibrations::{
     CalMngrArgs, CalibrationManager, LatestStore, Report, ReportMetadata, Sender, UploaderOptions,
 };
-use miru_agent::disk::layout::{CalibrationReportsLayout, LatestCalibrationsLayout};
+use miru_agent::disk::layout::{CalibrationReportsLayout, CalibrationsLayout};
 use miru_agent::models::InstanceFormat;
 
 // external crates
@@ -53,8 +53,8 @@ pub fn reports_layout(dir: &TempDir) -> CalibrationReportsLayout {
 }
 
 /// The latest calibrations layout under `dir`.
-pub fn latest_layout(dir: &TempDir) -> LatestCalibrationsLayout {
-    LatestCalibrationsLayout::new(dir.to_dir().subdir("resources").subdir("calibrations"))
+pub fn latest_layout(dir: &TempDir) -> CalibrationsLayout {
+    CalibrationsLayout::new(dir.to_dir().subdir("resources").subdir("calibrations"))
 }
 
 /// A calibration manager under `dir` that keeps its queue and latest store in

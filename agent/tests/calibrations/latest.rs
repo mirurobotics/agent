@@ -12,7 +12,7 @@ use miru_agent::calibrations::{
     latest::DEFAULT_CAPACITY, CalibrationsErr, LatestCalibrations, LatestContent, LatestEntry,
     LatestFilter, LatestIndex, LatestIndexFile, LatestStore, ListedEntry, ReportMetadata,
 };
-use miru_agent::disk::layout::LatestCalibrationsLayout;
+use miru_agent::disk::layout::CalibrationsLayout;
 use miru_agent::filesys::{dirs, files, File, PathExt, WriteOptions};
 use miru_agent::models::{CalibrationUploadStatus, InstanceFormat};
 
@@ -25,7 +25,7 @@ const DATA: &[u8] = b"offset: 1\n";
 
 struct Fixture {
     _dir: test_dirs::TempDir,
-    layout: LatestCalibrationsLayout,
+    layout: CalibrationsLayout,
 }
 
 impl Fixture {

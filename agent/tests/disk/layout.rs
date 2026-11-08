@@ -257,13 +257,13 @@ pub mod calibration_reports_layout {
     }
 }
 
-pub mod latest_calibrations_layout {
+pub mod calibrations_layout {
     use super::*;
 
     #[test]
     fn root_dir() {
         let layout = Layout::default();
-        let latest = layout.latest_calibrations();
+        let latest = layout.calibrations();
         assert_eq!(
             latest.root.to_string(),
             under_root(&["resources", "calibrations"])
@@ -273,7 +273,7 @@ pub mod latest_calibrations_layout {
     #[test]
     fn index_file() {
         let layout = Layout::default();
-        let file = layout.latest_calibrations().index();
+        let file = layout.calibrations().index();
         assert_eq!(
             file.to_string(),
             under_root(&["resources", "calibrations", "index.json"])
@@ -283,7 +283,7 @@ pub mod latest_calibrations_layout {
     #[test]
     fn contents_dir() {
         let layout = Layout::default();
-        let dir = layout.latest_calibrations().contents();
+        let dir = layout.calibrations().contents();
         assert_eq!(
             dir.to_string(),
             under_root(&["resources", "calibrations", "contents"])

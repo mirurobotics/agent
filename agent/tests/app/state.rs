@@ -300,7 +300,7 @@ pub mod init {
         // the actor is spawned and its queue and latest index are seeded on disk
         state.cal_mngr.num_queued_uploads().await.unwrap();
         assert!(env.layout.calibration_reports().queue().exists());
-        assert!(env.layout.latest_calibrations().index().exists());
+        assert!(env.layout.calibrations().index().exists());
 
         state.shutdown().await.unwrap();
         state_handle.await;
@@ -331,7 +331,7 @@ pub mod init {
         let env = TestEnv::valid().await;
         // a directory at the index FILE path makes
         // LatestIndexFile::new_with_default fail on both read and create
-        let index = env.layout.latest_calibrations().index();
+        let index = env.layout.calibrations().index();
         dirs::create(&Dir::new(index.path().clone())).await.unwrap();
 
         let (state, state_handle) = env.init().await.unwrap();
