@@ -727,10 +727,10 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn source_truncated_after_open_maps_to_local_io_err() {
-            // A file truncated after it was sized is shorter than the part, so
-            // building the part's body fails and the upload is aborted before
-            // any part leaves the client.
+        async fn source_truncated_after_open_fails_the_part_body() {
+            // The part is sized at `open`, so its request goes out and its body
+            // runs out of file. The replay client never reads request bodies,
+            // so the upload itself completes and the recorded body is read here.
             let src = temp_file_with(b"multipart-body").await;
             let source = source_of(&src).await;
             tokio::fs::OpenOptions::new()
@@ -744,16 +744,18 @@ mod tests {
 
             let (store, replay) = store_with(vec![
                 ReplayEvent::new(create_req(), create_resp()),
-                ReplayEvent::new(abort_req(), resp(204, &[])),
+                ReplayEvent::new(upload_part_req(1), upload_part_resp("\"e1\"")),
+                ReplayEvent::new(complete_req(), complete_resp()),
             ]);
 
-            let err = store
+            store
                 .put_multipart(source, &obj("big.bin"), &HashMap::new())
                 .await
-                .unwrap_err();
+                .unwrap();
 
-            assert!(matches!(err, S3Err::LocalIoErr(_)));
-            assert_eq!(actual_shapes(&replay), vec![create_shape(), abort_shape()]);
+            let requests = replay.actual_requests().collect::<Vec<_>>();
+            let part = requests[1].body().try_clone().unwrap();
+            assert!(http_body_util::BodyExt::collect(part).await.is_err());
         }
     }
 

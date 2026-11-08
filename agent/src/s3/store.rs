@@ -111,8 +111,8 @@ impl Store {
     }
 
     /// The request body that streams `len` bytes of `src` from `offset`, and
-    /// on GCS its `Content-MD5` (see [`Options::gcs`]). A file now shorter
-    /// than the range is [`S3Err::LocalIoErr`] before any request goes out.
+    /// on GCS its `Content-MD5` (see [`Options::gcs`]). See [`Source::read`]
+    /// for a file that shrinks since it was opened.
     pub(super) async fn body(
         &self,
         src: &Source,

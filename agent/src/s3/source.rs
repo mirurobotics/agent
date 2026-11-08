@@ -57,8 +57,9 @@ impl Source {
     }
 
     /// A request body that streams `len` bytes from `offset` of the open file.
-    /// A retry reads the range again. A file now shorter than the range is
-    /// [`S3Err::LocalIoErr`] before anything is read.
+    /// A retry reads the range again. A range past the size at [`Source::open`]
+    /// is [`S3Err::LocalIoErr`]; a file that shrinks since then fails the body
+    /// with [`io::ErrorKind::UnexpectedEof`] when the read reaches its end.
     pub(super) fn read(
         &self,
         operation: &str,
@@ -66,12 +67,10 @@ impl Source {
         offset: u64,
         len: u64,
     ) -> Result<ByteStream, S3Err> {
-        let map_err = |e| errors::map_body_io_err(operation, dst, &self.file, e);
-        let size = self.handle.metadata().map_err(map_err)?.len();
-        if size < offset + len {
+        if offset + len > self.size {
             let kind = io::ErrorKind::UnexpectedEof;
-            let e = io::Error::new(kind, "file is shorter than the upload range");
-            return Err(map_err(e));
+            let e = io::Error::new(kind, "range is past the end of the file");
+            return Err(errors::map_body_io_err(operation, dst, &self.file, e));
         }
         let handle = self.handle.clone();
         let body = SdkBody::retryable(move || {
@@ -241,7 +240,8 @@ mod tests {
         std::fs::write(file.path(), b"original").unwrap();
         let src = Source::open(file.clone(), &obj("k")).await.unwrap();
         std::fs::rename(file.path(), dir.file("moved.log").path()).unwrap();
-        std::fs::write(file.path(), b"swapped!").unwrap();
+        // shorter, so a size check by path would fail
+        std::fs::write(file.path(), b"abc").unwrap();
 
         let body = src.read("put_object", &obj("k"), 0, 8).unwrap();
 
@@ -249,9 +249,19 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn read_past_size_fails() {
+        let tf = temp_file_with(b"hello").await;
+        let src = Source::open(tf.to_file(), &obj("k")).await.unwrap();
+
+        let body = src.read("put_object", &obj("k"), 2, 4);
+
+        assert!(matches!(body, Err(S3Err::LocalIoErr(_))));
+    }
+
+    #[tokio::test]
     async fn read_fails_when_file_shrinks_mid_body() {
-        // The file covered the range when the body was built, so it's the
-        // read itself that runs out of file.
+        // The range is checked against the size at `open`, so it's the read
+        // itself that runs out of file.
         let tf = temp_file_with(b"hello world").await;
         let src = Source::open(tf.to_file(), &obj("k")).await.unwrap();
         let body = src.read("put_object", &obj("k"), 0, 11).unwrap();
@@ -262,6 +272,13 @@ mod tests {
             .set_len(4)
             .unwrap();
 
-        assert!(body.collect().await.is_err());
+        let Err(err) = body.collect().await else {
+            panic!("read past the end of the file");
+        };
+        let err: &(dyn std::error::Error + 'static) = &err;
+        let io_err = std::iter::successors(Some(err), |e| e.source())
+            .find_map(|e| e.downcast_ref::<io::Error>())
+            .expect("an io::Error in the source chain");
+        assert_eq!(io_err.kind(), io::ErrorKind::UnexpectedEof);
     }
 }
