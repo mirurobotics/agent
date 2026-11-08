@@ -141,10 +141,10 @@ async fn list_all(store: &LatestStore) -> Vec<ListedEntry> {
     latest.unwrap().entries
 }
 
-/// Lock the calibrations directory, so the metadata cache can be read but
-/// not written, while the contents directory stays writable.
+/// Set the mode of the calibrations directory: 0o555 lets the metadata cache
+/// be read but not written, while the contents directory stays writable.
 #[cfg(unix)]
-async fn lock_index(f: &Fixture, mode: u32) {
+async fn set_root_mode(f: &Fixture, mode: u32) {
     use std::os::unix::fs::PermissionsExt;
     let permissions = std::fs::Permissions::from_mode(mode);
     dirs::set_permissions(&f.layout.root, permissions)
@@ -270,11 +270,11 @@ async fn put_fails_and_changes_nothing_when_the_entry_cannot_be_written() {
     let store = f.store();
     let old = reported("arm", None, None);
     put_all(&store, &[&old]).await;
-    lock_index(&f, 0o555).await;
+    set_root_mode(&f, 0o555).await;
 
     let result = store.put(newer(&old), DATA).await;
 
-    lock_index(&f, 0o755).await;
+    set_root_mode(&f, 0o755).await;
     let err = result.unwrap_err();
     assert!(matches!(err, CalibrationsErr::CacheErr(_)), "{err:?}");
     assert_eq!(f.entries().await, [entry(&old, false)]);
@@ -356,11 +356,11 @@ async fn a_mark_that_cannot_be_written_leaves_the_entry() {
     let store = f.store();
     let arm = reported("arm", None, None);
     put_all(&store, &[&arm]).await;
-    lock_index(&f, 0o555).await;
+    set_root_mode(&f, 0o555).await;
 
     store.mark_uploaded(arm.report_id).await;
 
-    lock_index(&f, 0o755).await;
+    set_root_mode(&f, 0o755).await;
     assert_eq!(f.entries().await, [entry(&arm, false)]);
 }
 

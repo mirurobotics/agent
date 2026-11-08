@@ -131,7 +131,7 @@ pub mod init {
     }
 
     #[tokio::test]
-    async fn init_deletes_latest_contents_no_entry_names() {
+    async fn init_keeps_the_latest_entries_and_deletes_unnamed_contents() {
         let dir = test_dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
         let capacities = Capacities::default();
@@ -157,6 +157,9 @@ pub mod init {
             .await
             .unwrap();
 
+        let entries = storage.calibrations.meta.values().await.unwrap();
+        let reported: Vec<_> = entries.into_iter().map(|e| e.metadata).collect();
+        assert_eq!(reported, [named.metadata.clone()]);
         let contents = storage.calibrations.content.entry_map().await.unwrap();
         let kept: Vec<String> = contents.into_keys().collect();
         assert_eq!(kept, [named.metadata.report_id.to_string()]);
