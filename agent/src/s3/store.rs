@@ -65,9 +65,9 @@ impl Store {
         }
     }
 
-    /// Creates or overwrites an object from a local file, sized once as a
-    /// [`Source`]. GCS never overwrites: an existing object counts as written
-    /// (see [`gcs`](crate::s3::gcs)).
+    /// Creates or overwrites an object from an opened [`Source`]. GCS never
+    /// overwrites: an existing object counts as written (see
+    /// [`gcs`](crate::s3::gcs)).
     ///
     /// Files at or below [`PART_SIZE`] go through one `PutObject`
     /// ([`Self::put_singlepart`]); larger files go part-by-part through a
@@ -75,11 +75,10 @@ impl Store {
     /// bytes stream from the file.
     pub async fn put(
         &self,
-        src: File,
+        src: Source,
         dst: &Object,
         metadata: &HashMap<String, String>,
     ) -> Result<(), S3Err> {
-        let src = Source::open(src, dst).await?;
         if src.size > PART_SIZE {
             self.put_multipart(src, dst, metadata).await
         } else {
@@ -253,12 +252,12 @@ pub(super) mod tests {
     // internal crates
     use crate::test_utils::{
         error_harnesses::{assert_error, Expected},
-        filesys::{files as test_files, missing_file},
+        filesys::files as test_files,
     };
     use miru_agent::errors::{Code, Error, HTTPCode};
     use miru_agent::filesys::file::File;
     use miru_agent::filesys::path::PathExt;
-    use miru_agent::filesys::{files, FileSysErr, WriteOptions};
+    use miru_agent::filesys::{files, WriteOptions};
     use miru_agent::s3::{aws, sdk, Config, Credentials, Object, Options, S3Err, Source, Store};
 
     // external crates
@@ -346,6 +345,11 @@ pub(super) mod tests {
             .await
             .unwrap();
         tf
+    }
+
+    /// Opens `tf` as a [`Source`] for an upload to `key`.
+    pub(crate) async fn source_of(tf: &test_files::TempFile, key: &str) -> Source {
+        Source::open(tf.to_file(), &obj(key)).await.unwrap()
     }
 
     /// Builds an expected request (method + path-style URI, empty body) to match a
@@ -552,10 +556,6 @@ pub(super) mod tests {
         pub mod single {
             use super::*;
 
-            async fn source_of(tf: &test_files::TempFile, key: &str) -> Source {
-                Source::open(tf.to_file(), &obj(key)).await.unwrap()
-            }
-
             #[tokio::test]
             async fn put_sends_file_body_bytes() {
                 let key = "artifacts/hello.txt";
@@ -645,14 +645,15 @@ pub(super) mod tests {
 
             #[tokio::test]
             async fn put_403_maps_to_request_failed() {
-                let src = temp_file_with(b"x").await;
+                let tf = temp_file_with(b"x").await;
+                let src = source_of(&tf, "denied.txt").await;
                 let (store, _replay) = store_expecting(
                     req("PUT", "denied.txt?x-id=PutObject"),
                     access_denied_resp(),
                 );
 
                 let err = store
-                    .put(src.to_file(), &obj("denied.txt"), &HashMap::new())
+                    .put(src, &obj("denied.txt"), &HashMap::new())
                     .await
                     .unwrap_err();
 
@@ -667,78 +668,6 @@ pub(super) mod tests {
                     &err,
                     Expected::new(Code::InternalServerError, HTTPCode::INTERNAL_SERVER_ERROR),
                 );
-            }
-        }
-
-        pub mod source_missing {
-            use super::*;
-
-            #[tokio::test]
-            async fn put_missing_source_maps_to_filesys_err() {
-                // `put` opens the source before routing by size, so a missing
-                // file fails before any request is dispatched.
-                let (store, replay) = store_with(vec![]);
-                let missing = missing_file();
-
-                let err = store
-                    .put(missing, &obj("k"), &HashMap::new())
-                    .await
-                    .unwrap_err();
-
-                assert!(matches!(
-                    err,
-                    S3Err::FileSysErr(FileSysErr::PathDoesNotExistErr(_))
-                ));
-                assert_eq!(actual_shapes(&replay), vec![]);
-            }
-
-            #[tokio::test]
-            async fn put_unopenable_source_maps_to_local_io_err() {
-                // Every platform rejects a path with an interior NUL byte as
-                // `InvalidInput` rather than `NotFound`, so the open fails as
-                // `LocalIoErr` before any request.
-                let src = File::new("/tmp/bad\0name.bin");
-                let (store, replay) = store_with(vec![]);
-
-                let err = store
-                    .put(src, &obj("k"), &HashMap::new())
-                    .await
-                    .unwrap_err();
-
-                let S3Err::LocalIoErr(inner) = &err else {
-                    panic!("expected LocalIoErr, got {err:?}");
-                };
-                assert_eq!(
-                    (inner.operation.as_str(), &inner.object),
-                    ("open_source", &obj("k"))
-                );
-                assert_eq!(actual_shapes(&replay), vec![]);
-            }
-
-            #[cfg(unix)]
-            #[tokio::test]
-            async fn put_symlinked_source_maps_to_local_io_err() {
-                // The source is opened without following a symlink, so a link
-                // fails as `LocalIoErr` before any request.
-                let target = temp_file_with(b"secret").await;
-                let dir = crate::test_utils::filesys::dirs::temp("s3-test").unwrap();
-                let link = dir.file("x.log");
-                std::os::unix::fs::symlink(target.file().path(), link.path()).unwrap();
-                let (store, replay) = store_with(vec![]);
-
-                let err = store
-                    .put(link, &obj("k"), &HashMap::new())
-                    .await
-                    .unwrap_err();
-
-                let S3Err::LocalIoErr(inner) = &err else {
-                    panic!("expected LocalIoErr, got {err:?}");
-                };
-                assert_eq!(
-                    (inner.operation.as_str(), &inner.object),
-                    ("open_source", &obj("k"))
-                );
-                assert_eq!(actual_shapes(&replay), vec![]);
             }
         }
     }

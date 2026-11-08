@@ -161,12 +161,66 @@ fn read_at(file: &std::fs::File, pos: u64, len: usize) -> io::Result<Bytes> {
 mod tests {
     use super::*;
     use crate::s3::store::tests::{obj, temp_file_with};
+    use crate::test_utils::filesys::missing_file;
 
     #[tokio::test]
     async fn open_sizes_regular_file() {
         let tf = temp_file_with(b"hello").await;
         let src = Source::open(tf.to_file(), &obj("k")).await.unwrap();
         assert_eq!(src.size, 5);
+    }
+
+    #[tokio::test]
+    async fn open_missing_file_maps_to_filesys_err() {
+        let Err(err) = Source::open(missing_file(), &obj("k")).await else {
+            panic!("opened a missing file");
+        };
+        assert!(matches!(
+            err,
+            S3Err::FileSysErr(FileSysErr::PathDoesNotExistErr(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn open_unopenable_file_maps_to_local_io_err() {
+        // Every platform rejects a path with an interior NUL byte as
+        // `InvalidInput` rather than `NotFound`, so the open fails as
+        // `LocalIoErr`.
+        let src = File::new("/tmp/bad\0name.bin");
+
+        let Err(err) = Source::open(src, &obj("k")).await else {
+            panic!("opened a path with a NUL byte");
+        };
+
+        let S3Err::LocalIoErr(inner) = &err else {
+            panic!("expected LocalIoErr, got {err:?}");
+        };
+        assert_eq!(
+            (inner.operation.as_str(), &inner.object),
+            ("open_source", &obj("k"))
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn open_symlink_maps_to_local_io_err() {
+        // The file is opened without following a symlink.
+        let target = temp_file_with(b"secret").await;
+        let dir = crate::test_utils::filesys::dirs::temp("s3-test").unwrap();
+        let link = dir.file("x.log");
+        std::os::unix::fs::symlink(target.file().path(), link.path()).unwrap();
+
+        let Err(err) = Source::open(link, &obj("k")).await else {
+            panic!("opened a symlink");
+        };
+
+        let S3Err::LocalIoErr(inner) = &err else {
+            panic!("expected LocalIoErr, got {err:?}");
+        };
+        assert_eq!(
+            (inner.operation.as_str(), &inner.object),
+            ("open_source", &obj("k"))
+        );
     }
 
     #[tokio::test]

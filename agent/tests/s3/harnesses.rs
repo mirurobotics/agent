@@ -106,12 +106,10 @@ pub async fn put_stores_exact_bytes_and_metadata<B: RealBucket>() {
         let obj = bucket.object(name);
         let bytes = test_bytes(len);
         let file = temp_file_with(&bytes).await;
+        let src = Source::open(file.to_file(), &obj).await.unwrap();
 
         let store = bucket.upload_store(&obj).await;
-        store
-            .put(file.to_file(), &obj, &metadata())
-            .await
-            .expect(name);
+        store.put(src, &obj, &metadata()).await.expect(name);
         bucket.assert_stored(&obj, &bytes).await;
     }
 }
@@ -199,11 +197,9 @@ pub async fn put_of_an_existing_object_succeeds<B: RealBucket>() {
         let file = temp_file_with(&bytes).await;
 
         for _ in 0..2 {
+            let src = Source::open(file.to_file(), &obj).await.unwrap();
             let store = bucket.upload_store(&obj).await;
-            store
-                .put(file.to_file(), &obj, &metadata())
-                .await
-                .expect(name);
+            store.put(src, &obj, &metadata()).await.expect(name);
         }
         bucket.assert_stored(&obj, &bytes).await;
     }

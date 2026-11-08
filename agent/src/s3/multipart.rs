@@ -1135,12 +1135,13 @@ mod tests {
         async fn small_file_routes_to_single_put() {
             // A body well under PART_SIZE must take the single-part branch:
             // exactly one PutObject, no multipart calls.
-            let src = temp_file_with(b"tiny").await;
+            let tf = temp_file_with(b"tiny").await;
+            let src = Source::open(tf.to_file(), &obj("small.bin")).await.unwrap();
             let (store, replay) =
                 store_expecting(req("PUT", "small.bin?x-id=PutObject"), resp(200, &[]));
 
             store
-                .put(src.to_file(), &obj("small.bin"), &HashMap::new())
+                .put(src, &obj("small.bin"), &HashMap::new())
                 .await
                 .unwrap();
 
@@ -1168,7 +1169,7 @@ mod tests {
             ]);
 
             store
-                .put(src.to_file(), &obj("big.bin"), &HashMap::new())
+                .put(source_of(&src).await, &obj("big.bin"), &HashMap::new())
                 .await
                 .unwrap();
 
