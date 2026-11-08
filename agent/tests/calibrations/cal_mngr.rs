@@ -228,7 +228,7 @@ async fn drains_reports_buffered_before_start_in_order() {
 }
 
 #[tokio::test]
-async fn intake_wakes_an_idle_uploader() {
+async fn intake_wakes_an_idle_cal_mngr() {
     let mut h = Harness::new();
     h.spawn().await;
     assert_eq!(h.len().await, 0);
@@ -307,7 +307,7 @@ async fn shutdown_during_a_backoff() {
 }
 
 #[tokio::test]
-async fn dropping_every_handle_stops_the_uploader() {
+async fn dropping_every_handle_stops_the_cal_mngr() {
     let mut h = Harness::new();
     h.spawn().await;
 
@@ -331,7 +331,7 @@ async fn commands_after_shutdown_fail() {
 }
 
 #[tokio::test]
-async fn a_caller_that_stops_waiting_does_not_stop_the_uploader() {
+async fn a_caller_that_stops_waiting_does_not_stop_the_cal_mngr() {
     let mut h = Harness::new();
     h.spawn().await;
 
