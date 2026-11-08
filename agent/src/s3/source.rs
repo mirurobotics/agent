@@ -31,9 +31,10 @@ pub struct Source {
 }
 
 impl Source {
-    /// Opens and sizes `file` for upload with [`files::open_no_follow`]. A
-    /// missing file is [`S3Err::FileSysErr`]; a symlink, anything else that
-    /// isn't a regular file, or any other failure is [`S3Err::LocalIoErr`].
+    /// Opens and sizes `file` for upload with [`files::open_regular_file`]
+    /// (which refuses a symlink on Unix only). A missing file is
+    /// [`S3Err::FileSysErr`]; a symlink, anything else that isn't a regular
+    /// file, or any other failure is [`S3Err::LocalIoErr`].
     pub async fn open(file: File, dst: &Object) -> Result<Self, S3Err> {
         let map_err = |e: io::Error| -> S3Err {
             if e.kind() == io::ErrorKind::NotFound {
@@ -46,7 +47,7 @@ impl Source {
                 errors::map_body_io_err("open_source", dst, &file, e)
             }
         };
-        let handle = files::open_no_follow(&file).await.map_err(map_err)?;
+        let handle = files::open_regular_file(&file).await.map_err(map_err)?;
         let size = handle.metadata().await.map_err(map_err)?.len();
         Ok(Self {
             file,
@@ -177,6 +178,22 @@ mod tests {
 
         assert_eq!(body.size_hint(), (5, Some(5)));
         assert_eq!(body.collect().await.unwrap().to_vec(), b"world");
+    }
+
+    #[tokio::test]
+    async fn read_streams_opened_file_after_path_swap() {
+        let tf = temp_file_with(b"original").await;
+        let path = tf.to_file().path().clone();
+        let src = Source::open(tf.to_file(), &obj("k")).await.unwrap();
+        let moved = path.with_extension("moved");
+        std::fs::rename(&path, &moved).unwrap();
+        std::fs::write(&path, b"swapped!").unwrap();
+
+        let body = src.read("put_object", &obj("k"), 0, 8).unwrap();
+
+        assert_eq!(body.collect().await.unwrap().to_vec(), b"original");
+        drop(src);
+        std::fs::remove_file(&moved).unwrap();
     }
 
     #[tokio::test]
