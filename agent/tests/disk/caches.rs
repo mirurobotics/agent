@@ -36,6 +36,29 @@ pub mod init {
     use super::*;
 
     #[tokio::test]
+    async fn init_moves_a_corrupt_latest_index_aside() {
+        let dir = test_dirs::temp("testing").unwrap();
+        let layout = Layout::new(dir.to_dir());
+        let calibrations = layout.calibrations();
+        dirs::create(&calibrations.root).await.unwrap();
+        files::write_string(&calibrations.index(), "x", WriteOptions::OVERWRITE_ATOMIC)
+            .await
+            .unwrap();
+
+        let capacities = Capacities::default();
+        let (storage, _) = Storage::init(&layout, capacities, "test_device".to_string())
+            .await
+            .unwrap();
+
+        // the cache starts empty, and the corrupt index is kept beside it
+        let entries = storage.calibrations.meta.values().await.unwrap();
+        assert!(entries.is_empty());
+        let files = dirs::files(&calibrations.root).await.unwrap();
+        assert_eq!(files.len(), 2);
+        storage.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
     async fn init_and_shutdown() {
         let dir = test_dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
