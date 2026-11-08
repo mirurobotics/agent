@@ -1,10 +1,21 @@
+// standard crates
+use std::future::Future;
+use std::io;
+use std::pin::Pin;
+use std::sync::Arc;
+use std::task::{ready, Context, Poll};
+
 // internal crates
-use crate::filesys::{errors::PathDoesNotExistErr, file::File, path::PathExt, FileSysErr};
+use crate::filesys::{errors::PathDoesNotExistErr, file::File, files, path::PathExt, FileSysErr};
 use crate::s3::{errors, gcs, Object, S3Err};
 use crate::trace;
 
 // external crates
-use aws_sdk_s3::primitives::{ByteStream, Length};
+use aws_sdk_s3::primitives::ByteStream;
+use aws_smithy_types::body::SdkBody;
+use bytes::Bytes;
+use http_body::{Body, Frame, SizeHint};
+use tokio::task::JoinHandle;
 
 /// Bytes per read and per frame sent. The SDK's default is 4 KiB.
 const READ_SIZE: usize = 32 * 1024;
@@ -13,15 +24,20 @@ const READ_SIZE: usize = 32 * 1024;
 /// expected to stay unchanged until the upload is confirmed.
 pub struct Source {
     file: File,
+    /// Held open so every read gets the file checked in [`Source::open`], even
+    /// if its path is swapped later.
+    handle: Arc<std::fs::File>,
     pub(crate) size: u64,
 }
 
 impl Source {
-    /// Sizes `file` for upload. A missing file is [`S3Err::FileSysErr`]; any
-    /// other metadata failure is [`S3Err::LocalIoErr`].
+    /// Opens and sizes `file` for upload with [`files::open_regular_file`]
+    /// (which refuses a symlink on Unix only). A missing file is
+    /// [`S3Err::FileSysErr`]; a symlink, anything else that isn't a regular
+    /// file, or any other failure is [`S3Err::LocalIoErr`].
     pub async fn open(file: File, dst: &Object) -> Result<Self, S3Err> {
-        let metadata = tokio::fs::metadata(file.path()).await.map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
+        let map_err = |e: io::Error| -> S3Err {
+            if e.kind() == io::ErrorKind::NotFound {
                 FileSysErr::PathDoesNotExistErr(PathDoesNotExistErr {
                     path: file.path().clone(),
                     trace: trace!(),
@@ -30,31 +46,43 @@ impl Source {
             } else {
                 errors::map_body_io_err("open_source", dst, &file, e)
             }
-        })?;
+        };
+        let handle = files::open_regular_file(&file).await.map_err(map_err)?;
+        let size = handle.metadata().await.map_err(map_err)?.len();
         Ok(Self {
             file,
-            size: metadata.len(),
+            handle: Arc::new(handle.into_std().await),
+            size,
         })
     }
 
-    /// A request body that streams `len` bytes from `offset`. A retry reopens
-    /// the file. A file now shorter than the range is [`S3Err::LocalIoErr`]
-    /// before anything is read.
-    pub(super) async fn read(
+    /// A request body that streams `len` bytes from `offset` of the open file.
+    /// A retry reads the range again. A file now shorter than the range is
+    /// [`S3Err::LocalIoErr`] before anything is read.
+    pub(super) fn read(
         &self,
         operation: &str,
         dst: &Object,
         offset: u64,
         len: u64,
     ) -> Result<ByteStream, S3Err> {
-        ByteStream::read_from()
-            .path(self.file.path())
-            .offset(offset)
-            .length(Length::Exact(len))
-            .buffer_size(READ_SIZE)
-            .build()
-            .await
-            .map_err(|e| errors::map_body_io_err(operation, dst, &self.file, e.into()))
+        let map_err = |e| errors::map_body_io_err(operation, dst, &self.file, e);
+        let size = self.handle.metadata().map_err(map_err)?.len();
+        if size < offset + len {
+            let kind = io::ErrorKind::UnexpectedEof;
+            let e = io::Error::new(kind, "file is shorter than the upload range");
+            return Err(map_err(e));
+        }
+        let handle = self.handle.clone();
+        let body = SdkBody::retryable(move || {
+            SdkBody::from_body_1_x(RangeBody {
+                file: handle.clone(),
+                pos: offset,
+                end: offset + len,
+                reading: None,
+            })
+        });
+        Ok(ByteStream::new(body))
     }
 
     /// The `Content-MD5` of `len` bytes from `offset` (see
@@ -66,9 +94,120 @@ impl Source {
         offset: u64,
         len: u64,
     ) -> Result<String, S3Err> {
-        let range = self.read(operation, dst, offset, len).await?;
+        let range = self.read(operation, dst, offset, len)?;
         gcs::content_md5(range)
             .await
             .map_err(|e| errors::map_body_io_err(operation, dst, &self.file, e))
+    }
+}
+
+/// The bytes from `pos` to `end` of a file. Reads are positional, so bodies
+/// sharing one handle never move each other's place in the file.
+struct RangeBody {
+    file: Arc<std::fs::File>,
+    pos: u64,
+    end: u64,
+    reading: Option<JoinHandle<io::Result<Bytes>>>,
+}
+
+impl Body for RangeBody {
+    type Data = Bytes;
+    type Error = io::Error;
+
+    fn poll_frame(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<io::Result<Frame<Bytes>>>> {
+        let this = &mut *self;
+        if this.pos >= this.end {
+            return Poll::Ready(None);
+        }
+        let reading = this.reading.get_or_insert_with(|| {
+            let (file, pos) = (this.file.clone(), this.pos);
+            let len = (this.end - pos).min(READ_SIZE as u64) as usize;
+            tokio::task::spawn_blocking(move || read_at(&file, pos, len))
+        });
+        let read = ready!(Pin::new(reading).poll(cx));
+        this.reading = None;
+        let chunk = read??;
+        if chunk.is_empty() {
+            return Poll::Ready(Some(Err(io::ErrorKind::UnexpectedEof.into())));
+        }
+        this.pos += chunk.len() as u64;
+        Poll::Ready(Some(Ok(Frame::data(chunk))))
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.pos >= self.end
+    }
+
+    fn size_hint(&self) -> SizeHint {
+        SizeHint::with_exact(self.end - self.pos)
+    }
+}
+
+/// Reads up to `len` bytes at `pos`.
+fn read_at(file: &std::fs::File, pos: u64, len: usize) -> io::Result<Bytes> {
+    let mut buf = vec![0; len];
+    #[cfg(unix)]
+    let n = std::os::unix::fs::FileExt::read_at(file, &mut buf, pos)?;
+    #[cfg(windows)]
+    let n = std::os::windows::fs::FileExt::seek_read(file, &mut buf, pos)?;
+    buf.truncate(n);
+    Ok(buf.into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::s3::store::tests::{obj, temp_file_with};
+
+    #[tokio::test]
+    async fn open_sizes_regular_file() {
+        let tf = temp_file_with(b"hello").await;
+        let src = Source::open(tf.to_file(), &obj("k")).await.unwrap();
+        assert_eq!(src.size, 5);
+    }
+
+    #[tokio::test]
+    async fn read_streams_range() {
+        let tf = temp_file_with(b"hello world").await;
+        let src = Source::open(tf.to_file(), &obj("k")).await.unwrap();
+
+        let body = src.read("put_object", &obj("k"), 6, 5).unwrap();
+
+        assert_eq!(body.size_hint(), (5, Some(5)));
+        assert_eq!(body.collect().await.unwrap().to_vec(), b"world");
+    }
+
+    #[tokio::test]
+    async fn read_streams_opened_file_after_path_swap() {
+        let dir = crate::test_utils::filesys::dirs::temp("s3-test").unwrap();
+        let file = dir.file("x.log");
+        std::fs::write(file.path(), b"original").unwrap();
+        let src = Source::open(file.clone(), &obj("k")).await.unwrap();
+        std::fs::rename(file.path(), dir.file("moved.log").path()).unwrap();
+        std::fs::write(file.path(), b"swapped!").unwrap();
+
+        let body = src.read("put_object", &obj("k"), 0, 8).unwrap();
+
+        assert_eq!(body.collect().await.unwrap().to_vec(), b"original");
+    }
+
+    #[tokio::test]
+    async fn read_fails_when_file_shrinks_mid_body() {
+        // The file covered the range when the body was built, so it's the
+        // read itself that runs out of file.
+        let tf = temp_file_with(b"hello world").await;
+        let src = Source::open(tf.to_file(), &obj("k")).await.unwrap();
+        let body = src.read("put_object", &obj("k"), 0, 11).unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(tf.to_file().path())
+            .unwrap()
+            .set_len(4)
+            .unwrap();
+
+        assert!(body.collect().await.is_err());
     }
 }
