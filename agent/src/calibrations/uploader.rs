@@ -558,7 +558,7 @@ mod tests {
 
         let err = u.enqueue(&big).await.unwrap_err();
 
-        assert!(matches!(err, CalibrationsErr::TooLargeErr(_)));
+        assert!(matches!(err, CalibrationsErr::TooLargeErr(_)), "{err:?}");
         assert_eq!(u.len(), 0);
         assert!(!f.layout.reports().exists());
     }
@@ -575,7 +575,7 @@ mod tests {
 
         let err = u.enqueue(&report("b")).await.unwrap_err();
 
-        assert!(matches!(err, CalibrationsErr::QueueFullErr(_)));
+        assert!(matches!(err, CalibrationsErr::QueueFullErr(_)), "{err:?}");
         assert_eq!(u.len(), 1);
     }
 
@@ -592,7 +592,7 @@ mod tests {
 
         let err = u.enqueue(&report("a")).await.unwrap_err();
 
-        assert!(matches!(err, CalibrationsErr::FileSysErr(_)));
+        assert!(matches!(err, CalibrationsErr::FileSysErr(_)), "{err:?}");
         assert_eq!(u.len(), 0);
         assert!(!f.layout.reports().exists());
     }
@@ -609,7 +609,7 @@ mod tests {
 
         let err = u.enqueue(&report("a")).await.unwrap_err();
 
-        assert!(matches!(err, CalibrationsErr::FileSysErr(_)));
+        assert!(matches!(err, CalibrationsErr::FileSysErr(_)), "{err:?}");
         assert_eq!(u.len(), 0);
     }
 
