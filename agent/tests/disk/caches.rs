@@ -156,7 +156,7 @@ pub mod init {
 
         let entries = storage.calibrations.meta.values().await.unwrap();
         let reported: Vec<_> = entries.into_iter().map(|e| e.metadata).collect();
-        assert_eq!(reported, [named.metadata.clone()]);
+        assert_eq!(reported, std::slice::from_ref(&named.metadata));
         let contents = storage.calibrations.content.entry_map().await.unwrap();
         let kept: Vec<String> = contents.into_keys().collect();
         assert_eq!(kept, [named.metadata.report_id.to_string()]);
