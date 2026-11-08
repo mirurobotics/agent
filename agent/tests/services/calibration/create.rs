@@ -152,7 +152,7 @@ async fn stamps_no_deployment_when_none_is_deployed() {
 #[tokio::test]
 async fn a_deployments_cache_error_queues_nothing() {
     let f = Fixture::new().await;
-    // a report queued by mistake would stay in flight, so `num_queued_reports` would count it
+    // a report queued by mistake would stay in flight, so `num_queued_uploads` would count it
     let (_hold, hang) = oneshot::channel();
     f.sender.push(Step::Hang(hang));
     f.deployments.shutdown().await.unwrap();
@@ -160,7 +160,7 @@ async fn a_deployments_cache_error_queues_nothing() {
     let err = f.create(params()).await.unwrap_err();
 
     assert!(matches!(err, ServiceErr::DiskErr(_)), "{err:?}");
-    assert_eq!(f.cal_mngr.num_queued_reports().await.unwrap(), 0);
+    assert_eq!(f.cal_mngr.num_queued_uploads().await.unwrap(), 0);
 }
 
 #[tokio::test]

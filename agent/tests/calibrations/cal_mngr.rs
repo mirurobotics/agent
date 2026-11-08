@@ -123,8 +123,8 @@ impl Harness {
         guard(self.cal_mngr().report(report(slug))).await.unwrap();
     }
 
-    async fn num_queued_reports(&self) -> usize {
-        guard(self.cal_mngr().num_queued_reports()).await.unwrap()
+    async fn num_queued_uploads(&self) -> usize {
+        guard(self.cal_mngr().num_queued_uploads()).await.unwrap()
     }
 
     fn report_file(&self, id: Uuid) -> File {
@@ -147,7 +147,7 @@ impl Harness {
     /// Wait until every report is sent and the queue is empty.
     async fn await_drained(&self, sent: &[&str]) {
         eventually(|| async {
-            self.sender.sent() == strings(sent) && self.num_queued_reports().await == 0
+            self.sender.sent() == strings(sent) && self.num_queued_uploads().await == 0
         })
         .await;
     }
@@ -234,7 +234,7 @@ async fn drains_reports_buffered_before_start_in_order() {
 async fn intake_wakes_an_idle_cal_mngr() {
     let mut h = Harness::new();
     h.spawn().await;
-    assert_eq!(h.num_queued_reports().await, 0);
+    assert_eq!(h.num_queued_uploads().await, 0);
 
     h.report("a").await;
 
@@ -253,7 +253,7 @@ async fn intake_is_served_during_an_upload() {
 
     // the send of "a" is still in flight
     h.report("b").await;
-    assert_eq!(h.num_queued_reports().await, 2);
+    assert_eq!(h.num_queued_uploads().await, 2);
 
     release.send(()).unwrap();
     h.await_drained(&["a", "b"]).await;
@@ -339,7 +339,7 @@ async fn a_caller_that_stops_waiting_does_not_stop_the_cal_mngr() {
     h.spawn().await;
 
     // polled once: the command is sent, then its reply is abandoned
-    assert!(h.cal_mngr().num_queued_reports().now_or_never().is_none());
+    assert!(h.cal_mngr().num_queued_uploads().now_or_never().is_none());
 
     h.report("a").await;
     h.await_drained(&["a"]).await;
