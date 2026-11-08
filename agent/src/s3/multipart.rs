@@ -1165,7 +1165,11 @@ mod tests {
             ]);
 
             store
-                .put(source_of(&src, "big.bin").await, &obj("big.bin"), &HashMap::new())
+                .put(
+                    source_of(&src, "big.bin").await,
+                    &obj("big.bin"),
+                    &HashMap::new(),
+                )
                 .await
                 .unwrap();
 
