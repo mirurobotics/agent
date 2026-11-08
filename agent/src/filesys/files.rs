@@ -25,6 +25,8 @@ use tokio::fs::File as TokioFile;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 #[allow(unused_imports)]
 use tracing::{debug, error, info, warn};
+#[cfg(windows)]
+use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT;
 
 pub async fn read_bytes(file: &File) -> Result<Vec<u8>, FileSysErr> {
     // read file
@@ -94,15 +96,17 @@ async fn read_chunks(file: &File, mut on_chunk: impl FnMut(&[u8])) -> Result<(),
     Ok(())
 }
 
-/// Opens `file` for reading and refuses anything but a regular file. On Unix it
-/// also refuses a symlink (`O_NOFOLLOW`), so a link planted in a watched
-/// directory is never read through; Windows follows links.
+/// Opens `file` for reading and refuses anything but a regular file, including
+/// a symlink, so a link planted in a watched directory is never read through.
 pub async fn open_regular_file(file: &File) -> std::io::Result<TokioFile> {
     let mut opts = tokio::fs::OpenOptions::new();
     opts.read(true);
     // O_NONBLOCK keeps a FIFO from blocking the open until it's refused
     #[cfg(unix)]
     opts.custom_flags(nix::libc::O_NOFOLLOW | nix::libc::O_NONBLOCK);
+    // opens a link itself rather than its target, so the check below refuses it
+    #[cfg(windows)]
+    opts.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
     let f = opts.open(file.path()).await?;
     if !f.metadata().await?.is_file() {
         let kind = std::io::ErrorKind::InvalidInput;

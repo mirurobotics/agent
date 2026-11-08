@@ -486,7 +486,6 @@ pub mod sha256 {
         ));
     }
 
-    #[cfg(unix)]
     #[tokio::test]
     async fn refuses_symlink() {
         let dir = test_dirs::temp("testing").unwrap();
@@ -495,7 +494,10 @@ pub mod sha256 {
             .await
             .unwrap();
         let link = dir.file("link");
+        #[cfg(unix)]
         std::os::unix::fs::symlink(target.path(), link.path()).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_file(target.path(), link.path()).unwrap();
         assert!(matches!(
             files::sha256(&link).await.unwrap_err(),
             FileSysErr::OpenFileErr { .. }
