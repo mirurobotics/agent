@@ -116,15 +116,20 @@ pub async fn open_regular_file(file: &File) -> std::io::Result<TokioFile> {
     let meta = f.metadata().await?;
     #[cfg(unix)]
     let is_regular = meta.is_file();
-    // the flag also skips the filter behind any other reparse point, such as a
-    // cloud placeholder, so its stub would be read in place of the file
     #[cfg(windows)]
-    let is_regular = meta.is_file() && meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT == 0;
+    let is_regular = meta.is_file() && !is_reparse_point(&meta);
     if !is_regular {
         let kind = std::io::ErrorKind::InvalidInput;
         return Err(std::io::Error::new(kind, "not a regular file"));
     }
     Ok(f)
+}
+
+/// Whether `meta` is a reparse point, such as a link or a cloud placeholder. A
+/// no-follow open skips the placeholder's filter and would read its stub.
+#[cfg(windows)]
+fn is_reparse_point(meta: &std::fs::Metadata) -> bool {
+    meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
 }
 
 pub async fn read_secret_bytes(file: &File) -> Result<SecretBox<Vec<u8>>, FileSysErr> {
@@ -571,6 +576,12 @@ impl<'p> GlobWalk<'p> {
         } else if file_type.is_symlink() {
             debug!("glob: skipping symlink {}", path.display());
         } else if rest.is_empty() && file_type.is_file() {
+            // `open_regular_file` refuses these, so they're never candidates
+            #[cfg(windows)]
+            if std::fs::symlink_metadata(&path).is_ok_and(|m| is_reparse_point(&m)) {
+                debug!("glob: skipping reparse point {}", path.display());
+                return;
+            }
             self.matches.push(path);
         } else if !rest.is_empty() && file_type.is_dir() {
             self.todo.push((path, rest));
