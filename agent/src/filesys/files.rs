@@ -2,6 +2,8 @@
 use std::ffi::{OsStr, OsString};
 use std::fs::FileType;
 use std::io::Write;
+#[cfg(windows)]
+use std::os::windows::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -26,7 +28,9 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 #[allow(unused_imports)]
 use tracing::{debug, error, info, warn};
 #[cfg(windows)]
-use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT;
+use windows_sys::Win32::Storage::FileSystem::{
+    FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_OPEN_REPARSE_POINT,
+};
 
 pub async fn read_bytes(file: &File) -> Result<Vec<u8>, FileSysErr> {
     // read file
@@ -98,6 +102,7 @@ async fn read_chunks(file: &File, mut on_chunk: impl FnMut(&[u8])) -> Result<(),
 
 /// Opens `file` for reading and refuses anything but a regular file, including
 /// a symlink, so a link planted in a watched directory is never read through.
+/// On Windows it also refuses every other reparse point.
 pub async fn open_regular_file(file: &File) -> std::io::Result<TokioFile> {
     let mut opts = tokio::fs::OpenOptions::new();
     opts.read(true);
@@ -108,7 +113,14 @@ pub async fn open_regular_file(file: &File) -> std::io::Result<TokioFile> {
     #[cfg(windows)]
     opts.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
     let f = opts.open(file.path()).await?;
-    if !f.metadata().await?.is_file() {
+    let meta = f.metadata().await?;
+    #[cfg(unix)]
+    let is_regular = meta.is_file();
+    // the flag also skips the filter behind any other reparse point, such as a
+    // cloud placeholder, so its stub would be read in place of the file
+    #[cfg(windows)]
+    let is_regular = meta.is_file() && meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT == 0;
+    if !is_regular {
         let kind = std::io::ErrorKind::InvalidInput;
         return Err(std::io::Error::new(kind, "not a regular file"));
     }
