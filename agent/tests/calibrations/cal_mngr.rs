@@ -12,7 +12,7 @@ use std::time::Duration;
 use crate::mocks::calibration_sender::{MockCalibrationSender, Step};
 use crate::mocks::error::SleepController;
 use crate::test_utils::calibrations::{
-    latest_layout, received_at, report, report_id, reports_layout,
+    calibrations_layout, received_at, report, report_id, reports_layout,
 };
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::calibrations::{
@@ -54,7 +54,7 @@ impl Harness {
     fn new() -> Self {
         let dir = test_dirs::temp("cal_mngr_test").unwrap();
         let layout = reports_layout(&dir);
-        let latest = latest_layout(&dir);
+        let latest = calibrations_layout(&dir);
         let (sender, started) = MockCalibrationSender::new();
         Self {
             _dir: dir,
@@ -341,13 +341,38 @@ async fn a_failed_store_write_queues_nothing() {
     files::write_string(&blocker, "x", WriteOptions::OVERWRITE_ATOMIC)
         .await
         .unwrap();
+    // a report left queued would hang here rather than upload and leave
+    let (_hold, hang) = oneshot::channel();
+    h.sender.push(Step::Hang(hang));
     h.spawn().await;
 
     let err = guard(h.cal_mngr().report(report("a"))).await.unwrap_err();
 
     assert!(matches!(err, CalibrationsErr::FileSysErr(_)), "{err:?}");
     assert_eq!(h.num_queued_uploads().await, 0);
+    assert_eq!(h.queued_on_disk().await, 0);
     assert!(dirs::files(&h.layout.reports()).await.unwrap().is_empty());
+    assert!(h.sender.sent().is_empty());
+}
+
+#[tokio::test]
+async fn a_rejected_report_is_not_stored() {
+    let mut h = Harness::new();
+    let (_hold, hang) = oneshot::channel();
+    h.sender.push(Step::Hang(hang));
+    let options = UploaderOptions {
+        capacity: 1,
+        ..UploaderOptions::default()
+    };
+    h.spawn_with(options).await;
+    h.report("a").await;
+
+    let err = guard(h.cal_mngr().report(report("b"))).await.unwrap_err();
+
+    assert!(matches!(err, CalibrationsErr::QueueFullErr(_)), "{err:?}");
+    let latest = guard(h.cal_mngr().list_latest(LatestFilter::default())).await.unwrap();
+    let components: Vec<_> = latest.entries.into_iter().map(|e| e.metadata.component).collect();
+    assert_eq!(components, ["a"]);
 }
 
 #[tokio::test]

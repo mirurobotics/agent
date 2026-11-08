@@ -6,7 +6,7 @@
 use std::collections::HashSet;
 
 // internal crates
-use crate::test_utils::calibrations::{latest_layout, report, report_id};
+use crate::test_utils::calibrations::{calibrations_layout, report, report_id};
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::calibrations::{
     latest::DEFAULT_CAPACITY, CalibrationsErr, LatestCalibrations, LatestContent, LatestEntry,
@@ -31,7 +31,7 @@ struct Fixture {
 impl Fixture {
     fn new() -> Self {
         let dir = test_dirs::temp("latest_calibrations_test").unwrap();
-        let layout = latest_layout(&dir);
+        let layout = calibrations_layout(&dir);
         Self { _dir: dir, layout }
     }
 

@@ -95,6 +95,27 @@ async fn a_cal_mngr_rejection_fails_intake() {
 }
 
 #[tokio::test]
+async fn an_oversized_report_is_too_large_even_when_the_store_is_full() {
+    let options = UploaderOptions {
+        max_report_bytes: 100,
+        ..UploaderOptions::default()
+    };
+    let f = Fixture::with_options(options, 0).await;
+    let mut big = params();
+    big.data = "x".repeat(200);
+
+    let err = f.create(big).await.unwrap_err();
+
+    assert!(
+        matches!(
+            err,
+            ServiceErr::CalibrationsErr(CalibrationsErr::TooLargeErr(_))
+        ),
+        "{err:?}"
+    );
+}
+
+#[tokio::test]
 async fn a_full_latest_store_fails_intake() {
     let f = Fixture::with_options(UploaderOptions::default(), 0).await;
 

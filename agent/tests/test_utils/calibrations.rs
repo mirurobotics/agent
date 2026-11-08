@@ -52,8 +52,8 @@ pub fn reports_layout(dir: &TempDir) -> CalibrationReportsLayout {
     CalibrationReportsLayout::new(dir.to_dir().subdir("calibrations"))
 }
 
-/// The latest calibrations layout under `dir`.
-pub fn latest_layout(dir: &TempDir) -> CalibrationsLayout {
+/// The calibrations layout under `dir`, which holds the latest store.
+pub fn calibrations_layout(dir: &TempDir) -> CalibrationsLayout {
     CalibrationsLayout::new(dir.to_dir().subdir("resources").subdir("calibrations"))
 }
 
@@ -69,7 +69,7 @@ pub fn cal_mngr<S: Sender + 'static>(
     let args = CalMngrArgs {
         snapshot_file: None,
         reports: reports_layout(dir).reports(),
-        latest: LatestStore::new(None, latest_layout(dir).contents(), latest_capacity),
+        latest: LatestStore::new(None, calibrations_layout(dir).contents(), latest_capacity),
         sender,
         options,
         sleep_fn: tokio::time::sleep,
