@@ -597,7 +597,9 @@ fn glob_entries(dir: &Path, component: &GlobComponent) -> Vec<(PathBuf, FileType
         }
         let path = dir.join(name);
         return match std::fs::symlink_metadata(&path) {
-            Ok(meta) if !is_reparse_point(&meta) => vec![(path, meta.file_type())],
+            Ok(meta) if !is_skipped_reparse_point(&path, &meta) => {
+                vec![(path, meta.file_type())]
+            }
             _ => Vec::new(),
         };
     }
@@ -615,10 +617,23 @@ fn glob_entries(dir: &Path, component: &GlobComponent) -> Vec<(PathBuf, FileType
     // on Windows the listing already holds each entry's attributes, so this
     // needs no extra system call
     #[cfg(windows)]
-    let entries = entries.filter(|e| !e.metadata().is_ok_and(|m| is_reparse_point(&m)));
+    let entries = entries.filter(|e| {
+        let path = dir.join(e.file_name());
+        !e.metadata().is_ok_and(|m| is_skipped_reparse_point(&path, &m))
+    });
     entries
         .filter_map(|entry| Some((dir.join(entry.file_name()), entry.file_type().ok()?)))
         .collect()
+}
+
+/// Whether the glob leaves out `path` as a reparse point, logging it like a
+/// skipped symlink.
+fn is_skipped_reparse_point(path: &Path, meta: &std::fs::Metadata) -> bool {
+    let is_skipped = is_reparse_point(meta);
+    if is_skipped {
+        debug!("glob: skipping reparse point {}", path.display());
+    }
+    is_skipped
 }
 
 pub async fn metadata(file: &File) -> Result<Metadata, FileSysErr> {
