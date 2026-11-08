@@ -315,6 +315,8 @@ async fn a_corrupt_index_fails_every_call() {
     for err in errs {
         assert!(matches!(err, CalibrationsErr::CacheErr(_)), "{err:?}");
     }
+    // a mark it can't read is logged, not raised
+    store.mark_uploaded(arm.report_id).await;
 }
 
 // ============================ MARK UPLOADED ============================= //
