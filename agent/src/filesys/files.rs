@@ -1,4 +1,5 @@
 // standard crates
+use std::fs::FileType;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -442,8 +443,19 @@ pub async fn set_permissions(
 /// walk.
 pub fn glob(pattern: &str) -> Result<Vec<File>, FileSysErr> {
     let (root, patterns) = parse_glob(pattern)?;
-    let mut matches = Vec::new();
-    walk_glob(&root, &patterns, &mut matches);
+    let mut walk = GlobWalk {
+        todo: vec![(root, patterns.as_slice())],
+        matches: Vec::new(),
+    };
+    while let Some((dir, patterns)) = walk.todo.pop() {
+        let Some(first) = patterns.first() else {
+            continue;
+        };
+        for (path, file_type) in glob_entries(&dir, first) {
+            walk.visit(path, file_type, patterns);
+        }
+    }
+    let mut matches = walk.matches;
     matches.sort();
     // two `**` components can reach one file by two routes
     matches.dedup();
@@ -483,49 +495,55 @@ fn parse_glob(pattern: &str) -> Result<(PathBuf, Vec<glob::Pattern>), FileSysErr
     Ok((root, patterns))
 }
 
-/// Pushes the regular files in `dir` that match `patterns`.
-fn walk_glob(dir: &Path, patterns: &[glob::Pattern], matches: &mut Vec<PathBuf>) {
-    for (path, file_type) in read_dir_entries(dir) {
-        match_glob_entry(path, file_type, patterns, matches);
-    }
+/// A glob walk's state. It keeps its own work list rather than recursing, so a
+/// deep tree can't overflow the stack.
+struct GlobWalk<'p> {
+    /// Directories still to read, each with the patterns left for its entries.
+    todo: Vec<(PathBuf, &'p [glob::Pattern])>,
+    matches: Vec<PathBuf>,
 }
 
-/// Pushes `path` if it's a regular file that matches `patterns`, or walks
-/// into it if it's a directory that matches their first.
-fn match_glob_entry(
-    path: PathBuf,
-    file_type: std::fs::FileType,
-    patterns: &[glob::Pattern],
-    matches: &mut Vec<PathBuf>,
-) {
-    let Some((first, rest)) = patterns.split_first() else {
-        return;
-    };
-    if first.as_str() == "**" {
-        // `**` matches zero directories, or this one and any below it
-        match_glob_entry(path.clone(), file_type, rest, matches);
-        if file_type.is_dir() {
-            walk_glob(&path, patterns, matches);
+impl<'p> GlobWalk<'p> {
+    /// Keeps `path` if it's a regular file that matches `patterns`, or queues
+    /// it if it's a directory that matches their first.
+    fn visit(&mut self, path: PathBuf, file_type: FileType, patterns: &'p [glob::Pattern]) {
+        let Some((first, rest)) = patterns.split_first() else {
+            return;
+        };
+        if first.as_str() == "**" {
+            // `**` matches zero directories, or this one and any below it
+            self.visit(path.clone(), file_type, rest);
+            if file_type.is_dir() {
+                self.todo.push((path, patterns));
+            }
+            return;
         }
-        return;
-    }
-    let name = path.file_name().unwrap_or_default();
-    if !first.matches_path(Path::new(name)) {
-        return;
-    }
-    if file_type.is_symlink() {
-        debug!("glob: skipping symlink {}", path.display());
-    } else if rest.is_empty() && file_type.is_file() {
-        matches.push(path);
-    } else if !rest.is_empty() && file_type.is_dir() {
-        walk_glob(&path, rest, matches);
+        let name = path.file_name().unwrap_or_default();
+        if !first.matches_path(Path::new(name)) {
+            return;
+        }
+        if file_type.is_symlink() {
+            debug!("glob: skipping symlink {}", path.display());
+        } else if rest.is_empty() && file_type.is_file() {
+            self.matches.push(path);
+        } else if !rest.is_empty() && file_type.is_dir() {
+            self.todo.push((path, rest));
+        }
     }
 }
 
-/// The entries of `dir` (the current directory when empty) with their own
-/// types: a symlink is reported as one, not as its target. They're collected
-/// before returning so a recursive walk holds no directory handles open.
-fn read_dir_entries(dir: &Path) -> Vec<(PathBuf, std::fs::FileType)> {
+/// The entries of `dir` that `pattern` may match, with their own types: a
+/// symlink is reported as one, not as its target. A literal component is
+/// looked up directly, so it needs only traverse permission on `dir`.
+fn glob_entries(dir: &Path, pattern: &glob::Pattern) -> Vec<(PathBuf, FileType)> {
+    if !pattern.as_str().contains(GLOB_META) {
+        let path = dir.join(pattern.as_str());
+        return match std::fs::symlink_metadata(&path) {
+            Ok(metadata) => vec![(path, metadata.file_type())],
+            Err(_) => Vec::new(),
+        };
+    }
+    // an empty `dir` is the current directory
     let read_from = match dir.as_os_str().is_empty() {
         true => Path::new("."),
         false => dir,
