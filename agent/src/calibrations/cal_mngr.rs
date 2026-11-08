@@ -199,7 +199,7 @@ impl CalibrationManager {
     }
 
     /// The number of queued reports, including one being uploaded.
-    pub async fn num_queued_reports(&self) -> Result<usize, CalibrationsErr> {
+    pub async fn num_queued(&self) -> Result<usize, CalibrationsErr> {
         self.send_command("len", |respond_to| Command::Len { respond_to })
             .await
     }

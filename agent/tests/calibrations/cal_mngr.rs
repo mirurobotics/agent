@@ -124,7 +124,7 @@ impl Harness {
     }
 
     async fn len(&self) -> usize {
-        guard(self.cal_mngr().num_queued_reports()).await.unwrap()
+        guard(self.cal_mngr().num_queued()).await.unwrap()
     }
 
     fn report_file(&self, id: Uuid) -> File {
@@ -336,7 +336,7 @@ async fn a_caller_that_stops_waiting_does_not_stop_the_cal_mngr() {
     h.spawn().await;
 
     // polled once: the command is sent, then its reply is abandoned
-    assert!(h.cal_mngr().num_queued_reports().now_or_never().is_none());
+    assert!(h.cal_mngr().num_queued().now_or_never().is_none());
 
     h.enqueue("a").await;
     h.await_drained(&["a"]).await;
