@@ -120,7 +120,9 @@ impl Harness {
     }
 
     async fn enqueue(&self, slug: &str) {
-        guard(self.cal_mngr().enqueue_report(report(slug))).await.unwrap();
+        guard(self.cal_mngr().enqueue_report(report(slug)))
+            .await
+            .unwrap();
     }
 
     async fn len(&self) -> usize {
