@@ -329,7 +329,9 @@ mod tests {
     // internal crates
     use super::{NextAttempt, QueueEntry, UploaderImpl, UploaderOptions};
     use crate::test_utils::calibration_sender::{MockCalibrationSender, Step};
-    use crate::test_utils::calibrations::{latest_layout, layout, received_at, report, report_id};
+    use crate::test_utils::calibrations::{
+        latest_layout, received_at, report, report_id, reports_layout,
+    };
     use crate::test_utils::filesys::dirs as test_dirs;
     use miru_agent::calibrations::{
         latest::DEFAULT_CAPACITY, CalibrationsErr, LatestContent, LatestFilter, LatestIndexFile,
@@ -360,7 +362,7 @@ mod tests {
     impl Fixture {
         fn new() -> Self {
             let dir = test_dirs::temp("calibration_uploader_impl_test").unwrap();
-            let layout = layout(&dir);
+            let layout = reports_layout(&dir);
             let latest = latest_layout(&dir);
             let (sender, _) = MockCalibrationSender::new();
             Self {

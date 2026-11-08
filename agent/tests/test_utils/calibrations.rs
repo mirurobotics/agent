@@ -47,8 +47,8 @@ pub fn report(slug: &str) -> Report {
     }
 }
 
-/// The calibrations layout under `dir`.
-pub fn layout(dir: &TempDir) -> CalibrationReportsLayout {
+/// The calibration reports layout under `dir`.
+pub fn reports_layout(dir: &TempDir) -> CalibrationReportsLayout {
     CalibrationReportsLayout::new(dir.to_dir().subdir("calibrations"))
 }
 
@@ -67,7 +67,7 @@ pub fn uploader<S: Sender + 'static>(
 ) -> CalibrationManager {
     let args = UploaderArgs {
         snapshot_file: None,
-        reports: layout(dir).reports(),
+        reports: reports_layout(dir).reports(),
         latest: LatestStore::new(None, latest_layout(dir).contents(), latest_capacity),
         sender,
         options,

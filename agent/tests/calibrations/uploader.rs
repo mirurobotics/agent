@@ -10,7 +10,9 @@ use std::time::Duration;
 // internal crates
 use crate::mocks::calibration_sender::{MockCalibrationSender, Step};
 use crate::mocks::error::SleepController;
-use crate::test_utils::calibrations::{latest_layout, layout, received_at, report, report_id};
+use crate::test_utils::calibrations::{
+    latest_layout, received_at, report, report_id, reports_layout,
+};
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::calibrations::{
     latest::DEFAULT_CAPACITY, CalibrationManager, CalibrationsErr, LatestContent, LatestFilter,
@@ -50,7 +52,7 @@ struct Harness {
 impl Harness {
     fn new() -> Self {
         let dir = test_dirs::temp("calibration_uploader_test").unwrap();
-        let layout = layout(&dir);
+        let layout = reports_layout(&dir);
         let latest = latest_layout(&dir);
         let (sender, started) = MockCalibrationSender::new();
         Self {
