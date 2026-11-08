@@ -107,23 +107,10 @@ while read -r covgate_file; do
         echo "$COV_JSON" | jq -r --arg mod "$module_dir_abs" '
             .data[0].files[] | select(.filename | startswith($mod))
             | select(.summary.regions.covered < .summary.regions.count)
-            | .filename as $f | .segments[]
-            | select(.[2] == 0 and .[3] and .[4] and (.[5] | not))
-            | "    uncovered: \($f):\(.[0]):\(.[1])"'
-        echo "$COV_JSON" | jq -r --arg mod "$module_dir_abs" '
-            .data[0].files[] | select(.filename | startswith($mod))
-            | "    regions: \(.filename) \(.summary.regions.covered)/\(.summary.regions.count)"'
-        echo "$COV_JSON" | jq -r --arg mod "$module_dir_abs" '
-            .data[0].files[] | select(.filename | startswith($mod))
-            | .filename as $f | (.expansions // [])[]
-            | .source_region as $s | (.target_regions // [])[]
-            | select(.[4] == 0)
-            | "    uncovered expansion: \($f):\($s[0]):\($s[1]) region \(.[0]):\(.[1]) kind \(.[7])"'
-        echo "$COV_JSON" | jq -r --arg mod "$module_dir_abs" '
-            .data[0].functions[] | select(.filenames[0] | startswith($mod))
-            | .name as $n | .filenames as $fs | .regions[]
-            | select(.[4] == 0)
-            | "    uncovered fn: \($n) \($fs[.[5]]):\(.[0]):\(.[1])-\(.[2]):\(.[3]) kind \(.[7])"'
+            | .filename as $f
+            | "    regions: \($f) \(.summary.regions.covered)/\(.summary.regions.count)",
+              (.segments[] | select(.[2] == 0) | "    zero segment: \($f):\(.)"),
+              ((.expansions // [])[] | "    expansion: \($f) \(.source_region) zero targets: \([.target_regions[] | select(.[4] == 0)])")'
         HAS_FAILURES=1
     else
         echo "✅ ${module_display}: ${coverage}% (requires ${MIN}%)"

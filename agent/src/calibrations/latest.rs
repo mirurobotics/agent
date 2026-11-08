@@ -199,6 +199,30 @@ impl LatestStore {
         })
     }
 
+    /// Delete the content no entry names, which a crash or a failed delete
+    /// leaves, so it never pushes the content cache past its cap. A failure
+    /// is logged.
+    pub async fn prune_orphans(&self) {
+        if let Err(e) = self.try_prune_orphans().await {
+            warn!("calibrations: failed to prune latest contents: {e}");
+        }
+    }
+
+    async fn try_prune_orphans(&self) -> Result<(), CacheErr> {
+        let entries = self.stor.meta.values().await?;
+        let named: HashSet<String> = entries
+            .iter()
+            .map(|e| e.metadata.report_id.to_string())
+            .collect();
+        let contents = self.stor.content.entry_map().await?;
+        for content_key in contents.into_keys() {
+            if !named.contains(&content_key) {
+                self.delete_content(content_key).await;
+            }
+        }
+        Ok(())
+    }
+
     /// Delete the content under `content_key`, logging a failure.
     async fn delete_content(&self, content_key: String) {
         if let Err(e) = self.stor.content.delete(content_key.clone()).await {

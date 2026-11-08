@@ -12,7 +12,8 @@ use std::time::Duration;
 use crate::mocks::calibration_sender::{MockCalibrationSender, Step};
 use crate::mocks::error::SleepController;
 use crate::test_utils::calibrations::{
-    calibrations_layout, latest_store, received_at, report, report_id, reports_layout,
+    calibration_stor, calibrations_layout, latest_store, received_at, report, report_id,
+    reports_layout,
 };
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::calibrations::{
@@ -20,7 +21,7 @@ use miru_agent::calibrations::{
     LatestFilter, ListedEntry, Queue, QueueSnapshotFile, UploaderOptions,
 };
 use miru_agent::disk::layout::{CalibrationReportsLayout, CalibrationsLayout};
-use miru_agent::filesys::{dirs, files, File, PathExt, WriteOptions};
+use miru_agent::filesys::{dirs, files, File, Overwrite, PathExt, WriteOptions};
 use miru_agent::models::{CalibrationUploadStatus, InstanceFormat};
 use miru_agent::queue::Persistence;
 
@@ -229,6 +230,28 @@ async fn startup_prunes_orphaned_report_files() {
     h.await_started().await;
     assert!(!orphan.exists());
     assert!(h.report_file(ids[0]).exists());
+}
+
+#[tokio::test]
+async fn startup_prunes_unnamed_latest_contents() {
+    let mut h = Harness::new();
+    let orphan = Uuid::new_v4().to_string();
+    let content = calibration_stor(&h.dir).await.content;
+    let value = "{}".to_string();
+    content
+        .write(orphan.clone(), value, |_, _| false, Overwrite::Allow)
+        .await
+        .unwrap();
+    let (_hold, hang) = oneshot::channel();
+    h.sender.push(Step::Hang(hang));
+    preloaded(&h, &["a"]).await;
+
+    h.spawn().await;
+
+    // the worker prunes before it starts the first upload
+    h.await_started().await;
+    let file = h.latest.contents().file(&format!("{orphan}.json"));
+    assert!(!file.exists());
 }
 
 #[tokio::test]
