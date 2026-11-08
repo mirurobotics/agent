@@ -182,18 +182,16 @@ mod tests {
 
     #[tokio::test]
     async fn read_streams_opened_file_after_path_swap() {
-        let tf = temp_file_with(b"original").await;
-        let path = tf.to_file().path().clone();
-        let src = Source::open(tf.to_file(), &obj("k")).await.unwrap();
-        let moved = path.with_extension("moved");
-        std::fs::rename(&path, &moved).unwrap();
-        std::fs::write(&path, b"swapped!").unwrap();
+        let dir = crate::test_utils::filesys::dirs::temp("s3-test").unwrap();
+        let file = dir.file("x.log");
+        std::fs::write(file.path(), b"original").unwrap();
+        let src = Source::open(file.clone(), &obj("k")).await.unwrap();
+        std::fs::rename(file.path(), dir.file("moved.log").path()).unwrap();
+        std::fs::write(file.path(), b"swapped!").unwrap();
 
         let body = src.read("put_object", &obj("k"), 0, 8).unwrap();
 
         assert_eq!(body.collect().await.unwrap().to_vec(), b"original");
-        drop(src);
-        std::fs::remove_file(&moved).unwrap();
     }
 
     #[tokio::test]
