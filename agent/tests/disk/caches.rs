@@ -46,17 +46,25 @@ pub mod init {
         files::write_string(&calibrations.index(), "x", WriteOptions::OVERWRITE_ATOMIC)
             .await
             .unwrap();
+        dirs::create(&calibrations.contents()).await.unwrap();
+        let name = format!("{}.json", Uuid::new_v4());
+        let content = calibrations.contents().file(&name);
+        files::write_string(&content, "x", WriteOptions::OVERWRITE_ATOMIC)
+            .await
+            .unwrap();
 
         let capacities = Capacities::default();
         let (storage, _) = Storage::init(&layout, capacities, "test_device".to_string())
             .await
             .unwrap();
 
-        // the cache starts empty, and the corrupt index is kept beside it
+        // the cache starts empty, the corrupt index is kept beside it, and the
+        // content no entry now names is deleted
         let entries = storage.calibrations.meta.values().await.unwrap();
         assert!(entries.is_empty());
         let files = dirs::files(&calibrations.root).await.unwrap();
         assert_eq!(files.len(), 2);
+        assert!(!content.exists());
         storage.shutdown().await.unwrap();
     }
 
@@ -130,7 +138,7 @@ pub mod init {
     }
 
     #[tokio::test]
-    async fn init_keeps_the_latest_entries_and_deletes_unnamed_contents() {
+    async fn init_keeps_the_latest_entries_and_deletes_orphaned_contents() {
         let dir = test_dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
         let capacities = Capacities::default();

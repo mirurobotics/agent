@@ -319,7 +319,7 @@ async fn init_calibration_storage(
 ) -> Result<(CalibrationStor, [JoinHandle<()>; 2]), StorErr> {
     let calibrations_layout = layout.calibrations();
     calibrations::set_aside_corrupt_index(&calibrations_layout.index()).await;
-    calibrations::prune_unnamed_contents(&calibrations_layout).await;
+    calibrations::prune_orphaned_contents(&calibrations_layout).await;
     let (meta, meta_handle) =
         Calibrations::spawn(64, calibrations_layout.index(), capacities.calibrations).await?;
     let (content, content_handle) =
