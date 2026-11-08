@@ -617,7 +617,8 @@ fn glob_entries(dir: &Path, component: &GlobComponent) -> Vec<(PathBuf, FileType
     #[cfg(windows)]
     let entries = entries.filter(|e| {
         let path = dir.join(e.file_name());
-        !e.metadata().is_ok_and(|m| is_skipped_reparse_point(&path, &m))
+        !e.metadata()
+            .is_ok_and(|m| is_skipped_reparse_point(&path, &m))
     });
     entries
         .filter_map(|entry| Some((dir.join(entry.file_name()), entry.file_type().ok()?)))
