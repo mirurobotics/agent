@@ -190,7 +190,7 @@ impl CalibrationManager {
     /// Queue `report` durably. A full queue is the 507
     /// [`CalibrationsErr::QueueFullErr`], and a report over the size cap the
     /// 413 [`CalibrationsErr::TooLargeErr`].
-    pub async fn enqueue(&self, report: Report) -> Result<(), CalibrationsErr> {
+    pub async fn enqueue_report(&self, report: Report) -> Result<(), CalibrationsErr> {
         self.send_command("enqueue", |respond_to| Command::Enqueue {
             report: Box::new(report),
             respond_to,
@@ -199,9 +199,7 @@ impl CalibrationManager {
     }
 
     /// The number of queued reports, including one being uploaded.
-    // an actor-round-tripping is_empty would be dead weight next to len()
-    #[allow(clippy::len_without_is_empty)]
-    pub async fn len(&self) -> Result<usize, CalibrationsErr> {
+    pub async fn num_queued_reports(&self) -> Result<usize, CalibrationsErr> {
         self.send_command("len", |respond_to| Command::Len { respond_to })
             .await
     }

@@ -160,7 +160,7 @@ async fn a_deployments_cache_error_queues_nothing() {
     let err = f.create(params()).await.unwrap_err();
 
     assert!(matches!(err, ServiceErr::DiskErr(_)), "{err:?}");
-    assert_eq!(f.cal_mngr.len().await.unwrap(), 0);
+    assert_eq!(f.cal_mngr.num_queued_reports().await.unwrap(), 0);
 }
 
 #[tokio::test]

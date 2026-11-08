@@ -58,7 +58,7 @@ pub async fn create(
         },
         data: params.data,
     };
-    cal_mngr.enqueue(report).await?;
+    cal_mngr.enqueue_report(report).await?;
     Ok(Created {
         report_id,
         reported_at: now,

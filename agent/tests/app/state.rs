@@ -298,7 +298,7 @@ pub mod init {
         let (state, state_handle) = env.init().await.unwrap();
 
         // the actor is spawned and its queue snapshot file is seeded on disk
-        state.cal_mngr.len().await.unwrap();
+        state.cal_mngr.num_queued_reports().await.unwrap();
         assert!(env.layout.calibrations().queue().exists());
 
         state.shutdown().await.unwrap();
@@ -316,7 +316,7 @@ pub mod init {
         let (state, state_handle) = env.init().await.unwrap();
 
         // fail-open: the agent boots and the uploader runs without persistence
-        state.cal_mngr.len().await.unwrap();
+        state.cal_mngr.num_queued_reports().await.unwrap();
 
         state.shutdown().await.unwrap();
         state_handle.await;

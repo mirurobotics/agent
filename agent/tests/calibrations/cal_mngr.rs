@@ -120,11 +120,11 @@ impl Harness {
     }
 
     async fn enqueue(&self, slug: &str) {
-        guard(self.cal_mngr().enqueue(report(slug))).await.unwrap();
+        guard(self.cal_mngr().enqueue_report(report(slug))).await.unwrap();
     }
 
     async fn len(&self) -> usize {
-        guard(self.cal_mngr().len()).await.unwrap()
+        guard(self.cal_mngr().num_queued_reports()).await.unwrap()
     }
 
     fn report_file(&self, id: Uuid) -> File {
@@ -322,7 +322,7 @@ async fn commands_after_shutdown_fail() {
     h.spawn().await;
     h.stop().await;
 
-    let err = h.cal_mngr().enqueue(report("a")).await.unwrap_err();
+    let err = h.cal_mngr().enqueue_report(report("a")).await.unwrap_err();
 
     assert!(
         matches!(err, CalibrationsErr::SendActorMessageErr(_)),
@@ -336,7 +336,7 @@ async fn a_caller_that_stops_waiting_does_not_stop_the_cal_mngr() {
     h.spawn().await;
 
     // polled once: the command is sent, then its reply is abandoned
-    assert!(h.cal_mngr().len().now_or_never().is_none());
+    assert!(h.cal_mngr().num_queued_reports().now_or_never().is_none());
 
     h.enqueue("a").await;
     h.await_drained(&["a"]).await;
@@ -348,7 +348,8 @@ async fn a_command_queued_behind_shutdown_fails() {
     h.spawn().await;
 
     let cal_mngr = h.cal_mngr();
-    let (stopped, enqueued) = tokio::join!(cal_mngr.shutdown(), cal_mngr.enqueue(report("a")));
+    let (stopped, enqueued) =
+        tokio::join!(cal_mngr.shutdown(), cal_mngr.enqueue_report(report("a")));
 
     stopped.unwrap();
     let err = enqueued.unwrap_err();
