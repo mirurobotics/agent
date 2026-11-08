@@ -7,7 +7,6 @@ use std::sync::Arc;
 use crate::calibrations::{
     cleanup,
     errors::{CalibrationTooLargeErr, CalibrationsErr, InvalidReportErr},
-    latest::LatestStore,
     report::{Queue, QueueEntry, QueueSnapshotFile, Report, ReportMetadata},
     sender::Sender,
 };
@@ -54,8 +53,7 @@ pub(crate) type NextAttempt = queue::NextAttempt<ReportMetadata>;
 
 /// Single-threaded calibration uploader state and logic: the queue of report
 /// metadata, the directory of report files, and the sender that uploads them.
-/// [`CalibrationManager`] runs it inside an actor, does the waiting, and lends
-/// it the latest store to write.
+/// [`CalibrationManager`] runs it inside an actor and does the waiting.
 ///
 /// Each queued report's data is its own file, `<reports>/<entry id>`, so large
 /// data is never rewritten with the queue. A failed report is
@@ -118,28 +116,18 @@ where
         cleanup::prune(&self.reports, &queued.collect()).await;
     }
 
-    /// Queue `report`, write it to `latest`, and return its queue entry id.
-    /// The entry is written before the report file, so a crash between the two
-    /// leaves an entry without a file, which [`Self::attempt`] fails for good.
-    /// The store is written last, and a failed store write removes the queued
-    /// report. On error nothing is queued or stored.
-    pub(crate) async fn enqueue(
-        &mut self,
-        latest: &mut LatestStore,
-        report: Report,
-    ) -> Result<Uuid, CalibrationsErr> {
-        let bytes = report.data.into_bytes();
+    /// Queue `report` and return its queue entry id. The entry is written
+    /// before the report file, so a crash between the two leaves an entry
+    /// without a file, which [`Self::attempt`] fails for good. On error nothing
+    /// is queued.
+    pub(crate) async fn enqueue(&mut self, report: &Report) -> Result<Uuid, CalibrationsErr> {
+        let bytes = report.data.as_bytes();
         self.verify_size(bytes.len() as u64)?;
-        latest.verify_capacity(&report.metadata)?;
         let id = self.queue.enqueue(report.metadata.clone()).await?;
         let file = self.report_file(id);
-        if let Err(e) = files::write_bytes(&file, &bytes, WriteOptions::OVERWRITE_ATOMIC).await {
+        if let Err(e) = files::write_bytes(&file, bytes, WriteOptions::OVERWRITE_ATOMIC).await {
             self.queue.ack(id).await;
             return Err(e.into());
-        }
-        if let Err(e) = latest.put(report.metadata, &bytes).await {
-            self.remove(id).await;
-            return Err(e);
         }
         Ok(id)
     }
@@ -179,19 +167,15 @@ where
     }
 
     /// Settle `entry` once its attempt ended in `result`: remove the report
-    /// when sent, otherwise retry or drop it as the retry policy says. A sent
-    /// report's `latest` entry is marked uploaded before the report is
-    /// dequeued, so a crash in between re-sends it rather than losing the mark.
+    /// when sent, otherwise retry or drop it as the retry policy says.
     pub(crate) async fn finish_attempt(
         &mut self,
-        latest: &mut LatestStore,
         entry: QueueEntry,
         result: Result<(), CalibrationsErr>,
     ) {
         match result {
             Ok(()) => {
                 Self::log_success(&entry);
-                latest.mark_uploaded(entry.job.report_id).await;
                 self.remove(entry.id).await;
             }
             Err(err) => self.handle_failure(entry, err).await,
@@ -236,7 +220,7 @@ where
 
     /// Dequeue report `id`, then delete its file. The entry goes first, so a
     /// crash between the two leaves a file that [`Self::prune_orphans`] deletes.
-    async fn remove(&mut self, id: Uuid) {
+    pub(crate) async fn remove(&mut self, id: Uuid) {
         self.queue.ack(id).await;
         cleanup::delete(&self.report_file(id)).await;
     }
@@ -329,17 +313,11 @@ mod tests {
     // internal crates
     use super::{NextAttempt, QueueEntry, Uploader, UploaderOptions};
     use crate::test_utils::calibration_sender::{MockCalibrationSender, Step};
-    use crate::test_utils::calibrations::{
-        latest_layout, received_at, report, report_id, reports_layout,
-    };
+    use crate::test_utils::calibrations::{received_at, report, report_id, reports_layout};
     use crate::test_utils::filesys::dirs as test_dirs;
-    use miru_agent::calibrations::{
-        latest::DEFAULT_CAPACITY, CalibrationsErr, LatestContent, LatestFilter, LatestIndexFile,
-        LatestStore, ListedEntry, Queue, QueueSnapshotFile,
-    };
-    use miru_agent::disk::layout::{CalibrationReportsLayout, CalibrationsLayout};
+    use miru_agent::calibrations::{CalibrationsErr, Queue, QueueSnapshotFile};
+    use miru_agent::disk::layout::CalibrationReportsLayout;
     use miru_agent::filesys::{dirs, files, File, PathExt, WriteOptions};
-    use miru_agent::models::{CalibrationUploadStatus, InstanceFormat};
     use miru_agent::queue::{Persistence, RetryPolicy};
 
     // external crates
@@ -352,7 +330,6 @@ mod tests {
     struct Fixture {
         _dir: test_dirs::TempDir,
         layout: CalibrationReportsLayout,
-        latest: CalibrationsLayout,
         sender: Arc<MockCalibrationSender>,
         /// The uploader's clock. It starts when the fixture reports were
         /// received and moves only when a test advances it.
@@ -363,12 +340,10 @@ mod tests {
         fn new() -> Self {
             let dir = test_dirs::temp("calibration_uploader_test").unwrap();
             let layout = reports_layout(&dir);
-            let latest = latest_layout(&dir);
             let (sender, _) = MockCalibrationSender::new();
             Self {
                 _dir: dir,
                 layout,
-                latest,
                 sender,
                 clock: Arc::new(Mutex::new(received_at())),
             }
@@ -376,12 +351,6 @@ mod tests {
 
         async fn snapshot_file(&self) -> QueueSnapshotFile {
             QueueSnapshotFile::new_with_default(self.layout.queue(), Default::default())
-                .await
-                .unwrap()
-        }
-
-        async fn latest_index(&self) -> LatestIndexFile {
-            LatestIndexFile::new_with_default(self.latest.index(), Default::default())
                 .await
                 .unwrap()
         }
@@ -416,13 +385,6 @@ mod tests {
                 options,
                 now_fn,
             )
-        }
-
-        /// The latest store the worker would lend the uploader, saved under
-        /// the fixture's directory.
-        async fn latest_store(&self) -> LatestStore {
-            let index_file = Some(self.latest_index().await);
-            LatestStore::new(index_file, self.latest.contents(), DEFAULT_CAPACITY)
         }
 
         /// Move the uploader's clock forward by `by`.
@@ -465,13 +427,13 @@ mod tests {
 
     /// Upload the report that `next_attempt` says is due, then settle it, as
     /// the worker's `run_attempt` does. Panics if no report is due.
-    async fn run_next_attempt(u: &mut TestUploader, latest: &mut LatestStore) {
+    async fn run_next_attempt(u: &mut TestUploader) {
         let next = u.next_attempt().await;
         let NextAttempt::Ready(entry) = next else {
             panic!("no report is due: {next:?}");
         };
         let result = u.attempt(&entry).await;
-        u.finish_attempt(latest, entry, result).await;
+        u.finish_attempt(entry, result).await;
     }
 
     /// Assert that every report is backing off and the earliest is due in `secs`.
@@ -482,17 +444,6 @@ mod tests {
 
     async fn assert_empty(u: &mut TestUploader) {
         assert_eq!(u.next_attempt().await, NextAttempt::Empty);
-    }
-
-    /// The latest entries, with the status a listing derives from `u`'s queue.
-    fn listed(u: &TestUploader, latest: &LatestStore) -> Vec<ListedEntry> {
-        let queued = u.queued_report_ids();
-        latest.list(&LatestFilter::default(), &queued).entries
-    }
-
-    fn statuses(u: &TestUploader, latest: &LatestStore) -> Vec<CalibrationUploadStatus> {
-        let entries = listed(u, latest).into_iter();
-        entries.map(|entry| entry.upload_status).collect()
     }
 
     fn strings(names: &[&str]) -> Vec<String> {
@@ -512,9 +463,8 @@ mod tests {
     async fn without_a_queue_file_the_queue_lives_in_memory() {
         let f = Fixture::new();
         let mut u = f.uploader_on(None, UploaderOptions::default());
-        let mut latest = f.latest_store().await;
 
-        u.enqueue(&mut latest, report("a")).await.unwrap();
+        u.enqueue(&report("a")).await.unwrap();
 
         assert_eq!(u.len(), 1);
         assert!(!f.layout.queue().exists());
@@ -581,9 +531,8 @@ mod tests {
     async fn stores_metadata_in_the_queue_and_data_in_a_report_file() {
         let f = Fixture::new();
         let mut u = f.uploader().await;
-        let mut latest = f.latest_store().await;
 
-        let id = u.enqueue(&mut latest, report("a")).await.unwrap();
+        let id = u.enqueue(&report("a")).await.unwrap();
 
         let entry = QueueEntry {
             id,
@@ -604,11 +553,10 @@ mod tests {
             ..UploaderOptions::default()
         };
         let mut u = f.uploader_with(options).await;
-        let mut latest = f.latest_store().await;
         let mut big = report("arm");
         big.data = "x".repeat(200);
 
-        let err = u.enqueue(&mut latest, big).await.unwrap_err();
+        let err = u.enqueue(&big).await.unwrap_err();
 
         assert!(matches!(err, CalibrationsErr::TooLargeErr(_)), "{err:?}");
         assert_eq!(u.len(), 0);
@@ -623,21 +571,18 @@ mod tests {
             ..UploaderOptions::default()
         };
         let mut u = f.uploader_with(options).await;
-        let mut latest = f.latest_store().await;
-        u.enqueue(&mut latest, report("a")).await.unwrap();
+        u.enqueue(&report("a")).await.unwrap();
 
-        let err = u.enqueue(&mut latest, report("b")).await.unwrap_err();
+        let err = u.enqueue(&report("b")).await.unwrap_err();
 
         assert!(matches!(err, CalibrationsErr::QueueFullErr(_)), "{err:?}");
         assert_eq!(u.len(), 1);
-        assert_eq!(statuses(&u, &latest), [CalibrationUploadStatus::Queued]);
     }
 
     #[tokio::test]
     async fn a_queue_write_failure_queues_nothing() {
         let f = Fixture::new();
         let mut u = f.uploader().await;
-        let mut latest = f.latest_store().await;
         // a non-empty directory where the queue file should be can't be replaced
         files::delete(&f.layout.queue()).await.unwrap();
         let blocker = f.layout.root.subdir("queue.json");
@@ -645,12 +590,11 @@ mod tests {
             .await
             .unwrap();
 
-        let err = u.enqueue(&mut latest, report("a")).await.unwrap_err();
+        let err = u.enqueue(&report("a")).await.unwrap_err();
 
         assert!(matches!(err, CalibrationsErr::FileSysErr(_)), "{err:?}");
         assert_eq!(u.len(), 0);
         assert!(!f.layout.reports().exists());
-        assert!(listed(&u, &latest).is_empty());
     }
 
     #[tokio::test]
@@ -662,65 +606,11 @@ mod tests {
             .await
             .unwrap();
         let mut u = f.uploader().await;
-        let mut latest = f.latest_store().await;
 
-        let err = u.enqueue(&mut latest, report("a")).await.unwrap_err();
+        let err = u.enqueue(&report("a")).await.unwrap_err();
 
         assert!(matches!(err, CalibrationsErr::FileSysErr(_)), "{err:?}");
         assert_eq!(u.len(), 0);
-        assert!(listed(&u, &latest).is_empty());
-    }
-
-    #[tokio::test]
-    async fn enqueue_writes_the_report_through_to_the_latest_store() {
-        let f = Fixture::new();
-        let mut u = f.uploader().await;
-        let mut latest = f.latest_store().await;
-
-        u.enqueue(&mut latest, report("a")).await.unwrap();
-
-        let entry = ListedEntry {
-            metadata: report("a").metadata,
-            upload_status: CalibrationUploadStatus::Queued,
-        };
-        assert_eq!(listed(&u, &latest), [entry]);
-        let content = latest.content(report_id("a")).await.unwrap();
-        let want = LatestContent {
-            format: InstanceFormat::Json,
-            data: report("a").data.into_bytes(),
-        };
-        assert_eq!(content, want);
-    }
-
-    #[tokio::test]
-    async fn enqueue_rolls_back_the_queue_when_the_store_write_fails() {
-        let f = Fixture::new();
-        let mut u = f.uploader().await;
-        let mut latest = f.latest_store().await;
-        // a regular file where the latest contents directory should be
-        let blocker = File::new(f.latest.contents().path().clone());
-        files::write_string(&blocker, "x", WriteOptions::OVERWRITE_ATOMIC)
-            .await
-            .unwrap();
-
-        let err = u.enqueue(&mut latest, report("a")).await.unwrap_err();
-
-        assert!(matches!(err, CalibrationsErr::FileSysErr(_)), "{err:?}");
-        assert!(f.queued_on_disk().await.is_empty());
-        assert!(dirs::files(&f.layout.reports()).await.unwrap().is_empty());
-    }
-
-    #[tokio::test]
-    async fn enqueue_rejects_a_new_key_when_the_store_is_full_and_queues_nothing() {
-        let f = Fixture::new();
-        let mut u = f.uploader().await;
-        let mut latest = LatestStore::new(None, f.latest.contents(), 0);
-
-        let err = u.enqueue(&mut latest, report("a")).await.unwrap_err();
-
-        assert!(matches!(err, CalibrationsErr::StoreFullErr(_)), "{err:?}");
-        assert_eq!(u.len(), 0);
-        assert!(!f.layout.reports().exists());
     }
 
     // ========================== QUEUED REPORT IDS =========================== //
@@ -728,9 +618,8 @@ mod tests {
     async fn queued_report_ids_are_the_queued_reports() {
         let f = Fixture::new();
         let mut u = f.uploader().await;
-        let mut latest = f.latest_store().await;
         for slug in ["a", "b"] {
-            u.enqueue(&mut latest, report(slug)).await.unwrap();
+            u.enqueue(&report(slug)).await.unwrap();
         }
 
         let ids = u.queued_report_ids();
@@ -758,14 +647,13 @@ mod tests {
         let f = Fixture::new();
         f.sender.push(Step::Server);
         let mut u = f.uploader().await;
-        let mut latest = f.latest_store().await;
         let report = report("a");
         let id = report.metadata.report_id;
-        u.enqueue(&mut latest, report).await.unwrap();
+        u.enqueue(&report).await.unwrap();
 
-        run_next_attempt(&mut u, &mut latest).await;
+        run_next_attempt(&mut u).await;
         f.advance_secs(10);
-        run_next_attempt(&mut u, &mut latest).await;
+        run_next_attempt(&mut u).await;
 
         assert_eq!(f.sender.report_ids(), [id, id]);
     }
@@ -776,9 +664,8 @@ mod tests {
         let ids = preloaded(&f, &["a"]).await;
         files::delete(&f.report_file(ids[0])).await.unwrap();
         let mut u = f.uploader().await;
-        let mut latest = f.latest_store().await;
 
-        run_next_attempt(&mut u, &mut latest).await;
+        run_next_attempt(&mut u).await;
 
         assert!(f.sent().is_empty());
         assert_empty(&mut u).await;
@@ -796,9 +683,8 @@ mod tests {
         .await
         .unwrap();
         let mut u = f.uploader().await;
-        let mut latest = f.latest_store().await;
 
-        run_next_attempt(&mut u, &mut latest).await;
+        run_next_attempt(&mut u).await;
 
         assert!(f.sent().is_empty());
         assert_empty(&mut u).await;
@@ -814,9 +700,8 @@ mod tests {
         let dir = f.layout.reports().subdir(ids[0].to_string());
         dirs::create(&dir).await.unwrap();
         let mut u = f.uploader().await;
-        let mut latest = f.latest_store().await;
 
-        run_next_attempt(&mut u, &mut latest).await;
+        run_next_attempt(&mut u).await;
 
         assert!(f.sent().is_empty());
         assert_backoff(&mut u, 10).await;
@@ -827,45 +712,12 @@ mod tests {
     async fn a_sent_report_is_dequeued_and_its_file_deleted() {
         let f = Fixture::new();
         let mut u = f.uploader().await;
-        let mut latest = f.latest_store().await;
-        let id = u.enqueue(&mut latest, report("a")).await.unwrap();
+        let id = u.enqueue(&report("a")).await.unwrap();
 
-        run_next_attempt(&mut u, &mut latest).await;
+        run_next_attempt(&mut u).await;
 
         assert!(f.queued_on_disk().await.is_empty());
         assert!(!f.report_file(id).exists());
-    }
-
-    #[tokio::test]
-    async fn a_sent_report_is_marked_uploaded() {
-        let f = Fixture::new();
-        let mut u = f.uploader().await;
-        let mut latest = f.latest_store().await;
-        u.enqueue(&mut latest, report("a")).await.unwrap();
-
-        run_next_attempt(&mut u, &mut latest).await;
-
-        assert_eq!(statuses(&u, &latest), [CalibrationUploadStatus::Uploaded]);
-    }
-
-    #[tokio::test]
-    async fn a_newer_report_for_the_key_is_not_marked() {
-        let f = Fixture::new();
-        let mut u = f.uploader().await;
-        let mut latest = f.latest_store().await;
-        let mut newer = report("a");
-        newer.metadata.report_id = Uuid::new_v4();
-        u.enqueue(&mut latest, report("a")).await.unwrap();
-        u.enqueue(&mut latest, newer.clone()).await.unwrap();
-
-        // the older report uploads after the newer one replaced it
-        run_next_attempt(&mut u, &mut latest).await;
-
-        let entry = ListedEntry {
-            metadata: newer.metadata,
-            upload_status: CalibrationUploadStatus::Queued,
-        };
-        assert_eq!(listed(&u, &latest), [entry]);
     }
 
     /// A report file that can't be deleted is left for `prune_orphans` on the
@@ -875,7 +727,6 @@ mod tests {
         let f = Fixture::new();
         let ids = preloaded(&f, &["a"]).await;
         let mut u = f.uploader().await;
-        let mut latest = f.latest_store().await;
         let entry = QueueEntry {
             id: ids[0],
             job: report("a").metadata,
@@ -888,7 +739,7 @@ mod tests {
             .await
             .unwrap();
 
-        u.finish_attempt(&mut latest, entry, Ok(())).await;
+        u.finish_attempt(entry, Ok(())).await;
 
         assert!(f.queued_on_disk().await.is_empty());
     }
@@ -900,11 +751,10 @@ mod tests {
             f.sender.push(Step::Server);
         }
         let mut u = f.uploader().await;
-        let mut latest = f.latest_store().await;
-        u.enqueue(&mut latest, report("a")).await.unwrap();
+        u.enqueue(&report("a")).await.unwrap();
 
         for expected in [10, 20, 40, 80, 160, 320, 640, 1280, 2560, 3600, 3600] {
-            run_next_attempt(&mut u, &mut latest).await;
+            run_next_attempt(&mut u).await;
             assert_backoff(&mut u, expected).await;
             f.advance_secs(expected);
         }
@@ -917,11 +767,10 @@ mod tests {
             f.sender.push(Step::Network);
         }
         let mut u = f.uploader().await;
-        let mut latest = f.latest_store().await;
-        u.enqueue(&mut latest, report("a")).await.unwrap();
+        u.enqueue(&report("a")).await.unwrap();
 
         for _ in 0..3 {
-            run_next_attempt(&mut u, &mut latest).await;
+            run_next_attempt(&mut u).await;
             assert_backoff(&mut u, 10).await;
             f.advance_secs(10);
         }
@@ -941,14 +790,13 @@ mod tests {
             ..UploaderOptions::default()
         };
         let mut u = f.uploader_with(options).await;
-        let mut latest = f.latest_store().await;
-        u.enqueue(&mut latest, report("a")).await.unwrap();
+        u.enqueue(&report("a")).await.unwrap();
 
         for _ in 0..3 {
-            run_next_attempt(&mut u, &mut latest).await;
+            run_next_attempt(&mut u).await;
             f.advance_secs(10);
         }
-        run_next_attempt(&mut u, &mut latest).await;
+        run_next_attempt(&mut u).await;
 
         assert_eq!(f.sent(), strings(&["a"; 4]));
     }
@@ -961,17 +809,16 @@ mod tests {
         f.sender.push(Step::Server);
         preloaded(&f, &["a", "b"]).await;
         let mut u = f.uploader().await;
-        let mut latest = f.latest_store().await;
 
         // `a` fails and waits at the tail while `b` is sent
-        run_next_attempt(&mut u, &mut latest).await;
-        run_next_attempt(&mut u, &mut latest).await;
+        run_next_attempt(&mut u).await;
+        run_next_attempt(&mut u).await;
         assert_backoff(&mut u, 10).await;
         f.advance_secs(10);
-        run_next_attempt(&mut u, &mut latest).await;
+        run_next_attempt(&mut u).await;
         assert_backoff(&mut u, 20).await;
         f.advance_secs(20);
-        run_next_attempt(&mut u, &mut latest).await;
+        run_next_attempt(&mut u).await;
 
         assert_eq!(f.sent(), strings(&["a", "b", "a", "a"]));
     }
@@ -981,10 +828,9 @@ mod tests {
         let f = Fixture::new();
         f.sender.push(Step::Terminal);
         let mut u = f.uploader().await;
-        let mut latest = f.latest_store().await;
-        let id = u.enqueue(&mut latest, report("a")).await.unwrap();
+        let id = u.enqueue(&report("a")).await.unwrap();
 
-        run_next_attempt(&mut u, &mut latest).await;
+        run_next_attempt(&mut u).await;
 
         assert_empty(&mut u).await;
         assert!(!f.report_file(id).exists());
@@ -1004,14 +850,13 @@ mod tests {
             ..UploaderOptions::default()
         };
         let mut u = f.uploader_with(options).await;
-        let mut latest = f.latest_store().await;
-        u.enqueue(&mut latest, report("a")).await.unwrap();
+        u.enqueue(&report("a")).await.unwrap();
 
         for wait in [10, 20] {
-            run_next_attempt(&mut u, &mut latest).await;
+            run_next_attempt(&mut u).await;
             f.advance_secs(wait);
         }
-        run_next_attempt(&mut u, &mut latest).await;
+        run_next_attempt(&mut u).await;
 
         assert_eq!(f.sent(), strings(&["a"; 3]));
         assert_empty(&mut u).await;
@@ -1023,10 +868,9 @@ mod tests {
         f.sender.push(Step::Network);
         f.advance(TimeDelta::days(89));
         let mut u = f.uploader().await;
-        let mut latest = f.latest_store().await;
-        u.enqueue(&mut latest, report("a")).await.unwrap();
+        u.enqueue(&report("a")).await.unwrap();
 
-        run_next_attempt(&mut u, &mut latest).await;
+        run_next_attempt(&mut u).await;
 
         assert_backoff(&mut u, 10).await;
     }
@@ -1037,10 +881,9 @@ mod tests {
         f.sender.push(Step::Network);
         f.advance(TimeDelta::days(90));
         let mut u = f.uploader().await;
-        let mut latest = f.latest_store().await;
-        u.enqueue(&mut latest, report("a")).await.unwrap();
+        u.enqueue(&report("a")).await.unwrap();
 
-        run_next_attempt(&mut u, &mut latest).await;
+        run_next_attempt(&mut u).await;
 
         assert_empty(&mut u).await;
     }
@@ -1051,44 +894,10 @@ mod tests {
         f.sender.push(Step::Server);
         f.advance(TimeDelta::days(90));
         let mut u = f.uploader().await;
-        let mut latest = f.latest_store().await;
-        u.enqueue(&mut latest, report("a")).await.unwrap();
+        u.enqueue(&report("a")).await.unwrap();
 
-        run_next_attempt(&mut u, &mut latest).await;
+        run_next_attempt(&mut u).await;
 
         assert_empty(&mut u).await;
-    }
-
-    /// A dropped report is never marked, so its entry lists as dropped once
-    /// the queue lets it go.
-    #[tokio::test]
-    async fn a_dropped_report_is_not_marked_uploaded() {
-        let out_of_attempts = UploaderOptions {
-            retry: RetryPolicy {
-                attempts: 1,
-                ..RetryPolicy::default()
-            },
-            ..UploaderOptions::default()
-        };
-        // rejected for good, out of attempts, and unsent 90 days after
-        // reported_at
-        let cases = [
-            (Step::Terminal, UploaderOptions::default(), 0),
-            (Step::Server, out_of_attempts, 0),
-            (Step::Network, UploaderOptions::default(), 90),
-        ];
-        for (step, options, age_days) in cases {
-            let f = Fixture::new();
-            f.sender.push(step);
-            f.advance(TimeDelta::days(age_days));
-            let mut u = f.uploader_with(options).await;
-            let mut latest = f.latest_store().await;
-            u.enqueue(&mut latest, report("a")).await.unwrap();
-
-            run_next_attempt(&mut u, &mut latest).await;
-
-            assert_empty(&mut u).await;
-            assert_eq!(statuses(&u, &latest), [CalibrationUploadStatus::Dropped]);
-        }
     }
 }

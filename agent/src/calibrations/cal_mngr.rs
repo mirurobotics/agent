@@ -26,7 +26,7 @@ pub struct CalMngrArgs<S, F, N> {
     pub snapshot_file: Option<QueueSnapshotFile>,
     /// The directory holding one data file per queued report.
     pub reports: Dir,
-    /// The latest calibrations store, which the worker lends the uploader.
+    /// The latest calibrations store, which the worker writes beside the queue.
     pub latest: LatestStore,
     pub sender: Arc<S>,
     pub options: UploaderOptions,
@@ -94,15 +94,31 @@ where
 
     /// Upload the report queued as `entry` and settle it. A shutdown
     /// mid-upload leaves the report queued, to be re-sent on the next boot.
+    /// A sent report is marked uploaded before it is dequeued, so a crash in
+    /// between re-sends it rather than losing the mark.
     async fn run_attempt(&mut self, entry: QueueEntry) -> Flow {
         let upload = self.uploader.attempt(&entry);
         let Some(result) = self.serve_until(upload).await else {
             return Flow::Shutdown;
         };
-        self.uploader
-            .finish_attempt(&mut self.latest, entry, result)
-            .await;
+        if result.is_ok() {
+            self.latest.mark_uploaded(entry.job.report_id).await;
+        }
+        self.uploader.finish_attempt(entry, result).await;
         Flow::Continue
+    }
+
+    /// Queue `report`, then write it to the latest store. A failed store
+    /// write removes the queued report, so on error nothing is queued or
+    /// stored.
+    async fn enqueue(&mut self, report: Report) -> Result<(), CalibrationsErr> {
+        self.latest.verify_capacity(&report.metadata)?;
+        let id = self.uploader.enqueue(&report).await?;
+        if let Err(e) = self.latest.put(report.metadata, report.data.as_bytes()).await {
+            self.uploader.remove(id).await;
+            return Err(e);
+        }
+        Ok(())
     }
 
     /// Drive `fut` to completion while serving commands, so intake never
@@ -148,8 +164,7 @@ where
         };
         match cmd {
             Command::Enqueue { report, respond_to } => {
-                let enqueued = self.uploader.enqueue(&mut self.latest, *report).await;
-                let result = enqueued.map(drop);
+                let result = self.enqueue(*report).await;
                 respond(respond_to, result, "enqueue");
             }
             Command::Len { respond_to } => respond(respond_to, self.uploader.len(), "len"),

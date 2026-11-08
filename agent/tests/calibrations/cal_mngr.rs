@@ -1,6 +1,7 @@
 //! The calibration manager actor: drain order, serving intake while busy
-//! or backing off, and shutdown. `Uploader`'s queue, storage and retry
-//! rules are unit-tested in `uploader.rs`.
+//! or backing off, keeping the latest store in step with the queue, and
+//! shutdown. `Uploader`'s queue, storage and retry rules are unit-tested in
+//! `uploader.rs`.
 
 // standard crates
 use std::future::Future;
@@ -147,6 +148,13 @@ impl Harness {
 
     async fn num_queued_uploads(&self) -> usize {
         guard(self.cal_mngr().num_queued_uploads()).await.unwrap()
+    }
+
+    /// The upload status of each latest entry.
+    async fn upload_statuses(&self) -> Vec<CalibrationUploadStatus> {
+        let latest = guard(self.cal_mngr().list_latest(LatestFilter::default())).await;
+        let entries = latest.unwrap().entries.into_iter();
+        entries.map(|entry| entry.upload_status).collect()
     }
 
     fn report_file(&self, id: Uuid) -> File {
@@ -323,6 +331,48 @@ async fn latest_reads_are_served_during_an_upload() {
         data: report("a").data.into_bytes(),
     };
     assert_eq!(content.unwrap(), want);
+}
+
+#[tokio::test]
+async fn a_failed_store_write_queues_nothing() {
+    let mut h = Harness::new();
+    // a regular file where the latest contents directory should be
+    let blocker = File::new(h.latest.contents().path().clone());
+    files::write_string(&blocker, "x", WriteOptions::OVERWRITE_ATOMIC)
+        .await
+        .unwrap();
+    h.spawn().await;
+
+    let err = guard(h.cal_mngr().report(report("a"))).await.unwrap_err();
+
+    assert!(matches!(err, CalibrationsErr::FileSysErr(_)), "{err:?}");
+    assert_eq!(h.num_queued_uploads().await, 0);
+    assert!(dirs::files(&h.layout.reports()).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_sent_report_is_marked_uploaded() {
+    let mut h = Harness::new();
+    h.spawn().await;
+
+    h.report("a").await;
+
+    h.await_drained(&["a"]).await;
+    let statuses = h.upload_statuses().await;
+    assert_eq!(statuses, [CalibrationUploadStatus::Uploaded]);
+}
+
+#[tokio::test]
+async fn a_dropped_report_is_not_marked_uploaded() {
+    let mut h = Harness::new();
+    h.sender.push(Step::Terminal);
+    h.spawn().await;
+
+    h.report("a").await;
+
+    h.await_drained(&["a"]).await;
+    let statuses = h.upload_statuses().await;
+    assert_eq!(statuses, [CalibrationUploadStatus::Dropped]);
 }
 
 #[tokio::test]
