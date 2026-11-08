@@ -69,15 +69,9 @@ pub async fn sha256_and_crc32c(file: &File) -> Result<(String, u32), FileSysErr>
 }
 
 /// Reads `file` through a fixed 8 KiB buffer, passing each chunk to `on_chunk`.
-/// A symlink is refused (`O_NOFOLLOW`) so hashing never reads through a link
-/// planted in a watched directory.
+/// The file is opened with [`open_no_follow`].
 async fn read_chunks(file: &File, mut on_chunk: impl FnMut(&[u8])) -> Result<(), FileSysErr> {
-    let mut open_opts = tokio::fs::OpenOptions::new();
-    open_opts.read(true);
-    #[cfg(unix)]
-    open_opts.custom_flags(nix::libc::O_NOFOLLOW);
-    let mut f = open_opts
-        .open(file.path())
+    let mut f = open_no_follow(file)
         .await
         .map_err(|e| map_io_err_for_open(e, file))?;
 
@@ -96,6 +90,23 @@ async fn read_chunks(file: &File, mut on_chunk: impl FnMut(&[u8])) -> Result<(),
         on_chunk(&buf[..n]);
     }
     Ok(())
+}
+
+/// Opens `file` for reading without following a symlink (`O_NOFOLLOW` on
+/// Unix) and refuses anything but a regular file, so a link planted in a
+/// watched directory is never read through.
+pub async fn open_no_follow(file: &File) -> std::io::Result<TokioFile> {
+    let mut opts = tokio::fs::OpenOptions::new();
+    opts.read(true);
+    // O_NONBLOCK keeps a FIFO from blocking the open until it's refused
+    #[cfg(unix)]
+    opts.custom_flags(nix::libc::O_NOFOLLOW | nix::libc::O_NONBLOCK);
+    let f = opts.open(file.path()).await?;
+    if !f.metadata().await?.is_file() {
+        let kind = std::io::ErrorKind::InvalidInput;
+        return Err(std::io::Error::new(kind, "not a regular file"));
+    }
+    Ok(f)
 }
 
 pub async fn read_secret_bytes(file: &File) -> Result<SecretBox<Vec<u8>>, FileSysErr> {
