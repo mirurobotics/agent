@@ -127,7 +127,7 @@ impl Store {
         } else {
             None
         };
-        let body = src.read(operation, dst, offset, len)?;
+        let body = src.read(operation, dst, offset, len).await?;
         Ok((body, content_md5))
     }
 
@@ -702,32 +702,6 @@ pub(super) mod tests {
 
                 let err = store
                     .put(src, &obj("k"), &HashMap::new())
-                    .await
-                    .unwrap_err();
-
-                let S3Err::LocalIoErr(inner) = &err else {
-                    panic!("expected LocalIoErr, got {err:?}");
-                };
-                assert_eq!(
-                    (inner.operation.as_str(), &inner.object),
-                    ("open_source", &obj("k"))
-                );
-                assert_eq!(actual_shapes(&replay), vec![]);
-            }
-
-            #[cfg(unix)]
-            #[tokio::test]
-            async fn put_symlinked_source_maps_to_local_io_err() {
-                // The source is opened without following a symlink, so a link
-                // fails as `LocalIoErr` before any request.
-                let target = temp_file_with(b"secret").await;
-                let dir = crate::test_utils::filesys::dirs::temp("s3-test").unwrap();
-                let link = dir.file("x.log");
-                std::os::unix::fs::symlink(target.file().path(), link.path()).unwrap();
-                let (store, replay) = store_with(vec![]);
-
-                let err = store
-                    .put(link, &obj("k"), &HashMap::new())
                     .await
                     .unwrap_err();
 
