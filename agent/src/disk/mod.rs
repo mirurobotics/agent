@@ -317,12 +317,9 @@ async fn init_calibration_storage(
     let calibrations_layout = layout.calibrations();
     let (meta, meta_handle) =
         Calibrations::spawn(64, calibrations_layout.index(), capacities.calibrations).await?;
-    let (content, content_handle) = CalibrationContent::spawn(
-        64,
-        calibrations_layout.contents(),
-        capacities.calibrations,
-    )
-    .await?;
+    let (content, content_handle) =
+        CalibrationContent::spawn(64, calibrations_layout.contents(), capacities.calibrations)
+            .await?;
     let calibrations = CalibrationStor {
         meta: Arc::new(meta),
         content: Arc::new(content),

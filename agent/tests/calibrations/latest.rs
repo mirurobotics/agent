@@ -134,8 +134,8 @@ async fn put_all(store: &LatestStore, reports: &[&ReportMetadata]) {
 
 /// Every entry, with no report still queued.
 async fn list_all(store: &LatestStore) -> Vec<ListedEntry> {
-    let latest = store.list(&LatestFilter::default(), &HashSet::new());
-    latest.await.unwrap().entries
+    let latest = store.list(&LatestFilter::default(), &HashSet::new()).await;
+    latest.unwrap().entries
 }
 
 /// Lock the calibrations directory, so the metadata cache can be read but

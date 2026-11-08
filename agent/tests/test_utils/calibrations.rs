@@ -8,8 +8,8 @@ use std::sync::Arc;
 // internal crates
 use super::filesys::dirs::TempDir;
 use miru_agent::calibrations::{
-    latest::DEFAULT_CAPACITY, CalMngrArgs, CalibrationManager, LatestStore, Report,
-    ReportMetadata, Sender, UploaderOptions,
+    latest::DEFAULT_CAPACITY, CalMngrArgs, CalibrationManager, LatestStore, Report, ReportMetadata,
+    Sender, UploaderOptions,
 };
 use miru_agent::disk::layout::{CalibrationReportsLayout, CalibrationsLayout};
 use miru_agent::disk::{CalibrationContent, CalibrationStor, Calibrations};
