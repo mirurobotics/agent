@@ -31,8 +31,8 @@ pub struct Source {
 }
 
 impl Source {
-    /// Opens and sizes `file` for upload with [`files::open_regular_file`]
-    /// (which refuses a symlink on Unix only). A missing file is
+    /// Opens and sizes `file` for upload with [`files::open_regular_file`],
+    /// which refuses a symlink. A missing file is
     /// [`S3Err::FileSysErr`]; a symlink, anything else that isn't a regular
     /// file, or any other failure is [`S3Err::LocalIoErr`].
     pub async fn open(file: File, dst: &Object) -> Result<Self, S3Err> {
