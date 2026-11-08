@@ -190,7 +190,7 @@ impl CalibrationManager {
     /// Queue `report` durably. A full queue is the 507
     /// [`CalibrationsErr::QueueFullErr`], and a report over the size cap the
     /// 413 [`CalibrationsErr::TooLargeErr`].
-    pub async fn enqueue_report(&self, report: Report) -> Result<(), CalibrationsErr> {
+    pub async fn report(&self, report: Report) -> Result<(), CalibrationsErr> {
         self.send_command("enqueue", |respond_to| Command::Enqueue {
             report: Box::new(report),
             respond_to,

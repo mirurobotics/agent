@@ -119,10 +119,8 @@ impl Harness {
         self.cal_mngr.as_ref().expect("spawned")
     }
 
-    async fn enqueue_report(&self, slug: &str) {
-        guard(self.cal_mngr().enqueue_report(report(slug)))
-            .await
-            .unwrap();
+    async fn report(&self, slug: &str) {
+        guard(self.cal_mngr().report(report(slug))).await.unwrap();
     }
 
     async fn num_queued(&self) -> usize {
@@ -238,7 +236,7 @@ async fn intake_wakes_an_idle_cal_mngr() {
     h.spawn().await;
     assert_eq!(h.num_queued().await, 0);
 
-    h.enqueue_report("a").await;
+    h.report("a").await;
 
     h.await_started().await;
     h.await_drained(&["a"]).await;
@@ -250,11 +248,11 @@ async fn intake_is_served_during_an_upload() {
     let (release, hang) = oneshot::channel();
     h.sender.push(Step::Hang(hang));
     h.spawn().await;
-    h.enqueue_report("a").await;
+    h.report("a").await;
     h.await_started().await;
 
     // the send of "a" is still in flight
-    h.enqueue_report("b").await;
+    h.report("b").await;
     assert_eq!(h.num_queued().await, 2);
 
     release.send(()).unwrap();
@@ -266,10 +264,10 @@ async fn a_new_report_is_sent_while_another_backs_off() {
     let mut h = Harness::new();
     h.sender.push(Step::Server);
     h.spawn().await;
-    h.enqueue_report("a").await;
+    h.report("a").await;
     h.await_sleep().await;
 
-    h.enqueue_report("b").await;
+    h.report("b").await;
 
     eventually(|| async { h.sender.sent() == strings(&["a", "b"]) }).await;
     h.await_sleep().await;
@@ -284,7 +282,7 @@ async fn shutdown_mid_upload_keeps_the_report_for_replay() {
     let (_hold, hang) = oneshot::channel();
     h.sender.push(Step::Hang(hang));
     h.spawn().await;
-    h.enqueue_report("a").await;
+    h.report("a").await;
     h.await_started().await;
 
     h.stop().await;
@@ -303,7 +301,7 @@ async fn shutdown_during_a_backoff() {
     let mut h = Harness::new();
     h.sender.push(Step::Server);
     h.spawn().await;
-    h.enqueue_report("a").await;
+    h.report("a").await;
     h.await_sleep().await;
 
     h.stop().await;
@@ -327,7 +325,7 @@ async fn commands_after_shutdown_fail() {
     h.spawn().await;
     h.stop().await;
 
-    let err = h.cal_mngr().enqueue_report(report("a")).await.unwrap_err();
+    let err = h.cal_mngr().report(report("a")).await.unwrap_err();
 
     assert!(
         matches!(err, CalibrationsErr::SendActorMessageErr(_)),
@@ -343,7 +341,7 @@ async fn a_caller_that_stops_waiting_does_not_stop_the_cal_mngr() {
     // polled once: the command is sent, then its reply is abandoned
     assert!(h.cal_mngr().num_queued().now_or_never().is_none());
 
-    h.enqueue_report("a").await;
+    h.report("a").await;
     h.await_drained(&["a"]).await;
 }
 
@@ -353,8 +351,7 @@ async fn a_command_queued_behind_shutdown_fails() {
     h.spawn().await;
 
     let cal_mngr = h.cal_mngr();
-    let (stopped, enqueued) =
-        tokio::join!(cal_mngr.shutdown(), cal_mngr.enqueue_report(report("a")));
+    let (stopped, enqueued) = tokio::join!(cal_mngr.shutdown(), cal_mngr.report(report("a")));
 
     stopped.unwrap();
     let err = enqueued.unwrap_err();
