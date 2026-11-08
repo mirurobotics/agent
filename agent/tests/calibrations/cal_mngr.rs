@@ -119,13 +119,13 @@ impl Harness {
         self.cal_mngr.as_ref().expect("spawned")
     }
 
-    async fn enqueue(&self, slug: &str) {
+    async fn enqueue_report(&self, slug: &str) {
         guard(self.cal_mngr().enqueue_report(report(slug)))
             .await
             .unwrap();
     }
 
-    async fn len(&self) -> usize {
+    async fn num_queued(&self) -> usize {
         guard(self.cal_mngr().num_queued()).await.unwrap()
     }
 
@@ -148,7 +148,10 @@ impl Harness {
 
     /// Wait until every report is sent and the queue is empty.
     async fn await_drained(&self, sent: &[&str]) {
-        eventually(|| async { self.sender.sent() == strings(sent) && self.len().await == 0 }).await;
+        eventually(|| async {
+            self.sender.sent() == strings(sent) && self.num_queued().await == 0
+        })
+        .await;
     }
 
     async fn stop(&mut self) {
@@ -233,9 +236,9 @@ async fn drains_reports_buffered_before_start_in_order() {
 async fn intake_wakes_an_idle_cal_mngr() {
     let mut h = Harness::new();
     h.spawn().await;
-    assert_eq!(h.len().await, 0);
+    assert_eq!(h.num_queued().await, 0);
 
-    h.enqueue("a").await;
+    h.enqueue_report("a").await;
 
     h.await_started().await;
     h.await_drained(&["a"]).await;
@@ -247,12 +250,12 @@ async fn intake_is_served_during_an_upload() {
     let (release, hang) = oneshot::channel();
     h.sender.push(Step::Hang(hang));
     h.spawn().await;
-    h.enqueue("a").await;
+    h.enqueue_report("a").await;
     h.await_started().await;
 
     // the send of "a" is still in flight
-    h.enqueue("b").await;
-    assert_eq!(h.len().await, 2);
+    h.enqueue_report("b").await;
+    assert_eq!(h.num_queued().await, 2);
 
     release.send(()).unwrap();
     h.await_drained(&["a", "b"]).await;
@@ -263,10 +266,10 @@ async fn a_new_report_is_sent_while_another_backs_off() {
     let mut h = Harness::new();
     h.sender.push(Step::Server);
     h.spawn().await;
-    h.enqueue("a").await;
+    h.enqueue_report("a").await;
     h.await_sleep().await;
 
-    h.enqueue("b").await;
+    h.enqueue_report("b").await;
 
     eventually(|| async { h.sender.sent() == strings(&["a", "b"]) }).await;
     h.await_sleep().await;
@@ -281,7 +284,7 @@ async fn shutdown_mid_upload_keeps_the_report_for_replay() {
     let (_hold, hang) = oneshot::channel();
     h.sender.push(Step::Hang(hang));
     h.spawn().await;
-    h.enqueue("a").await;
+    h.enqueue_report("a").await;
     h.await_started().await;
 
     h.stop().await;
@@ -300,7 +303,7 @@ async fn shutdown_during_a_backoff() {
     let mut h = Harness::new();
     h.sender.push(Step::Server);
     h.spawn().await;
-    h.enqueue("a").await;
+    h.enqueue_report("a").await;
     h.await_sleep().await;
 
     h.stop().await;
@@ -340,7 +343,7 @@ async fn a_caller_that_stops_waiting_does_not_stop_the_cal_mngr() {
     // polled once: the command is sent, then its reply is abandoned
     assert!(h.cal_mngr().num_queued().now_or_never().is_none());
 
-    h.enqueue("a").await;
+    h.enqueue_report("a").await;
     h.await_drained(&["a"]).await;
 }
 
