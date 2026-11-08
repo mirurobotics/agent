@@ -229,20 +229,20 @@ pub mod auth_layout {
     }
 }
 
-pub mod calibrations_layout {
+pub mod calibration_reports_layout {
     use super::*;
 
     #[test]
     fn root_dir() {
         let layout = Layout::default();
-        let calibrations = layout.calibrations();
-        assert_eq!(calibrations.root.to_string(), under_root(&["calibrations"]));
+        let reports = layout.calibration_reports();
+        assert_eq!(reports.root.to_string(), under_root(&["calibrations"]));
     }
 
     #[test]
     fn queue_file() {
         let layout = Layout::default();
-        let file = layout.calibrations().queue();
+        let file = layout.calibration_reports().queue();
         assert_eq!(
             file.to_string(),
             under_root(&["calibrations", "queue.json"])
@@ -252,7 +252,7 @@ pub mod calibrations_layout {
     #[test]
     fn reports_dir() {
         let layout = Layout::default();
-        let dir = layout.calibrations().reports();
+        let dir = layout.calibration_reports().reports();
         assert_eq!(dir.to_string(), under_root(&["calibrations", "reports"]));
     }
 }

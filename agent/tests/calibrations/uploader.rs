@@ -17,7 +17,7 @@ use miru_agent::calibrations::{
     LatestIndexFile, LatestStore, ListedEntry, Queue, QueueSnapshotFile, UploaderArgs,
     UploaderOptions,
 };
-use miru_agent::disk::layout::{CalibrationsLayout, LatestCalibrationsLayout};
+use miru_agent::disk::layout::{CalibrationReportsLayout, LatestCalibrationsLayout};
 use miru_agent::filesys::{dirs, files, File, PathExt, WriteOptions};
 use miru_agent::models::{CalibrationUploadStatus, InstanceFormat};
 use miru_agent::queue::Persistence;
@@ -35,7 +35,7 @@ const HANG_GUARD: Duration = Duration::from_secs(60);
 
 struct Harness {
     _dir: test_dirs::TempDir,
-    layout: CalibrationsLayout,
+    layout: CalibrationReportsLayout,
     latest: LatestCalibrationsLayout,
     sender: Arc<MockCalibrationSender>,
     started: mpsc::UnboundedReceiver<()>,

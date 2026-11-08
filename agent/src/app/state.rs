@@ -272,7 +272,7 @@ impl AppState {
         tokio::task::JoinHandle<()>,
     ) {
         let latest_layout = layout.latest_calibrations();
-        let layout = layout.calibrations();
+        let layout = layout.calibration_reports();
         let snapshot_file = match calibrations::QueueSnapshotFile::new_with_default(
             layout.queue(),
             Default::default(),

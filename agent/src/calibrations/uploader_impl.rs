@@ -335,7 +335,7 @@ mod tests {
         latest::DEFAULT_CAPACITY, CalibrationsErr, LatestContent, LatestFilter, LatestIndexFile,
         LatestStore, ListedEntry, Queue, QueueSnapshotFile,
     };
-    use miru_agent::disk::layout::{CalibrationsLayout, LatestCalibrationsLayout};
+    use miru_agent::disk::layout::{CalibrationReportsLayout, LatestCalibrationsLayout};
     use miru_agent::filesys::{dirs, files, File, PathExt, WriteOptions};
     use miru_agent::models::{CalibrationUploadStatus, InstanceFormat};
     use miru_agent::queue::{Persistence, RetryPolicy};
@@ -349,7 +349,7 @@ mod tests {
 
     struct Fixture {
         _dir: test_dirs::TempDir,
-        layout: CalibrationsLayout,
+        layout: CalibrationReportsLayout,
         latest: LatestCalibrationsLayout,
         sender: Arc<MockCalibrationSender>,
         /// The uploader's clock. It starts when the fixture reports were

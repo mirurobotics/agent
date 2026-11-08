@@ -56,8 +56,8 @@ impl Layout {
         self.root().file("delete_queue.json")
     }
 
-    pub fn calibrations(&self) -> CalibrationsLayout {
-        CalibrationsLayout::new(self.root().subdir("calibrations"))
+    pub fn calibration_reports(&self) -> CalibrationReportsLayout {
+        CalibrationReportsLayout::new(self.root().subdir("calibrations"))
     }
 
     pub fn latest_calibrations(&self) -> LatestCalibrationsLayout {
@@ -155,11 +155,11 @@ impl AuthLayout {
 
 /// The calibration queue: a queue snapshot plus one report file per queued
 /// calibration, so a queue write never rewrites the (possibly large) content.
-pub struct CalibrationsLayout {
+pub struct CalibrationReportsLayout {
     pub root: filesys::Dir,
 }
 
-impl CalibrationsLayout {
+impl CalibrationReportsLayout {
     pub fn new(root: filesys::Dir) -> Self {
         Self { root }
     }
