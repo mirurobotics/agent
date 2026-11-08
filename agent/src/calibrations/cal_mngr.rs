@@ -77,7 +77,6 @@ where
     N: Fn() -> DateTime<Utc> + Send + Sync + 'static,
 {
     async fn run(mut self) {
-        self.latest.prune_orphans().await;
         self.uploader.prune_orphans().await;
         loop {
             let flow = match self.uploader.next_attempt().await {

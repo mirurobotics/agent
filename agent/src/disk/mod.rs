@@ -58,7 +58,7 @@ impl Default for Capacities {
             releases: 1000,
             file_rules: 1000,
             git_commits: 100,
-            calibrations: crate::calibrations::latest::DEFAULT_CAPACITY,
+            calibrations: 1000,
         }
     }
 }
@@ -87,6 +87,9 @@ impl CfgInstStor {
 pub struct CalibrationStor {
     pub meta: Arc<Calibrations>,
     pub content: Arc<CalibrationContent>,
+    /// The most keys the caches hold, so the latest store can reject a new
+    /// key before they would evict one.
+    pub capacity: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -316,6 +319,7 @@ async fn init_calibration_storage(
 ) -> Result<(CalibrationStor, [JoinHandle<()>; 2]), StorErr> {
     let calibrations_layout = layout.calibrations();
     calibrations::set_aside_corrupt_index(&calibrations_layout.index()).await;
+    calibrations::prune_unnamed_contents(&calibrations_layout).await;
     let (meta, meta_handle) =
         Calibrations::spawn(64, calibrations_layout.index(), capacities.calibrations).await?;
     let (content, content_handle) =
@@ -324,6 +328,7 @@ async fn init_calibration_storage(
     let calibrations = CalibrationStor {
         meta: Arc::new(meta),
         content: Arc::new(content),
+        capacity: capacities.calibrations,
     };
     Ok((calibrations, [meta_handle, content_handle]))
 }

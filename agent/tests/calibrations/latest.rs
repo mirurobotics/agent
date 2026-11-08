@@ -9,11 +9,11 @@ use std::collections::HashSet;
 use crate::test_utils::calibrations::{calibration_stor, calibrations_layout, report, report_id};
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::calibrations::{
-    latest::DEFAULT_CAPACITY, CalibrationsErr, LatestCalibrations, LatestContent, LatestEntry,
-    LatestFilter, LatestStore, ListedEntry, ReportMetadata,
+    CalibrationsErr, LatestCalibrations, LatestContent, LatestEntry, LatestFilter, LatestStore,
+    ListedEntry, ReportMetadata,
 };
-use miru_agent::disk::{layout::CalibrationsLayout, CalibrationStor};
-use miru_agent::filesys::{dirs, files, File, Overwrite, PathExt, WriteOptions};
+use miru_agent::disk::{layout::CalibrationsLayout, CalibrationStor, Capacities};
+use miru_agent::filesys::{dirs, files, File, PathExt, WriteOptions};
 use miru_agent::models::{CalibrationUploadStatus, InstanceFormat};
 
 // external crates
@@ -33,22 +33,25 @@ impl Fixture {
     async fn new() -> Self {
         let dir = test_dirs::temp("latest_calibrations_test").unwrap();
         let layout = calibrations_layout(&dir);
-        let stor = calibration_stor(&dir).await;
+        let stor = calibration_stor(&dir, Capacities::default().calibrations).await;
         Self { dir, layout, stor }
     }
 
     fn store(&self) -> LatestStore {
-        self.store_with(DEFAULT_CAPACITY)
+        LatestStore::new(self.stor.clone())
     }
 
+    /// A store over the fixture's caches that holds at most `capacity` keys.
     fn store_with(&self, capacity: usize) -> LatestStore {
-        LatestStore::new(self.stor.clone(), capacity)
+        let stor = self.stor.clone();
+        LatestStore::new(CalibrationStor { capacity, ..stor })
     }
 
     /// A store on new caches over the fixture's files, as the next boot opens
     /// them.
     async fn reopened(&self) -> LatestStore {
-        LatestStore::new(calibration_stor(&self.dir).await, DEFAULT_CAPACITY)
+        let capacity = Capacities::default().calibrations;
+        LatestStore::new(calibration_stor(&self.dir, capacity).await)
     }
 
     /// The metadata cache's entries, in key order.
@@ -315,9 +318,8 @@ async fn a_corrupt_index_fails_every_call() {
     for err in errs {
         assert!(matches!(err, CalibrationsErr::CacheErr(_)), "{err:?}");
     }
-    // a mark or prune it can't read is logged, not raised
+    // a mark it can't read is logged, not raised
     store.mark_uploaded(arm.report_id).await;
-    store.prune_orphans().await;
 }
 
 // ============================ MARK UPLOADED ============================= //
@@ -446,44 +448,6 @@ async fn list_matches_null_role_and_aspect() {
 
     let want = [listed(&bare, CalibrationUploadStatus::Dropped)];
     assert_eq!(latest.unwrap().entries, want);
-}
-
-// ============================ PRUNE ORPHANS ============================= //
-#[tokio::test]
-async fn prune_orphans_deletes_the_content_no_entry_names() {
-    let f = Fixture::new().await;
-    let store = f.store();
-    let arm = reported("arm", None, None);
-    put_all(&store, &[&arm]).await;
-    let orphan = Uuid::new_v4().to_string();
-    let content = &f.stor.content;
-    content
-        .write(orphan, DATA.to_string(), |_, _| false, Overwrite::Allow)
-        .await
-        .unwrap();
-
-    store.prune_orphans().await;
-
-    assert_eq!(f.content_ids().await, [arm.report_id]);
-}
-
-#[tokio::test]
-async fn a_prune_that_cannot_list_the_contents_keeps_the_entries() {
-    let f = Fixture::new().await;
-    let store = f.store();
-    let arm = reported("arm", None, None);
-    put_all(&store, &[&arm]).await;
-    // a regular file where the contents directory should be
-    let contents = f.layout.contents();
-    dirs::delete(&contents).await.unwrap();
-    let blocker = File::new(contents.path().clone());
-    files::write_string(&blocker, "x", WriteOptions::OVERWRITE_ATOMIC)
-        .await
-        .unwrap();
-
-    store.prune_orphans().await;
-
-    assert_eq!(f.entries().await, [entry(&arm, false)]);
 }
 
 // ================================ CONTENT =============================== //

@@ -60,7 +60,8 @@ pub mod routes {
     use tower::ServiceExt;
 
     use device_api::models as openapi;
-    use miru_agent::calibrations::{latest::DEFAULT_CAPACITY, UploaderOptions};
+    use miru_agent::calibrations::UploaderOptions;
+    use miru_agent::disk::Capacities;
     use miru_agent::events::hub::{EventHub, SpawnOptions};
     use miru_agent::filesys::Overwrite;
     use miru_agent::models::{
@@ -94,7 +95,7 @@ pub mod routes {
     impl Fixture {
         async fn new(name: &str) -> Self {
             let options = UploaderOptions::default();
-            Self::with_calibration_options(name, options, DEFAULT_CAPACITY).await
+            Self::with_calibration_options(name, options, Capacities::default().calibrations).await
         }
 
         async fn with_calibration_options(
@@ -675,7 +676,8 @@ pub mod routes {
                 ..UploaderOptions::default()
             };
             let name = "handler_calibration_full";
-            let f = Fixture::with_calibration_options(name, options, DEFAULT_CAPACITY).await;
+            let capacity = Capacities::default().calibrations;
+            let f = Fixture::with_calibration_options(name, options, capacity).await;
 
             let (status, bytes) = f.post_json(URI, request("json", "{}")).await;
             assert_eq!(status, StatusCode::INSUFFICIENT_STORAGE);

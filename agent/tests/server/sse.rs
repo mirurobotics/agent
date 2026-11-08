@@ -9,7 +9,8 @@ use crate::test_utils::{
     filesys::dirs as test_dirs,
     sync::{create_storage, create_token_manager},
 };
-use miru_agent::calibrations::{latest::DEFAULT_CAPACITY, UploaderOptions};
+use miru_agent::calibrations::UploaderOptions;
+use miru_agent::disk::Capacities;
 use miru_agent::events::hub::{EventHub, SpawnOptions};
 use miru_agent::events::model::EventArgs;
 use miru_agent::server::{routes, State};
@@ -54,7 +55,7 @@ impl Fixture {
             &dir,
             MockCalibrationSender::new().0,
             UploaderOptions::default(),
-            DEFAULT_CAPACITY,
+            Capacities::default().calibrations,
         )
         .await;
 

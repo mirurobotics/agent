@@ -10,10 +10,9 @@ use crate::mocks::calibration_sender::MockCalibrationSender;
 use crate::test_utils::calibrations::{latest_store, received_at, reports_layout};
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::calibrations::{
-    latest::DEFAULT_CAPACITY, CalMngrArgs, CalibrationManager, QueueSnapshotFile, Report,
-    UploaderOptions,
+    CalMngrArgs, CalibrationManager, QueueSnapshotFile, Report, UploaderOptions,
 };
-use miru_agent::disk::{self, Layout};
+use miru_agent::disk::{self, Capacities, Layout};
 use miru_agent::models::{Deployment, DplActivity, InstanceFormat};
 use miru_agent::services::calibration::{self, CreateParams, Created};
 use miru_agent::services::ServiceErr;
@@ -32,7 +31,7 @@ pub struct Fixture {
 
 impl Fixture {
     pub async fn new() -> Self {
-        Self::with_options(UploaderOptions::default(), DEFAULT_CAPACITY).await
+        Self::with_options(UploaderOptions::default(), Capacities::default().calibrations).await
     }
 
     /// A fixture whose calibration manager takes `options` and whose latest store holds

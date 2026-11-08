@@ -81,8 +81,7 @@ impl AppState {
             Self::init_data_uploads(layout, http_client.clone(), token_mngr.clone()).await?;
 
         // initialize the calibration manager
-        let latest =
-            calibrations::LatestStore::new(storage.calibrations.clone(), capacities.calibrations);
+        let latest = calibrations::LatestStore::new(storage.calibrations.clone());
         let (cal_mngr, cal_mngr_handle) =
             Self::init_cal_mngr(layout, latest, http_client.clone(), token_mngr.clone()).await;
 

@@ -8,8 +8,7 @@ use std::sync::Arc;
 // internal crates
 use super::filesys::dirs::TempDir;
 use miru_agent::calibrations::{
-    latest::DEFAULT_CAPACITY, CalMngrArgs, CalibrationManager, LatestStore, Report, ReportMetadata,
-    Sender, UploaderOptions,
+    CalMngrArgs, CalibrationManager, LatestStore, Report, ReportMetadata, Sender, UploaderOptions,
 };
 use miru_agent::disk::layout::{CalibrationReportsLayout, CalibrationsLayout};
 use miru_agent::disk::{CalibrationContent, CalibrationStor, Calibrations};
@@ -59,24 +58,25 @@ pub fn calibrations_layout(dir: &TempDir) -> CalibrationsLayout {
     CalibrationsLayout::new(dir.to_dir().subdir("resources").subdir("calibrations"))
 }
 
-/// The latest calibration caches under `dir`.
-pub async fn calibration_stor(dir: &TempDir) -> CalibrationStor {
+/// The latest calibration caches under `dir`, holding at most `capacity` keys.
+pub async fn calibration_stor(dir: &TempDir, capacity: usize) -> CalibrationStor {
     let layout = calibrations_layout(dir);
-    let (meta, _) = Calibrations::spawn(64, layout.index(), DEFAULT_CAPACITY)
+    let (meta, _) = Calibrations::spawn(64, layout.index(), capacity)
         .await
         .unwrap();
-    let (content, _) = CalibrationContent::spawn(64, layout.contents(), DEFAULT_CAPACITY)
+    let (content, _) = CalibrationContent::spawn(64, layout.contents(), capacity)
         .await
         .unwrap();
     CalibrationStor {
         meta: Arc::new(meta),
         content: Arc::new(content),
+        capacity,
     }
 }
 
 /// A latest store under `dir` holding at most `capacity` keys.
 pub async fn latest_store(dir: &TempDir, capacity: usize) -> LatestStore {
-    LatestStore::new(calibration_stor(dir).await, capacity)
+    LatestStore::new(calibration_stor(dir, capacity).await)
 }
 
 /// A calibration manager under `dir` that keeps its queue in memory, holds at

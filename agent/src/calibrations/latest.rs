@@ -17,9 +17,6 @@ use serde::{Deserialize, Serialize};
 use tracing::warn;
 use uuid::Uuid;
 
-/// The most keys a [`LatestStore`] holds unless told otherwise.
-pub const DEFAULT_CAPACITY: usize = 1_000;
-
 /// The newest report for one key and whether it reached Miru.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LatestEntry {
@@ -82,27 +79,27 @@ pub struct LatestContent {
 /// The newest calibration for each component, role and aspect, kept in the
 /// calibration caches: one entry per key in the metadata cache, and each
 /// entry's data in the content cache under its `report_id`. A report replaces
-/// its key's entry, and a new key past the capacity is rejected rather than
-/// evicting another.
+/// its key's entry, and a new key past the caches' capacity is rejected rather
+/// than evicting another.
 pub struct LatestStore {
     stor: CalibrationStor,
-    capacity: usize,
 }
 
 impl LatestStore {
-    pub fn new(stor: CalibrationStor, capacity: usize) -> Self {
-        Self { stor, capacity }
+    pub fn new(stor: CalibrationStor) -> Self {
+        Self { stor }
     }
 
     /// Ok when the key `metadata` reports already has an entry or there is
     /// room for a new key.
     pub async fn verify_capacity(&self, metadata: &ReportMetadata) -> Result<(), CalibrationsErr> {
         let entries = self.stor.meta.entry_map().await?;
-        if entries.len() < self.capacity || entries.contains_key(&key(metadata)) {
+        let capacity = self.stor.capacity;
+        if entries.len() < capacity || entries.contains_key(&key(metadata)) {
             return Ok(());
         }
         let err = CalibrationStoreFullErr {
-            capacity: self.capacity,
+            capacity,
             trace: trace!(),
         };
         warn!("calibrations: rejecting report: {err}");
@@ -197,30 +194,6 @@ impl LatestStore {
             format: entry.metadata.format,
             data: data.into_bytes(),
         })
-    }
-
-    /// Delete the content no entry names, which a crash or a failed delete
-    /// leaves, so it never pushes the content cache past its cap. A failure
-    /// is logged.
-    pub async fn prune_orphans(&self) {
-        if let Err(e) = self.try_prune_orphans().await {
-            warn!("calibrations: failed to prune latest contents: {e}");
-        }
-    }
-
-    async fn try_prune_orphans(&self) -> Result<(), CacheErr> {
-        let entries = self.stor.meta.values().await?;
-        let named: HashSet<String> = entries
-            .iter()
-            .map(|e| e.metadata.report_id.to_string())
-            .collect();
-        let contents = self.stor.content.entry_map().await?;
-        for content_key in contents.into_keys() {
-            if !named.contains(&content_key) {
-                self.delete_content(content_key).await;
-            }
-        }
-        Ok(())
     }
 
     /// Delete the content under `content_key`, logging a failure.

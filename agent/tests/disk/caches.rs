@@ -1,11 +1,14 @@
 // internal crates
+use crate::test_utils::calibrations::report;
 use crate::test_utils::filesys::dirs as test_dirs;
+use miru_agent::calibrations::LatestStore;
 use miru_agent::disk::{Capacities, DiskErr, Layout, Storage};
-use miru_agent::filesys::{dirs, files, WriteOptions};
+use miru_agent::filesys::{dirs, files, Overwrite, WriteOptions};
 use miru_agent::models::{self, device};
 
 // external crates
 use tokio::time::Duration;
+use uuid::Uuid;
 
 // Outer wall-clock net around join handles in each test. Purely hang
 // protection -- its value is NOT part of the verified behavior. It
@@ -122,6 +125,52 @@ pub mod init {
         files::write_string(&contents_file, "not a directory", WriteOptions::default())
             .await
             .unwrap();
+
+        let result = Storage::init(&layout, Capacities::default(), "test_device".to_string()).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn init_deletes_latest_contents_no_entry_names() {
+        let dir = test_dirs::temp("testing").unwrap();
+        let layout = Layout::new(dir.to_dir());
+        let capacities = Capacities::default();
+        let device_id = "test_device".to_string();
+        let (storage, _) = Storage::init(&layout, capacities, device_id.clone())
+            .await
+            .unwrap();
+        let named = report("a");
+        let latest = LatestStore::new(storage.calibrations.clone());
+        latest
+            .put(named.metadata.clone(), &named.data)
+            .await
+            .unwrap();
+        let content = &storage.calibrations.content;
+        let orphan = Uuid::new_v4().to_string();
+        content
+            .write(orphan, named.data, |_, _| false, Overwrite::Allow)
+            .await
+            .unwrap();
+        storage.shutdown().await.unwrap();
+
+        let (storage, _) = Storage::init(&layout, capacities, device_id)
+            .await
+            .unwrap();
+
+        let contents = storage.calibrations.content.entry_map().await.unwrap();
+        let kept: Vec<String> = contents.into_keys().collect();
+        assert_eq!(kept, [named.metadata.report_id.to_string()]);
+        storage.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn init_fails_when_the_latest_index_is_a_directory() {
+        let dir = dirs::create_temp("testing").await.unwrap();
+        let layout = Layout::new(dir);
+
+        // the index can be neither read, to prune the contents, nor opened
+        let index = layout.calibrations().root.subdir("index.json");
+        dirs::create(&index).await.unwrap();
 
         let result = Storage::init(&layout, Capacities::default(), "test_device".to_string()).await;
         assert!(result.is_err());
