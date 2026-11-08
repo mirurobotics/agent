@@ -332,7 +332,7 @@ mod tests {
     use super::*;
     use crate::s3::store::tests::{
         access_denied_resp, actual_shapes, obj, recorded_payload, req, resp, resp_xml, shape,
-        store_expecting, store_on, store_with, temp_file_with, uri,
+        source_of, store_expecting, store_on, store_with, temp_file_with, uri,
     };
     use crate::test_utils::filesys::files as test_files;
     use miru_agent::errors::{Code, Error};
@@ -422,10 +422,6 @@ mod tests {
     }
 
     const UPLOAD_ID: &str = "test-upload-id";
-
-    async fn source_of(tf: &test_files::TempFile) -> Source {
-        Source::open(tf.to_file(), &obj("big.bin")).await.unwrap()
-    }
 
     fn create_resp() -> http::Response<SdkBody> {
         let xml = format!(
@@ -533,7 +529,7 @@ mod tests {
             ]);
 
             store
-                .put_multipart(source_of(&src).await, &obj(key), &HashMap::new())
+                .put_multipart(source_of(&src, key).await, &obj(key), &HashMap::new())
                 .await
                 .unwrap();
 
@@ -557,7 +553,7 @@ mod tests {
             ]);
 
             store
-                .put_multipart(source_of(&src).await, &obj(key), &metadata)
+                .put_multipart(source_of(&src, key).await, &obj(key), &metadata)
                 .await
                 .unwrap();
 
@@ -588,7 +584,7 @@ mod tests {
             let (store, _replay) = store_with(vec![ReplayEvent::new(create_req(), no_id_resp)]);
 
             let err = store
-                .put_multipart(source_of(&src).await, &obj(key), &HashMap::new())
+                .put_multipart(source_of(&src, key).await, &obj(key), &HashMap::new())
                 .await
                 .unwrap_err();
             assert!(matches!(err, S3Err::InvalidResponseErr(_)));
@@ -614,7 +610,7 @@ mod tests {
             ]);
 
             let err = store
-                .put_multipart(source_of(&src).await, &obj(key), &HashMap::new())
+                .put_multipart(source_of(&src, key).await, &obj(key), &HashMap::new())
                 .await
                 .unwrap_err();
             assert!(matches!(err, S3Err::InvalidResponseErr(_)));
@@ -637,7 +633,7 @@ mod tests {
                 store_with(vec![ReplayEvent::new(create_req(), access_denied_resp())]);
 
             let err = store
-                .put_multipart(source_of(&src).await, &obj(key), &HashMap::new())
+                .put_multipart(source_of(&src, key).await, &obj(key), &HashMap::new())
                 .await
                 .unwrap_err();
             assert!(matches!(err, S3Err::RequestFailedErr(_)));
@@ -656,7 +652,7 @@ mod tests {
             ]);
 
             let err = store
-                .put_multipart(source_of(&src).await, &obj(key), &HashMap::new())
+                .put_multipart(source_of(&src, key).await, &obj(key), &HashMap::new())
                 .await
                 .unwrap_err();
             assert!(matches!(err, S3Err::RequestFailedErr(_)));
@@ -682,7 +678,7 @@ mod tests {
             ]);
 
             let err = store
-                .put_multipart(source_of(&src).await, &obj(key), &HashMap::new())
+                .put_multipart(source_of(&src, key).await, &obj(key), &HashMap::new())
                 .await
                 .unwrap_err();
             assert!(matches!(err, S3Err::RequestFailedErr(_)));
@@ -713,7 +709,7 @@ mod tests {
             ]);
 
             let err = store
-                .put_multipart(source_of(&src).await, &obj(key), &HashMap::new())
+                .put_multipart(source_of(&src, key).await, &obj(key), &HashMap::new())
                 .await
                 .unwrap_err();
             // The surfaced error is the original part failure, not the abort failure.
@@ -732,7 +728,7 @@ mod tests {
             // building the part's body fails and the upload is aborted before
             // any part leaves the client.
             let src = temp_file_with(b"multipart-body").await;
-            let source = source_of(&src).await;
+            let source = source_of(&src, "big.bin").await;
             tokio::fs::OpenOptions::new()
                 .write(true)
                 .open(src.file().path())
@@ -767,7 +763,7 @@ mod tests {
         async fn stalled_upload_part_maps_to_connection_err() {
             let len: u64 = 64 * 1024;
             let tf = temp_file_with(&vec![0u8; len as usize]).await;
-            let src = Source::open(tf.to_file(), &obj("big.bin")).await.unwrap();
+            let src = source_of(&tf, "big.bin").await;
             let store = store_on(NeverClient::new());
             let start = Instant::now();
 
@@ -907,7 +903,7 @@ mod tests {
         #[tokio::test]
         async fn resume_skips_landed_parts() {
             let tf = two_part_file().await;
-            let src = source_of(&tf).await;
+            let src = source_of(&tf, "big.bin").await;
 
             let (store, replay) = store_with(vec![
                 ReplayEvent::new(
@@ -936,7 +932,7 @@ mod tests {
         #[tokio::test]
         async fn resume_expired_upload_maps_to_no_such_upload() {
             let tf = two_part_file().await;
-            let src = source_of(&tf).await;
+            let src = source_of(&tf, "big.bin").await;
 
             let (store, replay) = store_with(vec![ReplayEvent::new(
                 list_parts_req(),
@@ -991,7 +987,7 @@ mod tests {
         #[tokio::test]
         async fn resume_merges_paginated_list_parts() {
             let tf = two_part_file().await;
-            let src = source_of(&tf).await;
+            let src = source_of(&tf, "big.bin").await;
 
             let page2_req = req("GET", &list_parts_page2_query());
 
@@ -1036,7 +1032,7 @@ mod tests {
             // no abort (or complete) event is queued, so an abort would panic the
             // replay client on an unexpected request.
             let tf = two_part_file().await;
-            let src = source_of(&tf).await;
+            let src = source_of(&tf, "big.bin").await;
 
             let (store, replay) = store_with(vec![
                 ReplayEvent::new(
@@ -1064,7 +1060,7 @@ mod tests {
             // A valid upload with zero landed parts (empty listing) is NOT a missing
             // upload: every part is uploaded, then complete.
             let tf = two_part_file().await;
-            let src = source_of(&tf).await;
+            let src = source_of(&tf, "big.bin").await;
 
             let (store, replay) = store_with(vec![
                 ReplayEvent::new(list_parts_req(), list_parts_resp(&[], None)),
@@ -1094,7 +1090,7 @@ mod tests {
             // Both parts already landed (single page): nothing is re-uploaded, and
             // the complete manifest carries both landed etags in ascending order.
             let tf = two_part_file().await;
-            let src = source_of(&tf).await;
+            let src = source_of(&tf, "big.bin").await;
 
             let (store, replay) = store_with(vec![
                 ReplayEvent::new(
@@ -1136,7 +1132,7 @@ mod tests {
             // A body well under PART_SIZE must take the single-part branch:
             // exactly one PutObject, no multipart calls.
             let tf = temp_file_with(b"tiny").await;
-            let src = Source::open(tf.to_file(), &obj("small.bin")).await.unwrap();
+            let src = source_of(&tf, "small.bin").await;
             let (store, replay) =
                 store_expecting(req("PUT", "small.bin?x-id=PutObject"), resp(200, &[]));
 
@@ -1169,7 +1165,7 @@ mod tests {
             ]);
 
             store
-                .put(source_of(&src).await, &obj("big.bin"), &HashMap::new())
+                .put(source_of(&src, "big.bin").await, &obj("big.bin"), &HashMap::new())
                 .await
                 .unwrap();
 
