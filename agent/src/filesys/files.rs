@@ -114,6 +114,7 @@ pub async fn open_regular_file(file: &File) -> std::io::Result<TokioFile> {
     opts.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
     let f = opts.open(file.path()).await?;
     let meta = f.metadata().await?;
+    // the flag above also skips a placeholder's filter, so its stub would be read
     if !meta.is_file() || is_reparse_point(&meta) {
         let kind = std::io::ErrorKind::InvalidInput;
         return Err(std::io::Error::new(kind, "not a regular file"));
@@ -121,8 +122,7 @@ pub async fn open_regular_file(file: &File) -> std::io::Result<TokioFile> {
     Ok(f)
 }
 
-/// Whether `meta` is a reparse point, such as a link or a cloud placeholder. A
-/// no-follow open skips the placeholder's filter and would read its stub.
+/// Whether `meta` is a reparse point, such as a link or a cloud placeholder.
 #[cfg(windows)]
 fn is_reparse_point(meta: &std::fs::Metadata) -> bool {
     meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
@@ -462,7 +462,8 @@ pub async fn set_permissions(
 /// pattern component, so it only enters directories that can hold a match. It
 /// never follows a symlink below the prefix: symlinked files and directories
 /// are skipped, and a `..` below the prefix matches nothing, so a match can't
-/// resolve outside the prefix. Directories that error mid-walk (e.g.
+/// resolve outside the prefix. On Windows, entries behind any other reparse
+/// point, such as cloud placeholders, are skipped too. Directories that error mid-walk (e.g.
 /// unreadable ones) are skipped rather than aborting the walk.
 pub fn glob(pattern: &str) -> Result<Vec<File>, FileSysErr> {
     let (root, components) = parse_glob(pattern)?;
