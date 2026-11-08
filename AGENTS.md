@@ -44,6 +44,10 @@ use tokio::sync::broadcast;
 
 Handlers in `agent/src/server/handlers.rs` don't convert wire types. Response conversions live in `server/response.rs` and request conversions in `server/request.rs` ([agent#383](https://github.com/mirurobotics/agent/pull/383#discussion_r4363970314)).
 
+### Comment scope
+
+A module's docs and comments describe its own job, not what its callers use it for: `filesys` doesn't mention uploads or object stores ([agent#396](https://github.com/mirurobotics/agent/pull/396#discussion_r4372220839)).
+
 ### Error handling
 
 All error types derive `thiserror::Error` and implement the custom `crate::errors::Error` trait (defined in `agent/src/errors/`). The trait provides default implementations for `code()`, `http_status()`, `params()`, and `is_network_conn_err()`. Aggregating enum errors use the `impl_error!` macro (also in `agent/src/errors/`).

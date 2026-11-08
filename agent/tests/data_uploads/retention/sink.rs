@@ -13,6 +13,7 @@ fn stable_file(name: &str) -> StableFile {
         file: File::new(format!("/data/{name}")),
         size: 128,
         digest: format!("sha256:{name}"),
+        crc32c: Some(42),
         mtime: DateTime::from_timestamp(950, 0).unwrap(),
         mtime_aliases: Vec::new(),
         first_observed_at: DateTime::from_timestamp(900, 0).unwrap(),

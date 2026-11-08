@@ -94,17 +94,25 @@ async fn happy_path_creates_transfers_confirms() {
     client.set_create_upload(|| Ok(pending_response()));
     client.set_confirm_upload(|| Ok(*uploaded_response().upload));
     let transfer = MockObjectTransfer::new();
-    let job = make_job("a.log");
+    let job = Job {
+        crc32c: Some(42),
+        ..make_job("a.log")
+    };
     let executor = LiveExecutor::new(client.clone(), token_manager(), transfer.clone());
 
     attempt(&executor, &job).await.unwrap();
 
     // Exactly one transfer, carrying the create response's credentials, its
     // upload (the physical `bucket_name`, not the Miru `bucket_id`, plus key and
-    // metadata) and the job's file.
+    // metadata) and the job's file and CRC32C.
     assert_eq!(
         transfer.recorded_calls(),
-        vec![(s3_credentials(), upload_checkpoint(), job.file.clone())]
+        vec![(
+            s3_credentials(),
+            upload_checkpoint(),
+            job.file.clone(),
+            Some(42)
+        )]
     );
     // The captured HTTP exchange: create (with the job's payload and the token
     // manager's bearer string) then confirm for the created upload's id.
@@ -275,6 +283,7 @@ fn create_request_maps_job_fields() {
         file,
         size: 42,
         digest: "sha256:abc".to_string(),
+        crc32c: None,
         mtime: Utc.with_ymd_and_hms(2021, 1, 1, 0, 0, 0).unwrap(),
         first_observed_at: Utc.with_ymd_and_hms(2021, 1, 1, 0, 1, 0).unwrap(),
         last_observed_at: Utc.with_ymd_and_hms(2021, 1, 1, 0, 2, 0).unwrap(),
@@ -307,6 +316,7 @@ fn new_upl_request_sends_mtime_with_device_offset() {
         file,
         size: 42,
         digest: "sha256:abc".to_string(),
+        crc32c: None,
         // 01:30 UTC is 20:30 the evening before in New York (EST)
         mtime: Utc.with_ymd_and_hms(2026, 1, 15, 1, 30, 0).unwrap(),
         first_observed_at: Utc.with_ymd_and_hms(2026, 1, 15, 1, 31, 0).unwrap(),
@@ -425,7 +435,12 @@ async fn retry_reuses_the_saved_upload() {
     assert_eq!(client.requests()[0].path, "/uploads/upl_1/credentials");
     assert_eq!(
         transfer.recorded_calls(),
-        vec![(s3_credentials(), upload_mid_transfer(), job.file.clone())]
+        vec![(
+            s3_credentials(),
+            upload_mid_transfer(),
+            job.file.clone(),
+            job.crc32c
+        )]
     );
 }
 
