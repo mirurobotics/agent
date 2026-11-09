@@ -3,7 +3,7 @@ use crate::calibrations::{
     errors::{CalibrationNotFoundErr, CalibrationStoreFullErr, CalibrationsErr},
     report::ReportMetadata,
 };
-use crate::disk::CalibrationStor;
+use crate::disk::LatestCalStor;
 use crate::filesys::Overwrite;
 use crate::models::InstanceFormat;
 use crate::trace;
@@ -50,11 +50,11 @@ pub struct LatestContent {
 /// than evicting another.
 #[derive(Clone, Debug)]
 pub struct LatestStore {
-    stor: CalibrationStor,
+    stor: LatestCalStor,
 }
 
 impl LatestStore {
-    pub fn new(stor: CalibrationStor) -> Self {
+    pub fn new(stor: LatestCalStor) -> Self {
         Self { stor }
     }
 

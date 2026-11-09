@@ -3,7 +3,6 @@ use std::future::Future;
 use std::sync::Arc;
 
 pub mod agent_version;
-pub mod calibrations;
 pub mod config_instances;
 pub mod deployments;
 pub mod device;
@@ -11,19 +10,20 @@ pub mod device_api;
 pub mod errors;
 pub mod file_rules;
 pub mod git_commits;
+pub mod latest_cals;
 pub mod layout;
 pub mod releases;
 pub mod settings;
 pub mod setup;
 pub mod system_metadata;
 
-pub use self::calibrations::{CalibrationContent, Calibrations};
 pub use self::config_instances::{CfgInstContent, CfgInsts};
 pub use self::deployments::{Deployments, DplEntry};
 pub use self::device::{activation_state, assert_activated, resolve_device_id, Activation, Device};
 pub use self::errors::{DeviceNotActivatedErr, DiskErr};
 pub use self::file_rules::{file_rules_for_deployed, file_rules_for_deployment, FileRules};
 pub use self::git_commits::GitCommits;
+pub use self::latest_cals::{LatestCalContent, LatestCals};
 pub use self::layout::Layout;
 pub use self::releases::Releases;
 pub use self::settings::{Backend, MQTTBroker, Settings, TCPServer};
@@ -46,7 +46,7 @@ pub struct Capacities {
     pub releases: usize,
     pub file_rules: usize,
     pub git_commits: usize,
-    pub calibrations: usize,
+    pub latest_cals: usize,
 }
 
 impl Default for Capacities {
@@ -58,7 +58,7 @@ impl Default for Capacities {
             releases: 1000,
             file_rules: 1000,
             git_commits: 100,
-            calibrations: 1000,
+            latest_cals: 1000,
         }
     }
 }
@@ -84,9 +84,9 @@ impl CfgInstStor {
 }
 
 #[derive(Clone, Debug)]
-pub struct CalibrationStor {
-    pub meta: Arc<Calibrations>,
-    pub content: Arc<CalibrationContent>,
+pub struct LatestCalStor {
+    pub meta: Arc<LatestCals>,
+    pub content: Arc<LatestCalContent>,
 }
 
 #[derive(Clone, Debug)]
@@ -97,7 +97,7 @@ pub struct Storage {
     pub releases: Arc<Releases>,
     pub file_rules: Arc<FileRules>,
     pub git_commits: Arc<GitCommits>,
-    pub calibrations: CalibrationStor,
+    pub latest_cals: LatestCalStor,
 }
 
 impl Storage {
@@ -131,8 +131,7 @@ impl Storage {
         let git_commits = Arc::new(git_commit_stor);
 
         // latest calibrations (metadata + content)
-        let (calibrations, calibration_handles) =
-            init_calibration_storage(layout, capacities).await?;
+        let (latest_cals, latest_cal_handles) = init_latest_cal_storage(layout, capacities).await?;
 
         let shutdown_handle = async move {
             let mut handles = vec![device_handle];
@@ -143,7 +142,7 @@ impl Storage {
                 file_rule_handle,
                 git_commit_handle,
             ]);
-            handles.extend(calibration_handles);
+            handles.extend(latest_cal_handles);
 
             futures::future::join_all(handles).await;
         };
@@ -156,7 +155,7 @@ impl Storage {
                 releases,
                 file_rules,
                 git_commits,
-                calibrations,
+                latest_cals,
             },
             shutdown_handle,
         ))
@@ -225,13 +224,13 @@ impl Storage {
         );
         first_err = record(
             first_err,
-            "calibration metadata store",
-            self.calibrations.meta.shutdown().await,
+            "latest calibrations metadata store",
+            self.latest_cals.meta.shutdown().await,
         );
         first_err = record(
             first_err,
-            "calibration content store",
-            self.calibrations.content.shutdown().await,
+            "latest calibrations content store",
+            self.latest_cals.content.shutdown().await,
         );
 
         match first_err {
@@ -310,21 +309,20 @@ async fn init_cfg_inst_storage(
     ))
 }
 
-async fn init_calibration_storage(
+async fn init_latest_cal_storage(
     layout: &StorLayout,
     capacities: Capacities,
-) -> Result<(CalibrationStor, [JoinHandle<()>; 2]), StorErr> {
-    let calibrations_layout = layout.calibrations();
+) -> Result<(LatestCalStor, [JoinHandle<()>; 2]), StorErr> {
+    let latest_layout = layout.latest_cals();
     let (meta, meta_handle) =
-        Calibrations::spawn(64, calibrations_layout.index(), capacities.calibrations).await?;
+        LatestCals::spawn(64, latest_layout.index(), capacities.latest_cals).await?;
     let (content, content_handle) =
-        CalibrationContent::spawn(64, calibrations_layout.contents(), capacities.calibrations)
-            .await?;
-    let calibrations = CalibrationStor {
+        LatestCalContent::spawn(64, latest_layout.contents(), capacities.latest_cals).await?;
+    let latest_cals = LatestCalStor {
         meta: Arc::new(meta),
         content: Arc::new(content),
     };
-    Ok((calibrations, [meta_handle, content_handle]))
+    Ok((latest_cals, [meta_handle, content_handle]))
 }
 
 async fn init_deployment_storage(

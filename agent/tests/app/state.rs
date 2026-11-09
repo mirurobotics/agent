@@ -300,8 +300,8 @@ pub mod init {
         // the actor is spawned, its queue is seeded on disk, and storage seeds
         // the latest index
         state.cal_mngr.num_queued_uploads().await.unwrap();
-        assert!(env.layout.calibration_reports().queue().exists());
-        assert!(env.layout.calibrations().index().exists());
+        assert!(env.layout.calibrations().queue().exists());
+        assert!(env.layout.latest_cals().index().exists());
 
         state.shutdown().await.unwrap();
         state_handle.await;
@@ -312,7 +312,7 @@ pub mod init {
         let env = TestEnv::valid().await;
         // a directory at the queue FILE path makes
         // QueueSnapshotFile::new_with_default fail on both read and create
-        let queue = env.layout.calibration_reports().queue();
+        let queue = env.layout.calibrations().queue();
         dirs::create(&Dir::new(queue.path().clone())).await.unwrap();
 
         let (state, state_handle) = env.init().await.unwrap();

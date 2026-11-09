@@ -95,7 +95,7 @@ pub mod routes {
     impl Fixture {
         async fn new(name: &str) -> Self {
             let options = UploaderOptions::default();
-            Self::with_calibration_options(name, options, Capacities::default().calibrations).await
+            Self::with_calibration_options(name, options, Capacities::default().latest_cals).await
         }
 
         async fn with_calibration_options(
@@ -676,7 +676,7 @@ pub mod routes {
                 ..UploaderOptions::default()
             };
             let name = "handler_calibration_full";
-            let capacity = Capacities::default().calibrations;
+            let capacity = Capacities::default().latest_cals;
             let f = Fixture::with_calibration_options(name, options, capacity).await;
 
             let (status, bytes) = f.post_json(URI, request("json", "{}")).await;

@@ -78,7 +78,7 @@ async fn a_cal_mngr_rejection_fails_intake() {
         max_report_bytes: 100,
         ..UploaderOptions::default()
     };
-    let f = Fixture::with_options(options, Capacities::default().calibrations).await;
+    let f = Fixture::with_options(options, Capacities::default().latest_cals).await;
     let mut big = params();
     big.data = "x".repeat(200);
 

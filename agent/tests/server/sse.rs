@@ -55,7 +55,7 @@ impl Fixture {
             &dir,
             MockCalibrationSender::new().0,
             UploaderOptions::default(),
-            Capacities::default().calibrations,
+            Capacities::default().latest_cals,
         )
         .await;
 

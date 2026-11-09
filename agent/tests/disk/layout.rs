@@ -229,20 +229,20 @@ pub mod auth_layout {
     }
 }
 
-pub mod calibration_reports_layout {
+pub mod calibrations_layout {
     use super::*;
 
     #[test]
     fn root_dir() {
         let layout = Layout::default();
-        let reports = layout.calibration_reports();
-        assert_eq!(reports.root.to_string(), under_root(&["calibrations"]));
+        let calibrations = layout.calibrations();
+        assert_eq!(calibrations.root.to_string(), under_root(&["calibrations"]));
     }
 
     #[test]
     fn queue_file() {
         let layout = Layout::default();
-        let file = layout.calibration_reports().queue();
+        let file = layout.calibrations().queue();
         assert_eq!(
             file.to_string(),
             under_root(&["calibrations", "queue.json"])
@@ -252,41 +252,41 @@ pub mod calibration_reports_layout {
     #[test]
     fn reports_dir() {
         let layout = Layout::default();
-        let dir = layout.calibration_reports().reports();
+        let dir = layout.calibrations().reports();
         assert_eq!(dir.to_string(), under_root(&["calibrations", "reports"]));
     }
 }
 
-pub mod calibrations_layout {
+pub mod latest_cals_layout {
     use super::*;
 
     #[test]
     fn root_dir() {
         let layout = Layout::default();
-        let latest = layout.calibrations();
+        let latest = layout.latest_cals();
         assert_eq!(
             latest.root.to_string(),
-            under_root(&["resources", "calibrations"])
+            under_root(&["resources", "latest_cals"])
         );
     }
 
     #[test]
     fn index_file() {
         let layout = Layout::default();
-        let file = layout.calibrations().index();
+        let file = layout.latest_cals().index();
         assert_eq!(
             file.to_string(),
-            under_root(&["resources", "calibrations", "index.json"])
+            under_root(&["resources", "latest_cals", "index.json"])
         );
     }
 
     #[test]
     fn contents_dir() {
         let layout = Layout::default();
-        let dir = layout.calibrations().contents();
+        let dir = layout.latest_cals().contents();
         assert_eq!(
             dir.to_string(),
-            under_root(&["resources", "calibrations", "contents"])
+            under_root(&["resources", "latest_cals", "contents"])
         );
     }
 }

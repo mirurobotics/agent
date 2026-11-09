@@ -12,14 +12,14 @@ use std::time::Duration;
 use crate::mocks::calibration_sender::{MockCalibrationSender, Step};
 use crate::mocks::error::SleepController;
 use crate::test_utils::calibrations::{
-    calibrations_layout, latest_store, received_at, report, reports_layout,
+    latest_cals_layout, latest_store, layout, received_at, report,
 };
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::calibrations::{
     CalMngrArgs, CalibrationManager, CalibrationsErr, LatestFilter, LatestStore, Queue,
     QueueSnapshotFile, ReportMetadata, UploaderOptions,
 };
-use miru_agent::disk::layout::{CalibrationReportsLayout, CalibrationsLayout};
+use miru_agent::disk::layout::{CalibrationsLayout, LatestCalsLayout};
 use miru_agent::disk::Capacities;
 use miru_agent::filesys::{dirs, files, File, PathExt, WriteOptions};
 use miru_agent::queue::Persistence;
@@ -37,8 +37,8 @@ const HANG_GUARD: Duration = Duration::from_secs(60);
 
 struct Harness {
     dir: test_dirs::TempDir,
-    layout: CalibrationReportsLayout,
-    latest: CalibrationsLayout,
+    layout: CalibrationsLayout,
+    latest: LatestCalsLayout,
     sender: Arc<MockCalibrationSender>,
     started: mpsc::UnboundedReceiver<()>,
     sleep: Arc<SleepController>,
@@ -54,8 +54,8 @@ struct Harness {
 impl Harness {
     fn new() -> Self {
         let dir = test_dirs::temp("cal_mngr_test").unwrap();
-        let layout = reports_layout(&dir);
-        let latest = calibrations_layout(&dir);
+        let layout = layout(&dir);
+        let latest = latest_cals_layout(&dir);
         let (sender, started) = MockCalibrationSender::new();
         Self {
             dir,
@@ -89,7 +89,7 @@ impl Harness {
 
     async fn spawn_with(&mut self, options: UploaderOptions) {
         let snapshot_file = Some(self.snapshot_file().await);
-        let latest = latest_store(&self.dir, Capacities::default().calibrations).await;
+        let latest = latest_store(&self.dir, Capacities::default().latest_cals).await;
         let args = CalMngrArgs {
             snapshot_file,
             reports: self.layout.reports(),

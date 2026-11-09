@@ -56,12 +56,12 @@ impl Layout {
         self.root().file("delete_queue.json")
     }
 
-    pub fn calibration_reports(&self) -> CalibrationReportsLayout {
-        CalibrationReportsLayout::new(self.root().subdir("calibrations"))
+    pub fn calibrations(&self) -> CalibrationsLayout {
+        CalibrationsLayout::new(self.root().subdir("calibrations"))
     }
 
-    pub fn calibrations(&self) -> CalibrationsLayout {
-        CalibrationsLayout::new(self.resources().subdir("calibrations"))
+    pub fn latest_cals(&self) -> LatestCalsLayout {
+        LatestCalsLayout::new(self.resources().subdir("latest_cals"))
     }
 
     fn config_instances(&self) -> filesys::Dir {
@@ -155,11 +155,11 @@ impl AuthLayout {
 
 /// The calibration queue: a queue snapshot plus one report file per queued
 /// calibration, so a queue write never rewrites the (possibly large) content.
-pub struct CalibrationReportsLayout {
+pub struct CalibrationsLayout {
     pub root: filesys::Dir,
 }
 
-impl CalibrationReportsLayout {
+impl CalibrationsLayout {
     pub fn new(root: filesys::Dir) -> Self {
         Self { root }
     }
@@ -174,11 +174,11 @@ impl CalibrationReportsLayout {
 }
 
 /// The latest calibrations store, a cache of Miru that `reset` wipes.
-pub struct CalibrationsLayout {
+pub struct LatestCalsLayout {
     pub root: filesys::Dir,
 }
 
-impl CalibrationsLayout {
+impl LatestCalsLayout {
     pub fn new(root: filesys::Dir) -> Self {
         Self { root }
     }

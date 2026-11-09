@@ -7,7 +7,7 @@ use std::time::Duration;
 
 // internal crates
 use crate::mocks::calibration_sender::MockCalibrationSender;
-use crate::test_utils::calibrations::{latest_store, received_at, reports_layout};
+use crate::test_utils::calibrations::{latest_store, layout, received_at};
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::calibrations::{
     CalMngrArgs, CalibrationManager, QueueSnapshotFile, Report, UploaderOptions,
@@ -33,7 +33,7 @@ impl Fixture {
     pub async fn new() -> Self {
         Self::with_options(
             UploaderOptions::default(),
-            Capacities::default().calibrations,
+            Capacities::default().latest_cals,
         )
         .await
     }
@@ -42,7 +42,7 @@ impl Fixture {
     /// at most `latest_capacity` keys.
     pub async fn with_options(options: UploaderOptions, latest_capacity: usize) -> Self {
         let dir = test_dirs::temp("calibration_service_test").unwrap();
-        let calibrations = reports_layout(&dir);
+        let calibrations = layout(&dir);
         let snapshot_file =
             QueueSnapshotFile::new_with_default(calibrations.queue(), Default::default())
                 .await

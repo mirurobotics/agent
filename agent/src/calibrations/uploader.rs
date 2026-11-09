@@ -305,10 +305,10 @@ mod tests {
     // internal crates
     use super::{NextAttempt, QueueEntry, Uploader, UploaderOptions};
     use crate::test_utils::calibration_sender::{MockCalibrationSender, Step};
-    use crate::test_utils::calibrations::{received_at, report, reports_layout};
+    use crate::test_utils::calibrations::{layout, received_at, report};
     use crate::test_utils::filesys::dirs as test_dirs;
     use miru_agent::calibrations::{CalibrationsErr, Queue, QueueSnapshotFile};
-    use miru_agent::disk::layout::CalibrationReportsLayout;
+    use miru_agent::disk::layout::CalibrationsLayout;
     use miru_agent::filesys::{dirs, files, File, PathExt, WriteOptions};
     use miru_agent::queue::{Persistence, RetryPolicy};
 
@@ -321,7 +321,7 @@ mod tests {
 
     struct Fixture {
         _dir: test_dirs::TempDir,
-        layout: CalibrationReportsLayout,
+        layout: CalibrationsLayout,
         sender: Arc<MockCalibrationSender>,
         /// The uploader's clock. It starts when the fixture reports were
         /// received and moves only when a test advances it.
@@ -331,7 +331,7 @@ mod tests {
     impl Fixture {
         fn new() -> Self {
             let dir = test_dirs::temp("calibration_uploader_test").unwrap();
-            let layout = reports_layout(&dir);
+            let layout = layout(&dir);
             let (sender, _) = MockCalibrationSender::new();
             Self {
                 _dir: dir,

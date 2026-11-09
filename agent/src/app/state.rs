@@ -83,7 +83,7 @@ impl AppState {
             Self::init_data_uploads(layout, http_client.clone(), token_mngr.clone()).await?;
 
         // initialize the calibration manager
-        let latest = calibrations::LatestStore::new(storage.calibrations.clone());
+        let latest = calibrations::LatestStore::new(storage.latest_cals.clone());
         let (cal_mngr, cal_mngr_handle) =
             Self::init_cal_mngr(layout, &latest, http_client.clone(), token_mngr.clone()).await;
 
@@ -276,7 +276,7 @@ impl AppState {
         Arc<calibrations::CalibrationManager>,
         tokio::task::JoinHandle<()>,
     ) {
-        let layout = layout.calibration_reports();
+        let layout = layout.calibrations();
         let snapshot_file = match calibrations::QueueSnapshotFile::new_with_default(
             layout.queue(),
             Default::default(),

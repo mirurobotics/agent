@@ -26,7 +26,7 @@ pub mod default_capacities {
             releases: 1000,
             file_rules: 1000,
             git_commits: 100,
-            calibrations: 1000,
+            latest_cals: 1000,
         };
         assert_eq!(actual, expected);
     }

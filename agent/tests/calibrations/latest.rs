@@ -2,12 +2,12 @@
 //! keys and capacity, write order, listing and content.
 
 // internal crates
-use crate::test_utils::calibrations::{calibration_stor, calibrations_layout, report};
+use crate::test_utils::calibrations::{latest_cal_stor, latest_cals_layout, report};
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::calibrations::{
     CalibrationsErr, LatestCalibrations, LatestContent, LatestFilter, LatestStore, ReportMetadata,
 };
-use miru_agent::disk::{layout::CalibrationsLayout, CalibrationStor, Capacities};
+use miru_agent::disk::{layout::LatestCalsLayout, Capacities, LatestCalStor};
 use miru_agent::filesys::{dirs, files, File, Overwrite, PathExt, WriteOptions};
 use miru_agent::models::InstanceFormat;
 
@@ -19,20 +19,20 @@ const DATA: &str = "offset: 1\n";
 
 struct Fixture {
     _dir: test_dirs::TempDir,
-    layout: CalibrationsLayout,
-    stor: CalibrationStor,
+    layout: LatestCalsLayout,
+    stor: LatestCalStor,
 }
 
 impl Fixture {
     async fn new() -> Self {
-        Self::with_capacity(Capacities::default().calibrations).await
+        Self::with_capacity(Capacities::default().latest_cals).await
     }
 
     /// A fixture whose caches hold at most `capacity` keys.
     async fn with_capacity(capacity: usize) -> Self {
         let dir = test_dirs::temp("latest_cals_test").unwrap();
-        let layout = calibrations_layout(&dir);
-        let stor = calibration_stor(&dir, capacity).await;
+        let layout = latest_cals_layout(&dir);
+        let stor = latest_cal_stor(&dir, capacity).await;
         Self {
             _dir: dir,
             layout,
