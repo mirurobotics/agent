@@ -83,9 +83,9 @@ impl LatestStore {
     }
 
     /// The entries `filter` matches, ordered by component, role and aspect.
-    pub async fn list(&self, filter: &Filter) -> Result<Vec<ReportMetadata>, CalibrationsErr> {
-        let mut entries = self.stor.index.values().await?;
-        entries.retain(|metadata| filter.is_match(metadata));
+    pub async fn list(&self, filter: Filter) -> Result<Vec<ReportMetadata>, CalibrationsErr> {
+        let index = &self.stor.index;
+        let mut entries = index.find_where(move |m| filter.is_match(m)).await?;
         entries.sort_by(|a, b| key_parts(a).cmp(&key_parts(b)));
         Ok(entries)
     }
@@ -93,8 +93,9 @@ impl LatestStore {
     /// The data of the entry for `report_id`. Not found unless an entry has
     /// that `report_id` and its content exists.
     pub async fn content(&self, report_id: Uuid) -> Result<String, CalibrationsErr> {
-        let entries = self.stor.index.values().await?;
-        if !entries.iter().any(|m| m.report_id == report_id) {
+        let index = &self.stor.index;
+        let entries = index.find_where(move |m| m.report_id == report_id).await?;
+        if entries.is_empty() {
             return Err(not_found(report_id));
         }
         let content = self.stor.content.read_optional(report_id.to_string());

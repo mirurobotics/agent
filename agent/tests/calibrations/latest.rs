@@ -245,7 +245,7 @@ async fn an_empty_filter_lists_every_entry_sorted() {
     let c = reported("c", None, None);
     put_all(&store, &[&c, &b, &a]).await;
 
-    let entries = store.list(&Filter::default()).await.unwrap();
+    let entries = store.list(Filter::default()).await.unwrap();
 
     assert_eq!(entries, [a, b, c]);
 }
@@ -295,7 +295,7 @@ async fn list_filters_by_component_role_and_aspect() {
     ];
 
     for (filter, want) in cases {
-        let entries = store.list(&filter).await.unwrap();
+        let entries = store.list(filter.clone()).await.unwrap();
         assert_eq!(entries, std::slice::from_ref(want), "{filter:?}");
     }
 }
@@ -355,7 +355,7 @@ async fn a_cache_that_cannot_be_read_fails_the_call() {
     let errs = [
         unreadable_content,
         store.put(arm.clone(), DATA).await.unwrap_err(),
-        store.list(&Filter::default()).await.unwrap_err(),
+        store.list(Filter::default()).await.unwrap_err(),
         store.content(arm.report_id).await.unwrap_err(),
     ];
 
