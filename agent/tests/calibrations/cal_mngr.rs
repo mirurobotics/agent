@@ -16,8 +16,8 @@ use crate::test_utils::calibrations::{
 };
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::calibrations::{
-    CalMngrArgs, CalibrationManager, CalibrationsErr, Filter, LatestStore, Queue, QueueSnapshotFile,
-    ReportMetadata, UploaderOptions,
+    CalMngrArgs, CalibrationManager, CalibrationsErr, Filter, LatestStore, Queue,
+    QueueSnapshotFile, ReportMetadata, UploaderOptions,
 };
 use miru_agent::disk::layout::{CalibrationsLayout, LatestCalsLayout};
 use miru_agent::disk::Capacities;
