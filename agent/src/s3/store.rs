@@ -22,7 +22,7 @@ pub(crate) const PART_SIZE: u64 = 8 * 1024 * 1024; // 8 MiB
 #[derive(Debug)]
 pub(super) enum WriteOutcome {
     Created,
-    /// An earlier attempt already stored the object (GCS create-only).
+    /// The object already existed, so this create-only write stored nothing.
     AlreadyExists,
 }
 
@@ -45,7 +45,8 @@ pub struct Options {
     pub config: aws_sdk_s3::Config,
     /// Set for a [`gcs::config`](crate::s3::gcs::config). Bodies then carry a
     /// `Content-MD5` the store computes, since the GCS client turns the SDK's
-    /// own request checksums off, and object writes are create-only.
+    /// own request checksums off, and the GCS client, not `If-None-Match`,
+    /// makes object writes create-only.
     pub gcs: bool,
 }
 
@@ -65,9 +66,9 @@ impl Store {
         }
     }
 
-    /// Creates or overwrites an object from a local file, sized once as a
-    /// [`Source`]. GCS never overwrites: an existing object counts as written
-    /// (see [`gcs`](crate::s3::gcs)).
+    /// Creates an object from a local file, sized once as a [`Source`]. Never
+    /// overwrites: an existing object counts as written (see
+    /// [`Self::finish_write`]).
     ///
     /// Files at or below [`PART_SIZE`] go through one `PutObject`
     /// ([`Self::put_singlepart`]); larger files go part-by-part through a
@@ -103,6 +104,7 @@ impl Store {
             .body(body)
             .set_content_md5(content_md5)
             .set_metadata((!metadata.is_empty()).then(|| metadata.clone()))
+            .set_if_none_match(self.if_none_match())
             .customize()
             .config_override(sdk::timeout(sdk::upload_timeout(src.size)))
             .send()
@@ -131,10 +133,16 @@ impl Store {
         Ok((body, content_md5))
     }
 
-    /// Finishes an object write (PutObject or CompleteMultipartUpload). On GCS
-    /// the client sends writes create-only (see [`gcs`](crate::s3::gcs)), so a 412 means an
-    /// earlier attempt already stored the object at this key, which counts as
-    /// done.
+    /// The `If-None-Match` value that makes an S3 object write create-only.
+    /// The GCS client sends GCS's own precondition instead (see
+    /// [`gcs`](crate::s3::gcs)).
+    pub(super) fn if_none_match(&self) -> Option<String> {
+        (!self.gcs).then(|| "*".to_string())
+    }
+
+    /// Finishes an object write (PutObject or CompleteMultipartUpload). Writes
+    /// are create-only, so a 412 means an earlier attempt already stored the
+    /// object at this key, which counts as done.
     pub(super) fn finish_write<E>(
         &self,
         operation: &str,
@@ -146,7 +154,7 @@ impl Store {
     {
         match result {
             Ok(()) => Ok(WriteOutcome::Created),
-            Err(e) if self.gcs && errors::status(&e) == Some(HTTPCode::PRECONDITION_FAILED) => {
+            Err(e) if errors::status(&e) == Some(HTTPCode::PRECONDITION_FAILED) => {
                 tracing::info!("upload: {dst} already exists, so an earlier {operation} landed");
                 Ok(WriteOutcome::AlreadyExists)
             }
@@ -385,6 +393,14 @@ pub(super) mod tests {
     /// service error, which the common mapper turns into `RequestFailedErr`.
     pub(crate) fn access_denied_resp() -> http::Response<SdkBody> {
         resp_xml(403, ACCESS_DENIED_XML)
+    }
+
+    const PRECONDITION_FAILED_XML: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>PreconditionFailed</Code><Message>At least one of the pre-conditions you specified did not hold</Message><Condition>If-None-Match</Condition></Error>"#;
+
+    /// Canned 412 S3 sends when a create-only write finds the object already there.
+    pub(crate) fn precondition_failed_resp() -> http::Response<SdkBody> {
+        resp_xml(412, PRECONDITION_FAILED_XML)
     }
 
     /// Wires a `Store` to a replay client expecting exactly one request/response
@@ -637,6 +653,43 @@ pub(super) mod tests {
                 let header = |name: &str| requests[0].headers().get(name);
                 assert_eq!(header("x-amz-meta-device_id"), Some("dvc_1"));
                 assert_eq!(header("x-amz-meta-digest"), Some("sha256:abc"));
+            }
+
+            #[tokio::test]
+            async fn put_is_create_only() {
+                let key = "artifacts/hello.txt";
+                let src = temp_file_with(b"hello world").await;
+                let (store, replay) = store_expecting(
+                    req("PUT", "artifacts/hello.txt?x-id=PutObject"),
+                    resp(200, &[]),
+                );
+
+                store
+                    .put_singlepart(source_of(&src, key).await, &obj(key), &HashMap::new())
+                    .await
+                    .unwrap();
+
+                let requests = replay.actual_requests().collect::<Vec<_>>();
+                assert_eq!(requests[0].headers().get("if-none-match"), Some("*"));
+            }
+
+            #[tokio::test]
+            async fn put_of_an_existing_object_counts_as_uploaded() {
+                // A retry after a lost success: the object is already there, so
+                // the create-only write gets 412.
+                let key = "artifacts/hello.txt";
+                let src = temp_file_with(b"hello world").await;
+                let (store, replay) = store_expecting(
+                    req("PUT", "artifacts/hello.txt?x-id=PutObject"),
+                    precondition_failed_resp(),
+                );
+
+                store
+                    .put_singlepart(source_of(&src, key).await, &obj(key), &HashMap::new())
+                    .await
+                    .unwrap();
+
+                assert_eq!(replay.actual_requests().count(), 1);
             }
         }
 
