@@ -62,14 +62,14 @@ pub fn latest_cals_layout(dir: &TempDir) -> LatestCalsLayout {
 /// The latest calibration caches under `dir`, holding at most `capacity` keys.
 pub async fn latest_cal_stor(dir: &TempDir, capacity: usize) -> LatestCalStor {
     let layout = latest_cals_layout(dir);
-    let (meta, _) = LatestCals::spawn(64, layout.index(), capacity)
+    let (index, _) = LatestCals::spawn(64, layout.index(), capacity)
         .await
         .unwrap();
     let (content, _) = LatestCalContent::spawn(64, layout.contents(), capacity)
         .await
         .unwrap();
     LatestCalStor {
-        meta: Arc::new(meta),
+        index: Arc::new(index),
         content: Arc::new(content),
     }
 }

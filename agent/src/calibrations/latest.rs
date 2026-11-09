@@ -29,7 +29,7 @@ impl Filter {
 }
 
 /// The newest calibration for each component, role and aspect, kept in the
-/// calibration caches: one entry per key in the metadata cache, and each
+/// calibration caches: one entry per key in the index cache, and each
 /// entry's data in the content cache under its `report_id`. A report replaces
 /// its key's entry, and a new key past the caches' capacity is rejected rather
 /// than evicting another.
@@ -50,8 +50,8 @@ impl LatestStore {
     /// error the key's entry is unchanged.
     pub async fn put(&self, metadata: ReportMetadata, data: &str) -> Result<(), CalibrationsErr> {
         let key = key(&metadata);
-        let capacity = self.stor.meta.capacity().await?;
-        let mut entries = self.stor.meta.entry_map().await?;
+        let capacity = self.stor.index.capacity().await?;
+        let mut entries = self.stor.index.entry_map().await?;
         let replaced = entries.remove(&key);
         if replaced.is_none() && entries.len() >= capacity {
             let err = CalibrationStoreFullErr {
@@ -67,8 +67,8 @@ impl LatestStore {
             .content
             .write(content_key.clone(), content, |_, _| false, Overwrite::Allow)
             .await?;
-        let meta = &self.stor.meta;
-        if let Err(e) = meta
+        let index = &self.stor.index;
+        if let Err(e) = index
             .write(key, metadata, |_, _| false, Overwrite::Allow)
             .await
         {
@@ -84,7 +84,7 @@ impl LatestStore {
 
     /// The entries `filter` matches, ordered by component, role and aspect.
     pub async fn list(&self, filter: &Filter) -> Result<Vec<ReportMetadata>, CalibrationsErr> {
-        let mut entries = self.stor.meta.values().await?;
+        let mut entries = self.stor.index.values().await?;
         entries.retain(|metadata| filter.is_match(metadata));
         entries.sort_by(|a, b| key_parts(a).cmp(&key_parts(b)));
         Ok(entries)
@@ -93,7 +93,7 @@ impl LatestStore {
     /// The data of the entry for `report_id`. Not found unless an entry has
     /// that `report_id` and its content exists.
     pub async fn content(&self, report_id: Uuid) -> Result<String, CalibrationsErr> {
-        let entries = self.stor.meta.values().await?;
+        let entries = self.stor.index.values().await?;
         if !entries.iter().any(|m| m.report_id == report_id) {
             return Err(not_found(report_id));
         }
@@ -109,7 +109,7 @@ impl LatestStore {
     }
 }
 
-/// The metadata cache's key for `metadata`: its component, role and aspect as
+/// The index cache's key for `metadata`: its component, role and aspect as
 /// a JSON array, so no two keys collide.
 fn key(metadata: &ReportMetadata) -> String {
     serde_json::json!(key_parts(metadata)).to_string()

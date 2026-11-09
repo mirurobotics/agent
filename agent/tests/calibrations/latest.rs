@@ -41,9 +41,9 @@ impl Fixture {
         LatestStore::new(self.stor.clone())
     }
 
-    /// The metadata cache's entries, in key order.
+    /// The index cache's entries, in key order.
     async fn entries(&self) -> Vec<ReportMetadata> {
-        let mut entries = self.stor.meta.values().await.unwrap();
+        let mut entries = self.stor.index.values().await.unwrap();
         entries.sort_by_key(key_parts);
         entries
     }
@@ -108,7 +108,7 @@ async fn put_all(store: &LatestStore, reports: &[&ReportMetadata]) {
     }
 }
 
-/// Set the mode of the calibrations directory: 0o555 lets the metadata cache
+/// Set the mode of the calibrations directory: 0o555 lets the index cache
 /// be read but not written, while the contents directory stays writable.
 #[cfg(unix)]
 async fn set_root_mode(f: &Fixture, mode: u32) {
@@ -365,11 +365,11 @@ async fn a_cache_that_cannot_be_read_fails_the_call() {
 }
 
 #[tokio::test]
-async fn a_stopped_metadata_cache_fails_put() {
+async fn a_stopped_index_cache_fails_put() {
     let f = Fixture::new().await;
     let store = f.store();
     let arm = reported("arm", None, None);
-    f.stor.meta.shutdown().await.unwrap();
+    f.stor.index.shutdown().await.unwrap();
 
     let err = store.put(arm, DATA).await.unwrap_err();
     assert!(matches!(err, CalibrationsErr::CacheErr(_)), "{err:?}");

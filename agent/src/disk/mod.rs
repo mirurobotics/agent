@@ -85,7 +85,7 @@ impl CfgInstStor {
 
 #[derive(Clone, Debug)]
 pub struct LatestCalStor {
-    pub meta: Arc<LatestCals>,
+    pub index: Arc<LatestCals>,
     pub content: Arc<LatestCalContent>,
 }
 
@@ -132,7 +132,7 @@ impl Storage {
         let git_commits = Arc::new(git_commit_stor);
 
         // latest calibrations (metadata + content)
-        let (latest_cals, [latest_cal_meta_handle, latest_cal_content_handle]) =
+        let (latest_cals, [latest_cal_index_handle, latest_cal_content_handle]) =
             init_latest_cal_storage(layout, capacities).await?;
 
         let shutdown_handle = async move {
@@ -144,7 +144,7 @@ impl Storage {
                 release_handle,
                 file_rule_handle,
                 git_commit_handle,
-                latest_cal_meta_handle,
+                latest_cal_index_handle,
                 latest_cal_content_handle,
             ];
 
@@ -228,8 +228,8 @@ impl Storage {
         );
         first_err = record(
             first_err,
-            "latest calibrations metadata store",
-            self.latest_cals.meta.shutdown().await,
+            "latest calibrations index store",
+            self.latest_cals.index.shutdown().await,
         );
         first_err = record(
             first_err,
@@ -319,15 +319,15 @@ async fn init_latest_cal_storage(
 ) -> Result<(LatestCalStor, [JoinHandle<()>; 2]), StorErr> {
     let latest_layout = layout.latest_cals();
     latest_cals::prune_orphaned_contents(&latest_layout).await;
-    let (meta, meta_handle) =
+    let (index, index_handle) =
         LatestCals::spawn(64, latest_layout.index(), capacities.latest_cals).await?;
     let (content, content_handle) =
         LatestCalContent::spawn(64, latest_layout.contents(), capacities.latest_cals).await?;
     let latest_cals = LatestCalStor {
-        meta: Arc::new(meta),
+        index: Arc::new(index),
         content: Arc::new(content),
     };
-    Ok((latest_cals, [meta_handle, content_handle]))
+    Ok((latest_cals, [index_handle, content_handle]))
 }
 
 async fn init_deployment_storage(

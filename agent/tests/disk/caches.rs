@@ -131,7 +131,7 @@ pub mod init {
 
         let (storage, _) = Storage::init(&layout, capacities, device_id).await.unwrap();
 
-        let entries = storage.latest_cals.meta.values().await.unwrap();
+        let entries = storage.latest_cals.index.values().await.unwrap();
         assert_eq!(entries, std::slice::from_ref(&named.metadata));
         let contents = storage.latest_cals.content.entry_map().await.unwrap();
         let kept: Vec<String> = contents.into_keys().collect();

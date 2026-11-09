@@ -81,7 +81,7 @@ pub async fn create_storage(dir: &filesys::Dir) -> Storage {
         file_rules: Arc::new(file_rule_stor),
         git_commits: Arc::new(git_commit_stor),
         latest_cals: LatestCalStor {
-            meta: Arc::new(latest_cal_stor),
+            index: Arc::new(latest_cal_stor),
             content: Arc::new(latest_cal_content_stor),
         },
     }
