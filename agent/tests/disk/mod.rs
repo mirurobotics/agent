@@ -6,6 +6,7 @@ pub mod device_api;
 pub mod errors;
 pub mod file_rules;
 pub mod init;
+pub mod latest_cals;
 pub mod layout;
 pub mod settings;
 pub mod setup;
