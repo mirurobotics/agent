@@ -160,6 +160,21 @@ pub mod params {
             assert_eq!(params.timeout, Duration::from_secs(30));
         }
     }
+
+    #[test]
+    fn debug_redacts_token() {
+        let params = Params::get("https://example.com").with_token("secret-value");
+        let debug_output = format!("{:?}", params);
+        assert!(debug_output.contains("[REDACTED]"));
+        assert!(!debug_output.contains("secret-value"));
+    }
+
+    #[test]
+    fn debug_shows_absent_token_as_none() {
+        let debug_output = format!("{:?}", Params::get("https://example.com"));
+        assert!(debug_output.contains("token: None"));
+        assert!(!debug_output.contains("[REDACTED]"));
+    }
 }
 
 pub mod meta {
@@ -277,6 +292,7 @@ pub mod build {
         let req = request::build(&client, &headers, params).unwrap();
         let auth = req.reqwest.headers().get("authorization").unwrap();
         assert_eq!(auth, "Bearer tok123");
+        assert!(auth.is_sensitive());
     }
 
     #[test]
