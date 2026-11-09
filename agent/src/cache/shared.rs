@@ -88,6 +88,9 @@ where
     Size {
         respond_to: oneshot::Sender<Result<usize, CacheErr>>,
     },
+    Capacity {
+        respond_to: oneshot::Sender<Result<usize, CacheErr>>,
+    },
     Entries {
         respond_to: oneshot::Sender<Result<Vec<CacheEntry<K, V>>, CacheErr>>,
     },
@@ -233,6 +236,14 @@ where
                 Command::Size { respond_to } => {
                     dispatch!(self, size(), respond_to, "Actor failed to get cache size");
                 }
+                Command::Capacity { respond_to } => {
+                    dispatch!(
+                        self,
+                        capacity(),
+                        respond_to,
+                        "Actor failed to get cache capacity"
+                    );
+                }
                 Command::Entries { respond_to } => {
                     dispatch!(
                         self,
@@ -351,7 +362,6 @@ where
     V: CacheValue,
 {
     sender: Sender<Command<K, V>>,
-    capacity: usize,
     _phantom: std::marker::PhantomData<ImplT>,
 }
 
@@ -361,17 +371,11 @@ where
     K: CacheKey,
     V: CacheValue,
 {
-    pub fn new(sender: Sender<Command<K, V>>, capacity: usize) -> Self {
+    pub fn new(sender: Sender<Command<K, V>>) -> Self {
         Self {
             sender,
-            capacity,
             _phantom: std::marker::PhantomData,
         }
-    }
-
-    /// The most entries the cache holds before it evicts the oldest.
-    pub fn capacity(&self) -> usize {
-        self.capacity
     }
 }
 
@@ -488,6 +492,11 @@ where
 
     pub async fn size(&self) -> Result<usize, CacheErr> {
         self.send_command(|tx| Command::Size { respond_to: tx })
+            .await?
+    }
+
+    pub async fn capacity(&self) -> Result<usize, CacheErr> {
+        self.send_command(|tx| Command::Capacity { respond_to: tx })
             .await?
     }
 

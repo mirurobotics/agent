@@ -61,8 +61,8 @@ impl LatestStore {
     /// Ok when the key `metadata` reports already has an entry or there is
     /// room for a new key.
     pub async fn verify_capacity(&self, metadata: &ReportMetadata) -> Result<(), CalibrationsErr> {
+        let capacity = self.stor.meta.capacity().await?;
         let entries = self.stor.meta.entry_map().await?;
-        let capacity = self.stor.meta.capacity();
         if entries.len() < capacity || entries.contains_key(&key(metadata)) {
             return Ok(());
         }

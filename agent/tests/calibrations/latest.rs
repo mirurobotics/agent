@@ -377,3 +377,14 @@ async fn a_cache_that_cannot_be_read_fails_the_call() {
         assert!(matches!(err, CalibrationsErr::CacheErr(_)), "{err:?}");
     }
 }
+
+#[tokio::test]
+async fn a_stopped_cache_fails_the_capacity_check() {
+    let f = Fixture::new().await;
+    let store = f.store();
+    let arm = reported("arm", None, None);
+    f.stor.meta.shutdown().await.unwrap();
+
+    let err = store.verify_capacity(&arm).await.unwrap_err();
+    assert!(matches!(err, CalibrationsErr::CacheErr(_)), "{err:?}");
+}
