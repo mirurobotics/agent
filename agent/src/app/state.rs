@@ -82,9 +82,10 @@ impl AppState {
             Self::init_data_uploads(layout, http_client.clone(), token_mngr.clone()).await?;
 
         // initialize the calibration manager
-        let latest = calibrations::LatestStore::new(storage.latest_cals.clone());
+        let latest_cals = calibrations::LatestStore::new(storage.latest_cals.clone());
         let (cal_mngr, cal_mngr_handle) =
-            Self::init_cal_mngr(layout, &latest, http_client.clone(), token_mngr.clone()).await;
+            Self::init_cal_mngr(layout, &latest_cals, http_client.clone(), token_mngr.clone())
+                .await;
 
         let shutdown_handle = async move {
             let handles = [
@@ -110,7 +111,7 @@ impl AppState {
                 token_mngr,
                 event_hub,
                 cal_mngr,
-                latest_cals: latest,
+                latest_cals,
             },
             shutdown_handle,
         ))
@@ -268,7 +269,7 @@ impl AppState {
     /// opens the queue file.
     async fn init_cal_mngr(
         layout: &disk::Layout,
-        latest: &calibrations::LatestStore,
+        latest_cals: &calibrations::LatestStore,
         http_client: Arc<http::Client>,
         token_mngr: Arc<authn::TokenManager>,
     ) -> (
@@ -294,7 +295,7 @@ impl AppState {
         let args = calibrations::CalMngrArgs {
             snapshot_file,
             reports: layout.reports(),
-            latest: latest.clone(),
+            latest: latest_cals.clone(),
             sender: Arc::new(calibrations::HttpSender::new(http_client, token_mngr)),
             options: calibrations::UploaderOptions::default(),
             sleep_fn: tokio::time::sleep,
