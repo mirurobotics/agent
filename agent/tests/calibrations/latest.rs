@@ -324,7 +324,8 @@ async fn list_filters_by_component_role_and_aspect() {
     let other_role = reported("arm", Some("right"), Some("pose"));
     let other_aspect = reported("arm", Some("left"), Some("offset"));
     let bare = reported("arm", None, None);
-    // each has one slug, so a `None` that matched anything would list them
+    // each lacks only one of role and aspect, so a `None` that matched anything
+    // would list them
     let role_only = reported("arm", Some("left"), None);
     let aspect_only = reported("arm", None, Some("pose"));
     let reports = [
