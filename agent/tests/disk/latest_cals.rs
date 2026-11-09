@@ -1,6 +1,8 @@
 // internal crates
-use crate::test_utils::calibrations::{latest_cals_layout, latest_store, report};
-use crate::test_utils::filesys::dirs as test_dirs;
+use crate::test_utils::{
+    calibrations::{latest_cals_layout, latest_store, report},
+    filesys::dirs as test_dirs,
+};
 use miru_agent::cache::dir_impl::entry_file_name;
 use miru_agent::disk::latest_cals::prune_orphaned_contents;
 use miru_agent::disk::layout::LatestCalsLayout;
