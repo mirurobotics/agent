@@ -9,13 +9,9 @@ use crate::calibrations::{
 use crate::cooldown;
 use crate::disk::layout::LatestCalsLayout;
 use crate::filesys::{
-    dirs,
-    files,
+    dirs, files,
     state_file::{is_retryable_read, READ_RETRY_DELAYS},
-    Dir,
-    File,
-    FileSysErr,
-    WriteOptions,
+    Dir, File, FileSysErr, WriteOptions,
 };
 use crate::trace;
 
