@@ -136,6 +136,9 @@ async fn put_rejects_only_a_new_key_at_capacity() {
     assert!(existing_key.is_ok(), "{existing_key:?}");
     let err = new_key.unwrap_err();
     assert!(matches!(err, CalibrationsErr::StoreFullErr(_)), "{err:?}");
+    let mut content_ids = vec![new_arm.report_id, leg.report_id];
+    content_ids.sort();
+    assert_eq!(f.content_ids().await, content_ids);
     assert_eq!(f.entries().await, [new_arm, leg]);
 }
 
