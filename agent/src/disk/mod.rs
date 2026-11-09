@@ -65,19 +65,19 @@ impl Default for Capacities {
 
 #[derive(Clone, Debug)]
 pub struct CfgInstStor {
-    pub meta: Arc<CfgInsts>,
+    pub index: Arc<CfgInsts>,
     pub content: Arc<CfgInstContent>,
 }
 
 pub struct CfgInstRef<'a> {
-    pub meta: &'a CfgInsts,
+    pub index: &'a CfgInsts,
     pub content: &'a CfgInstContent,
 }
 
 impl CfgInstStor {
     pub fn as_ref(&self) -> CfgInstRef<'_> {
         CfgInstRef {
-            meta: &self.meta,
+            index: &self.index,
             content: &self.content,
         }
     }
@@ -109,8 +109,8 @@ impl Storage {
         // device storage
         let (device, device_handle) = init_device_storage(layout, device_id).await?;
 
-        // config instances (metadata + content)
-        let (cfg_insts, [cfg_inst_meta_handle, cfg_inst_content_handle]) =
+        // config instances (index + content)
+        let (cfg_insts, [cfg_inst_index_handle, cfg_inst_content_handle]) =
             init_cfg_inst_storage(layout, capacities).await?;
 
         // deployments
@@ -138,7 +138,7 @@ impl Storage {
         let shutdown_handle = async move {
             let handles = vec![
                 device_handle,
-                cfg_inst_meta_handle,
+                cfg_inst_index_handle,
                 cfg_inst_content_handle,
                 deployment_handle,
                 release_handle,
@@ -202,8 +202,8 @@ impl Storage {
         first_err = record(first_err, "device store", self.device.shutdown().await);
         first_err = record(
             first_err,
-            "config instance metadata store",
-            self.cfg_insts.meta.shutdown().await,
+            "config instance index store",
+            self.cfg_insts.index.shutdown().await,
         );
         first_err = record(
             first_err,
@@ -291,9 +291,9 @@ async fn init_cfg_inst_storage(
     layout: &StorLayout,
     capacities: Capacities,
 ) -> Result<(CfgInstStor, [JoinHandle<()>; 2]), StorErr> {
-    // config instance metadata
+    // config instance index
     let (cfg_inst_stor, cfg_inst_stor_handle) =
-        CfgInsts::spawn(64, layout.config_instance_meta(), capacities.cfg_insts).await?;
+        CfgInsts::spawn(64, layout.config_instance_index(), capacities.cfg_insts).await?;
 
     // config instance content
     let (cfg_inst_content_stor, cfg_inst_content_stor_handle) = CfgInstContent::spawn(
@@ -304,7 +304,7 @@ async fn init_cfg_inst_storage(
     .await?;
 
     let cfg_insts = CfgInstStor {
-        meta: Arc::new(cfg_inst_stor),
+        index: Arc::new(cfg_inst_stor),
         content: Arc::new(cfg_inst_content_stor),
     };
     Ok((

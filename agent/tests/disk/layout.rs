@@ -114,9 +114,9 @@ pub mod storage_layout {
     }
 
     #[test]
-    fn config_instance_meta() {
+    fn config_instance_index() {
         let layout = Layout::default();
-        let file = layout.config_instance_meta();
+        let file = layout.config_instance_index();
         assert_eq!(
             file.to_string(),
             under_root(&["resources", "config_instances", "metadata.json"])

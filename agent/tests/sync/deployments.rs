@@ -90,7 +90,7 @@ impl Fixture {
             storage: &miru_agent::sync::deployments::Storage {
                 deployments: &self.deployment_stor,
                 cfg_insts: disk::CfgInstRef {
-                    meta: &self.cfg_inst_stor,
+                    index: &self.cfg_inst_stor,
                     content: &self.cfg_inst_content_stor,
                 },
                 releases: &self.release_stor,
@@ -691,7 +691,7 @@ mod pull_failure {
     }
 
     #[tokio::test]
-    async fn metadata_stored_but_content_missing_recovers_on_next_sync() {
+    async fn index_stored_but_content_missing_recovers_on_next_sync() {
         let f = Fixture::new("sync_content_recovery").await;
         let cfg_inst_args = cfg_inst_args(&f, &["cfg_inst_1"]);
         let backend_dep = make_deployment("dpl_1", cfg_inst_args);
@@ -739,15 +739,15 @@ mod pull_failure {
             .await
             .unwrap();
 
-        // pre-seed config instance metadata
-        let cfg_inst_meta = models::ConfigInstance {
+        // pre-seed config instance index entry
+        let cfg_inst_index_entry = models::ConfigInstance {
             id: "cfg_inst_1".to_string(),
             ..Default::default()
         };
         f.cfg_inst_stor
             .write(
                 "cfg_inst_1".to_string(),
-                cfg_inst_meta,
+                cfg_inst_index_entry,
                 |_, _| false,
                 Overwrite::Allow,
             )

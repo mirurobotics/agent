@@ -13,7 +13,7 @@ use miru_agent::models::{ConfigInstance, Deployment, DplActivity, DplTarget};
 use serde_json::json;
 
 struct Fixture {
-    cfg_inst_meta: disk::CfgInsts,
+    cfg_inst_index: disk::CfgInsts,
     cfg_inst_content: disk::CfgInstContent,
     pub(super) temp_dir: test_dirs::TempDir,
 }
@@ -23,8 +23,8 @@ impl Fixture {
         let temp_dir = test_dirs::temp("deploy-filesys-test").unwrap();
         let resources_dir = temp_dir.subdir("resources");
 
-        let (cfg_inst_meta, _) =
-            disk::CfgInsts::spawn(16, resources_dir.file("ci_meta.json"), 1000)
+        let (cfg_inst_index, _) =
+            disk::CfgInsts::spawn(16, resources_dir.file("ci_index.json"), 1000)
                 .await
                 .unwrap();
         let (cfg_inst_content, _) =
@@ -33,7 +33,7 @@ impl Fixture {
                 .unwrap();
 
         Self {
-            cfg_inst_meta,
+            cfg_inst_index,
             cfg_inst_content,
             temp_dir,
         }
@@ -44,7 +44,7 @@ impl Fixture {
     }
 
     async fn seed_cfg_inst(&self, cfg_inst: &ConfigInstance, content: String) {
-        self.cfg_inst_meta
+        self.cfg_inst_index
             .write(
                 cfg_inst.id.clone(),
                 cfg_inst.clone(),
@@ -93,7 +93,7 @@ impl Fixture {
 
     fn storage_ref(&self) -> disk::CfgInstRef<'_> {
         disk::CfgInstRef {
-            meta: &self.cfg_inst_meta,
+            index: &self.cfg_inst_index,
             content: &self.cfg_inst_content,
         }
     }
@@ -400,8 +400,8 @@ pub mod deploy_func_validation_errs {
             filepath: f.fixture_path("test/filepath").await,
             ..Default::default()
         };
-        // seed metadata but not content
-        f.cfg_inst_meta
+        // seed the index but not content
+        f.cfg_inst_index
             .write(
                 cfg_inst.id.clone(),
                 cfg_inst.clone(),
@@ -957,7 +957,7 @@ pub mod remove_func_success {
             filepath,
             ..Default::default()
         };
-        // seed metadata only — no file on disk
+        // seed the index only — no file on disk
         f.seed_cfg_inst(&ci, "{}".to_string()).await;
 
         let dpl = f.new_removing(std::slice::from_ref(&ci));
@@ -1018,12 +1018,12 @@ pub mod remove_func_errs {
             filepath: f.temp_dir.path().join("missing.json").display().to_string(),
             ..Default::default()
         };
-        // do NOT seed metadata — only reference the ID
+        // do NOT seed the index — only reference the ID
         let dpl = f.new_removing(std::slice::from_ref(&ci));
         let result = f.remove(&dpl, &[]).await;
         assert!(
             matches!(result, Err(DeployErr::CacheErr(_))),
-            "expected CacheErr for missing metadata, got {result:?}"
+            "expected CacheErr for a missing index entry, got {result:?}"
         );
     }
 
