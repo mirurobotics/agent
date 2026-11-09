@@ -160,6 +160,14 @@ pub mod params {
             assert_eq!(params.timeout, Duration::from_secs(30));
         }
     }
+
+    #[test]
+    fn debug_redacts_token() {
+        let params = Params::get("https://example.com").with_token("secret-value");
+        let debug_output = format!("{:?}", params);
+        assert!(debug_output.contains("[REDACTED]"));
+        assert!(!debug_output.contains("secret-value"));
+    }
 }
 
 pub mod meta {
