@@ -50,10 +50,11 @@ impl LatestStore {
     pub async fn put(&self, metadata: ReportMetadata, data: &str) -> Result<(), CalibrationsErr> {
         let key = key(&metadata);
         let index = &self.stor.index;
+        let capacity = index.capacity().await?;
         let mut entries = index.value_map().await?;
         let replaced = entries.remove(&key);
         if replaced.is_none() {
-            check_capacity(entries.len(), index.capacity().await?)?;
+            check_capacity(entries.len(), capacity)?;
         }
         let report_id = metadata.report_id.to_string();
         self.stor
