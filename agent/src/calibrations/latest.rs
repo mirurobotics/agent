@@ -69,21 +69,17 @@ impl LatestStore {
     /// index.
     pub async fn put(&self, metadata: ReportMetadata, data: &str) -> Result<(), CalibrationsErr> {
         let mut index = self.read_index().await?;
-        let slot = index
-            .iter()
-            .position(|entry| key_parts(entry) == key_parts(&metadata));
-        if slot.is_none() {
+        let replaced = take_entry(&mut index, &metadata);
+        if replaced.is_none() {
             check_capacity(index.len(), self.capacity)?;
         }
         let report_id = metadata.report_id;
-        let content = self.content_file(report_id);
-        files::write_string(&content, data, WriteOptions::OVERWRITE_ATOMIC).await?;
-        let replaced = slot.map(|i| index.swap_remove(i));
+        self.write_content(report_id, data).await?;
         index.push(metadata);
-        files::write_json(&self.index, &index, WriteOptions::OVERWRITE_ATOMIC).await?;
+        self.write_index(&index).await?;
         // the same report put again shares its content file, so keep it
         if let Some(replaced) = replaced.filter(|r| r.report_id != report_id) {
-            files::delete_or_warn(&self.content_file(replaced.report_id)).await;
+            self.delete_content(replaced.report_id).await;
         }
         Ok(())
     }
@@ -117,8 +113,21 @@ impl LatestStore {
         }
     }
 
+    async fn write_index(&self, index: &Index) -> Result<(), FileSysErr> {
+        files::write_json(&self.index, index, WriteOptions::OVERWRITE_ATOMIC).await
+    }
+
     fn content_file(&self, report_id: Uuid) -> File {
         self.contents.file(&report_id.to_string())
+    }
+
+    async fn write_content(&self, report_id: Uuid, data: &str) -> Result<(), FileSysErr> {
+        let file = self.content_file(report_id);
+        files::write_string(&file, data, WriteOptions::OVERWRITE_ATOMIC).await
+    }
+
+    async fn delete_content(&self, report_id: Uuid) {
+        files::delete_or_warn(&self.content_file(report_id)).await;
     }
 
     /// Delete the content no entry names. If the index can't be read, nothing
@@ -137,6 +146,14 @@ impl LatestStore {
             .collect();
         dirs::delete_files_except(&self.contents, &named).await;
     }
+}
+
+/// Remove and return the entry with `metadata`'s key, if there is one.
+fn take_entry(index: &mut Index, metadata: &ReportMetadata) -> Option<ReportMetadata> {
+    let slot = index
+        .iter()
+        .position(|entry| key_parts(entry) == key_parts(metadata))?;
+    Some(index.swap_remove(slot))
 }
 
 fn key_parts(metadata: &ReportMetadata) -> (&String, &Option<String>, &Option<String>) {
