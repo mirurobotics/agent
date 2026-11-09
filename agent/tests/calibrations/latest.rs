@@ -301,8 +301,8 @@ async fn list_filters_by_component_role_and_aspect() {
     ];
 
     for (filter, want) in cases {
-        let latest = store.list(&filter).await;
-        assert_eq!(latest.unwrap().entries, std::slice::from_ref(want), "{filter:?}");
+        let entries = store.list(&filter).await.unwrap().entries;
+        assert_eq!(entries, std::slice::from_ref(want), "{filter:?}");
     }
 }
 
