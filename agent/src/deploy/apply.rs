@@ -43,7 +43,7 @@ pub async fn apply(args: &Args<'_>) -> Result<Vec<Outcome>, DeployErr> {
     match &categorized.target_deployed {
         Some(target_deployed) => {
             let tgt_dpld_files: Vec<filesys::File> = read_cfg_insts(
-                args.storage.cfg_insts.meta,
+                args.storage.cfg_insts.index,
                 &target_deployed.config_instance_ids,
             )
             .await?

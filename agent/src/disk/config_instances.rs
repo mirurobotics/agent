@@ -2,7 +2,7 @@
 use crate::cache;
 use crate::models;
 
-// The config instance storage is split into two parts: metadata is stored in a single file
+// The config instance storage is split into two parts: the index is stored in a single file
 // while the content is stored in a directory with a file for each entry. This is for
 // performance reasons since accessing the config instances and storing them in a single
 // file allows for better performance / caching by the OS. On the other hand, the actual

@@ -589,7 +589,7 @@ mod tests {
             let after = Utc::now();
 
             assert_deployment_stored(&f.storage.deployments, "dpl_1").await;
-            assert_cfg_inst_stored(&f.storage.cfg_insts.meta, "cfg_inst_1").await;
+            assert_cfg_inst_stored(&f.storage.cfg_insts.index, "cfg_inst_1").await;
             let _content = read_content(&f.storage.cfg_insts.content, "cfg_inst_1").await;
 
             // check the sync state
