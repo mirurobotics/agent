@@ -281,16 +281,24 @@ async fn put_succeeds_when_the_replaced_content_cannot_be_deleted() {
 
 // ================================= LIST ================================= //
 #[tokio::test]
-async fn an_empty_filter_lists_every_entry_sorted() {
+async fn list_sorts_by_component_then_role_then_aspect() {
     let f = Fixture::new().await;
-    let a = reported("a", Some("left"), Some("pose"));
-    let b = reported("b", None, None);
-    let c = reported("c", None, None);
-    put_all(&f.store, &[&c, &b, &a]).await;
+    // in sorted order, where a missing role or aspect sorts first
+    let sorted = [
+        reported("arm", None, None),
+        reported("arm", None, Some("pose")),
+        reported("arm", Some("left"), None),
+        reported("arm", Some("left"), Some("offset")),
+        reported("arm", Some("left"), Some("pose")),
+        reported("arm", Some("right"), None),
+        reported("leg", None, None),
+    ];
+    let shuffled = [4, 0, 6, 2, 5, 1, 3].map(|i| &sorted[i]);
+    put_all(&f.store, &shuffled).await;
 
     let entries = f.store.list(&Filter::default()).await.unwrap();
 
-    assert_eq!(entries, [a, b, c]);
+    assert_eq!(entries, sorted);
 }
 
 #[tokio::test]
