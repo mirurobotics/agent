@@ -56,9 +56,10 @@ impl LatestStore {
         if !entries.contains_key(&key) {
             check_capacity(entries.len(), capacity)?;
         }
+        let data = data.to_string();
         self.stor
             .content
-            .write(content_key(&key), data.to_string(), |_, _| false, Overwrite::Allow)
+            .write(content_key(&key), data, |_, _| false, Overwrite::Allow)
             .await?;
         index
             .write(key, metadata, |_, _| false, Overwrite::Allow)

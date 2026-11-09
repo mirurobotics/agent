@@ -198,7 +198,10 @@ async fn keys_unsafe_in_a_file_name_keep_their_own_content() {
     store.put(underscored.clone(), "second").await.unwrap();
 
     assert_eq!(store.content(spaced.report_id).await.unwrap(), "first");
-    assert_eq!(store.content(underscored.report_id).await.unwrap(), "second");
+    assert_eq!(
+        store.content(underscored.report_id).await.unwrap(),
+        "second"
+    );
 }
 
 #[tokio::test]
