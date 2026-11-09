@@ -321,7 +321,13 @@ async fn list_filters_by_component_role_and_aspect() {
     let other_role = reported("arm", Some("right"), Some("pose"));
     let other_aspect = reported("arm", Some("left"), Some("offset"));
     let bare = reported("arm", None, None);
-    let reports = [&matched, &other_component, &other_role, &other_aspect, &bare];
+    let reports = [
+        &matched,
+        &other_component,
+        &other_role,
+        &other_aspect,
+        &bare,
+    ];
     put_all(&store, &reports).await;
     let cases = [
         (
