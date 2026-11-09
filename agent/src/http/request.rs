@@ -256,15 +256,14 @@ pub fn build(
 }
 
 fn add_token_to_headers(headers: &mut HeaderMap, token: &str) -> Result<(), HTTPErr> {
-    headers.insert(
-        AUTHORIZATION,
-        HeaderValue::from_str(&format!("Bearer {token}")).map_err(|e| {
-            HTTPErr::InvalidHeaderValueErr(InvalidHeaderValueErr {
-                msg: e.to_string(),
-                source: e,
-                trace: trace!(),
-            })
-        })?,
-    );
+    let mut value = HeaderValue::from_str(&format!("Bearer {token}")).map_err(|e| {
+        HTTPErr::InvalidHeaderValueErr(InvalidHeaderValueErr {
+            msg: e.to_string(),
+            source: e,
+            trace: trace!(),
+        })
+    })?;
+    value.set_sensitive(true);
+    headers.insert(AUTHORIZATION, value);
     Ok(())
 }
