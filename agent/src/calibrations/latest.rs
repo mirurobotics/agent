@@ -3,7 +3,7 @@ use crate::calibrations::{
     errors::{CalibrationNotFoundErr, CalibrationStoreFullErr, CalibrationsErr},
     report::ReportMetadata,
 };
-use crate::disk::{latest_cals::content_key, LatestCalStor};
+use crate::disk::LatestCalStor;
 use crate::filesys::Overwrite;
 use crate::trace;
 
@@ -30,9 +30,9 @@ impl Filter {
 
 /// The newest calibration for each component, role and aspect, kept in the
 /// calibration caches: one entry per key in the index cache, and each
-/// entry's data in the content cache under a hash of its key. A report replaces
-/// its key's entry and content, and a new key past the caches' capacity is
-/// rejected rather than evicting another.
+/// entry's data in the content cache under its `report_id`. A report replaces
+/// its key's entry, and a new key past the caches' capacity is rejected rather
+/// than evicting another.
 #[derive(Clone, Debug)]
 pub struct LatestStore {
     stor: LatestCalStor,
@@ -44,26 +44,29 @@ impl LatestStore {
     }
 
     /// Make `metadata` its key's entry, with `data` as its content. A new key
-    /// past the capacity is rejected rather than evicting another. The content
-    /// is written first, so a failed entry write leaves the old entry with the
-    /// new content, or a new key's content with no entry, which the startup
+    /// past the capacity is rejected rather than evicting another. A failure
+    /// part way leaves at most content that no entry names, which the startup
     /// prune deletes.
     pub async fn put(&self, metadata: ReportMetadata, data: &str) -> Result<(), CalibrationsErr> {
         let key = key(&metadata);
         let index = &self.stor.index;
         let capacity = index.capacity().await?;
-        let entries = index.value_map().await?;
-        if !entries.contains_key(&key) {
+        let mut entries = index.value_map().await?;
+        let replaced = entries.remove(&key);
+        if replaced.is_none() {
             check_capacity(entries.len(), capacity)?;
         }
-        let data = data.to_string();
+        let report_id = metadata.report_id.to_string();
         self.stor
             .content
-            .write(content_key(&key), data, |_, _| false, Overwrite::Allow)
+            .write(report_id, data.to_string(), |_, _| false, Overwrite::Allow)
             .await?;
         index
             .write(key, metadata, |_, _| false, Overwrite::Allow)
             .await?;
+        if let Some(replaced) = replaced {
+            self.delete_content(replaced.report_id.to_string()).await;
+        }
         Ok(())
     }
 
@@ -81,11 +84,18 @@ impl LatestStore {
     /// that `report_id` and its content exists.
     pub async fn content(&self, report_id: Uuid) -> Result<String, CalibrationsErr> {
         let entries = self.stor.index.values().await?;
-        let Some(entry) = entries.iter().find(|m| m.report_id == report_id) else {
+        if !entries.iter().any(|m| m.report_id == report_id) {
             return Err(not_found(report_id));
-        };
-        let content = self.stor.content.read_optional(content_key(&key(entry)));
+        }
+        let content = self.stor.content.read_optional(report_id.to_string());
         content.await?.ok_or_else(|| not_found(report_id))
+    }
+
+    /// Delete the content under `content_key`, logging a failure.
+    async fn delete_content(&self, content_key: String) {
+        if let Err(e) = self.stor.content.delete(content_key.clone()).await {
+            warn!("calibrations: failed to delete latest content {content_key}: {e}");
+        }
     }
 }
 

@@ -8,26 +8,20 @@ use crate::disk::layout::LatestCalsLayout;
 use crate::filesys::{dirs, files, FileSysErr};
 
 // external crates
-use sha2::{Digest, Sha256};
 use tracing::error;
 
 // The latest calibrations are split like the config instances: the entries sit in
 // one file, keyed by component, role and aspect, while each entry's data, which can
-// be large, is its own file, keyed by a hash of the entry's key.
+// be large, is its own file, keyed by report id.
 pub type LatestCals = cache::FileCache<String, ReportMetadata>;
 pub type LatestCalContent = cache::DirCache<String, String>;
 
 type Index = HashMap<String, CacheEntry<String, ReportMetadata>>;
 
-/// The content cache's key for the index key `key`: its SHA-256 in hex, so
-/// keys that differ only in characters unsafe in a file name don't share a file.
-pub fn content_key(key: &str) -> String {
-    format!("{:x}", Sha256::digest(key))
-}
-
-/// Delete the content no index entry names, which a crash or a failed entry
-/// write for a new key leaves, so it does not count toward the content cache's cap after a
-/// boot. Only file names are read, however large the content.
+/// Delete the content no index entry names, which a crash or a failed write or
+/// delete leaves, so it does not count toward the content cache's cap after a
+/// boot.
+/// Only file names are read, however large the content.
 pub async fn prune_orphaned_contents(layout: &LatestCalsLayout) {
     let index = match files::read_json::<Index>(&layout.index()).await {
         Ok(index) => index,
@@ -38,8 +32,8 @@ pub async fn prune_orphaned_contents(layout: &LatestCalsLayout) {
         }
     };
     let named: HashSet<String> = index
-        .keys()
-        .map(|key| entry_file_name(&content_key(key)))
+        .values()
+        .map(|entry| entry_file_name(&entry.value.report_id.to_string()))
         .collect();
     dirs::delete_files_except(&layout.contents(), &named).await;
 }
