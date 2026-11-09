@@ -82,9 +82,8 @@ impl AppState {
             Self::init_data_uploads(layout, http_client.clone(), token_mngr.clone()).await?;
 
         // initialize the calibration manager
-        let latest_cals = calibrations::LatestStore::new(storage.latest_cals.clone());
-        let (cal_mngr, cal_mngr_handle) =
-            Self::init_cal_mngr(layout, &latest_cals, &http_client, &token_mngr).await;
+        let (cal_mngr, latest_cals, cal_mngr_handle) =
+            Self::init_cal_mngr(layout, &storage, http_client.clone(), token_mngr.clone()).await;
 
         let shutdown_handle = async move {
             let handles = [
@@ -262,19 +261,21 @@ impl AppState {
     }
 
     /// Spawn the calibration manager, which sends reports to Miru with the
-    /// token manager's token and writes the latest calibrations store. A
-    /// queue-file error degrades to a queue kept in memory (fail-open); the
-    /// report files a previous boot queued are kept for the next boot that
-    /// opens the queue file.
+    /// token manager's token and writes the latest calibrations store it
+    /// returns for reads. A queue-file error degrades to a queue kept in memory
+    /// (fail-open); the report files a previous boot queued are kept for the
+    /// next boot that opens the queue file.
     async fn init_cal_mngr(
         layout: &disk::Layout,
-        latest_cals: &calibrations::LatestStore,
-        http_client: &Arc<http::Client>,
-        token_mngr: &Arc<authn::TokenManager>,
+        storage: &disk::Storage,
+        http_client: Arc<http::Client>,
+        token_mngr: Arc<authn::TokenManager>,
     ) -> (
         Arc<calibrations::CalibrationManager>,
+        calibrations::LatestStore,
         tokio::task::JoinHandle<()>,
     ) {
+        let latest_cals = calibrations::LatestStore::new(storage.latest_cals.clone());
         let layout = layout.calibrations();
         let snapshot_file = match calibrations::QueueSnapshotFile::new_with_default(
             layout.queue(),
@@ -291,18 +292,17 @@ impl AppState {
             }
         };
 
-        let sender = calibrations::HttpSender::new(http_client.clone(), token_mngr.clone());
         let args = calibrations::CalMngrArgs {
             snapshot_file,
             reports: layout.reports(),
             latest: latest_cals.clone(),
-            sender: Arc::new(sender),
+            sender: Arc::new(calibrations::HttpSender::new(http_client, token_mngr)),
             options: calibrations::UploaderOptions::default(),
             sleep_fn: tokio::time::sleep,
             now_fn: chrono::Utc::now,
         };
         let (cal_mngr, handle) = calibrations::CalibrationManager::spawn(64, args);
-        (Arc::new(cal_mngr), handle)
+        (Arc::new(cal_mngr), latest_cals, handle)
     }
 
     pub async fn shutdown(&self) -> Result<(), server::ServerErr> {
