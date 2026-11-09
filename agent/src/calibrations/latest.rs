@@ -5,7 +5,6 @@ use crate::calibrations::{
 };
 use crate::disk::LatestCalStor;
 use crate::filesys::Overwrite;
-use crate::models::InstanceFormat;
 use crate::trace;
 
 // external crates
@@ -27,13 +26,6 @@ impl Filter {
             && is_allowed(&self.role, &metadata.role)
             && is_allowed(&self.aspect, &metadata.aspect)
     }
-}
-
-/// A latest entry's content, as it was reported.
-#[derive(Debug, PartialEq)]
-pub struct LatestContent {
-    pub format: InstanceFormat,
-    pub data: Vec<u8>,
 }
 
 /// The newest calibration for each component, role and aspect, kept in the
@@ -103,22 +95,15 @@ impl LatestStore {
         Ok(entries)
     }
 
-    /// The content of the entry for `report_id`. Not found unless an entry has
+    /// The data of the entry for `report_id`. Not found unless an entry has
     /// that `report_id` and its content exists.
-    pub async fn content(&self, report_id: Uuid) -> Result<LatestContent, CalibrationsErr> {
+    pub async fn content(&self, report_id: Uuid) -> Result<String, CalibrationsErr> {
         let entries = self.stor.meta.values().await?;
-        let mut entries = entries.into_iter();
-        let Some(metadata) = entries.find(|m| m.report_id == report_id) else {
+        if !entries.iter().any(|m| m.report_id == report_id) {
             return Err(not_found(report_id));
-        };
+        }
         let content = self.stor.content.read_optional(report_id.to_string());
-        let Some(data) = content.await? else {
-            return Err(not_found(report_id));
-        };
-        Ok(LatestContent {
-            format: metadata.format,
-            data: data.into_bytes(),
-        })
+        content.await?.ok_or_else(|| not_found(report_id))
     }
 
     /// Delete the content under `content_key`, logging a failure.
