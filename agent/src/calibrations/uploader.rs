@@ -9,7 +9,7 @@ use crate::calibrations::{
     sender::Sender,
 };
 use crate::errors::Error;
-use crate::filesys::{cleanup, files, Dir, File, FileSysErr, WriteOptions};
+use crate::filesys::{dirs, files, Dir, File, FileSysErr, WriteOptions};
 use crate::queue::{self, Persistence, RetryPolicy, Verdict};
 use crate::trace;
 
@@ -111,7 +111,7 @@ where
             .queue
             .iter()
             .map(|entry| entry.id.hyphenated().to_string());
-        cleanup::prune(&self.reports, &queued.collect()).await;
+        dirs::delete_files_except(&self.reports, &queued.collect()).await;
     }
 
     /// Queue `report` and return its queue entry id. The entry is written
@@ -214,7 +214,7 @@ where
     /// crash between the two leaves a file that [`Self::prune_orphans`] deletes.
     pub(crate) async fn remove(&mut self, id: Uuid) {
         self.queue.ack(id).await;
-        cleanup::delete(&self.report_file(id)).await;
+        files::delete_or_warn(&self.report_file(id)).await;
     }
 
     fn verify_size(&self, report_bytes: u64) -> Result<(), CalibrationTooLargeErr> {

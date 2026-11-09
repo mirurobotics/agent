@@ -83,6 +83,20 @@ pub mod delete {
         assert!(!file.exists());
     }
 }
+pub mod delete_or_warn {
+    use super::*;
+
+    #[tokio::test]
+    async fn a_missing_file_is_fine() {
+        let tmp = test_dirs::temp("testing").unwrap();
+        let file = tmp.to_dir().file("missing");
+
+        files::delete_or_warn(&file).await;
+
+        assert!(!file.exists());
+    }
+}
+
 pub mod copy_to {
     use super::*;
 

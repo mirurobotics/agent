@@ -161,6 +161,27 @@ pub mod init {
     }
 
     #[tokio::test]
+    async fn init_keeps_the_latest_contents_when_the_index_is_corrupt() {
+        let dir = test_dirs::temp("testing").unwrap();
+        let layout = Layout::new(dir.to_dir());
+        let latest_cals = layout.latest_cals();
+        dirs::create(&latest_cals.contents()).await.unwrap();
+        files::write_string(&latest_cals.index(), "{", WriteOptions::OVERWRITE_ATOMIC)
+            .await
+            .unwrap();
+        let name = format!("{}.json", Uuid::new_v4());
+        let content = latest_cals.contents().file(&name);
+        files::write_string(&content, "x", WriteOptions::OVERWRITE_ATOMIC)
+            .await
+            .unwrap();
+
+        let result = Storage::init(&layout, Capacities::default(), "test_device".to_string()).await;
+
+        assert!(content.exists());
+        result.unwrap().0.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
     async fn init_fails_when_deployments_path_is_a_directory() {
         let dir = dirs::create_temp("testing").await.unwrap();
         let layout = Layout::new(dir);

@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use crate::cache::{self, dir_impl::entry_file_name, CacheEntry};
 use crate::calibrations::ReportMetadata;
 use crate::disk::layout::LatestCalsLayout;
-use crate::filesys::{cleanup, files, FileSysErr};
+use crate::filesys::{dirs, files, FileSysErr};
 
 // external crates
 use tracing::error;
@@ -19,8 +19,8 @@ pub type LatestCalContent = cache::DirCache<String, String>;
 type Index = HashMap<String, CacheEntry<String, ReportMetadata>>;
 
 /// Delete the content no index entry names, which a crash or a failed delete
-/// leaves, so it never pushes the content cache past its cap and evicts live
-/// content. Only file names are read, however large the content.
+/// leaves, so it does not count toward the content cache's cap after a boot.
+/// Only file names are read, however large the content.
 pub async fn prune_orphaned_contents(layout: &LatestCalsLayout) {
     let index = match files::read_json::<Index>(&layout.index()).await {
         Ok(index) => index,
@@ -34,5 +34,5 @@ pub async fn prune_orphaned_contents(layout: &LatestCalsLayout) {
         .values()
         .map(|entry| entry_file_name(&entry.value.report_id.to_string()))
         .collect();
-    cleanup::prune(&layout.contents(), &named).await;
+    dirs::delete_files_except(&layout.contents(), &named).await;
 }

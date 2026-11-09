@@ -298,6 +298,14 @@ pub async fn delete(file: &File) -> Result<(), FileSysErr> {
     }
 }
 
+/// Delete `file`, logging a failure instead of returning it. A file that is
+/// already gone is fine.
+pub async fn delete_or_warn(file: &File) {
+    if let Err(e) = delete(file).await {
+        warn!("failed to delete {file}: {e}");
+    }
+}
+
 /// Copy `file` to `dst`. Permissions follow `tokio::fs::copy` (Unix mode bits
 /// and Windows attributes).
 pub async fn copy_to(file: &File, dst: &File, overwrite: Overwrite) -> Result<(), FileSysErr> {
