@@ -29,13 +29,22 @@ pub struct Params<'a> {
 
 impl fmt::Debug for Params<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Destructure so a new field fails to compile until it is listed here.
+        let Params {
+            method,
+            url,
+            query,
+            body,
+            timeout,
+            token,
+        } = self;
         f.debug_struct("Params")
-            .field("method", &self.method)
-            .field("url", &self.url)
-            .field("query", &self.query)
-            .field("body", &self.body)
-            .field("timeout", &self.timeout)
-            .field("token", &self.token.map(|_| "[REDACTED]"))
+            .field("method", method)
+            .field("url", url)
+            .field("query", query)
+            .field("body", body)
+            .field("timeout", timeout)
+            .field("token", &token.map(|_| "[REDACTED]"))
             .finish()
     }
 }
