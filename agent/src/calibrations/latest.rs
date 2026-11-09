@@ -1,42 +1,16 @@
-// standard crates
-use std::collections::HashSet;
-
 // internal crates
-use crate::cache::CacheErr;
 use crate::calibrations::{
     errors::{CalibrationNotFoundErr, CalibrationStoreFullErr, CalibrationsErr},
     report::ReportMetadata,
 };
 use crate::disk::CalibrationStor;
 use crate::filesys::Overwrite;
-use crate::models::{CalibrationUploadStatus, InstanceFormat};
+use crate::models::InstanceFormat;
 use crate::trace;
 
 // external crates
-use serde::{Deserialize, Serialize};
 use tracing::warn;
 use uuid::Uuid;
-
-/// The newest report for one key and whether it reached Miru.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct LatestEntry {
-    pub metadata: ReportMetadata,
-    pub is_uploaded: bool,
-}
-
-impl LatestEntry {
-    /// Uploaded once marked, queued while the upload queue holds the report,
-    /// and dropped once the queue let it go without uploading it.
-    fn upload_status(&self, queued: &HashSet<Uuid>) -> CalibrationUploadStatus {
-        if self.is_uploaded {
-            CalibrationUploadStatus::Uploaded
-        } else if queued.contains(&self.metadata.report_id) {
-            CalibrationUploadStatus::Queued
-        } else {
-            CalibrationUploadStatus::Dropped
-        }
-    }
-}
 
 /// Which entries to list. Empty means any; `None` in `role`/`aspect` matches an
 /// entry without one.
@@ -59,14 +33,7 @@ impl LatestFilter {
 #[derive(Debug, PartialEq)]
 pub struct LatestCalibrations {
     pub is_confirmed: bool,
-    pub entries: Vec<ListedEntry>,
-}
-
-/// A latest entry as listed, with its upload status.
-#[derive(Debug, PartialEq)]
-pub struct ListedEntry {
-    pub metadata: ReportMetadata,
-    pub upload_status: CalibrationUploadStatus,
+    pub entries: Vec<ReportMetadata>,
 }
 
 /// A latest entry's content, as it was reported.
@@ -81,6 +48,7 @@ pub struct LatestContent {
 /// entry's data in the content cache under its `report_id`. A report replaces
 /// its key's entry, and a new key past the caches' capacity is rejected rather
 /// than evicting another.
+#[derive(Clone)]
 pub struct LatestStore {
     stor: CalibrationStor,
 }
@@ -106,10 +74,10 @@ impl LatestStore {
         Err(err.into())
     }
 
-    /// Make `metadata` its key's entry, not uploaded, with `data` as its
-    /// content. The content is written before the entry and the replaced
-    /// entry's content deleted after it, so a failure leaves at most content
-    /// that no entry names. On error the key's entry is unchanged.
+    /// Make `metadata` its key's entry, with `data` as its content. The content
+    /// is written before the entry and the replaced entry's content deleted
+    /// after it, so a failure leaves at most content that no entry names. On
+    /// error the key's entry is unchanged.
     pub async fn put(&self, metadata: ReportMetadata, data: &str) -> Result<(), CalibrationsErr> {
         let key = key(&metadata);
         let replaced = self.stor.meta.entry_map().await?.remove(&key);
@@ -119,62 +87,27 @@ impl LatestStore {
             .content
             .write(content_key.clone(), content, |_, _| false, Overwrite::Allow)
             .await?;
-        let entry = LatestEntry {
-            metadata,
-            is_uploaded: false,
-        };
         let meta = &self.stor.meta;
-        if let Err(e) = meta.write(key, entry, |_, _| false, Overwrite::Allow).await {
+        if let Err(e) = meta.write(key, metadata, |_, _| false, Overwrite::Allow).await {
             self.delete_content(content_key).await;
             return Err(e.into());
         }
         if let Some(replaced) = replaced {
-            let replaced_id = replaced.value.metadata.report_id;
+            let replaced_id = replaced.value.report_id;
             self.delete_content(replaced_id.to_string()).await;
         }
         Ok(())
     }
 
-    /// Mark the entry for `report_id` uploaded. A newer report may have
-    /// replaced it; then this does nothing. A failure is logged, and the entry
-    /// then lists as dropped.
-    pub async fn mark_uploaded(&self, report_id: Uuid) {
-        if let Err(e) = self.try_mark_uploaded(report_id).await {
-            warn!("calibrations: failed to mark report {report_id} uploaded: {e}");
-        }
-    }
-
-    async fn try_mark_uploaded(&self, report_id: Uuid) -> Result<(), CacheErr> {
-        let entries = self.stor.meta.value_map().await?;
-        let mut entries = entries.into_iter();
-        let Some((key, mut entry)) = entries.find(|(_, e)| e.metadata.report_id == report_id)
-        else {
-            return Ok(());
-        };
-        entry.is_uploaded = true;
-        let meta = &self.stor.meta;
-        meta.write(key, entry, |_, _| false, Overwrite::Allow).await
-    }
-
     /// The entries `filter` matches, ordered by component, role and aspect.
-    /// `queued` holds the `report_id` of every report still in the upload
-    /// queue.
-    pub async fn list(
-        &self,
-        filter: &LatestFilter,
-        queued: &HashSet<Uuid>,
-    ) -> Result<LatestCalibrations, CalibrationsErr> {
+    pub async fn list(&self, filter: &LatestFilter) -> Result<LatestCalibrations, CalibrationsErr> {
         let mut entries = self.stor.meta.values().await?;
-        entries.retain(|e| filter.is_match(&e.metadata));
-        entries.sort_by(|a, b| key_parts(&a.metadata).cmp(&key_parts(&b.metadata)));
-        let listed = entries.into_iter().map(|e| ListedEntry {
-            upload_status: e.upload_status(queued),
-            metadata: e.metadata,
-        });
+        entries.retain(|metadata| filter.is_match(metadata));
+        entries.sort_by(|a, b| key_parts(a).cmp(&key_parts(b)));
         Ok(LatestCalibrations {
             // nothing loads the store from Miru yet
             is_confirmed: false,
-            entries: listed.collect(),
+            entries,
         })
     }
 
@@ -183,7 +116,7 @@ impl LatestStore {
     pub async fn content(&self, report_id: Uuid) -> Result<LatestContent, CalibrationsErr> {
         let entries = self.stor.meta.values().await?;
         let mut entries = entries.into_iter();
-        let Some(entry) = entries.find(|e| e.metadata.report_id == report_id) else {
+        let Some(metadata) = entries.find(|m| m.report_id == report_id) else {
             return Err(not_found(report_id));
         };
         let content = self.stor.content.read_optional(report_id.to_string());
@@ -191,7 +124,7 @@ impl LatestStore {
             return Err(not_found(report_id));
         };
         Ok(LatestContent {
-            format: entry.metadata.format,
+            format: metadata.format,
             data: data.into_bytes(),
         })
     }

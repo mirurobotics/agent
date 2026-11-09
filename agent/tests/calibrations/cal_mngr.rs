@@ -12,17 +12,16 @@ use std::time::Duration;
 use crate::mocks::calibration_sender::{MockCalibrationSender, Step};
 use crate::mocks::error::SleepController;
 use crate::test_utils::calibrations::{
-    calibrations_layout, latest_store, received_at, report, report_id, reports_layout,
+    calibrations_layout, latest_store, received_at, report, reports_layout,
 };
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::calibrations::{
-    CalMngrArgs, CalibrationManager, CalibrationsErr, LatestContent, LatestFilter, ListedEntry,
-    Queue, QueueSnapshotFile, UploaderOptions,
+    CalMngrArgs, CalibrationManager, CalibrationsErr, LatestFilter, LatestStore, Queue,
+    QueueSnapshotFile, ReportMetadata, UploaderOptions,
 };
 use miru_agent::disk::layout::{CalibrationReportsLayout, CalibrationsLayout};
 use miru_agent::disk::Capacities;
 use miru_agent::filesys::{dirs, files, File, PathExt, WriteOptions};
-use miru_agent::models::{CalibrationUploadStatus, InstanceFormat};
 use miru_agent::queue::Persistence;
 
 // external crates
@@ -47,6 +46,8 @@ struct Harness {
     /// and moves only when a backoff sleep completes.
     clock: Arc<Mutex<DateTime<Utc>>>,
     cal_mngr: Option<CalibrationManager>,
+    /// The latest store the manager writes.
+    store: Option<LatestStore>,
     handle: Option<JoinHandle<()>>,
 }
 
@@ -65,6 +66,7 @@ impl Harness {
             sleep: Arc::new(SleepController::new()),
             clock: Arc::new(Mutex::new(received_at())),
             cal_mngr: None,
+            store: None,
             handle: None,
         }
     }
@@ -91,7 +93,7 @@ impl Harness {
         let args = CalMngrArgs {
             snapshot_file,
             reports: self.layout.reports(),
-            latest,
+            latest: latest.clone(),
             sender: self.sender.clone(),
             options,
             sleep_fn: self.sleep_fn(),
@@ -99,6 +101,7 @@ impl Harness {
         };
         let (cal_mngr, handle) = CalibrationManager::spawn(64, args);
         self.cal_mngr = Some(cal_mngr);
+        self.store = Some(latest);
         self.handle = Some(handle);
     }
 
@@ -134,11 +137,11 @@ impl Harness {
         guard(self.cal_mngr().num_queued_uploads()).await.unwrap()
     }
 
-    /// The upload status of each latest entry.
-    async fn upload_statuses(&self) -> Vec<CalibrationUploadStatus> {
-        let latest = guard(self.cal_mngr().list_latest(LatestFilter::default())).await;
-        let entries = latest.unwrap().entries.into_iter();
-        entries.map(|entry| entry.upload_status).collect()
+    /// Every latest entry.
+    async fn latest_entries(&self) -> Vec<ReportMetadata> {
+        let store = self.store.as_ref().expect("spawned");
+        let latest = store.list(&LatestFilter::default()).await;
+        latest.unwrap().entries
     }
 
     fn report_file(&self, id: Uuid) -> File {
@@ -274,32 +277,6 @@ async fn intake_is_served_during_an_upload() {
 }
 
 #[tokio::test]
-async fn latest_reads_are_served_during_an_upload() {
-    let mut h = Harness::new();
-    let (_hold, hang) = oneshot::channel();
-    h.sender.push(Step::Hang(hang));
-    h.spawn().await;
-    h.report("a").await;
-    h.await_started().await;
-
-    // the send of "a" is still in flight
-    let cal_mngr = h.cal_mngr();
-    let latest = guard(cal_mngr.list_latest(LatestFilter::default())).await;
-    let content = guard(cal_mngr.latest_content(report_id("a"))).await;
-
-    let entry = ListedEntry {
-        metadata: report("a").metadata,
-        upload_status: CalibrationUploadStatus::Queued,
-    };
-    assert_eq!(latest.unwrap().entries, [entry]);
-    let want = LatestContent {
-        format: InstanceFormat::Json,
-        data: report("a").data.into_bytes(),
-    };
-    assert_eq!(content.unwrap(), want);
-}
-
-#[tokio::test]
 async fn a_failed_store_write_queues_nothing() {
     let mut h = Harness::new();
     // a report left queued would hang here rather than upload and leave
@@ -338,12 +315,7 @@ async fn a_rejected_report_is_not_stored() {
     let err = guard(h.cal_mngr().report(report("b"))).await.unwrap_err();
 
     assert!(matches!(err, CalibrationsErr::QueueFullErr(_)), "{err:?}");
-    let latest = guard(h.cal_mngr().list_latest(LatestFilter::default())).await;
-    let entry = ListedEntry {
-        metadata: report("a").metadata,
-        upload_status: CalibrationUploadStatus::Queued,
-    };
-    assert_eq!(latest.unwrap().entries, [entry]);
+    assert_eq!(h.latest_entries().await, [report("a").metadata]);
 }
 
 #[tokio::test]
@@ -359,33 +331,7 @@ async fn an_oversized_report_is_not_stored() {
 
     assert!(matches!(err, CalibrationsErr::TooLargeErr(_)), "{err:?}");
     assert_eq!(h.num_queued_uploads().await, 0);
-    let latest = guard(h.cal_mngr().list_latest(LatestFilter::default())).await;
-    assert!(latest.unwrap().entries.is_empty());
-}
-
-#[tokio::test]
-async fn a_sent_report_is_marked_uploaded() {
-    let mut h = Harness::new();
-    h.spawn().await;
-
-    h.report("a").await;
-
-    h.await_drained(&["a"]).await;
-    let statuses = h.upload_statuses().await;
-    assert_eq!(statuses, [CalibrationUploadStatus::Uploaded]);
-}
-
-#[tokio::test]
-async fn a_dropped_report_is_not_marked_uploaded() {
-    let mut h = Harness::new();
-    h.sender.push(Step::Terminal);
-    h.spawn().await;
-
-    h.report("a").await;
-
-    h.await_drained(&["a"]).await;
-    let statuses = h.upload_statuses().await;
-    assert_eq!(statuses, [CalibrationUploadStatus::Dropped]);
+    assert!(h.latest_entries().await.is_empty());
 }
 
 #[tokio::test]
@@ -455,22 +401,10 @@ async fn commands_after_shutdown_fail() {
     h.stop().await;
 
     let err = h.cal_mngr().report(report("a")).await.unwrap_err();
-    let read = h.cal_mngr().latest_content(report_id("a"));
-    let read_err = read.await.unwrap_err();
-    let list = h.cal_mngr().list_latest(LatestFilter::default());
-    let list_err = list.await.unwrap_err();
 
     assert!(
         matches!(err, CalibrationsErr::SendActorMessageErr(_)),
         "{err:?}"
-    );
-    assert!(
-        matches!(read_err, CalibrationsErr::SendActorMessageErr(_)),
-        "{read_err:?}"
-    );
-    assert!(
-        matches!(list_err, CalibrationsErr::SendActorMessageErr(_)),
-        "{list_err:?}"
     );
 }
 

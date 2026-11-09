@@ -1,19 +1,15 @@
 //! The latest calibrations store's own rules over the calibration caches: its
-//! keys and capacity, write order, upload marks, listing and content.
-
-// standard crates
-use std::collections::HashSet;
+//! keys and capacity, write order, listing and content.
 
 // internal crates
 use crate::test_utils::calibrations::{calibration_stor, calibrations_layout, report};
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::calibrations::{
-    CalibrationsErr, LatestCalibrations, LatestContent, LatestEntry, LatestFilter, LatestStore,
-    ListedEntry, ReportMetadata,
+    CalibrationsErr, LatestCalibrations, LatestContent, LatestFilter, LatestStore, ReportMetadata,
 };
 use miru_agent::disk::{layout::CalibrationsLayout, CalibrationStor, Capacities};
 use miru_agent::filesys::{dirs, files, File, Overwrite, PathExt, WriteOptions};
-use miru_agent::models::{CalibrationUploadStatus, InstanceFormat};
+use miru_agent::models::InstanceFormat;
 
 // external crates
 use uuid::Uuid;
@@ -49,9 +45,9 @@ impl Fixture {
     }
 
     /// The metadata cache's entries, in key order.
-    async fn entries(&self) -> Vec<LatestEntry> {
+    async fn entries(&self) -> Vec<ReportMetadata> {
         let mut entries = self.stor.meta.values().await.unwrap();
-        entries.sort_by_key(|e| key_parts(&e.metadata));
+        entries.sort_by_key(key_parts);
         entries
     }
 
@@ -108,20 +104,6 @@ fn newer(metadata: &ReportMetadata) -> ReportMetadata {
     }
 }
 
-fn entry(metadata: &ReportMetadata, is_uploaded: bool) -> LatestEntry {
-    LatestEntry {
-        metadata: metadata.clone(),
-        is_uploaded,
-    }
-}
-
-fn listed(metadata: &ReportMetadata, upload_status: CalibrationUploadStatus) -> ListedEntry {
-    ListedEntry {
-        metadata: metadata.clone(),
-        upload_status,
-    }
-}
-
 /// Put each report with [`DATA`], in order.
 async fn put_all(store: &LatestStore, reports: &[&ReportMetadata]) {
     for &metadata in reports {
@@ -164,14 +146,14 @@ async fn verify_capacity_rejects_only_a_new_key_at_capacity() {
 
 // ================================= PUT ================================== //
 #[tokio::test]
-async fn put_adds_an_entry_not_uploaded_and_its_content() {
+async fn put_adds_an_entry_and_its_content() {
     let f = Fixture::new().await;
     let store = f.store();
     let arm = reported("arm", None, None);
 
     store.put(arm.clone(), DATA).await.unwrap();
 
-    assert_eq!(f.entries().await, [entry(&arm, false)]);
+    assert_eq!(f.entries().await, [arm.clone()]);
     assert_eq!(f.content_ids().await, [arm.report_id]);
 }
 
@@ -185,7 +167,7 @@ async fn put_replaces_the_keys_entry_and_deletes_its_content() {
 
     store.put(new.clone(), DATA).await.unwrap();
 
-    assert_eq!(f.entries().await, [entry(&new, false)]);
+    assert_eq!(f.entries().await, [new.clone()]);
     assert_eq!(f.content_ids().await, [new.report_id]);
 }
 
@@ -200,8 +182,7 @@ async fn role_and_aspect_are_part_of_the_key() {
     put_all(&store, &[&bare, &with_role, &with_aspect]).await;
 
     // in key order, a missing slug first
-    let want = [&bare, &with_aspect, &with_role].map(|m| entry(m, false));
-    assert_eq!(f.entries().await, want);
+    assert_eq!(f.entries().await, [bare, with_aspect, with_role]);
 }
 
 #[tokio::test]
@@ -237,7 +218,7 @@ async fn put_fails_and_changes_nothing_when_the_entry_cannot_be_written() {
     set_root_mode(&f, 0o755).await;
     let err = result.unwrap_err();
     assert!(matches!(err, CalibrationsErr::CacheErr(_)), "{err:?}");
-    assert_eq!(f.entries().await, [entry(&old, false)]);
+    assert_eq!(f.entries().await, [old.clone()]);
     // the new report's content is deleted again
     assert_eq!(f.content_ids().await, [old.report_id]);
 }
@@ -253,62 +234,24 @@ async fn put_succeeds_when_the_replaced_content_cannot_be_deleted() {
 
     store.put(new.clone(), DATA).await.unwrap();
 
-    assert_eq!(f.entries().await, [entry(&new, false)]);
-}
-
-// ============================ MARK UPLOADED ============================= //
-#[tokio::test]
-async fn mark_uploaded_marks_only_a_keys_latest_report() {
-    let f = Fixture::new().await;
-    let store = f.store();
-    let old = reported("arm", None, None);
-    let new = newer(&old);
-    let leg = reported("leg", None, None);
-    put_all(&store, &[&old, &new, &leg]).await;
-
-    store.mark_uploaded(old.report_id).await;
-    store.mark_uploaded(leg.report_id).await;
-
-    assert_eq!(f.entries().await, [entry(&new, false), entry(&leg, true)]);
-}
-
-#[cfg(unix)]
-#[tokio::test]
-async fn a_mark_that_cannot_be_written_leaves_the_entry() {
-    let f = Fixture::new().await;
-    let store = f.store();
-    let arm = reported("arm", None, None);
-    put_all(&store, &[&arm]).await;
-    set_root_mode(&f, 0o555).await;
-
-    store.mark_uploaded(arm.report_id).await;
-
-    set_root_mode(&f, 0o755).await;
-    assert_eq!(f.entries().await, [entry(&arm, false)]);
+    assert_eq!(f.entries().await, [new.clone()]);
 }
 
 // ================================= LIST ================================= //
 #[tokio::test]
-async fn an_empty_filter_lists_every_entry_sorted_with_its_status() {
+async fn an_empty_filter_lists_every_entry_sorted() {
     let f = Fixture::new().await;
     let store = f.store();
-    let uploaded = reported("a", Some("left"), Some("pose"));
-    let queued = reported("b", None, None);
-    let dropped = reported("c", None, None);
-    put_all(&store, &[&dropped, &queued, &uploaded]).await;
-    store.mark_uploaded(uploaded.report_id).await;
-    // a report is marked uploaded before it leaves the queue
-    let in_queue = HashSet::from([uploaded.report_id, queued.report_id]);
+    let a = reported("a", Some("left"), Some("pose"));
+    let b = reported("b", None, None);
+    let c = reported("c", None, None);
+    put_all(&store, &[&c, &b, &a]).await;
 
-    let latest = store.list(&LatestFilter::default(), &in_queue).await;
+    let latest = store.list(&LatestFilter::default()).await;
 
     let want = LatestCalibrations {
         is_confirmed: false,
-        entries: vec![
-            listed(&uploaded, CalibrationUploadStatus::Uploaded),
-            listed(&queued, CalibrationUploadStatus::Queued),
-            listed(&dropped, CalibrationUploadStatus::Dropped),
-        ],
+        entries: vec![a, b, c],
     };
     assert_eq!(latest.unwrap(), want);
 }
@@ -358,9 +301,8 @@ async fn list_filters_by_component_role_and_aspect() {
     ];
 
     for (filter, want) in cases {
-        let latest = store.list(&filter, &HashSet::new()).await;
-        let want = [listed(want, CalibrationUploadStatus::Dropped)];
-        assert_eq!(latest.unwrap().entries, want, "{filter:?}");
+        let latest = store.list(&filter).await;
+        assert_eq!(latest.unwrap().entries, [want.clone()], "{filter:?}");
     }
 }
 
@@ -427,16 +369,11 @@ async fn a_cache_that_cannot_be_read_fails_the_call() {
         unreadable_content,
         store.verify_capacity(&arm).await.unwrap_err(),
         store.put(arm.clone(), DATA).await.unwrap_err(),
-        store
-            .list(&LatestFilter::default(), &HashSet::new())
-            .await
-            .unwrap_err(),
+        store.list(&LatestFilter::default()).await.unwrap_err(),
         store.content(arm.report_id).await.unwrap_err(),
     ];
 
     for err in errs {
         assert!(matches!(err, CalibrationsErr::CacheErr(_)), "{err:?}");
     }
-    // a mark it can't read is logged, not raised
-    store.mark_uploaded(arm.report_id).await;
 }

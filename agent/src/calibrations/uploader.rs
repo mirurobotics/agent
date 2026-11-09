@@ -1,5 +1,4 @@
 // standard crates
-use std::collections::HashSet;
 use std::future::Future;
 use std::sync::Arc;
 
@@ -134,12 +133,6 @@ where
 
     pub(crate) fn len(&self) -> usize {
         self.queue.len()
-    }
-
-    /// The `report_id` of every queued report, including one being uploaded.
-    pub(crate) fn queued_report_ids(&self) -> HashSet<Uuid> {
-        let entries = self.queue.iter();
-        entries.map(|entry| entry.job.report_id).collect()
     }
 
     /// The report to attempt now, or how long until one is due.
@@ -306,14 +299,13 @@ fn invalid(reason: &str) -> CalibrationsErr {
 #[cfg(test)]
 mod tests {
     // standard crates
-    use std::collections::HashSet;
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
     // internal crates
     use super::{NextAttempt, QueueEntry, Uploader, UploaderOptions};
     use crate::test_utils::calibration_sender::{MockCalibrationSender, Step};
-    use crate::test_utils::calibrations::{received_at, report, report_id, reports_layout};
+    use crate::test_utils::calibrations::{received_at, report, reports_layout};
     use crate::test_utils::filesys::dirs as test_dirs;
     use miru_agent::calibrations::{CalibrationsErr, Queue, QueueSnapshotFile};
     use miru_agent::disk::layout::CalibrationReportsLayout;
@@ -611,20 +603,6 @@ mod tests {
 
         assert!(matches!(err, CalibrationsErr::FileSysErr(_)), "{err:?}");
         assert_eq!(u.len(), 0);
-    }
-
-    // ========================== QUEUED REPORT IDS =========================== //
-    #[tokio::test]
-    async fn queued_report_ids_are_the_queued_reports() {
-        let f = Fixture::new();
-        let mut u = f.uploader().await;
-        for slug in ["a", "b"] {
-            u.enqueue(&report(slug)).await.unwrap();
-        }
-
-        let ids = u.queued_report_ids();
-
-        assert_eq!(ids, HashSet::from([report_id("a"), report_id("b")]));
     }
 
     // ============================= NEXT ATTEMPT ============================= //

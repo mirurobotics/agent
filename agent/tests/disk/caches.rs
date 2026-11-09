@@ -1,6 +1,6 @@
 // internal crates
 use crate::test_utils::{calibrations::report, filesys::dirs as test_dirs};
-use miru_agent::calibrations::{LatestEntry, LatestStore};
+use miru_agent::calibrations::LatestStore;
 use miru_agent::disk::{Capacities, DiskErr, Layout, Storage};
 use miru_agent::filesys::{dirs, files, Overwrite, PathExt, WriteOptions};
 use miru_agent::models::{self, device};
@@ -36,37 +36,6 @@ pub mod default_capacities {
 
 pub mod init {
     use super::*;
-
-    #[tokio::test]
-    async fn init_moves_a_corrupt_latest_index_aside() {
-        let dir = test_dirs::temp("testing").unwrap();
-        let layout = Layout::new(dir.to_dir());
-        let calibrations = layout.calibrations();
-        dirs::create(&calibrations.root).await.unwrap();
-        files::write_string(&calibrations.index(), "x", WriteOptions::OVERWRITE_ATOMIC)
-            .await
-            .unwrap();
-        dirs::create(&calibrations.contents()).await.unwrap();
-        let name = format!("{}.json", Uuid::new_v4());
-        let content = calibrations.contents().file(&name);
-        files::write_string(&content, "x", WriteOptions::OVERWRITE_ATOMIC)
-            .await
-            .unwrap();
-
-        let capacities = Capacities::default();
-        let (storage, _) = Storage::init(&layout, capacities, "test_device".to_string())
-            .await
-            .unwrap();
-
-        // the cache starts empty, the corrupt index is kept beside it, and the
-        // content no entry now names is deleted
-        let entries = storage.calibrations.meta.values().await.unwrap();
-        assert!(entries.is_empty());
-        let files = dirs::files(&calibrations.root).await.unwrap();
-        assert_eq!(files.len(), 2);
-        assert!(!content.exists());
-        storage.shutdown().await.unwrap();
-    }
 
     #[tokio::test]
     async fn init_and_shutdown() {
@@ -152,7 +121,6 @@ pub mod init {
             .put(named.metadata.clone(), &named.data)
             .await
             .unwrap();
-        latest.mark_uploaded(named.metadata.report_id).await;
         let content = &storage.calibrations.content;
         let orphan = Uuid::new_v4().to_string();
         content
@@ -164,11 +132,7 @@ pub mod init {
         let (storage, _) = Storage::init(&layout, capacities, device_id).await.unwrap();
 
         let entries = storage.calibrations.meta.values().await.unwrap();
-        let uploaded = LatestEntry {
-            metadata: named.metadata.clone(),
-            is_uploaded: true,
-        };
-        assert_eq!(entries, [uploaded]);
+        assert_eq!(entries, std::slice::from_ref(&named.metadata));
         let contents = storage.calibrations.content.entry_map().await.unwrap();
         let kept: Vec<String> = contents.into_keys().collect();
         assert_eq!(kept, [named.metadata.report_id.to_string()]);

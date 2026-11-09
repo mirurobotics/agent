@@ -37,6 +37,8 @@ pub struct AppState {
     pub token_mngr: Arc<authn::TokenManager>,
     pub event_hub: events::EventHub,
     pub cal_mngr: Arc<calibrations::CalibrationManager>,
+    /// The latest calibrations, which the calibration manager writes.
+    pub latest_calibrations: calibrations::LatestStore,
 }
 
 impl AppState {
@@ -82,8 +84,13 @@ impl AppState {
 
         // initialize the calibration manager
         let latest = calibrations::LatestStore::new(storage.calibrations.clone());
-        let (cal_mngr, cal_mngr_handle) =
-            Self::init_cal_mngr(layout, latest, http_client.clone(), token_mngr.clone()).await;
+        let (cal_mngr, cal_mngr_handle) = Self::init_cal_mngr(
+            layout,
+            latest.clone(),
+            http_client.clone(),
+            token_mngr.clone(),
+        )
+        .await;
 
         let shutdown_handle = async move {
             let handles = [
@@ -109,6 +116,7 @@ impl AppState {
                 token_mngr,
                 event_hub,
                 cal_mngr,
+                latest_calibrations: latest,
             },
             shutdown_handle,
         ))
