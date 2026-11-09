@@ -64,7 +64,7 @@ impl Layout {
         self.resources().subdir("config_instances")
     }
 
-    pub fn config_instance_meta(&self) -> filesys::File {
+    pub fn config_instance_index(&self) -> filesys::File {
         self.config_instances().file("metadata.json")
     }
 
