@@ -190,7 +190,7 @@ mod tests {
     // internal crates
     use super::{check_capacity, is_allowed, key_parts, not_found, take_entry, Index};
     use crate::test_utils::calibrations::report;
-    use miru_agent::calibrations::{CalibrationsErr, ReportMetadata};
+    use miru_agent::calibrations::ReportMetadata;
 
     // external crates
     use uuid::Uuid;
@@ -272,15 +272,18 @@ mod tests {
 
         for (size, capacity, accepted) in cases {
             let result = check_capacity(size, capacity);
-            match result {
-                Ok(()) => assert!(accepted, "{size}/{capacity}"),
-                Err(CalibrationsErr::StoreFullErr(err)) => {
-                    assert!(!accepted, "{size}/{capacity}");
-                    assert_eq!(err.capacity, capacity);
-                }
-                Err(err) => panic!("unexpected error: {err:?}"),
-            }
+            assert_eq!(result.is_ok(), accepted, "{size}/{capacity}");
         }
+    }
+
+    #[test]
+    fn check_capacity_names_the_capacity() {
+        let err = check_capacity(1, 1).unwrap_err();
+
+        assert_eq!(
+            err.to_string(),
+            "latest calibrations store is full (1 keys)"
+        );
     }
 
     // ============================ NOT FOUND ============================= //
@@ -288,10 +291,9 @@ mod tests {
     fn not_found_names_the_report() {
         let report_id = Uuid::new_v4();
 
-        let CalibrationsErr::NotFoundErr(err) = not_found(report_id) else {
-            panic!("expected a not found error");
-        };
+        let err = not_found(report_id);
 
-        assert_eq!(err.report_id, report_id.to_string());
+        let want = format!("no latest calibration has report id {report_id}");
+        assert_eq!(err.to_string(), want);
     }
 }
