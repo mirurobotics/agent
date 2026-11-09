@@ -16,8 +16,8 @@ use crate::test_utils::calibrations::{
 };
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::calibrations::{
-    CalMngrArgs, CalibrationManager, CalibrationsErr, LatestFilter, LatestStore, Queue,
-    QueueSnapshotFile, ReportMetadata, UploaderOptions,
+    CalMngrArgs, CalibrationManager, CalibrationsErr, Filter, LatestStore, Queue, QueueSnapshotFile,
+    ReportMetadata, UploaderOptions,
 };
 use miru_agent::disk::layout::{CalibrationsLayout, LatestCalsLayout};
 use miru_agent::disk::Capacities;
@@ -140,7 +140,7 @@ impl Harness {
     /// Every latest entry.
     async fn latest_entries(&self) -> Vec<ReportMetadata> {
         let store = self.store.as_ref().expect("spawned");
-        let latest = store.list(&LatestFilter::default()).await;
+        let latest = store.list(&Filter::default()).await;
         latest.unwrap().entries
     }
 

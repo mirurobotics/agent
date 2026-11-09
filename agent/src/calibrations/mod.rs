@@ -14,7 +14,7 @@ pub use self::errors::{
     CalibrationBufferFullErr, CalibrationNotFoundErr, CalibrationStoreFullErr,
     CalibrationTooLargeErr, CalibrationsErr, InvalidReportErr, TokenErr,
 };
-pub use self::latest::{LatestCalibrations, LatestContent, LatestFilter, LatestStore};
+pub use self::latest::{Filter, LatestCalibrations, LatestContent, LatestStore};
 pub use self::report::{
     Queue, QueueEntry, QueueSnapshot, QueueSnapshotFile, Report, ReportMetadata,
 };

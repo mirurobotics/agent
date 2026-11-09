@@ -15,13 +15,13 @@ use uuid::Uuid;
 /// Which entries to list. Empty means any; `None` in `role`/`aspect` matches an
 /// entry without one.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct LatestFilter {
+pub struct Filter {
     pub component: Vec<String>,
     pub role: Vec<Option<String>>,
     pub aspect: Vec<Option<String>>,
 }
 
-impl LatestFilter {
+impl Filter {
     pub fn is_match(&self, metadata: &ReportMetadata) -> bool {
         is_allowed(&self.component, &metadata.component)
             && is_allowed(&self.role, &metadata.role)
@@ -103,7 +103,7 @@ impl LatestStore {
     }
 
     /// The entries `filter` matches, ordered by component, role and aspect.
-    pub async fn list(&self, filter: &LatestFilter) -> Result<LatestCalibrations, CalibrationsErr> {
+    pub async fn list(&self, filter: &Filter) -> Result<LatestCalibrations, CalibrationsErr> {
         let mut entries = self.stor.meta.values().await?;
         entries.retain(|metadata| filter.is_match(metadata));
         entries.sort_by(|a, b| key_parts(a).cmp(&key_parts(b)));

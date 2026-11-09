@@ -5,7 +5,7 @@
 use crate::test_utils::calibrations::{latest_cal_stor, latest_cals_layout, report};
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::calibrations::{
-    CalibrationsErr, LatestCalibrations, LatestContent, LatestFilter, LatestStore, ReportMetadata,
+    CalibrationsErr, Filter, LatestCalibrations, LatestContent, LatestStore, ReportMetadata,
 };
 use miru_agent::disk::{layout::LatestCalsLayout, Capacities, LatestCalStor};
 use miru_agent::filesys::{dirs, files, File, Overwrite, PathExt, WriteOptions};
@@ -247,7 +247,7 @@ async fn an_empty_filter_lists_every_entry_sorted() {
     let c = reported("c", None, None);
     put_all(&store, &[&c, &b, &a]).await;
 
-    let latest = store.list(&LatestFilter::default()).await;
+    let latest = store.list(&Filter::default()).await;
 
     let want = LatestCalibrations {
         is_confirmed: false,
@@ -282,7 +282,7 @@ async fn list_filters_by_component_role_and_aspect() {
     put_all(&store, &reports).await;
     let cases = [
         (
-            LatestFilter {
+            Filter {
                 component: vec!["arm".to_string(), "wrist".to_string()],
                 role: vec![Some("left".to_string())],
                 aspect: vec![Some("pose".to_string())],
@@ -291,10 +291,10 @@ async fn list_filters_by_component_role_and_aspect() {
         ),
         // `None` matches an entry without the slug
         (
-            LatestFilter {
+            Filter {
                 role: vec![None],
                 aspect: vec![None],
-                ..LatestFilter::default()
+                ..Filter::default()
             },
             &bare,
         ),
@@ -369,7 +369,7 @@ async fn a_cache_that_cannot_be_read_fails_the_call() {
         unreadable_content,
         store.verify_capacity(&arm).await.unwrap_err(),
         store.put(arm.clone(), DATA).await.unwrap_err(),
-        store.list(&LatestFilter::default()).await.unwrap_err(),
+        store.list(&Filter::default()).await.unwrap_err(),
         store.content(arm.report_id).await.unwrap_err(),
     ];
 
