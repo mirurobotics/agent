@@ -170,6 +170,18 @@ async fn put_replaces_the_keys_entry_and_deletes_its_content() {
 }
 
 #[tokio::test]
+async fn putting_the_same_report_again_keeps_its_content() {
+    let f = Fixture::new().await;
+    let store = f.store();
+    let arm = reported("arm", None, None);
+
+    put_all(&store, &[&arm, &arm]).await;
+
+    assert_eq!(f.entries().await, std::slice::from_ref(&arm));
+    assert_eq!(store.content(arm.report_id).await.unwrap(), DATA);
+}
+
+#[tokio::test]
 async fn role_and_aspect_are_part_of_the_key() {
     let f = Fixture::new().await;
     let store = f.store();

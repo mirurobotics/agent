@@ -56,16 +56,18 @@ impl LatestStore {
         if replaced.is_none() {
             check_capacity(entries.len(), capacity)?;
         }
-        let report_id = metadata.report_id.to_string();
+        let report_id = metadata.report_id;
+        let data = data.to_string();
         self.stor
             .content
-            .write(report_id, data.to_string(), |_, _| false, Overwrite::Allow)
+            .write(report_id.to_string(), data, |_, _| false, Overwrite::Allow)
             .await?;
         index
             .write(key, metadata, |_, _| false, Overwrite::Allow)
             .await?;
-        if let Some(replaced) = replaced {
-            self.delete_content(replaced.report_id.to_string()).await;
+        // the same report put again shares its content file, so keep it
+        if let Some(replaced) = replaced.filter(|r| r.report_id != report_id) {
+            self.delete_content(replaced.report_id).await;
         }
         Ok(())
     }
@@ -91,10 +93,10 @@ impl LatestStore {
         content.await?.ok_or_else(|| not_found(report_id))
     }
 
-    /// Delete the content under `content_key`, logging a failure.
-    async fn delete_content(&self, content_key: String) {
-        if let Err(e) = self.stor.content.delete(content_key.clone()).await {
-            warn!("calibrations: failed to delete latest content {content_key}: {e}");
+    /// Delete `report_id`'s content, logging a failure.
+    async fn delete_content(&self, report_id: Uuid) {
+        if let Err(e) = self.stor.content.delete(report_id.to_string()).await {
+            warn!("calibrations: failed to delete latest content {report_id}: {e}");
         }
     }
 }
