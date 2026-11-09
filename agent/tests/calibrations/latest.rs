@@ -4,6 +4,7 @@
 // internal crates
 use crate::test_utils::calibrations::{latest_cal_stor, latest_cals_layout, report};
 use crate::test_utils::filesys::dirs as test_dirs;
+use miru_agent::cache::dir_impl::entry_file_name;
 use miru_agent::calibrations::{CalibrationsErr, Filter, LatestStore, ReportMetadata};
 use miru_agent::disk::{layout::LatestCalsLayout, Capacities, LatestCalStor};
 use miru_agent::filesys::{dirs, files, File, Overwrite, PathExt, WriteOptions};
@@ -58,7 +59,8 @@ impl Fixture {
 
     /// The content cache's file for `report_id`.
     fn content_file(&self, report_id: Uuid) -> File {
-        self.layout.contents().file(&format!("{report_id}.json"))
+        let name = entry_file_name(&report_id.to_string());
+        self.layout.contents().file(&name)
     }
 
     /// Put a directory where `report_id`'s content file is, so it can be
