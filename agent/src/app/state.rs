@@ -38,7 +38,7 @@ pub struct AppState {
     pub event_hub: events::EventHub,
     pub cal_mngr: Arc<calibrations::CalibrationManager>,
     /// The latest calibrations, which the calibration manager writes.
-    pub latest_calibrations: calibrations::LatestStore,
+    pub latest_cals: calibrations::LatestStore,
 }
 
 impl AppState {
@@ -111,7 +111,7 @@ impl AppState {
                 token_mngr,
                 event_hub,
                 cal_mngr,
-                latest_calibrations: latest,
+                latest_cals: latest,
             },
             shutdown_handle,
         ))

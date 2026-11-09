@@ -30,7 +30,7 @@ impl Fixture {
 
     /// A fixture whose caches hold at most `capacity` keys.
     async fn with_capacity(capacity: usize) -> Self {
-        let dir = test_dirs::temp("latest_calibrations_test").unwrap();
+        let dir = test_dirs::temp("latest_cals_test").unwrap();
         let layout = calibrations_layout(&dir);
         let stor = calibration_stor(&dir, capacity).await;
         Self {
