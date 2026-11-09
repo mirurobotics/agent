@@ -12,7 +12,7 @@ use miru_agent::calibrations::{
     ListedEntry, ReportMetadata,
 };
 use miru_agent::disk::{layout::CalibrationsLayout, CalibrationStor, Capacities};
-use miru_agent::filesys::{dirs, files, File, PathExt, WriteOptions};
+use miru_agent::filesys::{dirs, files, File, Overwrite, PathExt, WriteOptions};
 use miru_agent::models::{CalibrationUploadStatus, InstanceFormat};
 
 // external crates
@@ -324,12 +324,17 @@ async fn list_filters_by_component_role_and_aspect() {
     let other_role = reported("arm", Some("right"), Some("pose"));
     let other_aspect = reported("arm", Some("left"), Some("offset"));
     let bare = reported("arm", None, None);
+    // each has one slug, so a `None` that matched anything would list them
+    let role_only = reported("arm", Some("left"), None);
+    let aspect_only = reported("arm", None, Some("pose"));
     let reports = [
         &matched,
         &other_component,
         &other_role,
         &other_aspect,
         &bare,
+        &role_only,
+        &aspect_only,
     ];
     put_all(&store, &reports).await;
     let cases = [
@@ -386,8 +391,15 @@ async fn content_is_not_found_for_an_unknown_report_or_a_missing_file() {
     let arm = reported("arm", None, None);
     put_all(&store, &[&arm]).await;
     files::delete(&f.content_file(arm.report_id)).await.unwrap();
+    // content no entry names is not served
+    let unnamed = Uuid::new_v4();
+    let content = &f.stor.content;
+    content
+        .write(unnamed.to_string(), DATA.to_string(), |_, _| false, Overwrite::Allow)
+        .await
+        .unwrap();
 
-    for report_id in [Uuid::new_v4(), arm.report_id] {
+    for report_id in [Uuid::new_v4(), unnamed, arm.report_id] {
         let err = store.content(report_id).await.unwrap_err();
         assert!(matches!(err, CalibrationsErr::NotFoundErr(_)), "{err:?}");
     }
