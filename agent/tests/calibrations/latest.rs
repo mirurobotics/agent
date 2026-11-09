@@ -153,7 +153,7 @@ async fn put_adds_an_entry_and_its_content() {
 
     store.put(arm.clone(), DATA).await.unwrap();
 
-    assert_eq!(f.entries().await, [arm.clone()]);
+    assert_eq!(f.entries().await, std::slice::from_ref(&arm));
     assert_eq!(f.content_ids().await, [arm.report_id]);
 }
 
@@ -167,7 +167,7 @@ async fn put_replaces_the_keys_entry_and_deletes_its_content() {
 
     store.put(new.clone(), DATA).await.unwrap();
 
-    assert_eq!(f.entries().await, [new.clone()]);
+    assert_eq!(f.entries().await, std::slice::from_ref(&new));
     assert_eq!(f.content_ids().await, [new.report_id]);
 }
 
@@ -218,7 +218,7 @@ async fn put_fails_and_changes_nothing_when_the_entry_cannot_be_written() {
     set_root_mode(&f, 0o755).await;
     let err = result.unwrap_err();
     assert!(matches!(err, CalibrationsErr::CacheErr(_)), "{err:?}");
-    assert_eq!(f.entries().await, [old.clone()]);
+    assert_eq!(f.entries().await, std::slice::from_ref(&old));
     // the new report's content is deleted again
     assert_eq!(f.content_ids().await, [old.report_id]);
 }
@@ -234,7 +234,7 @@ async fn put_succeeds_when_the_replaced_content_cannot_be_deleted() {
 
     store.put(new.clone(), DATA).await.unwrap();
 
-    assert_eq!(f.entries().await, [new.clone()]);
+    assert_eq!(f.entries().await, [new]);
 }
 
 // ================================= LIST ================================= //
@@ -302,7 +302,7 @@ async fn list_filters_by_component_role_and_aspect() {
 
     for (filter, want) in cases {
         let latest = store.list(&filter).await;
-        assert_eq!(latest.unwrap().entries, [want.clone()], "{filter:?}");
+        assert_eq!(latest.unwrap().entries, std::slice::from_ref(want), "{filter:?}");
     }
 }
 
