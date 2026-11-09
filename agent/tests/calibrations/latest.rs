@@ -363,19 +363,36 @@ async fn content_returns_the_data() {
 }
 
 #[tokio::test]
-async fn content_is_not_found_for_an_unknown_report_or_a_missing_file() {
+async fn content_is_not_found_for_an_unknown_report() {
+    let f = Fixture::new().await;
+    put_all(&f.store, &[&reported("arm", None, None)]).await;
+
+    let err = f.store.content(Uuid::new_v4()).await.unwrap_err();
+
+    assert!(matches!(err, CalibrationsErr::NotFoundErr(_)), "{err:?}");
+}
+
+#[tokio::test]
+async fn content_is_not_found_when_no_entry_names_it() {
+    let f = Fixture::new().await;
+    let unnamed = Uuid::new_v4();
+    f.write_orphan(unnamed).await;
+
+    let err = f.store.content(unnamed).await.unwrap_err();
+
+    assert!(matches!(err, CalibrationsErr::NotFoundErr(_)), "{err:?}");
+}
+
+#[tokio::test]
+async fn content_is_not_found_when_its_file_is_missing() {
     let f = Fixture::new().await;
     let arm = reported("arm", None, None);
     put_all(&f.store, &[&arm]).await;
     files::delete(&f.content_file(arm.report_id)).await.unwrap();
-    // content no entry names is not served
-    let unnamed = Uuid::new_v4();
-    f.write_orphan(unnamed).await;
 
-    for report_id in [Uuid::new_v4(), unnamed, arm.report_id] {
-        let err = f.store.content(report_id).await.unwrap_err();
-        assert!(matches!(err, CalibrationsErr::NotFoundErr(_)), "{err:?}");
-    }
+    let err = f.store.content(arm.report_id).await.unwrap_err();
+
+    assert!(matches!(err, CalibrationsErr::NotFoundErr(_)), "{err:?}");
 }
 
 // ================================ ERRORS ================================ //
