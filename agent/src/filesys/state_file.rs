@@ -13,11 +13,20 @@ use tracing::error;
 
 /// Waits between retries of a state file read that failed for a reason other
 /// than "missing" or "unparseable" (e.g. a transient EIO).
-const READ_RETRY_DELAYS: [Duration; 3] = [
+pub(crate) const READ_RETRY_DELAYS: [Duration; 3] = [
     Duration::from_millis(50),
     Duration::from_millis(250),
     Duration::from_millis(1000),
 ];
+
+/// Whether a failed read may succeed on a retry: anything but a missing or
+/// unparseable file.
+pub(crate) fn is_retryable_read(err: &FileSysErr) -> bool {
+    !matches!(
+        err,
+        FileSysErr::PathDoesNotExistErr(_) | FileSysErr::ParseJSONErr(_)
+    )
+}
 
 /// Single-threaded state file: a JSON file plus its cached contents.
 /// [`crate::filesys::shared_state_file::SharedStateFile`] wraps it in an actor
@@ -84,15 +93,9 @@ where
     /// [`Self::new`], retrying errors other than "missing" and "unparseable"
     /// after each of [`READ_RETRY_DELAYS`].
     async fn new_with_retry(file: &File) -> Result<Self, FileSysErr> {
-        let retryable = |err: &FileSysErr| {
-            !matches!(
-                err,
-                FileSysErr::PathDoesNotExistErr(_) | FileSysErr::ParseJSONErr(_)
-            )
-        };
         cooldown::retry(
             |n| READ_RETRY_DELAYS.get(n as usize).copied(),
-            retryable,
+            is_retryable_read,
             tokio::time::sleep,
             || Self::new(file.clone()),
         )

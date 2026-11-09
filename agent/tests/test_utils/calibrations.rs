@@ -47,6 +47,17 @@ pub fn report(slug: &str) -> Report {
     }
 }
 
+/// A fixture report's metadata for the key (`component`, `role`, `aspect`),
+/// with its own `report_id`.
+pub fn reported(component: &str, role: Option<&str>, aspect: Option<&str>) -> ReportMetadata {
+    ReportMetadata {
+        report_id: Uuid::new_v4(),
+        role: role.map(str::to_string),
+        aspect: aspect.map(str::to_string),
+        ..report(component).metadata
+    }
+}
+
 /// The calibrations layout under `dir`.
 pub fn layout(dir: &TempDir) -> CalibrationsLayout {
     CalibrationsLayout::new(dir.to_dir().subdir("calibrations"))

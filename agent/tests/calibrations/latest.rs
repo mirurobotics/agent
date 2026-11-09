@@ -2,7 +2,7 @@
 //! listing, content, and the prune when it opens.
 
 // internal crates
-use crate::test_utils::calibrations::{latest_cals_layout, latest_store, report};
+use crate::test_utils::calibrations::{latest_cals_layout, latest_store, reported};
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::calibrations::{latest, CalibrationsErr, Filter, LatestStore, ReportMetadata};
 use miru_agent::disk::layout::LatestCalsLayout;
@@ -83,17 +83,6 @@ impl Fixture {
         files::write_string(&self.layout.index(), "{", WriteOptions::OVERWRITE_ATOMIC)
             .await
             .unwrap();
-    }
-}
-
-/// A report for the key (`component`, `role`, `aspect`) with its own
-/// `report_id`.
-fn reported(component: &str, role: Option<&str>, aspect: Option<&str>) -> ReportMetadata {
-    ReportMetadata {
-        report_id: Uuid::new_v4(),
-        role: role.map(str::to_string),
-        aspect: aspect.map(str::to_string),
-        ..report(component).metadata
     }
 }
 

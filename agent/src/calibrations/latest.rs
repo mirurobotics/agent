@@ -6,7 +6,9 @@ use crate::calibrations::{
     errors::{CalibrationNotFoundErr, CalibrationStoreFullErr, CalibrationsErr},
     report::ReportMetadata,
 };
+use crate::cooldown;
 use crate::disk::layout::LatestCalsLayout;
+use crate::filesys::state_file::{is_retryable_read, READ_RETRY_DELAYS};
 use crate::filesys::{dirs, files, Dir, File, FileSysErr, WriteOptions};
 use crate::trace;
 
@@ -105,9 +107,18 @@ impl LatestStore {
         }
     }
 
-    /// The index, which is empty until the first put writes it.
+    /// The index, which is empty until the first put writes it. A read that
+    /// fails for another reason is retried as a state file's is.
     async fn read_index(&self) -> Result<Index, CalibrationsErr> {
-        match files::read_json::<Index>(&self.index).await {
+        let file = &self.index;
+        let read = cooldown::retry(
+            |n| READ_RETRY_DELAYS.get(n as usize).copied(),
+            is_retryable_read,
+            tokio::time::sleep,
+            move || files::read_json::<Index>(file),
+        )
+        .await;
+        match read {
             Err(FileSysErr::PathDoesNotExistErr(_)) => Ok(Index::new()),
             result => Ok(result?),
         }
@@ -189,33 +200,34 @@ fn not_found(report_id: Uuid) -> CalibrationsErr {
 mod tests {
     // internal crates
     use super::{check_capacity, is_allowed, key_parts, not_found, take_entry, Index};
-    use crate::test_utils::calibrations::report;
+    use crate::test_utils::calibrations::reported;
     use miru_agent::calibrations::ReportMetadata;
 
     // external crates
+    use chrono::TimeDelta;
     use uuid::Uuid;
 
-    /// A report for `component` and `role` with its own `report_id`.
-    fn reported(component: &str, role: Option<&str>) -> ReportMetadata {
+    /// Another report for `metadata`'s key, differing in every other field.
+    fn same_key(metadata: &ReportMetadata) -> ReportMetadata {
         ReportMetadata {
             report_id: Uuid::new_v4(),
-            role: role.map(str::to_string),
-            ..report(component).metadata
+            serial_number: Some("other".to_string()),
+            reported_by: Some("other".to_string()),
+            deployment_id: Some("other".to_string()),
+            reported_at: metadata.reported_at + TimeDelta::seconds(1),
+            ..metadata.clone()
         }
     }
 
     // ============================ TAKE ENTRY ============================ //
     #[test]
     fn take_entry_removes_the_entry_with_the_same_key() {
-        let arm = reported("arm", None);
-        let left_arm = reported("arm", Some("left"));
-        let mut index: Index = vec![arm.clone(), left_arm.clone()];
-        let newer = ReportMetadata {
-            report_id: Uuid::new_v4(),
-            ..arm.clone()
-        };
+        let arm = reported("arm", None, None);
+        // shares the component, and comes first
+        let left_arm = reported("arm", Some("left"), None);
+        let mut index: Index = vec![left_arm.clone(), arm.clone()];
 
-        let taken = take_entry(&mut index, &newer);
+        let taken = take_entry(&mut index, &same_key(&arm));
 
         assert_eq!(taken, Some(arm));
         assert_eq!(index, [left_arm]);
@@ -223,10 +235,10 @@ mod tests {
 
     #[test]
     fn take_entry_leaves_the_index_for_a_new_key() {
-        let arm = reported("arm", None);
+        let arm = reported("arm", None, None);
         let mut index: Index = vec![arm.clone()];
 
-        let taken = take_entry(&mut index, &reported("leg", None));
+        let taken = take_entry(&mut index, &reported("leg", None, None));
 
         assert_eq!(taken, None);
         assert_eq!(index, [arm]);
@@ -235,13 +247,18 @@ mod tests {
     // ============================= KEY PARTS ============================ //
     #[test]
     fn key_parts_are_the_component_role_and_aspect_only() {
-        let arm = reported("arm", None);
-        // the same key from another report
-        let newer = reported("arm", None);
-        let left_arm = reported("arm", Some("left"));
+        let arm = reported("arm", Some("left"), Some("pose"));
+        // each differs from `arm` in one part of the key
+        let others = [
+            reported("leg", Some("left"), Some("pose")),
+            reported("arm", Some("right"), Some("pose")),
+            reported("arm", Some("left"), Some("offset")),
+        ];
 
-        assert_eq!(key_parts(&arm), key_parts(&newer));
-        assert_ne!(key_parts(&arm), key_parts(&left_arm));
+        assert_eq!(key_parts(&arm), key_parts(&same_key(&arm)));
+        for other in &others {
+            assert_ne!(key_parts(&arm), key_parts(other), "{other:?}");
+        }
     }
 
     // ============================ IS ALLOWED ============================ //
