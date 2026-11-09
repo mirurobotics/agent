@@ -121,24 +121,22 @@ async fn set_root_mode(f: &Fixture, mode: u32) {
 
 // =============================== CAPACITY =============================== //
 #[tokio::test]
-async fn verify_capacity_rejects_only_a_new_key_at_capacity() {
+async fn put_rejects_only_a_new_key_at_capacity() {
     let f = Fixture::with_capacity(2).await;
     let store = f.store();
     let arm = reported("arm", None, None);
     let leg = reported("leg", None, None);
-    put_all(&store, &[&arm]).await;
-    // one key short of full
-    let below = store.verify_capacity(&leg).await;
-    put_all(&store, &[&leg]).await;
+    // the second key fills the store
+    put_all(&store, &[&arm, &leg]).await;
 
-    let existing_key = store.verify_capacity(&newer(&arm)).await;
-    let hand = reported("hand", None, None);
-    let new_key = store.verify_capacity(&hand).await;
+    let new_arm = newer(&arm);
+    let existing_key = store.put(new_arm.clone(), DATA).await;
+    let new_key = store.put(reported("hand", None, None), DATA).await;
 
-    assert!(below.is_ok(), "{below:?}");
     assert!(existing_key.is_ok(), "{existing_key:?}");
     let err = new_key.unwrap_err();
     assert!(matches!(err, CalibrationsErr::StoreFullErr(_)), "{err:?}");
+    assert_eq!(f.entries().await, [new_arm, leg]);
 }
 
 // ================================= PUT ================================== //
@@ -353,7 +351,6 @@ async fn a_cache_that_cannot_be_read_fails_the_call() {
 
     let errs = [
         unreadable_content,
-        store.verify_capacity(&arm).await.unwrap_err(),
         store.put(arm.clone(), DATA).await.unwrap_err(),
         store.list(&Filter::default()).await.unwrap_err(),
         store.content(arm.report_id).await.unwrap_err(),
@@ -365,12 +362,12 @@ async fn a_cache_that_cannot_be_read_fails_the_call() {
 }
 
 #[tokio::test]
-async fn a_stopped_cache_fails_the_capacity_check() {
+async fn a_stopped_metadata_cache_fails_put() {
     let f = Fixture::new().await;
     let store = f.store();
     let arm = reported("arm", None, None);
     f.stor.meta.shutdown().await.unwrap();
 
-    let err = store.verify_capacity(&arm).await.unwrap_err();
+    let err = store.put(arm, DATA).await.unwrap_err();
     assert!(matches!(err, CalibrationsErr::CacheErr(_)), "{err:?}");
 }

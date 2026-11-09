@@ -43,29 +43,24 @@ impl LatestStore {
         Self { stor }
     }
 
-    /// Ok when the key `metadata` reports already has an entry or there is
-    /// room for a new key.
-    pub async fn verify_capacity(&self, metadata: &ReportMetadata) -> Result<(), CalibrationsErr> {
-        let capacity = self.stor.meta.capacity().await?;
-        let entries = self.stor.meta.entry_map().await?;
-        if entries.len() < capacity || entries.contains_key(&key(metadata)) {
-            return Ok(());
-        }
-        let err = CalibrationStoreFullErr {
-            capacity,
-            trace: trace!(),
-        };
-        warn!("calibrations: rejecting report: {err}");
-        Err(err.into())
-    }
-
-    /// Make `metadata` its key's entry, with `data` as its content. The content
+    /// Make `metadata` its key's entry, with `data` as its content. A new key
+    /// past the capacity is rejected rather than evicting another. The content
     /// is written before the entry and the replaced entry's content deleted
     /// after it, so a failure leaves at most content that no entry names. On
     /// error the key's entry is unchanged.
     pub async fn put(&self, metadata: ReportMetadata, data: &str) -> Result<(), CalibrationsErr> {
         let key = key(&metadata);
-        let replaced = self.stor.meta.entry_map().await?.remove(&key);
+        let capacity = self.stor.meta.capacity().await?;
+        let mut entries = self.stor.meta.entry_map().await?;
+        let replaced = entries.remove(&key);
+        if replaced.is_none() && entries.len() >= capacity {
+            let err = CalibrationStoreFullErr {
+                capacity,
+                trace: trace!(),
+            };
+            warn!("calibrations: rejecting report: {err}");
+            return Err(err.into());
+        }
         let content_key = metadata.report_id.to_string();
         let content = data.to_string();
         self.stor

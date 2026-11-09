@@ -218,7 +218,7 @@ where
         cleanup::delete(&self.report_file(id)).await;
     }
 
-    pub(crate) fn verify_size(&self, report_bytes: u64) -> Result<(), CalibrationTooLargeErr> {
+    fn verify_size(&self, report_bytes: u64) -> Result<(), CalibrationTooLargeErr> {
         if report_bytes <= self.options.max_report_bytes {
             return Ok(());
         }

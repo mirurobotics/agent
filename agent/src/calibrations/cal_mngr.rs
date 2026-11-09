@@ -95,11 +95,8 @@ where
 
     /// Queue `report`, then write it to the latest store. A failed store
     /// write removes the queued report, so on error nothing is queued or
-    /// stored. Size goes first, so an oversized report is a 413 even when the
-    /// store is full.
+    /// stored.
     async fn enqueue(&mut self, report: Report) -> Result<(), CalibrationsErr> {
-        self.uploader.verify_size(report.data.len() as u64)?;
-        self.latest.verify_capacity(&report.metadata).await?;
         let id = self.uploader.enqueue(&report).await?;
         if let Err(e) = self.latest.put(report.metadata, &report.data).await {
             self.uploader.remove(id).await;
