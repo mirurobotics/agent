@@ -94,7 +94,7 @@ impl LatestStore {
     /// room for a new key.
     pub async fn verify_capacity(&self, metadata: &ReportMetadata) -> Result<(), CalibrationsErr> {
         let entries = self.stor.meta.entry_map().await?;
-        let capacity = self.stor.meta.capacity().await?;
+        let capacity = self.stor.meta.capacity();
         if entries.len() < capacity || entries.contains_key(&key(metadata)) {
             return Ok(());
         }

@@ -322,7 +322,7 @@ pub mod capacity {
         ImplT: CacheImpl<String, String>,
     {
         let (_tmp, cache, _) = new_cache(7).await;
-        assert_eq!(cache.capacity().await.unwrap(), 7);
+        assert_eq!(cache.capacity(), 7);
     }
 }
 

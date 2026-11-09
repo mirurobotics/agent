@@ -28,6 +28,6 @@ where
             receiver,
         };
         let worker_handle = tokio::spawn(worker.run());
-        Ok((Self::new(sender), worker_handle))
+        Ok((Self::new(sender, capacity), worker_handle))
     }
 }
