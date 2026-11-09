@@ -4,7 +4,9 @@
 // internal crates
 use crate::test_utils::calibrations::{latest_cal_stor, latest_cals_layout, report};
 use crate::test_utils::filesys::dirs as test_dirs;
-use miru_agent::calibrations::{CalibrationsErr, Filter, LatestContent, LatestStore, ReportMetadata};
+use miru_agent::calibrations::{
+    CalibrationsErr, Filter, LatestContent, LatestStore, ReportMetadata,
+};
 use miru_agent::disk::{layout::LatestCalsLayout, Capacities, LatestCalStor};
 use miru_agent::filesys::{dirs, files, File, Overwrite, PathExt, WriteOptions};
 use miru_agent::models::InstanceFormat;
