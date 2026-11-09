@@ -217,6 +217,7 @@ async fn put_fails_and_keeps_the_entry_when_the_entry_cannot_be_written() {
     let err = result.unwrap_err();
     assert!(matches!(err, CalibrationsErr::CacheErr(_)), "{err:?}");
     assert_eq!(f.entries().await, std::slice::from_ref(&old));
+    assert!(f.content_ids().await.contains(&old.report_id));
 }
 
 #[tokio::test]
