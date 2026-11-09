@@ -61,7 +61,7 @@ impl Layout {
     }
 
     pub fn latest_cals(&self) -> LatestCalsLayout {
-        LatestCalsLayout::new(self.resources().subdir("latest_cals"))
+        LatestCalsLayout::new(self.resources().subdir("latest_calibrations"))
     }
 
     fn config_instances(&self) -> filesys::Dir {

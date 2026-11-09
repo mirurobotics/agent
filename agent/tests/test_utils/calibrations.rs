@@ -55,7 +55,8 @@ pub fn layout(dir: &TempDir) -> CalibrationsLayout {
 
 /// The latest calibrations layout under `dir`.
 pub fn latest_cals_layout(dir: &TempDir) -> LatestCalsLayout {
-    LatestCalsLayout::new(dir.to_dir().subdir("resources").subdir("latest_cals"))
+    let resources = dir.to_dir().subdir("resources");
+    LatestCalsLayout::new(resources.subdir("latest_calibrations"))
 }
 
 /// The latest calibration caches under `dir`, holding at most `capacity` keys.

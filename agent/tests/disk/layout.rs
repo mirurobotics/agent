@@ -266,7 +266,7 @@ pub mod latest_cals_layout {
         let latest = layout.latest_cals();
         assert_eq!(
             latest.root.to_string(),
-            under_root(&["resources", "latest_cals"])
+            under_root(&["resources", "latest_calibrations"])
         );
     }
 
@@ -276,7 +276,7 @@ pub mod latest_cals_layout {
         let file = layout.latest_cals().index();
         assert_eq!(
             file.to_string(),
-            under_root(&["resources", "latest_cals", "index.json"])
+            under_root(&["resources", "latest_calibrations", "index.json"])
         );
     }
 
@@ -286,7 +286,7 @@ pub mod latest_cals_layout {
         let dir = layout.latest_cals().contents();
         assert_eq!(
             dir.to_string(),
-            under_root(&["resources", "latest_cals", "contents"])
+            under_root(&["resources", "latest_calibrations", "contents"])
         );
     }
 }
