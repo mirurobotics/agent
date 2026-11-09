@@ -2,7 +2,7 @@
 //! they reach Miru.
 
 pub mod cal_mngr;
-pub(crate) mod cleanup;
+mod cleanup;
 pub mod errors;
 pub mod latest;
 pub mod report;

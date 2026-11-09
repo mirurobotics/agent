@@ -1,38 +1,9 @@
-// standard crates
-use std::collections::{HashMap, HashSet};
-
 // internal crates
-use crate::cache::{self, dir_impl::entry_file_name, CacheEntry};
-use crate::calibrations::{cleanup, ReportMetadata};
-use crate::disk::layout::CalibrationsLayout;
-use crate::filesys::{files, FileSysErr};
-
-// external crates
-use tracing::error;
+use crate::cache;
+use crate::calibrations::ReportMetadata;
 
 // The latest calibrations are split like the config instances: the entries sit in
 // one file, keyed by component, role and aspect, while each entry's data, which can
 // be large, is its own file, keyed by report id.
 pub type Calibrations = cache::FileCache<String, ReportMetadata>;
 pub type CalibrationContent = cache::DirCache<String, String>;
-
-type Index = HashMap<String, CacheEntry<String, ReportMetadata>>;
-
-/// Delete the content no index entry names, which a crash or a failed delete
-/// leaves, so it never pushes the content cache past its cap and evicts live
-/// content. Only file names are read, however large the content.
-pub async fn prune_orphaned_contents(layout: &CalibrationsLayout) {
-    let index = match files::read_json::<Index>(&layout.index()).await {
-        Ok(index) => index,
-        Err(FileSysErr::PathDoesNotExistErr(_)) => Index::new(),
-        Err(err) => {
-            error!("latest calibrations index could not be read to prune contents: {err}");
-            return;
-        }
-    };
-    let named: HashSet<String> = index
-        .values()
-        .map(|entry| entry_file_name(&entry.value.report_id.to_string()))
-        .collect();
-    cleanup::prune(&layout.contents(), &named).await;
-}

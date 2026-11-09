@@ -45,14 +45,10 @@ where
     }
 
     fn cache_entry_file(&self, key: &K) -> File {
-        self.dir.file(&entry_file_name(key))
+        let mut filename = format!("{}.json", key.to_string());
+        filename = file::sanitize_filename(&filename);
+        self.dir.file(&filename)
     }
-}
-
-/// The name of the file in a [`DirCacheImpl`]'s directory that holds `key`'s
-/// entry.
-pub fn entry_file_name<K: CacheKeyImpl>(key: &K) -> String {
-    file::sanitize_filename(&format!("{}.json", key.to_string()))
 }
 
 impl<K, V> CacheImpl<K, V> for DirCacheImpl<K, V>
