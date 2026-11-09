@@ -70,7 +70,6 @@ pub async fn calibration_stor(dir: &TempDir, capacity: usize) -> CalibrationStor
     CalibrationStor {
         meta: Arc::new(meta),
         content: Arc::new(content),
-        capacity,
     }
 }
 

@@ -87,9 +87,6 @@ impl CfgInstStor {
 pub struct CalibrationStor {
     pub meta: Arc<Calibrations>,
     pub content: Arc<CalibrationContent>,
-    /// The most keys the caches hold, so the latest store can reject a new
-    /// key before they would evict one.
-    pub capacity: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -328,7 +325,6 @@ async fn init_calibration_storage(
     let calibrations = CalibrationStor {
         meta: Arc::new(meta),
         content: Arc::new(content),
-        capacity: capacities.calibrations,
     };
     Ok((calibrations, [meta_handle, content_handle]))
 }

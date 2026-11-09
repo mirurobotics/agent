@@ -83,7 +83,6 @@ pub async fn create_storage(dir: &filesys::Dir) -> Storage {
         calibrations: CalibrationStor {
             meta: Arc::new(calibration_stor),
             content: Arc::new(calibration_content_stor),
-            capacity: 1000,
         },
     }
 }

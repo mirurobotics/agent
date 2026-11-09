@@ -29,9 +29,14 @@ struct Fixture {
 
 impl Fixture {
     async fn new() -> Self {
+        Self::with_capacity(Capacities::default().calibrations).await
+    }
+
+    /// A fixture whose caches hold at most `capacity` keys.
+    async fn with_capacity(capacity: usize) -> Self {
         let dir = test_dirs::temp("latest_calibrations_test").unwrap();
         let layout = calibrations_layout(&dir);
-        let stor = calibration_stor(&dir, Capacities::default().calibrations).await;
+        let stor = calibration_stor(&dir, capacity).await;
         Self {
             _dir: dir,
             layout,
@@ -41,12 +46,6 @@ impl Fixture {
 
     fn store(&self) -> LatestStore {
         LatestStore::new(self.stor.clone())
-    }
-
-    /// A store over the fixture's caches that holds at most `capacity` keys.
-    fn store_with(&self, capacity: usize) -> LatestStore {
-        let stor = self.stor.clone();
-        LatestStore::new(CalibrationStor { capacity, ..stor })
     }
 
     /// The metadata cache's entries, in key order.
@@ -144,8 +143,8 @@ async fn set_root_mode(f: &Fixture, mode: u32) {
 // =============================== CAPACITY =============================== //
 #[tokio::test]
 async fn verify_capacity_rejects_only_a_new_key_at_capacity() {
-    let f = Fixture::new().await;
-    let store = f.store_with(2);
+    let f = Fixture::with_capacity(2).await;
+    let store = f.store();
     let arm = reported("arm", None, None);
     let leg = reported("leg", None, None);
     put_all(&store, &[&arm]).await;
