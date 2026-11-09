@@ -1,6 +1,5 @@
 // internal crates
 use crate::errors::harnesses::{assert_error, Expected};
-use miru_agent::cache::{errors::CacheElementNotFound, CacheErr};
 use miru_agent::calibrations::{
     CalibrationBufferFullErr, CalibrationNotFoundErr, CalibrationStoreFullErr,
     CalibrationTooLargeErr, CalibrationsErr,
@@ -52,22 +51,6 @@ fn a_missing_latest_calibration_is_404() {
         report_id: "not-a-report".to_string(),
         trace: miru_agent::trace!(),
     });
-
-    assert_error(
-        &err,
-        Expected::new(Code::ResourceNotFound, HTTPCode::NOT_FOUND),
-    );
-    assert!(!err.is_terminal());
-}
-
-/// A latest store's cache failure keeps the cache error's code and status.
-#[test]
-fn a_cache_error_keeps_its_code() {
-    let missing = CacheElementNotFound {
-        msg: "missing".to_string(),
-        trace: miru_agent::trace!(),
-    };
-    let err = CalibrationsErr::from(CacheErr::CacheElementNotFound(missing));
 
     assert_error(
         &err,

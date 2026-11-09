@@ -297,11 +297,9 @@ pub mod init {
 
         let (state, state_handle) = env.init().await.unwrap();
 
-        // the actor is spawned, its queue is seeded on disk, and storage seeds
-        // the latest index
+        // the actor is spawned and its queue snapshot file is seeded on disk
         state.cal_mngr.num_queued_uploads().await.unwrap();
         assert!(env.layout.calibrations().queue().exists());
-        assert!(env.layout.latest_cals().index().exists());
 
         state.shutdown().await.unwrap();
         state_handle.await;

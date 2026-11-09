@@ -7,8 +7,8 @@ use super::http_client::MockClient;
 use miru_agent::authn::token_mngr::TokenFile;
 use miru_agent::authn::{Token, TokenManager};
 use miru_agent::disk::{
-    self, CfgInstContent, CfgInstStor, CfgInsts, Deployments, FileRules, GitCommits,
-    LatestCalContent, LatestCalStor, LatestCals, Releases, Storage,
+    self, CfgInstContent, CfgInstStor, CfgInsts, Deployments, FileRules, GitCommits, Releases,
+    Storage,
 };
 use miru_agent::filesys;
 use miru_agent::models::Device;
@@ -62,13 +62,6 @@ pub async fn create_storage(dir: &filesys::Dir) -> Storage {
     let (file_rule_stor, _) = FileRules::spawn(16, dir.file("file_rules_cache.json"), 1000)
         .await
         .unwrap();
-    let (latest_cal_stor, _) = LatestCals::spawn(16, dir.file("latest_cals_cache.json"), 1000)
-        .await
-        .unwrap();
-    let (latest_cal_content_stor, _) =
-        LatestCalContent::spawn(16, dir.subdir("latest_cal_content_cache"), 1000)
-            .await
-            .unwrap();
 
     Storage {
         device: Arc::new(device_stor),
@@ -80,9 +73,5 @@ pub async fn create_storage(dir: &filesys::Dir) -> Storage {
         releases: Arc::new(release_stor),
         file_rules: Arc::new(file_rule_stor),
         git_commits: Arc::new(git_commit_stor),
-        latest_cals: LatestCalStor {
-            index: Arc::new(latest_cal_stor),
-            content: Arc::new(latest_cal_content_stor),
-        },
     }
 }

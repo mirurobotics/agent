@@ -10,7 +10,6 @@ pub mod device_api;
 pub mod errors;
 pub mod file_rules;
 pub mod git_commits;
-pub mod latest_cals;
 pub mod layout;
 pub mod releases;
 pub mod settings;
@@ -23,7 +22,6 @@ pub use self::device::{activation_state, assert_activated, resolve_device_id, Ac
 pub use self::errors::{DeviceNotActivatedErr, DiskErr};
 pub use self::file_rules::{file_rules_for_deployed, file_rules_for_deployment, FileRules};
 pub use self::git_commits::GitCommits;
-pub use self::latest_cals::{LatestCalContent, LatestCals};
 pub use self::layout::Layout;
 pub use self::releases::Releases;
 pub use self::settings::{Backend, MQTTBroker, Settings, TCPServer};
@@ -46,7 +44,6 @@ pub struct Capacities {
     pub releases: usize,
     pub file_rules: usize,
     pub git_commits: usize,
-    pub latest_cals: usize,
 }
 
 impl Default for Capacities {
@@ -58,7 +55,6 @@ impl Default for Capacities {
             releases: 1000,
             file_rules: 1000,
             git_commits: 100,
-            latest_cals: 1000,
         }
     }
 }
@@ -84,12 +80,6 @@ impl CfgInstStor {
 }
 
 #[derive(Clone, Debug)]
-pub struct LatestCalStor {
-    pub index: Arc<LatestCals>,
-    pub content: Arc<LatestCalContent>,
-}
-
-#[derive(Clone, Debug)]
 pub struct Storage {
     pub device: Arc<DeviceStorage>,
     pub cfg_insts: CfgInstStor,
@@ -97,7 +87,6 @@ pub struct Storage {
     pub releases: Arc<Releases>,
     pub file_rules: Arc<FileRules>,
     pub git_commits: Arc<GitCommits>,
-    pub latest_cals: LatestCalStor,
 }
 
 impl Storage {
@@ -110,8 +99,7 @@ impl Storage {
         let (device, device_handle) = init_device_storage(layout, device_id).await?;
 
         // config instances (index + content)
-        let (cfg_insts, [cfg_inst_index_handle, cfg_inst_content_handle]) =
-            init_cfg_inst_storage(layout, capacities).await?;
+        let (cfg_insts, cfg_inst_handles) = init_cfg_inst_storage(layout, capacities).await?;
 
         // deployments
         let (deployments, deployment_handle) = init_deployment_storage(layout, capacities).await?;
@@ -131,22 +119,15 @@ impl Storage {
             GitCommits::spawn(64, layout.git_commits(), capacities.git_commits).await?;
         let git_commits = Arc::new(git_commit_stor);
 
-        // latest calibrations (index + content)
-        let (latest_cals, [latest_cal_index_handle, latest_cal_content_handle]) =
-            init_latest_cal_storage(layout, capacities).await?;
-
         let shutdown_handle = async move {
-            let handles = vec![
-                device_handle,
-                cfg_inst_index_handle,
-                cfg_inst_content_handle,
+            let mut handles = vec![device_handle];
+            handles.extend(cfg_inst_handles);
+            handles.extend([
                 deployment_handle,
                 release_handle,
                 file_rule_handle,
                 git_commit_handle,
-                latest_cal_index_handle,
-                latest_cal_content_handle,
-            ];
+            ]);
 
             futures::future::join_all(handles).await;
         };
@@ -159,7 +140,6 @@ impl Storage {
                 releases,
                 file_rules,
                 git_commits,
-                latest_cals,
             },
             shutdown_handle,
         ))
@@ -225,16 +205,6 @@ impl Storage {
             first_err,
             "git commits store",
             self.git_commits.shutdown().await,
-        );
-        first_err = record(
-            first_err,
-            "latest calibrations index store",
-            self.latest_cals.index.shutdown().await,
-        );
-        first_err = record(
-            first_err,
-            "latest calibrations content store",
-            self.latest_cals.content.shutdown().await,
         );
 
         match first_err {
@@ -311,23 +281,6 @@ async fn init_cfg_inst_storage(
         cfg_insts,
         [cfg_inst_stor_handle, cfg_inst_content_stor_handle],
     ))
-}
-
-async fn init_latest_cal_storage(
-    layout: &StorLayout,
-    capacities: Capacities,
-) -> Result<(LatestCalStor, [JoinHandle<()>; 2]), StorErr> {
-    let latest_layout = layout.latest_cals();
-    latest_cals::prune_orphaned_contents(&latest_layout).await;
-    let (index, index_handle) =
-        LatestCals::spawn(64, latest_layout.index(), capacities.latest_cals).await?;
-    let (content, content_handle) =
-        LatestCalContent::spawn(64, latest_layout.contents(), capacities.latest_cals).await?;
-    let latest_cals = LatestCalStor {
-        index: Arc::new(index),
-        content: Arc::new(content),
-    };
-    Ok((latest_cals, [index_handle, content_handle]))
 }
 
 async fn init_deployment_storage(

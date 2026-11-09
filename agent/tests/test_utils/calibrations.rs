@@ -11,7 +11,6 @@ use miru_agent::calibrations::{
     CalMngrArgs, CalibrationManager, LatestStore, Report, ReportMetadata, Sender, UploaderOptions,
 };
 use miru_agent::disk::layout::{CalibrationsLayout, LatestCalsLayout};
-use miru_agent::disk::{LatestCalContent, LatestCalStor, LatestCals};
 use miru_agent::models::InstanceFormat;
 
 // external crates
@@ -59,24 +58,9 @@ pub fn latest_cals_layout(dir: &TempDir) -> LatestCalsLayout {
     LatestCalsLayout::new(resources.subdir("latest_calibrations"))
 }
 
-/// The latest calibration caches under `dir`, holding at most `capacity` keys.
-pub async fn latest_cal_stor(dir: &TempDir, capacity: usize) -> LatestCalStor {
-    let layout = latest_cals_layout(dir);
-    let (index, _) = LatestCals::spawn(64, layout.index(), capacity)
-        .await
-        .unwrap();
-    let (content, _) = LatestCalContent::spawn(64, layout.contents(), capacity)
-        .await
-        .unwrap();
-    LatestCalStor {
-        index: Arc::new(index),
-        content: Arc::new(content),
-    }
-}
-
 /// A latest store under `dir` holding at most `capacity` keys.
 pub async fn latest_store(dir: &TempDir, capacity: usize) -> LatestStore {
-    LatestStore::new(latest_cal_stor(dir, capacity).await)
+    LatestStore::open(latest_cals_layout(dir), capacity).await
 }
 
 /// A calibration manager under `dir` that keeps its queue in memory, holds at

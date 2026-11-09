@@ -30,15 +30,6 @@ macro_rules! shared_cache_tests {
             }
         }
 
-        pub mod capacity {
-            use super::*;
-
-            #[tokio::test]
-            async fn test_capacity() {
-                $crate::cache::shared::capacity::capacity_impl($spawn_cache_with_capacity).await;
-            }
-        }
-
         pub mod entry_map {
             use super::*;
 
@@ -303,26 +294,6 @@ pub mod shutdown {
         let (_tmp, cache, worker_handle) = spawn_cache().await;
         cache.shutdown().await.unwrap();
         worker_handle.await.unwrap();
-    }
-}
-
-pub mod capacity {
-    use super::*;
-
-    pub async fn capacity_impl<F, Fut, ImplT>(new_cache: F)
-    where
-        F: Fn(usize) -> Fut + Clone,
-        Fut: Future<
-            Output = (
-                crate::test_utils::filesys::dirs::TempDir,
-                Cache<ImplT, String, String>,
-                JoinHandle<()>,
-            ),
-        >,
-        ImplT: CacheImpl<String, String>,
-    {
-        let (_tmp, cache, _) = new_cache(7).await;
-        assert_eq!(cache.capacity().await.unwrap(), 7);
     }
 }
 

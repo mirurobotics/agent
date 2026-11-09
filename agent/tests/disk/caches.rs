@@ -1,7 +1,7 @@
 // internal crates
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::disk::{Capacities, DiskErr, Layout, Storage};
-use miru_agent::filesys::{dirs, files, PathExt, WriteOptions};
+use miru_agent::filesys::{dirs, files, WriteOptions};
 use miru_agent::models::{self, device};
 
 // external crates
@@ -26,7 +26,6 @@ pub mod default_capacities {
             releases: 1000,
             file_rules: 1000,
             git_commits: 100,
-            latest_cals: 1000,
         };
         assert_eq!(actual, expected);
     }
@@ -102,26 +101,6 @@ pub mod init {
 
         let result = Storage::init(&layout, Capacities::default(), "test_device".to_string()).await;
         assert!(result.is_err());
-    }
-
-    #[tokio::test]
-    async fn init_deletes_orphaned_latest_contents() {
-        let dir = test_dirs::temp("testing").unwrap();
-        let layout = Layout::new(dir.to_dir());
-        let contents = layout.latest_cals().contents();
-        dirs::create(&contents).await.unwrap();
-        let orphan = contents.file("orphan.json");
-        files::write_string(&orphan, "x", WriteOptions::OVERWRITE_ATOMIC)
-            .await
-            .unwrap();
-
-        let capacities = Capacities::default();
-        let (storage, _) = Storage::init(&layout, capacities, "test_device".to_string())
-            .await
-            .unwrap();
-
-        assert!(!orphan.exists());
-        storage.shutdown().await.unwrap();
     }
 
     #[tokio::test]

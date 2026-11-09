@@ -16,11 +16,10 @@ use crate::test_utils::calibrations::{
 };
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::calibrations::{
-    CalMngrArgs, CalibrationManager, CalibrationsErr, Filter, LatestStore, Queue,
+    latest, CalMngrArgs, CalibrationManager, CalibrationsErr, Filter, LatestStore, Queue,
     QueueSnapshotFile, ReportMetadata, UploaderOptions,
 };
 use miru_agent::disk::layout::{CalibrationsLayout, LatestCalsLayout};
-use miru_agent::disk::Capacities;
 use miru_agent::filesys::{dirs, files, File, PathExt, WriteOptions};
 use miru_agent::queue::Persistence;
 
@@ -89,7 +88,7 @@ impl Harness {
 
     async fn spawn_with(&mut self, options: UploaderOptions) {
         let snapshot_file = Some(self.snapshot_file().await);
-        let latest = latest_store(&self.dir, Capacities::default().latest_cals).await;
+        let latest = latest_store(&self.dir, latest::DEFAULT_CAPACITY).await;
         let args = CalMngrArgs {
             snapshot_file,
             reports: self.layout.reports(),
@@ -283,16 +282,14 @@ async fn a_failed_store_write_queues_nothing() {
     h.sender.push(Step::Hang(hang));
     h.spawn().await;
     // a regular file where the latest contents directory should be
-    let contents = h.latest.contents();
-    dirs::delete(&contents).await.unwrap();
-    let blocker = File::new(contents.path().clone());
+    let blocker = File::new(h.latest.contents().path().clone());
     files::write_string(&blocker, "x", WriteOptions::OVERWRITE_ATOMIC)
         .await
         .unwrap();
 
     let err = guard(h.cal_mngr().report(report("a"))).await.unwrap_err();
 
-    assert!(matches!(err, CalibrationsErr::CacheErr(_)), "{err:?}");
+    assert!(matches!(err, CalibrationsErr::FileSysErr(_)), "{err:?}");
     assert_eq!(h.num_queued_uploads().await, 0);
     assert_eq!(h.queued_on_disk().await, 0);
     assert!(dirs::files(&h.layout.reports()).await.unwrap().is_empty());

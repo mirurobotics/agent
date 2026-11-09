@@ -83,7 +83,7 @@ impl AppState {
 
         // initialize the calibration manager
         let (cal_mngr, latest_cals, cal_mngr_handle) =
-            Self::init_cal_mngr(layout, &storage, http_client.clone(), token_mngr.clone()).await;
+            Self::init_cal_mngr(layout, http_client.clone(), token_mngr.clone()).await;
 
         let shutdown_handle = async move {
             let handles = [
@@ -267,7 +267,6 @@ impl AppState {
     /// next boot that opens the queue file.
     async fn init_cal_mngr(
         layout: &disk::Layout,
-        storage: &disk::Storage,
         http_client: Arc<http::Client>,
         token_mngr: Arc<authn::TokenManager>,
     ) -> (
@@ -275,7 +274,11 @@ impl AppState {
         calibrations::LatestStore,
         tokio::task::JoinHandle<()>,
     ) {
-        let latest_cals = calibrations::LatestStore::new(storage.latest_cals.clone());
+        let latest_cals = calibrations::LatestStore::open(
+            layout.latest_cals(),
+            calibrations::latest::DEFAULT_CAPACITY,
+        )
+        .await;
         let layout = layout.calibrations();
         let snapshot_file = match calibrations::QueueSnapshotFile::new_with_default(
             layout.queue(),

@@ -60,8 +60,7 @@ pub mod routes {
     use tower::ServiceExt;
 
     use device_api::models as openapi;
-    use miru_agent::calibrations::UploaderOptions;
-    use miru_agent::disk::Capacities;
+    use miru_agent::calibrations::{latest, UploaderOptions};
     use miru_agent::events::hub::{EventHub, SpawnOptions};
     use miru_agent::filesys::Overwrite;
     use miru_agent::models::{
@@ -95,7 +94,7 @@ pub mod routes {
     impl Fixture {
         async fn new(name: &str) -> Self {
             let options = UploaderOptions::default();
-            Self::with_calibration_options(name, options, Capacities::default().latest_cals).await
+            Self::with_calibration_options(name, options, latest::DEFAULT_CAPACITY).await
         }
 
         async fn with_calibration_options(
@@ -676,7 +675,7 @@ pub mod routes {
                 ..UploaderOptions::default()
             };
             let name = "handler_calibration_full";
-            let capacity = Capacities::default().latest_cals;
+            let capacity = latest::DEFAULT_CAPACITY;
             let f = Fixture::with_calibration_options(name, options, capacity).await;
 
             let (status, bytes) = f.post_json(URI, request("json", "{}")).await;

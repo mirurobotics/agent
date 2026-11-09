@@ -1,6 +1,5 @@
 // internal crates
 use crate::authn::AuthnErr;
-use crate::cache::CacheErr;
 use crate::errors::{Code, HTTPCode, Trace};
 use crate::filesys::FileSysErr;
 use crate::http::HTTPErr;
@@ -143,8 +142,6 @@ pub enum CalibrationsErr {
     #[error(transparent)]
     FileSysErr(FileSysErr),
     #[error(transparent)]
-    CacheErr(CacheErr),
-    #[error(transparent)]
     InvalidReportErr(InvalidReportErr),
     #[error(transparent)]
     HTTPErr(HTTPErr),
@@ -169,12 +166,6 @@ impl From<EnqueueErr> for CalibrationsErr {
 impl From<FileSysErr> for CalibrationsErr {
     fn from(e: FileSysErr) -> Self {
         Self::FileSysErr(e)
-    }
-}
-
-impl From<CacheErr> for CalibrationsErr {
-    fn from(e: CacheErr) -> Self {
-        Self::CacheErr(e)
     }
 }
 
@@ -214,7 +205,6 @@ crate::impl_error!(CalibrationsErr {
     StoreFullErr,
     NotFoundErr,
     FileSysErr,
-    CacheErr,
     InvalidReportErr,
     HTTPErr,
     TokenErr,
