@@ -109,7 +109,7 @@ impl Store {
             .send()
             .await
             .map(|_| ());
-        self.finish_write("put_object", dst, result).map(|_| ())
+        Self::finish_write("put_object", dst, result).map(|_| ())
     }
 
     /// The request body that streams `len` bytes of `src` from `offset`, and
@@ -135,9 +135,9 @@ impl Store {
     /// Finishes an object write (PutObject or CompleteMultipartUpload). Writes
     /// are sent create-only (`If-None-Match: *`, which the GCS client swaps for
     /// its own precondition), so a 412 means an earlier attempt already stored
-    /// the object at this key, which counts as done.
+    /// the object at this key, which counts as done. That holds only because
+    /// the backend gives each object key to one upload.
     pub(super) fn finish_write<E>(
-        &self,
         operation: &str,
         dst: &Object,
         result: Result<(), SdkError<E>>,

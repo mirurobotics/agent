@@ -304,7 +304,7 @@ impl Store {
             .send()
             .await
             .map(|_| ());
-        self.finish_write("complete_multipart_upload", obj, result)
+        Self::finish_write("complete_multipart_upload", obj, result)
     }
 
     /// Aborts an in-progress multipart upload so S3 releases its parts. Returns a
