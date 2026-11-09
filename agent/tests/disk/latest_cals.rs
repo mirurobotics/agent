@@ -3,7 +3,6 @@ use crate::test_utils::{
     calibrations::{latest_cals_layout, latest_store, report},
     filesys::dirs as test_dirs,
 };
-use miru_agent::cache::dir_impl::entry_file_name;
 use miru_agent::disk::latest_cals::prune_orphaned_contents;
 use miru_agent::disk::layout::LatestCalsLayout;
 use miru_agent::filesys::{dirs, files, File, PathExt, WriteOptions};
@@ -39,9 +38,9 @@ pub mod prune_orphaned_contents {
 
         prune_orphaned_contents(&layout).await;
 
-        let report_id = named.metadata.report_id.to_string();
-        let named_content = layout.contents().file(&entry_file_name(&report_id));
-        assert!(named_content.exists());
+        // the named content is the only file left
+        let left = dirs::files(&layout.contents()).await.unwrap();
+        assert_eq!(left.len(), 1);
         assert!(!orphan.exists());
     }
 
