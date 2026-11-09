@@ -88,7 +88,10 @@ impl LatestStore {
             .write(content_key.clone(), content, |_, _| false, Overwrite::Allow)
             .await?;
         let meta = &self.stor.meta;
-        if let Err(e) = meta.write(key, metadata, |_, _| false, Overwrite::Allow).await {
+        if let Err(e) = meta
+            .write(key, metadata, |_, _| false, Overwrite::Allow)
+            .await
+        {
             self.delete_content(content_key).await;
             return Err(e.into());
         }
