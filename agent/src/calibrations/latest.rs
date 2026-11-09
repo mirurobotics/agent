@@ -29,13 +29,6 @@ impl Filter {
     }
 }
 
-/// The entries a filter matched, and whether the store was loaded from Miru.
-#[derive(Debug, PartialEq)]
-pub struct LatestCalibrations {
-    pub is_confirmed: bool,
-    pub entries: Vec<ReportMetadata>,
-}
-
 /// A latest entry's content, as it was reported.
 #[derive(Debug, PartialEq)]
 pub struct LatestContent {
@@ -103,15 +96,11 @@ impl LatestStore {
     }
 
     /// The entries `filter` matches, ordered by component, role and aspect.
-    pub async fn list(&self, filter: &Filter) -> Result<LatestCalibrations, CalibrationsErr> {
+    pub async fn list(&self, filter: &Filter) -> Result<Vec<ReportMetadata>, CalibrationsErr> {
         let mut entries = self.stor.meta.values().await?;
         entries.retain(|metadata| filter.is_match(metadata));
         entries.sort_by(|a, b| key_parts(a).cmp(&key_parts(b)));
-        Ok(LatestCalibrations {
-            // nothing loads the store from Miru yet
-            is_confirmed: false,
-            entries,
-        })
+        Ok(entries)
     }
 
     /// The content of the entry for `report_id`. Not found unless an entry has

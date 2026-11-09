@@ -140,8 +140,7 @@ impl Harness {
     /// Every latest entry.
     async fn latest_entries(&self) -> Vec<ReportMetadata> {
         let store = self.store.as_ref().expect("spawned");
-        let latest = store.list(&Filter::default()).await;
-        latest.unwrap().entries
+        store.list(&Filter::default()).await.unwrap()
     }
 
     fn report_file(&self, id: Uuid) -> File {

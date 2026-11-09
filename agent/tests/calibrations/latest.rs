@@ -4,9 +4,7 @@
 // internal crates
 use crate::test_utils::calibrations::{latest_cal_stor, latest_cals_layout, report};
 use crate::test_utils::filesys::dirs as test_dirs;
-use miru_agent::calibrations::{
-    CalibrationsErr, Filter, LatestCalibrations, LatestContent, LatestStore, ReportMetadata,
-};
+use miru_agent::calibrations::{CalibrationsErr, Filter, LatestContent, LatestStore, ReportMetadata};
 use miru_agent::disk::{layout::LatestCalsLayout, Capacities, LatestCalStor};
 use miru_agent::filesys::{dirs, files, File, Overwrite, PathExt, WriteOptions};
 use miru_agent::models::InstanceFormat;
@@ -247,13 +245,9 @@ async fn an_empty_filter_lists_every_entry_sorted() {
     let c = reported("c", None, None);
     put_all(&store, &[&c, &b, &a]).await;
 
-    let latest = store.list(&Filter::default()).await;
+    let entries = store.list(&Filter::default()).await.unwrap();
 
-    let want = LatestCalibrations {
-        is_confirmed: false,
-        entries: vec![a, b, c],
-    };
-    assert_eq!(latest.unwrap(), want);
+    assert_eq!(entries, [a, b, c]);
 }
 
 #[tokio::test]
@@ -301,7 +295,7 @@ async fn list_filters_by_component_role_and_aspect() {
     ];
 
     for (filter, want) in cases {
-        let entries = store.list(&filter).await.unwrap().entries;
+        let entries = store.list(&filter).await.unwrap();
         assert_eq!(entries, std::slice::from_ref(want), "{filter:?}");
     }
 }
