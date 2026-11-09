@@ -314,6 +314,7 @@ async fn init_latest_cal_storage(
     capacities: Capacities,
 ) -> Result<(LatestCalStor, [JoinHandle<()>; 2]), StorErr> {
     let latest_layout = layout.latest_cals();
+    latest_cals::prune_orphaned_contents(&latest_layout).await;
     let (meta, meta_handle) =
         LatestCals::spawn(64, latest_layout.index(), capacities.latest_cals).await?;
     let (content, content_handle) =
