@@ -8,8 +8,15 @@ use crate::calibrations::{
 };
 use crate::cooldown;
 use crate::disk::layout::LatestCalsLayout;
-use crate::filesys::state_file::{is_retryable_read, READ_RETRY_DELAYS};
-use crate::filesys::{dirs, files, Dir, File, FileSysErr, WriteOptions};
+use crate::filesys::{
+    dirs,
+    files,
+    state_file::{is_retryable_read, READ_RETRY_DELAYS},
+    Dir,
+    File,
+    FileSysErr,
+    WriteOptions,
+};
 use crate::trace;
 
 // external crates
