@@ -184,3 +184,114 @@ fn not_found(report_id: Uuid) -> CalibrationsErr {
         trace: trace!(),
     })
 }
+
+#[cfg(test)]
+mod tests {
+    // internal crates
+    use super::{check_capacity, is_allowed, key_parts, not_found, take_entry, Index};
+    use crate::test_utils::calibrations::report;
+    use miru_agent::calibrations::{CalibrationsErr, ReportMetadata};
+
+    // external crates
+    use uuid::Uuid;
+
+    /// A report for `component` and `role` with its own `report_id`.
+    fn reported(component: &str, role: Option<&str>) -> ReportMetadata {
+        ReportMetadata {
+            report_id: Uuid::new_v4(),
+            role: role.map(str::to_string),
+            ..report(component).metadata
+        }
+    }
+
+    // ============================ TAKE ENTRY ============================ //
+    #[test]
+    fn take_entry_removes_the_entry_with_the_same_key() {
+        let arm = reported("arm", None);
+        let left_arm = reported("arm", Some("left"));
+        let mut index: Index = vec![arm.clone(), left_arm.clone()];
+        let newer = ReportMetadata {
+            report_id: Uuid::new_v4(),
+            ..arm.clone()
+        };
+
+        let taken = take_entry(&mut index, &newer);
+
+        assert_eq!(taken, Some(arm));
+        assert_eq!(index, [left_arm]);
+    }
+
+    #[test]
+    fn take_entry_leaves_the_index_for_a_new_key() {
+        let arm = reported("arm", None);
+        let mut index: Index = vec![arm.clone()];
+
+        let taken = take_entry(&mut index, &reported("leg", None));
+
+        assert_eq!(taken, None);
+        assert_eq!(index, [arm]);
+    }
+
+    // ============================= KEY PARTS ============================ //
+    #[test]
+    fn key_parts_are_the_component_role_and_aspect_only() {
+        let arm = reported("arm", None);
+        // the same key from another report
+        let newer = reported("arm", None);
+        let left_arm = reported("arm", Some("left"));
+
+        assert_eq!(key_parts(&arm), key_parts(&newer));
+        assert_ne!(key_parts(&arm), key_parts(&left_arm));
+    }
+
+    // ============================ IS ALLOWED ============================ //
+    #[test]
+    fn is_allowed_allows_any_value_for_an_empty_list() {
+        let cases: [(&[&str], &str, bool); 3] = [
+            (&[], "arm", true),
+            (&["arm", "leg"], "arm", true),
+            (&["leg"], "arm", false),
+        ];
+
+        for (allowed, value, want) in cases {
+            assert_eq!(is_allowed(allowed, &value), want, "{allowed:?} {value}");
+        }
+    }
+
+    // ========================== CHECK CAPACITY ========================== //
+    #[test]
+    fn check_capacity_rejects_a_new_key_once_the_store_is_full() {
+        // (size, capacity, accepted)
+        let cases = [
+            (0, 1, true),
+            (1, 2, true),
+            (1, 1, false),
+            (2, 1, false),
+            (0, 0, false),
+        ];
+
+        for (size, capacity, accepted) in cases {
+            let result = check_capacity(size, capacity);
+            match result {
+                Ok(()) => assert!(accepted, "{size}/{capacity}"),
+                Err(CalibrationsErr::StoreFullErr(err)) => {
+                    assert!(!accepted, "{size}/{capacity}");
+                    assert_eq!(err.capacity, capacity);
+                }
+                Err(err) => panic!("unexpected error: {err:?}"),
+            }
+        }
+    }
+
+    // ============================ NOT FOUND ============================= //
+    #[test]
+    fn not_found_names_the_report() {
+        let report_id = Uuid::new_v4();
+
+        let CalibrationsErr::NotFoundErr(err) = not_found(report_id) else {
+            panic!("expected a not found error");
+        };
+
+        assert_eq!(err.report_id, report_id.to_string());
+    }
+}
