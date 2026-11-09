@@ -3,9 +3,9 @@ use std::collections::{HashMap, HashSet};
 
 // internal crates
 use crate::cache::{self, dir_impl::entry_file_name, CacheEntry};
-use crate::calibrations::{cleanup, ReportMetadata};
+use crate::calibrations::ReportMetadata;
 use crate::disk::layout::LatestCalsLayout;
-use crate::filesys::{files, FileSysErr};
+use crate::filesys::{cleanup, files, FileSysErr};
 
 // external crates
 use tracing::error;

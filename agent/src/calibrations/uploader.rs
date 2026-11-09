@@ -4,13 +4,12 @@ use std::sync::Arc;
 
 // internal crates
 use crate::calibrations::{
-    cleanup,
     errors::{CalibrationTooLargeErr, CalibrationsErr, InvalidReportErr},
     report::{Queue, QueueEntry, QueueSnapshotFile, Report, ReportMetadata},
     sender::Sender,
 };
 use crate::errors::Error;
-use crate::filesys::{files, Dir, File, FileSysErr, WriteOptions};
+use crate::filesys::{cleanup, files, Dir, File, FileSysErr, WriteOptions};
 use crate::queue::{self, Persistence, RetryPolicy, Verdict};
 use crate::trace;
 
