@@ -1,5 +1,5 @@
 // standard crates
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::Arc;
 
 // internal crates
@@ -19,8 +19,8 @@ use uuid::Uuid;
 /// The most keys the store holds in the agent.
 pub const DEFAULT_CAPACITY: usize = 1000;
 
-/// The entries by key, as `index.json` holds them.
-type Index = HashMap<String, ReportMetadata>;
+/// The entries, one per key, as `index.json` holds them.
+type Index = Vec<ReportMetadata>;
 
 /// Which entries to list. Empty means any; `None` in `role`/`aspect` matches an
 /// entry without one.
@@ -74,14 +74,17 @@ impl LatestStore {
     pub async fn put(&self, metadata: ReportMetadata, data: &str) -> Result<(), CalibrationsErr> {
         let _guard = self.write_lock.lock().await;
         let mut index = self.read_index().await?;
-        let key = key(&metadata);
-        if !index.contains_key(&key) {
+        let slot = index
+            .iter()
+            .position(|entry| key_parts(entry) == key_parts(&metadata));
+        if slot.is_none() {
             check_capacity(index.len(), self.capacity)?;
         }
         let report_id = metadata.report_id;
         let content = self.content_file(report_id);
         files::write_string(&content, data, WriteOptions::OVERWRITE_ATOMIC).await?;
-        let replaced = index.insert(key, metadata);
+        let replaced = slot.map(|i| index.swap_remove(i));
+        index.push(metadata);
         files::write_json(&self.index, &index, WriteOptions::OVERWRITE_ATOMIC).await?;
         // the same report put again shares its content file, so keep it
         if let Some(replaced) = replaced.filter(|r| r.report_id != report_id) {
@@ -92,8 +95,7 @@ impl LatestStore {
 
     /// The entries `filter` matches, ordered by component, role and aspect.
     pub async fn list(&self, filter: &Filter) -> Result<Vec<ReportMetadata>, CalibrationsErr> {
-        let index = self.read_index().await?;
-        let mut entries: Vec<ReportMetadata> = index.into_values().collect();
+        let mut entries = self.read_index().await?;
         entries.retain(|metadata| filter.is_match(metadata));
         entries.sort_by(|a, b| key_parts(a).cmp(&key_parts(b)));
         Ok(entries)
@@ -103,7 +105,7 @@ impl LatestStore {
     /// that `report_id` and its content exists.
     pub async fn content(&self, report_id: Uuid) -> Result<String, CalibrationsErr> {
         let index = self.read_index().await?;
-        if !index.values().any(|m| m.report_id == report_id) {
+        if !index.iter().any(|m| m.report_id == report_id) {
             return Err(not_found(report_id));
         }
         match files::read_string(&self.content_file(report_id)).await {
@@ -135,17 +137,11 @@ impl LatestStore {
             }
         };
         let named: HashSet<String> = index
-            .values()
+            .iter()
             .map(|metadata| metadata.report_id.to_string())
             .collect();
         dirs::delete_files_except(&self.contents, &named).await;
     }
-}
-
-/// The index's key for `metadata`: its component, role and aspect as
-/// a JSON array, so no two keys collide.
-fn key(metadata: &ReportMetadata) -> String {
-    serde_json::json!(key_parts(metadata)).to_string()
 }
 
 fn key_parts(metadata: &ReportMetadata) -> (&String, &Option<String>, &Option<String>) {
