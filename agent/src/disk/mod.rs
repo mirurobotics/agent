@@ -131,7 +131,7 @@ impl Storage {
             GitCommits::spawn(64, layout.git_commits(), capacities.git_commits).await?;
         let git_commits = Arc::new(git_commit_stor);
 
-        // latest calibrations (metadata + content)
+        // latest calibrations (index + content)
         let (latest_cals, [latest_cal_index_handle, latest_cal_content_handle]) =
             init_latest_cal_storage(layout, capacities).await?;
 
