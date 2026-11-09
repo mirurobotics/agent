@@ -84,8 +84,7 @@ impl AppState {
         // initialize the calibration manager
         let latest_cals = calibrations::LatestStore::new(storage.latest_cals.clone());
         let (cal_mngr, cal_mngr_handle) =
-            Self::init_cal_mngr(layout, &latest_cals, http_client.clone(), token_mngr.clone())
-                .await;
+            Self::init_cal_mngr(layout, &latest_cals, &http_client, &token_mngr).await;
 
         let shutdown_handle = async move {
             let handles = [
@@ -270,8 +269,8 @@ impl AppState {
     async fn init_cal_mngr(
         layout: &disk::Layout,
         latest_cals: &calibrations::LatestStore,
-        http_client: Arc<http::Client>,
-        token_mngr: Arc<authn::TokenManager>,
+        http_client: &Arc<http::Client>,
+        token_mngr: &Arc<authn::TokenManager>,
     ) -> (
         Arc<calibrations::CalibrationManager>,
         tokio::task::JoinHandle<()>,
@@ -292,11 +291,12 @@ impl AppState {
             }
         };
 
+        let sender = calibrations::HttpSender::new(http_client.clone(), token_mngr.clone());
         let args = calibrations::CalMngrArgs {
             snapshot_file,
             reports: layout.reports(),
             latest: latest_cals.clone(),
-            sender: Arc::new(calibrations::HttpSender::new(http_client, token_mngr)),
+            sender: Arc::new(sender),
             options: calibrations::UploaderOptions::default(),
             sleep_fn: tokio::time::sleep,
             now_fn: chrono::Utc::now,
