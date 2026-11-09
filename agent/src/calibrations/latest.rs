@@ -1,6 +1,5 @@
 // standard crates
 use std::collections::HashSet;
-use std::sync::Arc;
 
 // internal crates
 use crate::calibrations::{
@@ -12,7 +11,6 @@ use crate::filesys::{dirs, files, Dir, File, FileSysErr, WriteOptions};
 use crate::trace;
 
 // external crates
-use tokio::sync::Mutex;
 use tracing::{error, warn};
 use uuid::Uuid;
 
@@ -48,8 +46,6 @@ pub struct LatestStore {
     index: File,
     contents: Dir,
     capacity: usize,
-    // serializes puts, which read, change and rewrite the index
-    write_lock: Arc<Mutex<()>>,
 }
 
 impl LatestStore {
@@ -61,7 +57,6 @@ impl LatestStore {
             index: layout.index(),
             contents: layout.contents(),
             capacity,
-            write_lock: Arc::new(Mutex::new(())),
         };
         store.prune_orphaned_contents().await;
         store
@@ -70,9 +65,9 @@ impl LatestStore {
     /// Make `metadata` its key's entry, with `data` as its content. A new key
     /// past the capacity is rejected rather than evicting another. A failure
     /// part way leaves at most content that no entry names, which the next
-    /// open deletes.
+    /// open deletes. Puts must not overlap, since each rewrites the whole
+    /// index.
     pub async fn put(&self, metadata: ReportMetadata, data: &str) -> Result<(), CalibrationsErr> {
-        let _guard = self.write_lock.lock().await;
         let mut index = self.read_index().await?;
         let slot = index
             .iter()
