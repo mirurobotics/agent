@@ -110,7 +110,8 @@ impl Storage {
         let (device, device_handle) = init_device_storage(layout, device_id).await?;
 
         // config instances (metadata + content)
-        let (cfg_insts, cfg_inst_handles) = init_cfg_inst_storage(layout, capacities).await?;
+        let (cfg_insts, [cfg_inst_meta_handle, cfg_inst_content_handle]) =
+            init_cfg_inst_storage(layout, capacities).await?;
 
         // deployments
         let (deployments, deployment_handle) = init_deployment_storage(layout, capacities).await?;
@@ -131,18 +132,21 @@ impl Storage {
         let git_commits = Arc::new(git_commit_stor);
 
         // latest calibrations (metadata + content)
-        let (latest_cals, latest_cal_handles) = init_latest_cal_storage(layout, capacities).await?;
+        let (latest_cals, [latest_cal_meta_handle, latest_cal_content_handle]) =
+            init_latest_cal_storage(layout, capacities).await?;
 
         let shutdown_handle = async move {
-            let mut handles = vec![device_handle];
-            handles.extend(cfg_inst_handles);
-            handles.extend([
+            let handles = vec![
+                device_handle,
+                cfg_inst_meta_handle,
+                cfg_inst_content_handle,
                 deployment_handle,
                 release_handle,
                 file_rule_handle,
                 git_commit_handle,
-            ]);
-            handles.extend(latest_cal_handles);
+                latest_cal_meta_handle,
+                latest_cal_content_handle,
+            ];
 
             futures::future::join_all(handles).await;
         };
