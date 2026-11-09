@@ -50,9 +50,10 @@ impl LatestStore {
     pub async fn put(&self, metadata: ReportMetadata, data: &str) -> Result<(), CalibrationsErr> {
         let key = key(&metadata);
         let index = &self.stor.index;
-        let replaced = index.read_optional(key.clone()).await?;
+        let mut entries = index.value_map().await?;
+        let replaced = entries.remove(&key);
         if replaced.is_none() {
-            self.check_capacity().await?;
+            check_capacity(entries.len(), index.capacity().await?)?;
         }
         let report_id = metadata.report_id.to_string();
         self.stor
@@ -68,24 +69,12 @@ impl LatestStore {
         Ok(())
     }
 
-    /// Reject a new key once the store holds its capacity.
-    async fn check_capacity(&self) -> Result<(), CalibrationsErr> {
-        let capacity = self.stor.index.capacity().await?;
-        if self.stor.index.size().await? < capacity {
-            return Ok(());
-        }
-        let err = CalibrationStoreFullErr {
-            capacity,
-            trace: trace!(),
-        };
-        warn!("calibrations: rejecting report: {err}");
-        Err(err.into())
-    }
-
     /// The entries `filter` matches, ordered by component, role and aspect.
-    pub async fn list(&self, filter: Filter) -> Result<Vec<ReportMetadata>, CalibrationsErr> {
-        let index = &self.stor.index;
-        let mut entries = index.find_where(move |m| filter.is_match(m)).await?;
+    pub async fn list(&self, filter: &Filter) -> Result<Vec<ReportMetadata>, CalibrationsErr> {
+        // not find_where: it bumps each match's last access, rewriting the
+        // index once per match
+        let mut entries = self.stor.index.values().await?;
+        entries.retain(|metadata| filter.is_match(metadata));
         entries.sort_by(|a, b| key_parts(a).cmp(&key_parts(b)));
         Ok(entries)
     }
@@ -93,9 +82,8 @@ impl LatestStore {
     /// The data of the entry for `report_id`. Not found unless an entry has
     /// that `report_id` and its content exists.
     pub async fn content(&self, report_id: Uuid) -> Result<String, CalibrationsErr> {
-        let index = &self.stor.index;
-        let entries = index.find_where(move |m| m.report_id == report_id).await?;
-        if entries.is_empty() {
+        let entries = self.stor.index.values().await?;
+        if !entries.iter().any(|m| m.report_id == report_id) {
             return Err(not_found(report_id));
         }
         let content = self.stor.content.read_optional(report_id.to_string());
@@ -123,6 +111,19 @@ fn key_parts(metadata: &ReportMetadata) -> (&String, &Option<String>, &Option<St
 /// Whether `value` is in `allowed`, where an empty list allows any value.
 fn is_allowed<T: PartialEq>(allowed: &[T], value: &T) -> bool {
     allowed.is_empty() || allowed.contains(value)
+}
+
+/// Reject a new key once the store holds `capacity` keys.
+fn check_capacity(size: usize, capacity: usize) -> Result<(), CalibrationsErr> {
+    if size < capacity {
+        return Ok(());
+    }
+    let err = CalibrationStoreFullErr {
+        capacity,
+        trace: trace!(),
+    };
+    warn!("calibrations: rejecting report: {err}");
+    Err(err.into())
 }
 
 fn not_found(report_id: Uuid) -> CalibrationsErr {
