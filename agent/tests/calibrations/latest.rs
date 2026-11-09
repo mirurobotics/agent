@@ -147,8 +147,11 @@ async fn verify_capacity_rejects_only_a_new_key_at_capacity() {
     let f = Fixture::new().await;
     let store = f.store_with(2);
     let arm = reported("arm", None, None);
-    let below = store.verify_capacity(&arm).await;
-    put_all(&store, &[&arm, &reported("leg", None, None)]).await;
+    let leg = reported("leg", None, None);
+    put_all(&store, &[&arm]).await;
+    // one key short of full
+    let below = store.verify_capacity(&leg).await;
+    put_all(&store, &[&leg]).await;
 
     let existing_key = store.verify_capacity(&newer(&arm)).await;
     let hand = reported("hand", None, None);
