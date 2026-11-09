@@ -44,42 +44,42 @@ impl LatestStore {
     }
 
     /// Make `metadata` its key's entry, with `data` as its content. A new key
-    /// past the capacity is rejected rather than evicting another. The content
-    /// is written before the entry and the replaced entry's content deleted
-    /// after it, so a failure leaves at most content that no entry names. On
-    /// error the key's entry is unchanged.
+    /// past the capacity is rejected rather than evicting another. A failure
+    /// part way leaves at most content that no entry names, which the startup
+    /// prune deletes.
     pub async fn put(&self, metadata: ReportMetadata, data: &str) -> Result<(), CalibrationsErr> {
         let key = key(&metadata);
-        let capacity = self.stor.index.capacity().await?;
-        let mut entries = self.stor.index.entry_map().await?;
-        let replaced = entries.remove(&key);
-        if replaced.is_none() && entries.len() >= capacity {
-            let err = CalibrationStoreFullErr {
-                capacity,
-                trace: trace!(),
-            };
-            warn!("calibrations: rejecting report: {err}");
-            return Err(err.into());
+        let index = &self.stor.index;
+        let replaced = index.read_optional(key.clone()).await?;
+        if replaced.is_none() {
+            self.check_capacity().await?;
         }
-        let content_key = metadata.report_id.to_string();
-        let content = data.to_string();
+        let report_id = metadata.report_id.to_string();
         self.stor
             .content
-            .write(content_key.clone(), content, |_, _| false, Overwrite::Allow)
+            .write(report_id, data.to_string(), |_, _| false, Overwrite::Allow)
             .await?;
-        let index = &self.stor.index;
-        if let Err(e) = index
+        index
             .write(key, metadata, |_, _| false, Overwrite::Allow)
-            .await
-        {
-            self.delete_content(content_key).await;
-            return Err(e.into());
-        }
+            .await?;
         if let Some(replaced) = replaced {
-            let replaced_id = replaced.value.report_id;
-            self.delete_content(replaced_id.to_string()).await;
+            self.delete_content(replaced.report_id.to_string()).await;
         }
         Ok(())
+    }
+
+    /// Reject a new key once the store holds its capacity.
+    async fn check_capacity(&self) -> Result<(), CalibrationsErr> {
+        let capacity = self.stor.index.capacity().await?;
+        if self.stor.index.size().await? < capacity {
+            return Ok(());
+        }
+        let err = CalibrationStoreFullErr {
+            capacity,
+            trace: trace!(),
+        };
+        warn!("calibrations: rejecting report: {err}");
+        Err(err.into())
     }
 
     /// The entries `filter` matches, ordered by component, role and aspect.

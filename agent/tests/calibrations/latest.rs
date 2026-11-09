@@ -204,7 +204,7 @@ async fn put_fails_and_changes_nothing_when_the_content_cannot_be_written() {
 
 #[cfg(unix)]
 #[tokio::test]
-async fn put_fails_and_changes_nothing_when_the_entry_cannot_be_written() {
+async fn put_fails_and_keeps_the_entry_when_the_entry_cannot_be_written() {
     let f = Fixture::new().await;
     let store = f.store();
     let old = reported("arm", None, None);
@@ -217,8 +217,6 @@ async fn put_fails_and_changes_nothing_when_the_entry_cannot_be_written() {
     let err = result.unwrap_err();
     assert!(matches!(err, CalibrationsErr::CacheErr(_)), "{err:?}");
     assert_eq!(f.entries().await, std::slice::from_ref(&old));
-    // the new report's content is deleted again
-    assert_eq!(f.content_ids().await, [old.report_id]);
 }
 
 #[tokio::test]

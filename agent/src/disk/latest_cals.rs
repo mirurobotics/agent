@@ -18,8 +18,9 @@ pub type LatestCalContent = cache::DirCache<String, String>;
 
 type Index = HashMap<String, CacheEntry<String, ReportMetadata>>;
 
-/// Delete the content no index entry names, which a crash or a failed delete
-/// leaves, so it does not count toward the content cache's cap after a boot.
+/// Delete the content no index entry names, which a crash or a failed write or
+/// delete leaves, so it does not count toward the content cache's cap after a
+/// boot.
 /// Only file names are read, however large the content.
 pub async fn prune_orphaned_contents(layout: &LatestCalsLayout) {
     let index = match files::read_json::<Index>(&layout.index()).await {
