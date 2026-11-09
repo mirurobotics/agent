@@ -48,7 +48,7 @@ pub struct LatestContent {
 /// entry's data in the content cache under its `report_id`. A report replaces
 /// its key's entry, and a new key past the caches' capacity is rejected rather
 /// than evicting another.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct LatestStore {
     stor: CalibrationStor,
 }
