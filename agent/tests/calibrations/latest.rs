@@ -395,7 +395,12 @@ async fn content_is_not_found_for_an_unknown_report_or_a_missing_file() {
     let unnamed = Uuid::new_v4();
     let content = &f.stor.content;
     content
-        .write(unnamed.to_string(), DATA.to_string(), |_, _| false, Overwrite::Allow)
+        .write(
+            unnamed.to_string(),
+            DATA.to_string(),
+            |_, _| false,
+            Overwrite::Allow,
+        )
         .await
         .unwrap();
 
