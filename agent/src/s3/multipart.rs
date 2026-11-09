@@ -298,7 +298,7 @@ impl Store {
             .key(&obj.key)
             .upload_id(upload_id)
             .multipart_upload(completed)
-            .set_if_none_match(self.if_none_match())
+            .if_none_match("*")
             .customize()
             .config_override(sdk::timeout(sdk::COMPLETE_TIMEOUT))
             .send()

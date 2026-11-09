@@ -45,8 +45,7 @@ pub struct Options {
     pub config: aws_sdk_s3::Config,
     /// Set for a [`gcs::config`](crate::s3::gcs::config). Bodies then carry a
     /// `Content-MD5` the store computes, since the GCS client turns the SDK's
-    /// own request checksums off, and the GCS client, not `If-None-Match`,
-    /// makes object writes create-only.
+    /// own request checksums off.
     pub gcs: bool,
 }
 
@@ -104,7 +103,7 @@ impl Store {
             .body(body)
             .set_content_md5(content_md5)
             .set_metadata((!metadata.is_empty()).then(|| metadata.clone()))
-            .set_if_none_match(self.if_none_match())
+            .if_none_match("*")
             .customize()
             .config_override(sdk::timeout(sdk::upload_timeout(src.size)))
             .send()
@@ -133,16 +132,10 @@ impl Store {
         Ok((body, content_md5))
     }
 
-    /// The `If-None-Match` value that makes an S3 object write create-only.
-    /// The GCS client sends GCS's own precondition instead (see
-    /// [`gcs`](crate::s3::gcs)).
-    pub(super) fn if_none_match(&self) -> Option<String> {
-        (!self.gcs).then(|| "*".to_string())
-    }
-
     /// Finishes an object write (PutObject or CompleteMultipartUpload). Writes
-    /// are create-only, so a 412 means an earlier attempt already stored the
-    /// object at this key, which counts as done.
+    /// are sent create-only (`If-None-Match: *`, which the GCS client swaps for
+    /// its own precondition), so a 412 means an earlier attempt already stored
+    /// the object at this key, which counts as done.
     pub(super) fn finish_write<E>(
         &self,
         operation: &str,
