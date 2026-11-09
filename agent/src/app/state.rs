@@ -37,7 +37,6 @@ pub struct AppState {
     pub token_mngr: Arc<authn::TokenManager>,
     pub event_hub: events::EventHub,
     pub cal_mngr: Arc<calibrations::CalibrationManager>,
-    /// The latest calibrations, which the calibration manager writes.
     pub latest_cals: calibrations::LatestStore,
 }
 
