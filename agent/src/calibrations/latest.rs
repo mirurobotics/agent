@@ -295,7 +295,8 @@ mod tests {
 
     #[test]
     fn check_capacity_names_the_capacity() {
-        let err = check_capacity(1, 1).unwrap_err();
+        // more keys than the cap, so the error can't take its count from them
+        let err = check_capacity(2, 1).unwrap_err();
 
         assert_eq!(
             err.to_string(),
