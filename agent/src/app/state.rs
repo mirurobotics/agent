@@ -84,13 +84,8 @@ impl AppState {
 
         // initialize the calibration manager
         let latest = calibrations::LatestStore::new(storage.calibrations.clone());
-        let (cal_mngr, cal_mngr_handle) = Self::init_cal_mngr(
-            layout,
-            latest.clone(),
-            http_client.clone(),
-            token_mngr.clone(),
-        )
-        .await;
+        let (cal_mngr, cal_mngr_handle) =
+            Self::init_cal_mngr(layout, &latest, http_client.clone(), token_mngr.clone()).await;
 
         let shutdown_handle = async move {
             let handles = [
@@ -268,13 +263,13 @@ impl AppState {
     }
 
     /// Spawn the calibration manager, which sends reports to Miru with the
-    /// token manager's token and owns the latest calibrations store. A
+    /// token manager's token and writes the latest calibrations store. A
     /// queue-file error degrades to a queue kept in memory (fail-open); the
     /// report files a previous boot queued are kept for the next boot that
     /// opens the queue file.
     async fn init_cal_mngr(
         layout: &disk::Layout,
-        latest: calibrations::LatestStore,
+        latest: &calibrations::LatestStore,
         http_client: Arc<http::Client>,
         token_mngr: Arc<authn::TokenManager>,
     ) -> (
@@ -300,7 +295,7 @@ impl AppState {
         let args = calibrations::CalMngrArgs {
             snapshot_file,
             reports: layout.reports(),
-            latest,
+            latest: latest.clone(),
             sender: Arc::new(calibrations::HttpSender::new(http_client, token_mngr)),
             options: calibrations::UploaderOptions::default(),
             sleep_fn: tokio::time::sleep,
