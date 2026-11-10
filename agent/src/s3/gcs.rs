@@ -32,7 +32,6 @@ use aws_sdk_s3::config::{
 };
 use aws_sdk_s3::error::BoxError;
 use aws_sdk_s3::primitives::ByteStream;
-use aws_smithy_runtime_api::client::orchestrator::Metadata;
 use aws_smithy_runtime_api::http::Headers;
 use base64::Engine;
 use md5::{Digest, Md5};
@@ -43,9 +42,6 @@ const ENDPOINT: &str = "https://storage.googleapis.com";
 
 const AMZ_META: &str = "x-amz-meta-";
 const GOOG_META: &str = "x-goog-meta-";
-
-/// The operations that write an object, and so are sent create-only.
-const OBJECT_WRITES: [&str; 2] = ["PutObject", "CompleteMultipartUpload"];
 
 /// The backend's OAuth2 access token for one upload.
 #[derive(Debug)]
@@ -90,8 +86,8 @@ pub(crate) async fn content_md5(mut body: ByteStream) -> std::io::Result<String>
 }
 
 /// Sets the bearer token and GCS metadata header names on each attempt, right
-/// before it is sent, and makes object writes create-only
-/// (`x-goog-if-generation-match: 0`).
+/// before it is sent, and sends the store's create-only writes with
+/// `x-goog-if-generation-match: 0`.
 ///
 /// The upload token has `roles/storage.objectCreator`, which can't overwrite,
 /// and can't read the object to check it. Without create-only, a write retried
@@ -113,26 +109,22 @@ impl Intercept for GcsInterceptor {
         &self,
         context: &mut BeforeTransmitInterceptorContextMut<'_>,
         _runtime_components: &RuntimeComponents,
-        cfg: &mut ConfigBag,
+        _cfg: &mut ConfigBag,
     ) -> Result<(), BoxError> {
         let headers = context.request_mut().headers_mut();
-        if is_object_write(cfg) {
-            set_create_only(headers);
-        }
+        set_create_only(headers);
         rename_amz_metadata(headers)?;
         set_bearer(headers, &self.token)
     }
 }
 
-/// Whether this attempt is one of [`OBJECT_WRITES`].
-fn is_object_write(cfg: &ConfigBag) -> bool {
-    let operation = cfg.load::<Metadata>().map(Metadata::name);
-    operation.is_some_and(|op| OBJECT_WRITES.contains(&op))
-}
-
-/// Makes GCS write the object only if none exists at its key yet.
+/// Swaps the store's create-only `If-None-Match: *` for GCS's own
+/// precondition, since how GCS treats `If-None-Match` on a write isn't
+/// documented.
 fn set_create_only(headers: &mut Headers) {
-    headers.insert("x-goog-if-generation-match", "0");
+    if headers.remove("if-none-match").is_some() {
+        headers.insert("x-goog-if-generation-match", "0");
+    }
 }
 
 /// Renames each `x-amz-meta-*` header to `x-goog-meta-*`.
@@ -440,6 +432,10 @@ mod tests {
                 .collect::<Vec<_>>();
             let zero = Some("0".to_string());
             assert_eq!(precondition, vec![zero.clone(), None, None, None, zero]);
+            // GCS gets its own precondition instead of the store's.
+            assert!(replay
+                .actual_requests()
+                .all(|r| r.headers().get("if-none-match").is_none()));
         }
 
         #[tokio::test]
