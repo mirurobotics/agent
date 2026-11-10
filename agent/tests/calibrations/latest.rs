@@ -455,6 +455,7 @@ async fn spawn_retries_an_index_read_that_fails_for_a_moment() {
     let f = Fixture::new().await;
     let arm = reported("arm", None, None);
     put_all(&f.store, &[&arm]).await;
+    f.write_orphan(Uuid::new_v4()).await;
     let saved = f.block_index().await;
     let (store, _) = f.spawn();
     let filter = Filter::default();
@@ -465,6 +466,8 @@ async fn spawn_retries_an_index_read_that_fails_for_a_moment() {
 
     let ((), entries) = tokio::join!(unblock, store.list(&filter));
 
+    // the prune ran, so the read at spawn succeeded
+    assert_eq!(f.content_ids().await, [arm.report_id]);
     assert_eq!(entries.unwrap(), [arm]);
 }
 
