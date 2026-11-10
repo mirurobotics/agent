@@ -269,7 +269,11 @@ impl AppState {
         layout: &disk::Layout,
         http_client: Arc<http::Client>,
         token_mngr: Arc<authn::TokenManager>,
-    ) -> (Arc<calibrations::Uploader>, calibrations::LatestStore, tokio::task::JoinHandle<()>) {
+    ) -> (
+        Arc<calibrations::Uploader>,
+        calibrations::LatestStore,
+        tokio::task::JoinHandle<()>,
+    ) {
         let latest_cals = calibrations::LatestStore::open(
             layout.latest_cals(),
             calibrations::latest::DEFAULT_CAPACITY,
