@@ -1,5 +1,5 @@
 // internal crates
-use crate::calibrations::{LatestContent, ReportMetadata};
+use crate::calibrations::{Report, ReportMetadata};
 use crate::events;
 use crate::models;
 use crate::services::calibration;
@@ -162,17 +162,18 @@ impl From<&calibration::LatestCalibrations> for device_server::LatestCalibration
     }
 }
 
-/// The content's bytes, with the `Content-Type` of its format and an inline
-/// `Content-Disposition` that names the file the way Miru does.
-impl IntoResponse for LatestContent {
+/// The report's data as its content, with the `Content-Type` of its format and
+/// an inline `Content-Disposition` that names the file the way Miru does.
+impl IntoResponse for Report {
     fn into_response(self) -> Response {
-        let filename = match self.format.file_ext() {
-            Some(ext) => format!("{}.{ext}", self.report_id),
-            None => self.report_id.to_string(),
+        let metadata = self.metadata;
+        let filename = match metadata.format.file_ext() {
+            Some(ext) => format!("{}.{ext}", metadata.report_id),
+            None => metadata.report_id.to_string(),
         };
         let disposition = format!("inline; filename=\"{filename}\"");
         let headers = [
-            (header::CONTENT_TYPE, self.format.media_type().to_string()),
+            (header::CONTENT_TYPE, metadata.format.media_type().to_string()),
             (header::CONTENT_DISPOSITION, disposition),
         ];
         (StatusCode::OK, headers, self.data).into_response()

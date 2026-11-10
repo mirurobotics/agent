@@ -555,23 +555,24 @@ pub mod latest_calibrations_response {
 }
 
 pub mod latest_content_response {
+    use crate::test_utils::calibrations::reported;
     use axum::body;
     use axum::http::{header, StatusCode};
     use axum::response::IntoResponse;
-    use miru_agent::calibrations::LatestContent;
+    use miru_agent::calibrations::Report;
     use miru_agent::models::InstanceFormat;
-    use uuid::Uuid;
 
     #[tokio::test]
     async fn sends_the_data_with_the_headers_of_the_format() {
-        let report_id = Uuid::new_v4();
-        let content = LatestContent {
-            report_id,
-            format: InstanceFormat::Csv,
+        let mut metadata = reported("arm", None, None);
+        metadata.format = InstanceFormat::Csv;
+        let report_id = metadata.report_id;
+        let report = Report {
+            metadata,
             data: "a,b\n".to_string(),
         };
 
-        let response = content.into_response();
+        let response = report.into_response();
 
         assert_eq!(response.status(), StatusCode::OK);
         let headers = response.headers();
@@ -584,14 +585,15 @@ pub mod latest_content_response {
 
     #[test]
     fn names_text_without_an_extension() {
-        let report_id = Uuid::new_v4();
-        let content = LatestContent {
-            report_id,
-            format: InstanceFormat::Text,
+        let mut metadata = reported("arm", None, None);
+        metadata.format = InstanceFormat::Text;
+        let report_id = metadata.report_id;
+        let report = Report {
+            metadata,
             data: String::new(),
         };
 
-        let response = content.into_response();
+        let response = report.into_response();
 
         let disposition = format!("inline; filename=\"{report_id}\"");
         assert_eq!(response.headers()[header::CONTENT_DISPOSITION], disposition);

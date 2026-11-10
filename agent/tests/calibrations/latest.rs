@@ -5,7 +5,7 @@
 use crate::test_utils::calibrations::{latest_cals_layout, latest_store, reported};
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::calibrations::{
-    latest, CalibrationsErr, Filter, LatestContent, LatestStore, ReportMetadata,
+    latest, CalibrationsErr, Filter, LatestStore, Report, ReportMetadata,
 };
 use miru_agent::disk::layout::LatestCalsLayout;
 use miru_agent::filesys::{dirs, files, File, PathExt, WriteOptions};
@@ -347,9 +347,8 @@ async fn content_returns_the_data_and_its_format() {
 
     let content = f.store.content(arm.report_id).await.unwrap();
 
-    let expected = LatestContent {
-        report_id: arm.report_id,
-        format: InstanceFormat::Yaml,
+    let expected = Report {
+        metadata: arm,
         data: DATA.to_string(),
     };
     assert_eq!(content, expected);

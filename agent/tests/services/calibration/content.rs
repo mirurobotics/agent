@@ -2,7 +2,7 @@
 
 // internal crates
 use crate::services::calibration::helpers::{params, Fixture};
-use miru_agent::calibrations::{CalibrationsErr, LatestContent};
+use miru_agent::calibrations::CalibrationsErr;
 use miru_agent::models::InstanceFormat;
 use miru_agent::services::calibration;
 use miru_agent::services::ServiceErr;
@@ -18,12 +18,10 @@ async fn get_content_returns_the_reported_data() {
 
     let content = calibration::get_content(&f.latest, &report_id).await;
 
-    let want = LatestContent {
-        report_id: created.report_id,
-        format: InstanceFormat::Yaml,
-        data: params().data,
-    };
-    assert_eq!(content.unwrap(), want);
+    let report = content.unwrap();
+    assert_eq!(report.metadata.report_id, created.report_id);
+    assert_eq!(report.metadata.format, InstanceFormat::Yaml);
+    assert_eq!(report.data, params().data);
 }
 
 #[tokio::test]
