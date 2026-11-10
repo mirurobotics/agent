@@ -558,9 +558,9 @@ pub mod latest_content_response {
     use crate::test_utils::calibrations::reported;
     use axum::body;
     use axum::http::{header, StatusCode};
-    use axum::response::IntoResponse;
     use miru_agent::calibrations::Report;
     use miru_agent::models::InstanceFormat;
+    use miru_agent::server::response::calibration_content;
 
     #[tokio::test]
     async fn sends_the_data_with_the_headers_of_the_format() {
@@ -572,7 +572,7 @@ pub mod latest_content_response {
             data: "a,b\n".to_string(),
         };
 
-        let response = report.into_response();
+        let response = calibration_content(report);
 
         assert_eq!(response.status(), StatusCode::OK);
         let headers = response.headers();
@@ -593,7 +593,7 @@ pub mod latest_content_response {
             data: String::new(),
         };
 
-        let response = report.into_response();
+        let response = calibration_content(report);
 
         let disposition = format!("inline; filename=\"{report_id}\"");
         assert_eq!(response.headers()[header::CONTENT_DISPOSITION], disposition);

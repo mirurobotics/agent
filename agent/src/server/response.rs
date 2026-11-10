@@ -162,23 +162,22 @@ impl From<&calibration::LatestCalibrations> for device_server::LatestCalibration
     }
 }
 
-/// The report's data as its content, with the `Content-Type` of its format and
-/// an inline `Content-Disposition` that names the file the way Miru does.
-impl IntoResponse for Report {
-    fn into_response(self) -> Response {
-        let metadata = self.metadata;
-        let filename = match metadata.format.file_ext() {
-            Some(ext) => format!("{}.{ext}", metadata.report_id),
-            None => metadata.report_id.to_string(),
-        };
-        let disposition = format!("inline; filename=\"{filename}\"");
-        let headers = [
-            (
-                header::CONTENT_TYPE,
-                metadata.format.media_type().to_string(),
-            ),
-            (header::CONTENT_DISPOSITION, disposition),
-        ];
-        (StatusCode::OK, headers, self.data).into_response()
-    }
+/// The calibration content route's response: the report's data, with the
+/// `Content-Type` of its format and an inline `Content-Disposition` that names
+/// the file the way Miru does.
+pub fn calibration_content(report: Report) -> Response {
+    let metadata = report.metadata;
+    let filename = match metadata.format.file_ext() {
+        Some(ext) => format!("{}.{ext}", metadata.report_id),
+        None => metadata.report_id.to_string(),
+    };
+    let disposition = format!("inline; filename=\"{filename}\"");
+    let headers = [
+        (
+            header::CONTENT_TYPE,
+            metadata.format.media_type().to_string(),
+        ),
+        (header::CONTENT_DISPOSITION, disposition),
+    ];
+    (StatusCode::OK, headers, report.data).into_response()
 }

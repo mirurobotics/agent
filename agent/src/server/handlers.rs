@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 // internal crates
 use crate::errors::Error;
-use crate::server::{errors::*, request, routes, state::State};
+use crate::server::{errors::*, request, response, routes, state::State};
 use crate::services::{
     calibration as calibration_svc, deployment as dpl_svc, device as dvc_svc,
     file_rule as file_rule_svc, git_commit as git_cmt_svc, release as rls_svc, HttpBackend,
@@ -221,7 +221,7 @@ pub async fn get_calibration_content(
     Path(report_id): Path<String>,
 ) -> Response {
     match calibration_svc::get_content(&state.latest_cals, &report_id).await {
-        Ok(report) => report.into_response(),
+        Ok(report) => response::calibration_content(report),
         Err(e) => error_response(e.into(), "Error getting calibration content").into_response(),
     }
 }
