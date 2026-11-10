@@ -1,23 +1,13 @@
 // standard crates
 use std::sync::Arc;
-use std::time::Duration;
 
 // internal crates
-use crate::cooldown;
 use crate::filesys::{errors::*, file::File, files, Atomic, Overwrite, WriteOptions};
 use crate::models::Patch;
 
 // external crates
 use serde::{de::DeserializeOwned, Serialize};
 use tracing::error;
-
-/// Waits between retries of a state file read that failed for a reason other
-/// than "missing" or "unparseable" (e.g. a transient EIO).
-const READ_RETRY_DELAYS: [Duration; 3] = [
-    Duration::from_millis(50),
-    Duration::from_millis(250),
-    Duration::from_millis(1000),
-];
 
 /// Single-threaded state file: a JSON file plus its cached contents.
 /// [`crate::filesys::shared_state_file::SharedStateFile`] wraps it in an actor
@@ -38,14 +28,15 @@ where
 {
     pub async fn new(file: File) -> Result<Self, FileSysErr> {
         let state = files::read_json::<ContentT>(&file).await?;
+        Ok(Self::from_state(file, state))
+    }
 
-        // initialize the struct with the read data
-        let state_file = Self {
+    fn from_state(file: File, state: ContentT) -> Self {
+        Self {
             file,
             state: Arc::new(state),
             _phantom: std::marker::PhantomData,
-        };
-        Ok(state_file)
+        }
     }
 
     /// Opens `file`:
@@ -53,7 +44,7 @@ where
     /// - **Missing:** created with `default`.
     /// - **Unparseable:** copied aside to `<name>.corrupt-<uuid>` (best
     ///   effort), then atomically replaced with `default`.
-    /// - **Other read error:** retried per [`READ_RETRY_DELAYS`], then returned
+    /// - **Other read error:** retried per [`files::read_json_with_retry`], then returned
     ///   with the file left untouched.
     pub async fn new_with_default(file: File, default: ContentT) -> Result<Self, FileSysErr>
     where
@@ -81,22 +72,10 @@ where
         }
     }
 
-    /// [`Self::new`], retrying errors other than "missing" and "unparseable"
-    /// after each of [`READ_RETRY_DELAYS`].
+    /// [`Self::new`], reading with [`files::read_json_with_retry`].
     async fn new_with_retry(file: &File) -> Result<Self, FileSysErr> {
-        let retryable = |err: &FileSysErr| {
-            !matches!(
-                err,
-                FileSysErr::PathDoesNotExistErr(_) | FileSysErr::ParseJSONErr(_)
-            )
-        };
-        cooldown::retry(
-            |n| READ_RETRY_DELAYS.get(n as usize).copied(),
-            retryable,
-            tokio::time::sleep,
-            || Self::new(file.clone()),
-        )
-        .await
+        let state = files::read_json_with_retry::<ContentT>(file).await?;
+        Ok(Self::from_state(file.clone(), state))
     }
 
     /// Copies `file` to a uniquely named `.corrupt-<uuid>` sibling, keeping

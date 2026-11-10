@@ -5,11 +5,11 @@ use std::time::Duration;
 // internal crates
 use crate::mocks::{calibration_sender::MockCalibrationSender, http_client::MockClient};
 use crate::test_utils::{
-    calibrations::cal_mngr,
+    calibrations::{cal_uploader, latest_store},
     filesys::dirs as test_dirs,
     sync::{create_storage, create_token_manager},
 };
-use miru_agent::calibrations::UploaderOptions;
+use miru_agent::calibrations::{latest, UploaderOptions};
 use miru_agent::events::hub::{EventHub, SpawnOptions};
 use miru_agent::events::model::EventArgs;
 use miru_agent::server::{routes, State};
@@ -50,21 +50,26 @@ impl Fixture {
         let log_file = dir.file("events.jsonl");
         let (event_hub, _handle) = EventHub::spawn(log_file, opts).await.unwrap();
 
+        let latest_cals = latest_store(&dir, latest::DEFAULT_CAPACITY).await;
+        let cal_uploader = cal_uploader(
+            &dir,
+            MockCalibrationSender::new().0,
+            UploaderOptions::default(),
+            latest_cals.clone(),
+        );
+
         let (shutdown_tx, _) = broadcast::channel::<()>(1);
 
-        let state = Arc::new(State::new(
+        let state = Arc::new(State {
             storage,
-            real_http_client,
+            http_client: real_http_client,
             syncer,
-            Arc::new(token_mngr),
+            token_mngr: Arc::new(token_mngr),
             event_hub,
-            Arc::new(cal_mngr(
-                &dir,
-                MockCalibrationSender::new().0,
-                UploaderOptions::default(),
-            )),
-            shutdown_tx.clone(),
-        ));
+            cal_uploader: Arc::new(cal_uploader),
+            latest_cals,
+            shutdown_tx: shutdown_tx.clone(),
+        });
 
         let app = routes::router(state.clone());
 

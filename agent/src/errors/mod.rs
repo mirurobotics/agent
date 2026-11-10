@@ -14,6 +14,7 @@ pub enum Code {
     InvalidRequest,
     CalibrationBufferFull,
     CalibrationTooLarge,
+    CalibrationStoreFull,
     BackendError(String),
 }
 
@@ -27,6 +28,7 @@ impl Code {
             Self::InvalidRequest => "invalid_request",
             Self::CalibrationBufferFull => "calibration_buffer_full",
             Self::CalibrationTooLarge => "calibration_too_large",
+            Self::CalibrationStoreFull => "calibration_store_full",
             Self::BackendError(code) => code,
         }
     }

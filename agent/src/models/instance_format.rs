@@ -52,4 +52,29 @@ impl InstanceFormat {
             agent_server::InstanceFormat::InstanceFormatUnknown => None,
         }
     }
+
+    /// The media type served for content in this format, the same types Miru's
+    /// content downloads send.
+    pub fn media_type(&self) -> &'static str {
+        match self {
+            Self::Json => "application/json",
+            Self::Yaml => "application/yaml",
+            Self::Jsonc => "application/jsonc",
+            Self::Xml => "application/xml",
+            Self::Csv => "text/csv",
+            Self::Text => "application/octet-stream",
+        }
+    }
+
+    /// The extension Miru gives a file in this format; text has none.
+    pub fn file_ext(&self) -> Option<&'static str> {
+        match self {
+            Self::Json => Some("json"),
+            Self::Yaml => Some("yaml"),
+            Self::Jsonc => Some("jsonc"),
+            Self::Xml => Some("xml"),
+            Self::Csv => Some("csv"),
+            Self::Text => None,
+        }
+    }
 }

@@ -41,7 +41,7 @@ impl<'a> Storage<'a> {
         apply::Storage {
             deployments: self.deployments,
             cfg_insts: disk::CfgInstRef {
-                meta: self.cfg_insts.meta,
+                index: self.cfg_insts.index,
                 content: self.cfg_insts.content,
             },
             releases: self.releases,
@@ -117,7 +117,7 @@ async fn pull_deployments<'a, HTTPClientT: http::ClientI>(
             let cfg_inst_id = cfg_inst.id.clone();
             storage
                 .cfg_insts
-                .meta
+                .index
                 .write_if_absent(cfg_inst_id, cfg_inst, |_, _| false)
                 .await?;
         }

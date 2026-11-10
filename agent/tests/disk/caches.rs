@@ -143,10 +143,10 @@ pub mod init {
             .await
             .unwrap();
 
-        // pre-close the cfg_insts meta store
-        storage.cfg_insts.meta.shutdown().await.unwrap();
+        // pre-close the cfg_insts index store
+        storage.cfg_insts.index.shutdown().await.unwrap();
 
-        // shutdown fails when it reaches the already-closed cfg_insts.meta
+        // shutdown fails when it reaches the already-closed cfg_insts.index
         storage.shutdown().await.unwrap_err();
     }
 
@@ -213,7 +213,7 @@ pub mod shutdown {
                 .unwrap();
 
         // pre-close an early store so the shutdown sequence hits a dead worker
-        storage.cfg_insts.meta.shutdown().await.unwrap();
+        storage.cfg_insts.index.shutdown().await.unwrap();
 
         // shutdown reports the failure...
         let err = storage.shutdown().await.unwrap_err();

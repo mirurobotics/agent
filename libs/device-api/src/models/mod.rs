@@ -8,8 +8,6 @@ pub mod cal_search;
 pub use self::cal_search::CalSearch;
 pub mod calibration;
 pub use self::calibration::Calibration;
-pub mod calibration_upload_status;
-pub use self::calibration_upload_status::CalibrationUploadStatus;
 pub mod create_calibration_request;
 pub use self::create_calibration_request::CreateCalibrationRequest;
 pub mod create_calibration_response;

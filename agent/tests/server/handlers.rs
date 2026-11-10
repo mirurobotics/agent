@@ -54,13 +54,13 @@ pub mod routes {
     use std::sync::Arc;
 
     use axum::body::{self, Body};
-    use axum::http::{Request, StatusCode};
+    use axum::http::{header, HeaderMap, Request, StatusCode};
     use axum::routing::get;
     use axum::Router;
     use tower::ServiceExt;
 
     use device_api::models as openapi;
-    use miru_agent::calibrations::UploaderOptions;
+    use miru_agent::calibrations::{latest, UploaderOptions};
     use miru_agent::events::hub::{EventHub, SpawnOptions};
     use miru_agent::filesys::Overwrite;
     use miru_agent::models::{
@@ -72,7 +72,7 @@ pub mod routes {
 
     use crate::mocks::calibration_sender::MockCalibrationSender;
     use crate::mocks::http_client::{self as mock, MockClient};
-    use crate::test_utils::calibrations::cal_mngr;
+    use crate::test_utils::calibrations::{cal_uploader, latest_store};
     use crate::test_utils::filesys::dirs as test_dirs;
     use crate::test_utils::sync::{create_storage, create_token_manager};
 
@@ -93,10 +93,15 @@ pub mod routes {
 
     impl Fixture {
         async fn new(name: &str) -> Self {
-            Self::with_calibration_options(name, UploaderOptions::default()).await
+            let options = UploaderOptions::default();
+            Self::with_calibration_options(name, options, latest::DEFAULT_CAPACITY).await
         }
 
-        async fn with_calibration_options(name: &str, options: UploaderOptions) -> Self {
+        async fn with_calibration_options(
+            name: &str,
+            options: UploaderOptions,
+            latest_capacity: usize,
+        ) -> Self {
             let dir = test_dirs::temp(name).unwrap();
             let storage = Arc::new(create_storage(dir.dir()).await);
             let http_client = Arc::new(MockClient::default());
@@ -121,18 +126,25 @@ pub mod routes {
                 .await
                 .unwrap();
 
-            let cal_mngr = cal_mngr(&dir, MockCalibrationSender::new().0, options);
+            let latest_cals = latest_store(&dir, latest_capacity).await;
+            let cal_uploader = cal_uploader(
+                &dir,
+                MockCalibrationSender::new().0,
+                options,
+                latest_cals.clone(),
+            );
 
             let (shutdown_tx, _) = broadcast::channel::<()>(1);
-            let state = Arc::new(State::new(
+            let state = Arc::new(State {
                 storage,
-                real_http_client,
+                http_client: real_http_client,
                 syncer,
-                Arc::new(token_mngr),
+                token_mngr: Arc::new(token_mngr),
                 event_hub,
-                Arc::new(cal_mngr),
+                cal_uploader: Arc::new(cal_uploader),
+                latest_cals,
                 shutdown_tx,
-            ));
+            });
 
             let app = routes::router(state.clone());
 
@@ -145,6 +157,11 @@ pub mod routes {
         }
 
         async fn get(&self, uri: &str) -> (StatusCode, Vec<u8>) {
+            let (status, _, bytes) = self.get_with_headers(uri).await;
+            (status, bytes)
+        }
+
+        async fn get_with_headers(&self, uri: &str) -> (StatusCode, HeaderMap, Vec<u8>) {
             let response = self
                 .app
                 .clone()
@@ -152,8 +169,9 @@ pub mod routes {
                 .await
                 .unwrap();
             let status = response.status();
+            let headers = response.headers().clone();
             let bytes = body::to_bytes(response.into_body(), 16384).await.unwrap();
-            (status, bytes.to_vec())
+            (status, headers, bytes.to_vec())
         }
 
         async fn post(&self, uri: &str) -> (StatusCode, Vec<u8>) {
@@ -587,6 +605,13 @@ pub mod routes {
             actual.error.code
         }
 
+        /// Report a calibration as [`request`] builds it.
+        async fn report(f: &Fixture) -> openapi::CreateCalibrationResponse {
+            let (status, bytes) = f.post_json(URI, request("yaml", "offset: 1\n")).await;
+            assert_eq!(status, StatusCode::OK);
+            serde_json::from_slice(&bytes).unwrap()
+        }
+
         #[tokio::test]
         async fn create_calibration_returns_200_with_report_id_and_reported_at() {
             let f = Fixture::new("handler_create_calibration").await;
@@ -658,16 +683,97 @@ pub mod routes {
         }
 
         #[tokio::test]
+        async fn create_calibration_returns_422_for_a_null_role() {
+            let f = Fixture::new("handler_create_calibration_null_role").await;
+            let body = json!({
+                "component": "arm",
+                "role": "null",
+                "content": { "format": "json", "data": "{}" },
+            });
+
+            let (status, bytes) = f.post_json(URI, body.to_string()).await;
+            assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+            assert_eq!(error_code(&bytes), "invalid_request");
+        }
+
+        #[tokio::test]
         async fn create_calibration_returns_507_when_the_buffer_is_full() {
             let options = UploaderOptions {
                 capacity: 0,
                 ..UploaderOptions::default()
             };
-            let f = Fixture::with_calibration_options("handler_calibration_full", options).await;
+            let name = "handler_calibration_full";
+            let capacity = latest::DEFAULT_CAPACITY;
+            let f = Fixture::with_calibration_options(name, options, capacity).await;
 
             let (status, bytes) = f.post_json(URI, request("json", "{}")).await;
             assert_eq!(status, StatusCode::INSUFFICIENT_STORAGE);
             assert_eq!(error_code(&bytes), "calibration_buffer_full");
+        }
+
+        #[tokio::test]
+        async fn create_calibration_returns_507_when_the_store_is_full() {
+            let options = UploaderOptions::default();
+            let f = Fixture::with_calibration_options("handler_store_full", options, 0).await;
+
+            let (status, bytes) = f.post_json(URI, request("json", "{}")).await;
+            assert_eq!(status, StatusCode::INSUFFICIENT_STORAGE);
+            assert_eq!(error_code(&bytes), "calibration_store_full");
+        }
+
+        #[tokio::test]
+        async fn list_latest_calibrations_returns_200_with_the_calibrations_it_matches() {
+            let f = Fixture::new("handler_list_latest_calibrations").await;
+            let created = report(&f).await;
+            let right = json!({
+                "component": "arm",
+                "role": "right",
+                "content": { "format": "yaml", "data": "offset: 2\n" },
+            });
+            let (status, _) = f.post_json(URI, right.to_string()).await;
+            assert_eq!(status, StatusCode::OK);
+
+            let uri = "/v0.2/calibrations/latest?component=arm,leg&role=left";
+            let (status, bytes) = f.get(uri).await;
+            assert_eq!(status, StatusCode::OK);
+
+            let actual: openapi::LatestCalibrationsResponse =
+                serde_json::from_slice(&bytes).unwrap();
+            let ids: Vec<_> = actual.calibrations.iter().map(|c| c.report_id).collect();
+            assert_eq!(ids, [created.report_id]);
+        }
+
+        #[tokio::test]
+        async fn list_latest_calibrations_returns_422_for_a_repeated_filter() {
+            let f = Fixture::new("handler_list_latest_calibrations_repeated").await;
+
+            let (status, bytes) = f.get("/v0.2/calibrations/latest?role=a&role=b").await;
+            assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+            assert_eq!(error_code(&bytes), "invalid_request");
+        }
+
+        #[tokio::test]
+        async fn get_latest_calibration_content_returns_200_with_the_bytes_and_headers() {
+            let f = Fixture::new("handler_get_latest_calibration_content").await;
+            let created = report(&f).await;
+            let uri = format!("{URI}/latest/{}/content", created.report_id);
+
+            let (status, headers, bytes) = f.get_with_headers(&uri).await;
+            assert_eq!(status, StatusCode::OK);
+            assert_eq!(headers[header::CONTENT_TYPE], "application/yaml");
+            let disposition = format!("inline; filename=\"{}.yaml\"", created.report_id);
+            assert_eq!(headers[header::CONTENT_DISPOSITION], disposition);
+            assert_eq!(bytes, b"offset: 1\n");
+        }
+
+        #[tokio::test]
+        async fn get_latest_calibration_content_returns_404_for_a_non_uuid_report_id() {
+            let f = Fixture::new("handler_get_latest_calibration_content_404").await;
+
+            let uri = "/v0.2/calibrations/latest/not-a-report/content";
+            let (status, bytes) = f.get(uri).await;
+            assert_eq!(status, StatusCode::NOT_FOUND);
+            assert_eq!(error_code(&bytes), "resource_not_found");
         }
     }
 }

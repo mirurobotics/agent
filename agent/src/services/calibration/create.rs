@@ -1,5 +1,5 @@
 // internal crates
-use crate::calibrations::{CalibrationManager, Report, ReportMetadata};
+use crate::calibrations::{Report, ReportMetadata, Uploader};
 use crate::disk;
 use crate::models::InstanceFormat;
 use crate::services::errors::ServiceErr;
@@ -31,11 +31,11 @@ pub struct Created {
 }
 
 /// Accept a calibration: stamp it with `now` and the deployed deployment, if
-/// any, and hand it to the calibration manager to queue. Nothing here waits on
+/// any, and hand it to the calibration uploader to queue. Nothing here waits on
 /// Miru. A deployments-cache error fails the call rather than dropping the
 /// deployment.
 pub async fn create(
-    cal_mngr: &CalibrationManager,
+    cal_uploader: &Uploader,
     deployments: &disk::Deployments,
     params: CreateParams,
     now: DateTime<Utc>,
@@ -58,7 +58,7 @@ pub async fn create(
         },
         data: params.data,
     };
-    cal_mngr.report(report).await?;
+    cal_uploader.report(report).await?;
     Ok(Created {
         report_id,
         reported_at: now,

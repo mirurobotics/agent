@@ -17,7 +17,7 @@ use tokio::time::Duration;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct Params<'a> {
     pub method: reqwest::Method,
     pub url: &'a str,
@@ -25,6 +25,28 @@ pub struct Params<'a> {
     pub body: Option<String>,
     pub timeout: Duration,
     pub token: Option<&'a str>,
+}
+
+impl fmt::Debug for Params<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Destructure so a new field fails to compile until it is listed here.
+        let Params {
+            method,
+            url,
+            query,
+            body,
+            timeout,
+            token,
+        } = self;
+        f.debug_struct("Params")
+            .field("method", method)
+            .field("url", url)
+            .field("query", query)
+            .field("body", body)
+            .field("timeout", timeout)
+            .field("token", &token.map(|_| "[REDACTED]"))
+            .finish()
+    }
 }
 
 impl<'a> Params<'a> {
@@ -234,15 +256,14 @@ pub fn build(
 }
 
 fn add_token_to_headers(headers: &mut HeaderMap, token: &str) -> Result<(), HTTPErr> {
-    headers.insert(
-        AUTHORIZATION,
-        HeaderValue::from_str(&format!("Bearer {token}")).map_err(|e| {
-            HTTPErr::InvalidHeaderValueErr(InvalidHeaderValueErr {
-                msg: e.to_string(),
-                source: e,
-                trace: trace!(),
-            })
-        })?,
-    );
+    let mut value = HeaderValue::from_str(&format!("Bearer {token}")).map_err(|e| {
+        HTTPErr::InvalidHeaderValueErr(InvalidHeaderValueErr {
+            msg: e.to_string(),
+            source: e,
+            trace: trace!(),
+        })
+    })?;
+    value.set_sensitive(true);
+    headers.insert(AUTHORIZATION, value);
     Ok(())
 }
