@@ -142,7 +142,7 @@ pub mod reprovision_fn {
     }
 
     #[tokio::test]
-    async fn a_failed_pull_wipes_the_calibrations_and_returns_calibrations_err() {
+    async fn a_failed_pull_wipes_the_calibrations_and_still_reprovisions() {
         let env = Env::new("reprovision-test").await;
         env.seed_provision("initial").await;
         seed_calibrations(&env.layout).await;
@@ -153,9 +153,11 @@ pub mod reprovision_fn {
             }))
         });
 
-        let result = reprovision::reprovision(&mock, &env.layout, &env.settings, &env.token).await;
+        let device = reprovision::reprovision(&mock, &env.layout, &env.settings, &env.token)
+            .await
+            .unwrap();
 
-        assert!(matches!(result, Err(ProvisionErr::CalibrationsErr(_))));
+        assert_eq!(device.name, "after-reprovision");
         assert!(latest_entries(&env.layout).await.is_empty());
         assert_queue_deleted(&env.layout);
         validate_storage(&env.layout, "after-reprovision").await;
@@ -164,7 +166,7 @@ pub mod reprovision_fn {
     }
 
     #[tokio::test]
-    async fn a_failed_token_wipes_the_calibrations() {
+    async fn a_failed_token_wipes_the_calibrations_and_still_reprovisions() {
         let env = Env::new("reprovision-test").await;
         env.seed_provision("initial").await;
         seed_calibrations(&env.layout).await;
@@ -174,11 +176,14 @@ pub mod reprovision_fn {
             ..mock_ok_reprovision("after-reprovision")
         };
 
-        let result = reprovision::reprovision(&mock, &env.layout, &env.settings, &env.token).await;
+        reprovision::reprovision(&mock, &env.layout, &env.settings, &env.token)
+            .await
+            .unwrap();
 
-        assert!(matches!(result, Err(ProvisionErr::AuthnErr(_))));
+        assert_eq!(mock.call_count(mock::Call::ListLatestCalibrations), 0);
         assert!(latest_entries(&env.layout).await.is_empty());
         assert_queue_deleted(&env.layout);
+        validate_storage(&env.layout, "after-reprovision").await;
         assert_temp_dir_cleaned(&env.layout).await;
 
         env.cleanup().await;

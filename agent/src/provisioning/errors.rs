@@ -1,6 +1,5 @@
 // internal crates
 use crate::authn;
-use crate::calibrations;
 use crate::crypt;
 use crate::disk::DiskErr;
 use crate::errors::Trace;
@@ -36,8 +35,6 @@ pub enum ProvisionErr {
     AlreadyProvisionedErr(AlreadyProvisionedErr),
     #[error(transparent)]
     AuthnErr(authn::AuthnErr),
-    #[error("failed to pull the latest calibrations: {0}")]
-    CalibrationsErr(calibrations::CalibrationsErr),
     #[error(transparent)]
     CryptErr(crypt::CryptErr),
     #[error(transparent)]
@@ -53,12 +50,6 @@ pub enum ProvisionErr {
 impl From<authn::AuthnErr> for ProvisionErr {
     fn from(e: authn::AuthnErr) -> Self {
         Self::AuthnErr(e)
-    }
-}
-
-impl From<calibrations::CalibrationsErr> for ProvisionErr {
-    fn from(e: calibrations::CalibrationsErr) -> Self {
-        Self::CalibrationsErr(e)
     }
 }
 
@@ -96,7 +87,6 @@ crate::impl_error!(ProvisionErr {
     MissingEnvVarErr,
     AlreadyProvisionedErr,
     AuthnErr,
-    CalibrationsErr,
     CryptErr,
     FileSysErr,
     HTTPErr,
@@ -121,18 +111,6 @@ mod tests {
             );
             let install_err = ProvisionErr::from(err);
             assert!(matches!(install_err, ProvisionErr::AuthnErr(_)));
-        }
-
-        #[test]
-        fn from_calibrations_err() {
-            let err = calibrations::CalibrationsErr::StoreFullErr(
-                calibrations::errors::CalibrationStoreFullErr {
-                    capacity: 1,
-                    trace: crate::trace!(),
-                },
-            );
-            let install_err = ProvisionErr::from(err);
-            assert!(matches!(install_err, ProvisionErr::CalibrationsErr(_)));
         }
 
         #[test]

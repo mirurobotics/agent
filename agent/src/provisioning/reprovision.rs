@@ -46,7 +46,10 @@ pub async fn reprovision<HTTPClientT: http::ClientI>(
             version::VERSION,
         )
         .await?;
-        pull_calibrations(http_client, layout).await?;
+        // drop the old device's calibrations, upload queue included, before
+        // the pull, which may fail
+        dirs::delete(&layout.calibrations().root).await?;
+        pull_calibrations(http_client, layout).await;
         Ok(device)
     }
     .await;
@@ -55,22 +58,27 @@ pub async fn reprovision<HTTPClientT: http::ClientI>(
     result
 }
 
-/// Replace the device's calibrations, upload queue included, with the control
-/// plane's latest. Runs after `bootstrap`, so the old device's calibrations are
-/// gone even if the pull fails, and the token comes from the installed keys.
+/// Pull the control plane's latest calibrations into the emptied store, best
+/// effort: a failure is logged and leaves the store empty or partial. The
+/// token comes from the keys `bootstrap` installed.
 async fn pull_calibrations<HTTPClientT: http::ClientI>(
     http_client: &HTTPClientT,
     layout: &disk::Layout,
-) -> Result<(), ProvisionErr> {
-    let cals = layout.calibrations();
-    dirs::delete(&cals.root).await?;
+) {
     let auth = layout.auth();
     let device_token =
-        authn::issue_token(http_client, &auth.private_key(), &auth.public_key()).await?;
+        match authn::issue_token(http_client, &auth.private_key(), &auth.public_key()).await {
+            Ok(device_token) => device_token,
+            Err(e) => {
+                warn!("reprovision: unable to get a token to pull the latest calibrations: {e}");
+                return;
+            }
+        };
     // each command returns once done, so the worker exits idle when dropped
-    let (store, _) = LatestStore::spawn(64, cals.latest(), DEFAULT_CAPACITY);
-    calibrations::pull_latest(&store, http_client, &device_token.token).await?;
-    Ok(())
+    let (store, _) = LatestStore::spawn(64, layout.calibrations().latest(), DEFAULT_CAPACITY);
+    if let Err(e) = calibrations::pull_latest(&store, http_client, &device_token.token).await {
+        warn!("reprovision: unable to pull the latest calibrations: {e}");
+    }
 }
 
 async fn reprovision_with_backend<HTTPClientT: http::ClientI>(
