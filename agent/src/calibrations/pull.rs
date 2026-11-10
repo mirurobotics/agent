@@ -32,6 +32,22 @@ pub async fn pull_latest<HTTPClientT: http::ClientI>(
     Ok(())
 }
 
+async fn list_latest<HTTPClientT: http::ClientI>(
+    http_client: &HTTPClientT,
+    token: &str,
+) -> Result<Vec<Calibration>, HTTPErr> {
+    http::with_retry(|| {
+        http::calibrations::list_all_latest(
+            http_client,
+            ListAllLatestParams {
+                expansions: &["reported_by"],
+                token,
+            },
+        )
+    })
+    .await
+}
+
 /// Put `calibration` into `store` unless `stored` has its key as new or newer.
 /// Returns whether it was put.
 async fn pull_one<HTTPClientT: http::ClientI>(
@@ -51,22 +67,6 @@ async fn pull_one<HTTPClientT: http::ClientI>(
     }
     let data = download(http_client, &id, token).await?;
     store.put_if_newer(metadata, &data).await
-}
-
-async fn list_latest<HTTPClientT: http::ClientI>(
-    http_client: &HTTPClientT,
-    token: &str,
-) -> Result<Vec<Calibration>, HTTPErr> {
-    http::with_retry(|| {
-        http::calibrations::list_all_latest(
-            http_client,
-            ListAllLatestParams {
-                expansions: &["reported_by"],
-                token,
-            },
-        )
-    })
-    .await
 }
 
 async fn download<HTTPClientT: http::ClientI>(
