@@ -65,8 +65,7 @@ pub fn layout(dir: &TempDir) -> CalibrationsLayout {
 
 /// The latest calibrations layout under `dir`.
 pub fn latest_cals_layout(dir: &TempDir) -> LatestCalsLayout {
-    let resources = dir.to_dir().subdir("resources");
-    LatestCalsLayout::new(resources.subdir("latest_calibrations"))
+    layout(dir).latest()
 }
 
 /// A latest store under `dir` holding at most `capacity` keys, once its worker

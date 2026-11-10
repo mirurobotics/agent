@@ -417,6 +417,22 @@ pub mod reset {
     }
 
     #[tokio::test]
+    async fn keeps_latest_calibrations() {
+        let dir = test_dirs::temp("testing").unwrap();
+        let layout = Layout::new(dir.to_dir());
+        write_existing_keys(&layout).await;
+
+        let index = layout.calibrations().latest().index();
+        test_files::seed(&index, "[]").await;
+
+        disk::setup::reset(&layout, &Device::default(), &Settings::default(), "v1.0.0")
+            .await
+            .unwrap();
+
+        assert_eq!(files::read_string(&index).await.unwrap(), "[]");
+    }
+
+    #[tokio::test]
     async fn wipes_events_subtree() {
         let dir = test_dirs::temp("testing").unwrap();
         let layout = Layout::new(dir.to_dir());
