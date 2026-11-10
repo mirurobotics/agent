@@ -1,5 +1,4 @@
 // internal crates
-pub use crate::calibrations::latest_impl::DEFAULT_CAPACITY;
 use crate::calibrations::{
     errors::{CalibrationsErr, ReceiveActorMessageErr, SendActorMessageErr},
     latest_impl::{Filter, LatestStoreImpl},
@@ -13,6 +12,9 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{error, info};
 use uuid::Uuid;
+
+/// The most keys the store holds in the agent.
+pub const DEFAULT_CAPACITY: usize = 1000;
 
 // ================================== WORKER ======================================= //
 enum Command {

@@ -14,9 +14,6 @@ use crate::trace;
 use tracing::{error, warn};
 use uuid::Uuid;
 
-/// The most keys the store holds in the agent.
-pub const DEFAULT_CAPACITY: usize = 1000;
-
 /// The entries, one per key, as `index.json` holds them.
 type Index = Vec<ReportMetadata>;
 
