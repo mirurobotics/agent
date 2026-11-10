@@ -74,7 +74,9 @@ No new test files: actor tests go in the existing `agent/tests/calibrations/late
 
 ## Decision Log
 
-(Add entries as work proceeds.)
+- 2026-11-10: The three open questions take their defaults (open keeps its signature and detaches the worker; an unreadable index fails each call until a read succeeds; `Filter` and `DEFAULT_CAPACITY` live in `latest_impl.rs`). The design review may revisit the first.
+- 2026-11-10: Coverage gates are never lowered; uncovered actor plumbing gets tests instead.
+- 2026-11-10: The branch is stacked on the rename PR (agent#446) instead of waiting for it to merge, and is retargeted to `main` once #446 merges.
 
 ## Outcomes & Retrospective
 
@@ -231,7 +233,7 @@ Acceptance, as behavior:
 - `put_fails_and_keeps_the_entries_when_the_index_cannot_be_written`: a failed put leaves the in-memory entries matching disk.
 - `commands_after_shutdown_fail` and `latest_cals_shutdown_error_does_not_abort_teardown`: the worker stops on `shutdown`, and `AppState` shuts it down after the calibration uploader without aborting teardown on its error.
 
-If `covgate` fails for `calibrations`, read the uncovered lines from the CI log. Cover reachable ones with a test. If only the actor plumbing that no test can reach is left (a `dispatch!` reply to a caller that already left, a dropped `respond_to`), which `deleter.rs` also leaves uncovered, lower `agent/src/calibrations/.covgate` to the measured value and record why in the Decision Log and the PR body.
+If `covgate` fails for `calibrations`, read the uncovered lines from the CI log and cover them with tests, including the actor plumbing (a caller that drops its reply receiver, a command after shutdown). Never lower `agent/src/calibrations/.covgate`.
 
 ## Idempotence and Recovery
 
