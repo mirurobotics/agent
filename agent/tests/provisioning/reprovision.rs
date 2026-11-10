@@ -44,6 +44,18 @@ fn assert_queue_deleted(layout: &Layout) {
 
 pub mod reprovision_fn {
     use super::*;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+
+    /// Set the mode of the device's calibration reports dir.
+    #[cfg(unix)]
+    async fn set_reports_mode(layout: &Layout, mode: u32) {
+        let reports = layout.calibrations().reports();
+        let permissions = std::fs::Permissions::from_mode(mode);
+        miru_agent::filesys::dirs::set_permissions(&reports, permissions)
+            .await
+            .unwrap();
+    }
 
     #[tokio::test]
     async fn success() {
@@ -137,6 +149,25 @@ pub mod reprovision_fn {
             .map(|r| r.token)
             .collect();
         assert_eq!(tokens, vec![Some("mock.jwt.token".to_string()); 2]);
+
+        env.cleanup().await;
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_failed_calibrations_delete_fails_reprovision() {
+        let env = Env::new("reprovision-test").await;
+        env.seed_provision("initial").await;
+        seed_calibrations(&env.layout).await;
+        // a queued report that can't be removed fails the delete
+        set_reports_mode(&env.layout, 0o555).await;
+        let mock = mock_ok_reprovision("after-reprovision");
+
+        let result = reprovision::reprovision(&mock, &env.layout, &env.settings, &env.token).await;
+
+        set_reports_mode(&env.layout, 0o755).await;
+        assert!(matches!(result, Err(ProvisionErr::FileSysErr(_))), "{result:?}");
+        assert_eq!(mock.call_count(mock::Call::ListLatestCalibrations), 0);
 
         env.cleanup().await;
     }
