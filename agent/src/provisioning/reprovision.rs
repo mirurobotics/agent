@@ -1,8 +1,10 @@
 // internal crates
+use crate::authn;
+use crate::calibrations::{self, latest::DEFAULT_CAPACITY};
 use crate::cli;
 use crate::crypt::rsa;
 use crate::disk::{self, settings};
-use crate::filesys::{self, files, Overwrite};
+use crate::filesys::{self, dirs, files, Overwrite};
 use crate::http;
 use crate::models;
 use crate::provisioning::{errors::*, shared};
@@ -44,12 +46,35 @@ pub async fn reprovision<HTTPClientT: http::ClientI>(
             version::VERSION,
         )
         .await?;
+        pull_calibrations(http_client, layout).await?;
         Ok(device)
     }
     .await;
 
     shared::cleanup_temp_files(&[&private_key_file, &public_key_file]).await;
     result
+}
+
+/// Replace the device's calibrations, upload queue included, with Miru's
+/// latest. Runs after `bootstrap`, so the old device's calibrations are gone
+/// even if the pull fails, and the token comes from the installed keys.
+async fn pull_calibrations<HTTPClientT: http::ClientI>(
+    http_client: &HTTPClientT,
+    layout: &disk::Layout,
+) -> Result<(), ProvisionErr> {
+    let cals = layout.calibrations();
+    dirs::delete(&cals.root).await?;
+    let auth = layout.auth();
+    let device_token =
+        authn::issue_token(http_client, &auth.private_key(), &auth.public_key()).await?;
+    calibrations::pull_latest(
+        http_client,
+        cals.latest(),
+        DEFAULT_CAPACITY,
+        &device_token.token,
+    )
+    .await?;
+    Ok(())
 }
 
 async fn reprovision_with_backend<HTTPClientT: http::ClientI>(

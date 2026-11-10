@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 // internal crates
 use super::filesys::dirs::TempDir;
+use backend_api::models as backend_client;
 use miru_agent::calibrations::{
     Filter, LatestStore, Report, ReportMetadata, Sender, Uploader, UploaderArgs, UploaderOptions,
 };
@@ -44,6 +45,19 @@ pub fn report(slug: &str) -> Report {
             reported_at: received_at(),
         },
         data: r#"{"offset":[1,2,3]}"#.to_string(),
+    }
+}
+
+/// Miru's latest calibration for the fixture report for `slug`; it converts to
+/// that report's metadata.
+pub fn miru_calibration(slug: &str) -> backend_client::Calibration {
+    backend_client::Calibration {
+        id: format!("cal_{slug}"),
+        report_id: report_id(slug),
+        component_slug: slug.to_string(),
+        format: backend_client::InstanceFormat::INSTANCE_FORMAT_JSON,
+        reported_at: received_at().to_rfc3339(),
+        ..backend_client::Calibration::default()
     }
 }
 

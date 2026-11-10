@@ -4,10 +4,12 @@ use crate::filesys::{files, Dir, File, FileSysErr};
 use crate::models::InstanceFormat;
 use crate::queue;
 use crate::trace;
+use backend_api::models as backend_client;
 
 // external crates
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use tracing::error;
 use uuid::Uuid;
 
 /// A calibration report: what intake hands the uploader and what the uploader
@@ -58,6 +60,28 @@ impl ReportMetadata {
             self.role.as_deref(),
             self.aspect.as_deref(),
         )
+    }
+}
+
+impl From<backend_client::Calibration> for ReportMetadata {
+    fn from(calibration: backend_client::Calibration) -> Self {
+        Self {
+            report_id: calibration.report_id,
+            component: calibration.component_slug,
+            format: (&calibration.format).into(),
+            role: calibration.role_slug,
+            aspect: calibration.aspect_slug,
+            serial_number: calibration.serial_number,
+            reported_by: calibration.reported_by.flatten().map(|u| u.identifier),
+            deployment_id: calibration.deployment_id,
+            reported_at: calibration
+                .reported_at
+                .parse::<DateTime<Utc>>()
+                .unwrap_or_else(|e| {
+                    error!("Error parsing reported_at: {e}");
+                    DateTime::<Utc>::UNIX_EPOCH
+                }),
+        }
     }
 }
 
