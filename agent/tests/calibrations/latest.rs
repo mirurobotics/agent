@@ -69,8 +69,8 @@ impl Fixture {
             .unwrap();
     }
 
-    /// Put a directory where `report_id`'s content file is, so it can be
-    /// neither read nor deleted.
+    /// Put a directory where `report_id`'s content file goes, so it can be
+    /// neither read, written nor deleted.
     async fn block_content(&self, report_id: Uuid) {
         let file = self.content_file(report_id);
         files::delete(&file).await.unwrap();
@@ -234,9 +234,7 @@ async fn put_fails_and_keeps_the_replaced_entry_when_the_content_cannot_be_writt
     let old = reported("arm", None, None);
     let new = newer(&old);
     put_all(&f.store, &[&old]).await;
-    // a directory where the new content file would go
-    let blocker = f.layout.contents().subdir(new.report_id.to_string());
-    dirs::create(&blocker).await.unwrap();
+    f.block_content(new.report_id).await;
 
     let err = f.store.put(new, DATA).await.unwrap_err();
 
