@@ -157,7 +157,9 @@ async fn invalid_app_state_initialization() {
     let layout = Layout::new(dir.to_dir());
     write_stale_discovery_file(&layout).await;
 
-    run_to_exit(options(&layout, lifecycle(), None)).await.unwrap_err();
+    run_to_exit(options(&layout, lifecycle(), None))
+        .await
+        .unwrap_err();
 
     // the stale file goes before the failing init step
     assert!(!layout.device_api().exists());
