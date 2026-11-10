@@ -235,7 +235,7 @@ async fn put_fails_and_keeps_the_replaced_entry_when_the_content_cannot_be_writt
     let new = newer(&old);
     put_all(&f.store, &[&old]).await;
     // a directory where the new content file would go
-    let blocker = f.layout.contents().subdir(&new.report_id.to_string());
+    let blocker = f.layout.contents().subdir(new.report_id.to_string());
     dirs::create(&blocker).await.unwrap();
 
     let err = f.store.put(new, DATA).await.unwrap_err();
