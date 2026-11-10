@@ -1,6 +1,6 @@
 // internal crates
 use crate::authn;
-use crate::calibrations::{self, latest::DEFAULT_CAPACITY};
+use crate::calibrations::{self, latest::DEFAULT_CAPACITY, LatestStore};
 use crate::cli;
 use crate::crypt::rsa;
 use crate::disk::{self, settings};
@@ -55,9 +55,9 @@ pub async fn reprovision<HTTPClientT: http::ClientI>(
     result
 }
 
-/// Replace the device's calibrations, upload queue included, with Miru's
-/// latest. Runs after `bootstrap`, so the old device's calibrations are gone
-/// even if the pull fails, and the token comes from the installed keys.
+/// Replace the device's calibrations, upload queue included, with the control
+/// plane's latest. Runs after `bootstrap`, so the old device's calibrations are
+/// gone even if the pull fails, and the token comes from the installed keys.
 async fn pull_calibrations<HTTPClientT: http::ClientI>(
     http_client: &HTTPClientT,
     layout: &disk::Layout,
@@ -67,13 +67,9 @@ async fn pull_calibrations<HTTPClientT: http::ClientI>(
     let auth = layout.auth();
     let device_token =
         authn::issue_token(http_client, &auth.private_key(), &auth.public_key()).await?;
-    calibrations::pull_latest(
-        http_client,
-        cals.latest(),
-        DEFAULT_CAPACITY,
-        &device_token.token,
-    )
-    .await?;
+    // each command returns once done, so the worker exits idle when dropped
+    let (store, _) = LatestStore::spawn(64, cals.latest(), DEFAULT_CAPACITY);
+    calibrations::pull_latest(&store, http_client, &device_token.token).await?;
     Ok(())
 }
 

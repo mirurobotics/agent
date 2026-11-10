@@ -1,4 +1,4 @@
-//! The latest calibrations store: its keys and capacity, write order,
+//! The latest calibrations store: its keys and capacity, write order, merging,
 //! listing, content, the prune when its worker starts, and shutdown.
 
 // internal crates
@@ -12,6 +12,7 @@ use miru_agent::filesys::{dirs, files, File, PathExt, WriteOptions};
 use miru_agent::models::InstanceFormat;
 
 // external crates
+use chrono::TimeDelta;
 use futures::FutureExt;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
@@ -279,6 +280,81 @@ async fn put_succeeds_when_the_replaced_content_cannot_be_deleted() {
     assert_eq!(f.entries().await, [new]);
 }
 
+// ============================= PUT IF NEWER ============================= //
+/// A report for `metadata`'s key, reported `secs` after it.
+fn reported_after(metadata: &ReportMetadata, secs: i64) -> ReportMetadata {
+    ReportMetadata {
+        reported_at: metadata.reported_at + TimeDelta::seconds(secs),
+        ..newer(metadata)
+    }
+}
+
+#[tokio::test]
+async fn put_if_newer_puts_a_new_key_or_a_later_report() {
+    let f = Fixture::new().await;
+    let old = reported("arm", None, None);
+    let later = reported_after(&old, 1);
+    let leg = reported("leg", None, None);
+    put_all(&f.store, &[&old]).await;
+
+    assert!(f.store.put_if_newer(later.clone(), DATA).await.unwrap());
+    assert!(f.store.put_if_newer(leg.clone(), DATA).await.unwrap());
+
+    assert_eq!(f.entries().await, [later, leg]);
+}
+
+#[tokio::test]
+async fn put_if_newer_keeps_an_entry_reported_at_the_same_time_or_later() {
+    let f = Fixture::new().await;
+    let arm = reported("arm", None, None);
+    put_all(&f.store, &[&arm]).await;
+
+    for secs in [0, -1] {
+        let candidate = reported_after(&arm, secs);
+        assert!(
+            !f.store.put_if_newer(candidate, DATA).await.unwrap(),
+            "{secs}"
+        );
+    }
+
+    assert_eq!(f.entries().await, std::slice::from_ref(&arm));
+    assert_eq!(f.content_ids().await, [arm.report_id]);
+}
+
+#[tokio::test]
+async fn put_if_newer_rejects_a_new_key_at_capacity() {
+    let f = Fixture::with_capacity(1).await;
+    let arm = reported("arm", None, None);
+    put_all(&f.store, &[&arm]).await;
+
+    let err = f
+        .store
+        .put_if_newer(reported("leg", None, None), DATA)
+        .await
+        .unwrap_err();
+
+    assert!(matches!(err, CalibrationsErr::StoreFullErr(_)), "{err:?}");
+    assert_eq!(f.entries().await, [arm]);
+}
+
+#[tokio::test]
+async fn put_if_newer_checks_and_puts_in_one_command() {
+    let f = Fixture::new().await;
+    let old = reported("arm", None, None);
+    let later = reported_after(&old, 1);
+
+    // the put is queued behind the check, so it can't land between the
+    // check and its put
+    let (put_old, put_later) = tokio::join!(
+        f.store.put_if_newer(old, DATA),
+        f.store.put(later.clone(), DATA),
+    );
+
+    assert!(put_old.unwrap());
+    put_later.unwrap();
+    assert_eq!(f.entries().await, [later]);
+}
+
 // ================================= LIST ================================= //
 #[tokio::test]
 async fn list_sorts_by_component_then_role_then_aspect() {
@@ -410,6 +486,7 @@ async fn a_corrupt_index_fails_every_call() {
 
     let errs = [
         f.store.put(arm.clone(), DATA).await.unwrap_err(),
+        f.store.put_if_newer(arm.clone(), DATA).await.unwrap_err(),
         f.store.list(&Filter::default()).await.unwrap_err(),
         f.store.get(arm.report_id).await.unwrap_err(),
     ];
@@ -469,6 +546,7 @@ async fn commands_after_shutdown_fail() {
 
     let errs = [
         store.put(arm.clone(), DATA).await.unwrap_err(),
+        store.put_if_newer(arm.clone(), DATA).await.unwrap_err(),
         store.list(&Filter::default()).await.unwrap_err(),
         store.get(arm.report_id).await.unwrap_err(),
     ];

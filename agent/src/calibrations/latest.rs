@@ -23,6 +23,11 @@ enum Command {
         data: String,
         respond_to: oneshot::Sender<Result<(), CalibrationsErr>>,
     },
+    PutIfNewer {
+        metadata: Box<ReportMetadata>,
+        data: String,
+        respond_to: oneshot::Sender<Result<bool, CalibrationsErr>>,
+    },
     List {
         filter: Filter,
         respond_to: oneshot::Sender<Result<Vec<ReportMetadata>, CalibrationsErr>>,
@@ -55,6 +60,14 @@ impl Worker {
                 } => {
                     let result = self.store.put(*metadata, &data).await;
                     respond(respond_to, result, "put");
+                }
+                Command::PutIfNewer {
+                    metadata,
+                    data,
+                    respond_to,
+                } => {
+                    let result = self.store.put_if_newer(*metadata, &data).await;
+                    respond(respond_to, result, "put if newer");
                 }
                 Command::List { filter, respond_to } => {
                     let result = self.store.list(&filter).await;
@@ -113,6 +126,21 @@ impl LatestStore {
     /// spawn deletes.
     pub async fn put(&self, metadata: ReportMetadata, data: &str) -> Result<(), CalibrationsErr> {
         self.send_command("put", |respond_to| Command::Put {
+            metadata: Box::new(metadata),
+            data: data.to_string(),
+            respond_to,
+        })
+        .await?
+    }
+
+    /// Make `metadata` its key's entry, as [`Self::put`] does, unless that
+    /// entry was reported at the same time or later. Returns whether it did.
+    pub async fn put_if_newer(
+        &self,
+        metadata: ReportMetadata,
+        data: &str,
+    ) -> Result<bool, CalibrationsErr> {
+        self.send_command("put if newer", |respond_to| Command::PutIfNewer {
             metadata: Box::new(metadata),
             data: data.to_string(),
             respond_to,

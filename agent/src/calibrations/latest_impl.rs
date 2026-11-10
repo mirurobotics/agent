@@ -71,7 +71,32 @@ impl LatestStoreImpl {
         metadata: ReportMetadata,
         data: &str,
     ) -> Result<(), CalibrationsErr> {
-        let mut index = self.read_index().await?;
+        let index = self.read_index().await?;
+        self.put_impl(index, metadata, data).await
+    }
+
+    /// Put `metadata` unless its key's entry was reported at the same time or
+    /// later. Returns whether it was put.
+    pub(crate) async fn put_if_newer(
+        &self,
+        metadata: ReportMetadata,
+        data: &str,
+    ) -> Result<bool, CalibrationsErr> {
+        let index = self.read_index().await?;
+        if index.iter().any(|entry| entry.is_as_new_as(&metadata)) {
+            return Ok(false);
+        }
+        self.put_impl(index, metadata, data).await?;
+        Ok(true)
+    }
+
+    /// Put `metadata` into `index`, which the caller just read, and write both.
+    async fn put_impl(
+        &self,
+        mut index: Index,
+        metadata: ReportMetadata,
+        data: &str,
+    ) -> Result<(), CalibrationsErr> {
         let replaced = take_entry(&mut index, &metadata);
         if replaced.is_none() {
             check_capacity(index.len(), self.capacity)?;
