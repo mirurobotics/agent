@@ -5,10 +5,9 @@ use std::time::Duration;
 // internal crates
 use crate::app::errors::UpgradeErr;
 use crate::authn::{self, token::Token};
-use crate::calibrations::{self, latest::DEFAULT_CAPACITY};
+use crate::calibrations;
 use crate::cooldown;
 use crate::disk::{self, Layout, Settings};
-use crate::errors::Error;
 use crate::filesys::{files, PathExt};
 use crate::http::{self, ClientI};
 use crate::models;
@@ -145,8 +144,8 @@ pub async fn reconcile_impl<HTTPClientT: ClientI>(
             Settings::default()
         }
     };
-    // before reset writes the version marker, so a failed pull is retried
-    pull_calibrations(http_client, layout, &token).await?;
+    // before reset writes the version marker, so a crash can't skip it
+    mark_calibrations_for_pull(layout).await;
     disk::setup::reset(layout, &device, &settings, version).await?;
     update_device(http_client, &device, version, &token).await?;
     Ok(())
@@ -163,23 +162,13 @@ async fn issue_token<HTTPClientT: ClientI>(
     Ok(token)
 }
 
-/// Merge Miru's latest calibrations into the store, which an older agent may
-/// not have written. A network failure fails the attempt so it is retried;
-/// any other failure is logged, so a calibration never keeps the agent from
-/// starting.
-async fn pull_calibrations<HTTPClientT: ClientI>(
-    http_client: &HTTPClientT,
-    layout: &Layout,
-    token: &Token,
-) -> Result<(), UpgradeErr> {
+/// Mark the latest calibrations store to merge in Miru's latest once the
+/// agent syncs, since an older agent may not have written it. A failure is
+/// logged, so a calibration never keeps the agent from starting.
+async fn mark_calibrations_for_pull(layout: &Layout) {
     let latest = layout.calibrations().latest();
-    match calibrations::pull_latest(http_client, latest, DEFAULT_CAPACITY, &token.token).await {
-        Err(e) if e.is_network_conn_err() => Err(e.into()),
-        Err(e) => {
-            error!("upgrade: the latest calibrations may be incomplete: {e}");
-            Ok(())
-        }
-        Ok(()) => Ok(()),
+    if let Err(e) = calibrations::mark_needs_pull(latest).await {
+        error!("upgrade: the latest calibrations may stay incomplete: {e}");
     }
 }
 

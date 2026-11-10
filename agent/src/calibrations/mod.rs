@@ -16,7 +16,7 @@ pub use self::errors::{
 };
 pub use self::latest::LatestStore;
 pub use self::latest_impl::Filter;
-pub use self::pull::pull_latest;
+pub use self::pull::{mark_needs_pull, pull_if_needed, pull_latest};
 pub use self::report::{
     Queue, QueueEntry, QueueSnapshot, QueueSnapshotFile, Report, ReportMetadata,
 };

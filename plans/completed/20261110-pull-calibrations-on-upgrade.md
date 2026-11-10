@@ -6,7 +6,7 @@ This ExecPlan is a living document. The sections Progress, Surprises & Discoveri
 
 | Repository | Access | Description |
 |-----------|--------|-------------|
-| `agent/` (mirurobotics/agent) | read-write | `calibrations::pull_latest` merges instead of overwriting; upgrade reconcile pulls; an `UpgradeErr` variant; tests and `ARCHITECTURE.md`. |
+| `agent/` (mirurobotics/agent) | read-write | A `needs_pull` mark in the latest store's index; `put_if_newer`; upgrade reconcile marks the store; the syncer pulls a marked store; `AppState` spawns the store before the syncer; tests and `ARCHITECTURE.md`. |
 
 Part of ENG-1726 (RFC: Latest Calibrations on the Device), after #450 and #451. Based on `main` at `394f78c`.
 
@@ -14,50 +14,55 @@ Part of ENG-1726 (RFC: Latest Calibrations on the Device), after #450 and #451. 
 
 The latest calibrations store survives upgrades (#451), but agents before it never wrote the store at `calibrations/latest/`. A device that upgrades from one of them, or from a version it was rolled back to, starts with a store that lacks the reports that agent took, though Miru has them. Until each is reported again, `GET /v0.2/calibrations/latest` doesn't list it.
 
-After this change, upgrade reconcile pulls Miru's latest calibrations into the store before the agent serves the Device API. The pull merges: per key, it keeps whichever report is newer, so reports the device took that Miru hasn't received are kept.
+After this change, upgrade reconcile marks the store (`needs_pull: true` in `index.json`). Each sync that reaches Miru checks the mark; if set, it merges Miru's latest into the store and clears the mark. The merge keeps whichever report is newer per key, so reports the device took that Miru hasn't received are kept. A failed pull leaves the mark, so the next sync retries.
 
-Observable: upgrade an agent on an online device whose calibrations are in Miru but not in `calibrations/latest/`. The log shows `calibrations: wrote N latest calibrations from Miru` before `upgrade: resetting storage state for version ... complete`, and the first `GET /v0.2/calibrations/latest` lists them.
+Observable: upgrade an agent on a device whose calibrations are in Miru but not in `calibrations/latest/`. `index.json` has `"needs_pull": true` once the agent starts; after the first sync that reaches Miru, the log shows `calibrations: wrote N latest calibrations from Miru`, `needs_pull` is `false`, and `GET /v0.2/calibrations/latest` lists them.
 
 ## Decisions
 
-- **Pull in upgrade reconcile, not on a later sync (recommended in the project thread, pending the user's confirmation).** Reconcile already blocks until Miru answers (it issues a token and fetches the device, retrying until it succeeds), so pulling there adds no new wait for the network, and the list is complete as soon as the agent serves. The alternative, a "needs pull" field in `index.json` that the syncer clears after a merge, would let the agent serve sooner but list an incomplete store until that sync, and needs an on-disk field, a syncer change and a reordered `AppState::init`.
-- **Pull before `reset`.** `reset` writes the version marker last, so a crash or failure during the pull leaves the marker old and the next start reruns reconcile, pull included.
-- **Merge, keeping the newer per key.** A key whose stored entry has the same or a later `reported_at` is skipped before its content is downloaded. Equal times keep the stored entry: it is almost always the same report, and it saves a download. Reports Miru doesn't have are never touched. During reconcile and reprovision the agent isn't running, so the pull is the store's only writer and needs no compare-and-put in the store's worker.
-- **One pull for reprovision and upgrade.** Reprovision deletes `calibrations/` first, so merging into its empty store puts every key, as before; its behavior and tests are unchanged.
-- **Network failures retry; other failures are logged.** A network error fails the reconcile attempt, which reconcile retries with its backoff. Any other failure (a 4xx/5xx, a full store, a disk error) is logged with `upgrade: the latest calibrations may be incomplete` and the upgrade goes on, so a calibration problem never keeps the agent from starting and deploying.
+- **Mark on upgrade, pull on a later sync (the user's pick in the project thread).** The agent starts serving without waiting on the pull. Until the first successful pull after an upgrade, the list can lack reports that only Miru has; the docs say so. The alternative, pulling inside reconcile, would make the list complete at start but makes startup wait on the downloads.
+- **The mark lives in `index.json`.** `index.json` is an object so a store-wide field can be added (#451). `needs_pull` defaults to `false` when missing, so existing stores read as unmarked, and an agent rolled back to ignores it. An older agent that rewrites the index drops it, which is fine: the next upgrade marks it again.
+- **Mark before `reset`.** `reset` writes the version marker last, so a crash before the mark leaves the old marker and the next start reruns reconcile.
+- **A failed mark is logged.** A calibration problem never keeps the agent from starting.
+- **The merge compares inside the store's worker.** The agent runs while the syncer pulls, so intake may write the same key. `LatestStore::put_if_newer` checks `reported_at` and puts in one command, so a report the device just took is never overwritten by an older one from Miru. Equal times keep the stored entry.
+- **One merge for reprovision and the syncer.** Reprovision deletes `calibrations/` first, so merging into its empty store puts every key, as before; its behavior and tests are unchanged.
+- **Best-effort in the syncer, like the system metadata sync.** The pull runs after the deployments sync unless that hit a network error, and a failure is logged and never fails the sync.
+- **The syncer gets the store's handle.** `AppState` spawns the calibrations pipeline before the syncer, and shuts the store down after the syncer.
 
 ### Names
 
 | New name | Why |
 |----------|-----|
-| `UpgradeErr::CalibrationsErr` | Named after the wrapped type, like `ProvisionErr::CalibrationsErr`. |
-| `app::upgrade::pull_calibrations` | Matches reprovision's helper of the same name. |
-| `calibrations::pull::is_newer` | A question, for a bool. |
+| `needs_pull` (field, `LatestStore::needs_pull`, `set_needs_pull`) | A question, for a bool. |
+| `calibrations::mark_needs_pull` | Sets the mark on a store in a layout, while no agent runs. |
+| `calibrations::pull_if_needed` | Pulls only when marked. |
+| `LatestStore::put_if_newer` | `put`, with the condition. |
 
 ### Precedent
 
-Reprovision's `pull_calibrations` (#450) for the upgrade helper. Tests extend `tests/calibrations/pull.rs` and `tests/app/upgrade.rs`'s `reconcile_impl` module.
+`sync_system_metadata` in `syncer_impl.rs` for the best-effort sync step; `pull_latest` (#450) for spawning a store handle on a layout. Tests extend `tests/calibrations/latest.rs`, `tests/calibrations/pull.rs`, the syncer's inline `Fixture` and the `reconcile_impl` module in `tests/app/upgrade.rs`.
 
 ### Left out
 
 - Keying by component alone (ENG-1823). The merge keys by `ReportMetadata::key()`, so it follows that change.
-- Pulling on a schedule. Reports are created only on the device, so the store goes stale only through reprovision or an agent that doesn't write it, and both now pull.
+- Skipping the download for keys the store already has as new. Each pull downloads every content once per upgrade; the worker's check decides.
+- Marking on a failed reprovision pull.
 
 ## Progress
 
-- [x] `pull_latest` merges.
-- [x] Upgrade reconcile pulls before `reset`.
+- [x] Mark, `put_if_newer` and the merge.
+- [x] Upgrade reconcile marks; the syncer pulls a marked store.
 - [x] Tests written.
 - [x] `ARCHITECTURE.md`.
 - [ ] CI green.
 
 ## Surprises & Discoveries
 
-- Upgrade reconcile already needs Miru, so the planned "mark now, pull on a later sync" design was unnecessary.
+- Upgrade reconcile already needs Miru, so pulling inside it was possible; the user chose the later-sync design.
 
 ## Decision Log
 
-- Pull in reconcile rather than on a later sync: see Decisions.
+- First draft pulled inside reconcile; reworked to mark-then-sync after the user picked that option.
 
 ## Outcomes & Retrospective
 
@@ -67,5 +72,7 @@ To be filled in when CI is green.
 
 CI runs the suite; preflight must report `CLEAN` (CI green on the pushed branch head) before the PR leaves draft.
 
-- `tests/calibrations/pull.rs`: replaces an older entry; keeps an entry as new or newer without downloading its content; keeps keys Miru doesn't have; the existing cases still pass.
-- `tests/app/upgrade.rs` `reconcile_impl`: pulls Miru's latest into the store; a network failure in the pull fails before the marker and the device update; any other failure still upgrades.
+- `tests/calibrations/latest.rs`: `put_if_newer` puts a new key or a later report, and keeps an entry reported at the same time or later; the mark persists, survives puts and clears; the index shape includes `needs_pull`.
+- `tests/calibrations/pull.rs`: replaces an older entry; keeps an entry as new or newer; keeps keys Miru doesn't have; `mark_needs_pull` marks; `pull_if_needed` pulls and unmarks a marked store, does nothing unmarked, and keeps the mark on failure.
+- `sync/syncer.rs` `latest_calibrations`: a sync pulls and unmarks a marked store; does nothing unmarked; skips the pull when Miru is unreachable; a failed pull keeps the mark and doesn't fail the sync.
+- `tests/app/upgrade.rs` `reconcile_impl`: marks the store without pulling.

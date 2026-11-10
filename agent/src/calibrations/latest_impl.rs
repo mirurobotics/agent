@@ -23,6 +23,9 @@ type Index = Vec<ReportMetadata>;
 #[derive(Default, Deserialize, Serialize)]
 struct IndexFile {
     entries: Index,
+    /// Set by an upgrade, and cleared once Miru's latest is merged in.
+    #[serde(default)]
+    needs_pull: bool,
 }
 
 /// Which entries to list. Empty means any; `None` in `role`/`aspect` matches an
@@ -72,14 +75,14 @@ impl LatestStoreImpl {
         data: &str,
     ) -> Result<(), CalibrationsErr> {
         let mut index = self.read_index().await?;
-        let replaced = take_entry(&mut index, &metadata);
+        let replaced = take_entry(&mut index.entries, &metadata);
         if replaced.is_none() {
-            check_capacity(index.len(), self.capacity)?;
+            check_capacity(index.entries.len(), self.capacity)?;
         }
         let report_id = metadata.report_id;
         self.write_content(report_id, data).await?;
-        index.push(metadata);
-        self.write_index(index).await?;
+        index.entries.push(metadata);
+        self.write_index(&index).await?;
         // the same report put again shares its content file, so keep it
         if let Some(replaced) = replaced.filter(|r| r.report_id != report_id) {
             self.delete_content(replaced.report_id).await;
@@ -87,12 +90,41 @@ impl LatestStoreImpl {
         Ok(())
     }
 
+    /// Put `metadata` unless its key's entry was reported at the same time or
+    /// later. Returns whether it was put.
+    pub(crate) async fn put_if_newer(
+        &self,
+        metadata: ReportMetadata,
+        data: &str,
+    ) -> Result<bool, CalibrationsErr> {
+        let index = self.read_index().await?;
+        let is_stale = index.entries.iter().any(|entry| {
+            entry.key() == metadata.key() && entry.reported_at >= metadata.reported_at
+        });
+        if is_stale {
+            return Ok(false);
+        }
+        self.put(metadata, data).await?;
+        Ok(true)
+    }
+
+    /// Whether the store is waiting to merge in Miru's latest.
+    pub(crate) async fn needs_pull(&self) -> Result<bool, CalibrationsErr> {
+        Ok(self.read_index().await?.needs_pull)
+    }
+
+    pub(crate) async fn set_needs_pull(&self, needs_pull: bool) -> Result<(), CalibrationsErr> {
+        let mut index = self.read_index().await?;
+        index.needs_pull = needs_pull;
+        Ok(self.write_index(&index).await?)
+    }
+
     /// The entries `filter` matches, ordered by component, role and aspect.
     pub(crate) async fn list(
         &self,
         filter: &Filter,
     ) -> Result<Vec<ReportMetadata>, CalibrationsErr> {
-        let mut entries = self.read_index().await?;
+        let mut entries = self.read_index().await?.entries;
         entries.retain(|metadata| filter.is_match(metadata));
         entries.sort_by(|a, b| a.key().cmp(&b.key()));
         Ok(entries)
@@ -100,7 +132,7 @@ impl LatestStoreImpl {
 
     /// The entry for `report_id`, with its data.
     pub(crate) async fn get(&self, report_id: Uuid) -> Result<Report, CalibrationsErr> {
-        let index = self.read_index().await?;
+        let index = self.read_index().await?.entries;
         let Some(entry) = index.into_iter().find(|m| m.report_id == report_id) else {
             return Err(not_found(report_id));
         };
@@ -113,17 +145,16 @@ impl LatestStoreImpl {
         }
     }
 
-    /// The index, which is empty until the first put writes it.
-    async fn read_index(&self) -> Result<Index, CalibrationsErr> {
+    /// The index, which is empty until the first write.
+    async fn read_index(&self) -> Result<IndexFile, CalibrationsErr> {
         match files::read_json_with_retry::<IndexFile>(&self.index).await {
-            Err(FileSysErr::PathDoesNotExistErr(_)) => Ok(Index::new()),
-            result => Ok(result?.entries),
+            Err(FileSysErr::PathDoesNotExistErr(_)) => Ok(IndexFile::default()),
+            result => Ok(result?),
         }
     }
 
-    async fn write_index(&self, index: Index) -> Result<(), FileSysErr> {
-        let file = IndexFile { entries: index };
-        files::write_json(&self.index, &file, WriteOptions::OVERWRITE_ATOMIC).await
+    async fn write_index(&self, index: &IndexFile) -> Result<(), FileSysErr> {
+        files::write_json(&self.index, index, WriteOptions::OVERWRITE_ATOMIC).await
     }
 
     fn content_file(&self, report_id: Uuid) -> File {
@@ -143,7 +174,7 @@ impl LatestStoreImpl {
     /// delete leaves. If the index can't be read, nothing is deleted.
     pub(crate) async fn prune_orphaned_contents(&self) {
         let index = match self.read_index().await {
-            Ok(index) => index,
+            Ok(index) => index.entries,
             Err(e) => {
                 error!("calibrations: not pruning latest contents, index unreadable: {e}");
                 return;

@@ -4,6 +4,7 @@ use std::time::Duration;
 
 // internal crates
 use crate::authn::{self, TokenManagerExt};
+use crate::calibrations;
 use crate::cooldown;
 use crate::deploy::apply;
 use crate::disk;
@@ -31,6 +32,7 @@ pub struct SyncerImpl<HTTPClientT> {
     deploy_opts: apply::DeployOpts,
     event_hub: events::EventHub,
     system_metadata_cache: File,
+    latest_cals: calibrations::LatestStore,
 
     // subscribers
     subscriber_tx: watch::Sender<SyncEvent>,
@@ -52,6 +54,7 @@ impl<HTTPClientT: http::ClientI> SyncerImpl<HTTPClientT> {
             backoff: args.backoff,
             event_hub: args.event_hub,
             system_metadata_cache: args.system_metadata_cache,
+            latest_cals: args.latest_cals,
             state: State::default(),
             subscriber_tx,
             subscriber_rx,
@@ -195,8 +198,18 @@ impl<HTTPClientT: http::ClientI> SyncerImpl<HTTPClientT> {
         // skip while the backend is unreachable; the next sync retries
         if !matches!(&result, Err(e) if e.is_network_conn_err()) {
             self.sync_system_metadata(&token.token).await;
+            self.pull_calibrations(&token.token).await;
         }
         result
+    }
+
+    /// Best-effort, as [`Self::sync_system_metadata`] is: a failed pull stays
+    /// marked, so the next sync retries it.
+    async fn pull_calibrations(&self, token: &str) {
+        let http_client = self.http_client.as_ref();
+        if let Err(e) = calibrations::pull_if_needed(&self.latest_cals, http_client, token).await {
+            warn!("unable to pull the latest calibrations: {e}");
+        }
     }
 
     /// Best-effort: failures are logged and never affect the sync result or its

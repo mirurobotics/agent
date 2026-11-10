@@ -116,7 +116,7 @@ async fn replaces_an_older_entry_for_a_key() {
 }
 
 #[tokio::test]
-async fn keeps_an_entry_as_new_or_newer_without_downloading() {
+async fn keeps_an_entry_reported_at_the_same_time_or_later() {
     let fx = Fixture::new();
     let stored = vec![reported_after("arm", 0), reported_after("leg", 1)];
     seed(&fx, &stored).await;
@@ -125,7 +125,6 @@ async fn keeps_an_entry_as_new_or_newer_without_downloading() {
     fx.pull(latest::DEFAULT_CAPACITY).await.unwrap();
 
     assert_eq!(fx.entries().await, stored);
-    assert_eq!(fx.client.call_count(Call::GetCalibrationContent), 0);
 }
 
 #[tokio::test]
@@ -184,4 +183,59 @@ async fn a_failed_download_fails_the_call() {
     let result = fx.pull(latest::DEFAULT_CAPACITY).await;
 
     assert!(matches!(result, Err(CalibrationsErr::HTTPErr(_))));
+}
+
+// ============================= MARK AND PULL ============================ //
+#[tokio::test]
+async fn mark_needs_pull_marks_the_store() {
+    let fx = Fixture::new();
+
+    calibrations::mark_needs_pull(latest_cals_layout(&fx.dir))
+        .await
+        .unwrap();
+
+    let store = latest_store(&fx.dir, latest::DEFAULT_CAPACITY).await;
+    assert!(store.needs_pull().await.unwrap());
+}
+
+#[tokio::test]
+async fn pull_if_needed_pulls_and_unmarks_a_marked_store() {
+    let fx = Fixture::new();
+    let store = latest_store(&fx.dir, latest::DEFAULT_CAPACITY).await;
+    store.set_needs_pull(true).await.unwrap();
+    fx.serve(&["arm"]);
+
+    calibrations::pull_if_needed(&store, &fx.client, "tok")
+        .await
+        .unwrap();
+
+    assert_eq!(fx.entries().await, vec![report("arm").metadata]);
+    assert!(!store.needs_pull().await.unwrap());
+}
+
+#[tokio::test]
+async fn pull_if_needed_does_nothing_for_an_unmarked_store() {
+    let fx = Fixture::new();
+    let store = latest_store(&fx.dir, latest::DEFAULT_CAPACITY).await;
+    fx.serve(&["arm"]);
+
+    calibrations::pull_if_needed(&store, &fx.client, "tok")
+        .await
+        .unwrap();
+
+    assert!(fx.client.requests().is_empty());
+    assert!(fx.entries().await.is_empty());
+}
+
+#[tokio::test]
+async fn a_failed_pull_if_needed_keeps_the_mark() {
+    let fx = Fixture::new();
+    let store = latest_store(&fx.dir, latest::DEFAULT_CAPACITY).await;
+    store.set_needs_pull(true).await.unwrap();
+    fx.client.set_list_latest_calibrations(|| Err(mock_err()));
+
+    let result = calibrations::pull_if_needed(&store, &fx.client, "tok").await;
+
+    assert!(matches!(result, Err(CalibrationsErr::HTTPErr(_))));
+    assert!(store.needs_pull().await.unwrap());
 }

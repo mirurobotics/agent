@@ -23,6 +23,18 @@ enum Command {
         data: String,
         respond_to: oneshot::Sender<Result<(), CalibrationsErr>>,
     },
+    PutIfNewer {
+        metadata: Box<ReportMetadata>,
+        data: String,
+        respond_to: oneshot::Sender<Result<bool, CalibrationsErr>>,
+    },
+    NeedsPull {
+        respond_to: oneshot::Sender<Result<bool, CalibrationsErr>>,
+    },
+    SetNeedsPull {
+        needs_pull: bool,
+        respond_to: oneshot::Sender<Result<(), CalibrationsErr>>,
+    },
     List {
         filter: Filter,
         respond_to: oneshot::Sender<Result<Vec<ReportMetadata>, CalibrationsErr>>,
@@ -55,6 +67,25 @@ impl Worker {
                 } => {
                     let result = self.store.put(*metadata, &data).await;
                     respond(respond_to, result, "put");
+                }
+                Command::PutIfNewer {
+                    metadata,
+                    data,
+                    respond_to,
+                } => {
+                    let result = self.store.put_if_newer(*metadata, &data).await;
+                    respond(respond_to, result, "put if newer");
+                }
+                Command::NeedsPull { respond_to } => {
+                    let result = self.store.needs_pull().await;
+                    respond(respond_to, result, "needs pull");
+                }
+                Command::SetNeedsPull {
+                    needs_pull,
+                    respond_to,
+                } => {
+                    let result = self.store.set_needs_pull(needs_pull).await;
+                    respond(respond_to, result, "set needs pull");
                 }
                 Command::List { filter, respond_to } => {
                     let result = self.store.list(&filter).await;
@@ -115,6 +146,37 @@ impl LatestStore {
         self.send_command("put", |respond_to| Command::Put {
             metadata: Box::new(metadata),
             data: data.to_string(),
+            respond_to,
+        })
+        .await?
+    }
+
+    /// Make `metadata` its key's entry, as [`Self::put`] does, unless that
+    /// entry was reported at the same time or later. Returns whether it did.
+    pub async fn put_if_newer(
+        &self,
+        metadata: ReportMetadata,
+        data: &str,
+    ) -> Result<bool, CalibrationsErr> {
+        self.send_command("put if newer", |respond_to| Command::PutIfNewer {
+            metadata: Box::new(metadata),
+            data: data.to_string(),
+            respond_to,
+        })
+        .await?
+    }
+
+    /// Whether an upgrade marked the store to merge in Miru's latest.
+    pub async fn needs_pull(&self) -> Result<bool, CalibrationsErr> {
+        self.send_command("needs pull", |respond_to| Command::NeedsPull { respond_to })
+            .await?
+    }
+
+    /// Mark or unmark the store to merge in Miru's latest. The mark is kept
+    /// on disk until unmarked.
+    pub async fn set_needs_pull(&self, needs_pull: bool) -> Result<(), CalibrationsErr> {
+        self.send_command("set needs pull", |respond_to| Command::SetNeedsPull {
+            needs_pull,
             respond_to,
         })
         .await?

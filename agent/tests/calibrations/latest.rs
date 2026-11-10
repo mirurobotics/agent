@@ -1,5 +1,6 @@
-//! The latest calibrations store: its keys and capacity, write order,
-//! listing, content, the prune when its worker starts, and shutdown.
+//! The latest calibrations store: its keys and capacity, write order, merging,
+//! the pull mark, listing, content, the prune when its worker starts, and
+//! shutdown.
 
 // internal crates
 use crate::test_utils::calibrations::{latest_cals_layout, latest_store, reported};
@@ -12,6 +13,7 @@ use miru_agent::filesys::{dirs, files, File, PathExt, WriteOptions};
 use miru_agent::models::InstanceFormat;
 
 // external crates
+use chrono::TimeDelta;
 use futures::FutureExt;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
@@ -194,7 +196,7 @@ async fn put_writes_the_index_as_an_object_of_entries() {
     f.store.put(arm.clone(), DATA).await.unwrap();
 
     let index: serde_json::Value = files::read_json(&f.layout.index()).await.unwrap();
-    let expected = serde_json::json!({ "entries": [arm] });
+    let expected = serde_json::json!({ "entries": [arm], "needs_pull": false });
     assert_eq!(index, expected);
 }
 
@@ -277,6 +279,64 @@ async fn put_succeeds_when_the_replaced_content_cannot_be_deleted() {
     f.store.put(new.clone(), DATA).await.unwrap();
 
     assert_eq!(f.entries().await, [new]);
+}
+
+// ============================= PUT IF NEWER ============================= //
+/// A report for `metadata`'s key, reported `secs` after it.
+fn reported_after(metadata: &ReportMetadata, secs: i64) -> ReportMetadata {
+    ReportMetadata {
+        reported_at: metadata.reported_at + TimeDelta::seconds(secs),
+        ..newer(metadata)
+    }
+}
+
+#[tokio::test]
+async fn put_if_newer_puts_a_new_key_or_a_later_report() {
+    let f = Fixture::new().await;
+    let old = reported("arm", None, None);
+    let later = reported_after(&old, 1);
+    let leg = reported("leg", None, None);
+    put_all(&f.store, &[&old]).await;
+
+    assert!(f.store.put_if_newer(later.clone(), DATA).await.unwrap());
+    assert!(f.store.put_if_newer(leg.clone(), DATA).await.unwrap());
+
+    assert_eq!(f.entries().await, [later, leg]);
+}
+
+#[tokio::test]
+async fn put_if_newer_keeps_an_entry_reported_at_the_same_time_or_later() {
+    let f = Fixture::new().await;
+    let arm = reported("arm", None, None);
+    put_all(&f.store, &[&arm]).await;
+
+    for secs in [0, -1] {
+        let candidate = reported_after(&arm, secs);
+        assert!(!f.store.put_if_newer(candidate, DATA).await.unwrap(), "{secs}");
+    }
+
+    assert_eq!(f.entries().await, std::slice::from_ref(&arm));
+    assert_eq!(f.content_ids().await, [arm.report_id]);
+}
+
+// ============================== NEEDS PULL ============================== //
+#[tokio::test]
+async fn a_new_store_does_not_need_a_pull() {
+    let f = Fixture::new().await;
+
+    assert!(!f.store.needs_pull().await.unwrap());
+}
+
+#[tokio::test]
+async fn the_pull_mark_persists_and_survives_puts() {
+    let f = Fixture::new().await;
+
+    f.store.set_needs_pull(true).await.unwrap();
+    put_all(&f.store, &[&reported("arm", None, None)]).await;
+
+    assert!(f.reopen().await.needs_pull().await.unwrap());
+    f.store.set_needs_pull(false).await.unwrap();
+    assert!(!f.reopen().await.needs_pull().await.unwrap());
 }
 
 // ================================= LIST ================================= //
