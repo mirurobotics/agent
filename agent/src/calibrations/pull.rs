@@ -12,18 +12,18 @@ use crate::http::{
 use tracing::info;
 
 /// Write Miru's latest calibration for each key into the latest store in
-/// `store`, one key at a time, overwriting the entry already there for that
+/// `layout`, one key at a time, overwriting the entry already there for that
 /// key. Any failure fails the call, so a store emptied first ends up holding
 /// every calibration Miru has; more than `capacity` keys is
 /// `CalibrationStoreFullErr`.
 pub async fn pull_latest<HTTPClientT: http::ClientI>(
     http_client: &HTTPClientT,
-    store: LatestCalsLayout,
+    layout: LatestCalsLayout,
     capacity: usize,
     token: &str,
 ) -> Result<(), CalibrationsErr> {
     // each put returns once written, so the worker exits idle when dropped
-    let (handle, _) = LatestStore::spawn(64, store, capacity);
+    let (handle, _) = LatestStore::spawn(64, layout, capacity);
     let put = put_mirus_latest(&handle, http_client, token).await?;
     info!("calibrations: wrote {put} latest calibrations from Miru");
     Ok(())

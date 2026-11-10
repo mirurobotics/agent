@@ -66,6 +66,7 @@ pub mod reprovision_fn {
     async fn http_error_preserves_existing_storage() {
         let env = Env::new("reprovision-test").await;
         env.seed_provision("initial").await;
+        seed_calibrations(&env.layout).await;
         let snapshot = StorageSnapshot::capture(&env.layout).await;
 
         let mock = mock_failing_reprovision();
@@ -73,6 +74,11 @@ pub mod reprovision_fn {
 
         assert!(matches!(result, Err(ProvisionErr::HTTPErr(_))));
         snapshot.assert_unchanged(&env.layout).await;
+        let cals = env.layout.calibrations();
+        assert!(cals.queue().exists(), "queue file was deleted");
+        assert!(cals.reports().exists(), "reports dir was deleted");
+        let expected = vec![report("leg").metadata];
+        assert_eq!(latest_entries(&env.layout).await, expected);
         assert_temp_dir_cleaned(&env.layout).await;
 
         env.cleanup().await;
@@ -123,6 +129,14 @@ pub mod reprovision_fn {
         assert_eq!(latest_entries(&env.layout).await, expected);
         assert_queue_deleted(&env.layout);
         assert_temp_dir_cleaned(&env.layout).await;
+        // the pull uses the device token issued from the new keys
+        let tokens: Vec<_> = mock
+            .requests()
+            .into_iter()
+            .filter(|r| r.path.starts_with("/calibrations"))
+            .map(|r| r.token)
+            .collect();
+        assert_eq!(tokens, vec![Some("mock.jwt.token".to_string()); 2]);
 
         env.cleanup().await;
     }

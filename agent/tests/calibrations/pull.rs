@@ -76,6 +76,10 @@ async fn writes_mirus_latest_calibrations_into_the_given_store() {
     };
     assert_eq!(found, expected);
     assert_eq!(fx.client.call_count(Call::GetCalibrationContent), 2);
+    let requests = fx.client.requests();
+    assert!(requests.iter().all(|r| r.token.as_deref() == Some("tok")));
+    let expand = ("expand".to_string(), "reported_by".to_string());
+    assert!(requests[0].query.contains(&expand));
 }
 
 #[tokio::test]
