@@ -71,11 +71,6 @@ impl AppState {
         let (event_hub, event_hub_handle) =
             events::EventHub::spawn(layout.events_log_file(), Default::default()).await?;
 
-        // initialize the calibrations pipeline (latest store, uploader) before
-        // the syncer, which pulls into the latest store
-        let (latest_cals, cal_uploader, [latest_cals_handle, cal_uploader_handle]) =
-            Self::init_calibrations(layout, http_client.clone(), token_mngr.clone()).await;
-
         // initialize the syncer
         let syncer_args = build_syncer_args(
             storage.clone(),
@@ -84,13 +79,17 @@ impl AppState {
             dpl_retry_policy,
             event_hub.clone(),
             layout.system_metadata(),
-            latest_cals.clone(),
         );
         let (syncer, syncer_handle) = sync::Syncer::spawn(64, syncer_args)?;
+        let syncer = Arc::new(syncer);
 
         // initialize the data upload pipeline (deleter, uploader, scanner)
         let (deleter, uploader, scanner, [scanner_handle, deleter_handle, uploader_handle]) =
             Self::init_data_uploads(layout, http_client.clone(), token_mngr.clone()).await?;
+
+        // initialize the calibrations pipeline (latest store, uploader)
+        let (latest_cals, cal_uploader, [latest_cals_handle, cal_uploader_handle]) =
+            Self::init_calibrations(layout, http_client.clone(), token_mngr.clone()).await;
 
         let shutdown_handle = async move {
             let handles = [
@@ -110,7 +109,7 @@ impl AppState {
             AppState {
                 storage,
                 http_client,
-                syncer: Arc::new(syncer),
+                syncer,
                 scanner,
                 deleter,
                 uploader,
@@ -346,6 +345,13 @@ impl AppState {
             first_err.get_or_insert(e.into());
         }
 
+        // shutdown the latest calibrations store after the calibration uploader,
+        // whose worker writes it
+        if let Err(e) = self.latest_cals.shutdown().await {
+            tracing::error!("failed to shutdown latest calibrations store: {e}");
+            first_err.get_or_insert(e.into());
+        }
+
         // shutdown the data uploader next: it depends on nothing else in the app. The
         // scanner's upload sink may still enqueue into the stopped uploader if a
         // scan tick races this shutdown; the sink logs a warn and the tick
@@ -373,13 +379,6 @@ impl AppState {
         // shutdown the syncer before storage (it uses storage during sync)
         if let Err(e) = self.syncer.shutdown().await {
             tracing::error!("failed to shutdown syncer: {e}");
-            first_err.get_or_insert(e.into());
-        }
-
-        // shutdown the latest calibrations store after the calibration uploader
-        // and the syncer, which write it
-        if let Err(e) = self.latest_cals.shutdown().await {
-            tracing::error!("failed to shutdown latest calibrations store: {e}");
             first_err.get_or_insert(e.into());
         }
 
@@ -435,7 +434,6 @@ fn build_syncer_args(
     dpl_retry_policy: fsm::RetryPolicy,
     event_hub: events::EventHub,
     system_metadata_cache: File,
-    latest_cals: calibrations::LatestStore,
 ) -> SyncerArgs<http::Client, authn::TokenManager> {
     SyncerArgs {
         storage,
@@ -451,6 +449,5 @@ fn build_syncer_args(
         },
         event_hub,
         system_metadata_cache,
-        latest_cals,
     }
 }

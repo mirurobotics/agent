@@ -4,7 +4,6 @@ use std::sync::Arc;
 
 // internal crates
 use crate::authn::{self, TokenManagerExt};
-use crate::calibrations;
 use crate::cooldown;
 use crate::deploy::apply;
 use crate::disk;
@@ -75,7 +74,6 @@ pub struct SyncerArgs<HTTPClientT, TokenManagerT: TokenManagerExt> {
     pub backoff: cooldown::Backoff,
     pub event_hub: events::EventHub,
     pub system_metadata_cache: File,
-    pub latest_cals: calibrations::LatestStore,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -150,7 +148,7 @@ impl<HTTPClientT: Send> Worker<HTTPClientT> {
     }
 }
 
-impl<HTTPClientT: http::ClientI + 'static> Worker<HTTPClientT> {
+impl<HTTPClientT: http::ClientI> Worker<HTTPClientT> {
     pub async fn run(mut self) {
         while let Some(cmd) = self.receiver.recv().await {
             match cmd {
@@ -304,14 +302,12 @@ mod tests {
 
     // internal crates
     use crate::test_utils::{
-        calibrations::latest_store,
         filesys::dirs as test_dirs,
         http_client::{Call, MockClient},
         sync::{create_storage, create_token_manager},
         sync_helpers::*,
     };
     use miru_agent::authn::{TokenManager, TokenManagerExt};
-    use miru_agent::calibrations::{latest, LatestStore};
     use miru_agent::cooldown;
     use miru_agent::deploy::{apply, fsm};
     use miru_agent::disk::Storage;
@@ -352,7 +348,6 @@ mod tests {
         backoff: cooldown::Backoff,
         token_mngr: Arc<TokenManager>,
         system_metadata_cache: File,
-        latest_cals: LatestStore,
     }
 
     impl Fixture {
@@ -376,7 +371,6 @@ mod tests {
             let http_client = Arc::new(MockClient::default());
             let storage = Arc::new(create_storage(dir.dir()).await);
             let system_metadata_cache = dir.file("system_metadata.json");
-            let latest_cals = latest_store(&dir, latest::DEFAULT_CAPACITY).await;
 
             let log_file = dir.file("events.jsonl");
             let (event_hub, _hub_handle) = EventHub::spawn(log_file, SpawnOptions::default())
@@ -395,7 +389,6 @@ mod tests {
                     backoff,
                     event_hub,
                     system_metadata_cache: system_metadata_cache.clone(),
-                    latest_cals: latest_cals.clone(),
                 },
             )
             .unwrap();
@@ -408,7 +401,6 @@ mod tests {
                 backoff,
                 system_metadata_cache,
                 token_mngr,
-                latest_cals,
             }
         }
 
@@ -495,7 +487,6 @@ mod tests {
                     },
                     event_hub,
                     system_metadata_cache: dir.file("system_metadata.json"),
-                    latest_cals: latest_store(&dir, latest::DEFAULT_CAPACITY).await,
                 },
             )
             .unwrap();
@@ -1032,89 +1023,6 @@ mod tests {
             assert_eq!(f.http_client.call_count(Call::UpdateDevice), 1);
             let cached = cache::read(&f.system_metadata_cache).await.unwrap();
             assert_eq!(cached, None);
-        }
-    }
-
-    pub mod latest_calibrations {
-        use super::*;
-        use crate::test_utils::calibrations::{miru_calibration, report};
-        use backend_api::models::CalibrationList;
-        use miru_agent::calibrations::{Filter, ReportMetadata};
-
-        fn serve_arm(f: &Fixture) {
-            f.http_client.set_list_latest_calibrations(|| {
-                Ok(CalibrationList {
-                    data: vec![miru_calibration("arm")],
-                    ..CalibrationList::default()
-                })
-            });
-        }
-
-        async fn entries(f: &Fixture) -> Vec<ReportMetadata> {
-            f.latest_cals.list(&Filter::default()).await.unwrap()
-        }
-
-        /// Wait for the sync's background pull to fill the store.
-        async fn wait_for_entries(f: &Fixture) {
-            for _ in 0..500 {
-                if !entries(f).await.is_empty() {
-                    return;
-                }
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-            panic!("the store was never filled");
-        }
-
-        #[tokio::test]
-        async fn pulled_once_per_run() {
-            let f = Fixture::new("sync_latest_cals_once").await;
-            serve_arm(&f);
-
-            f.syncer.sync().await.unwrap();
-            wait_for_entries(&f).await;
-            f.reset_cooldown().await;
-            f.syncer.sync().await.unwrap();
-
-            assert_eq!(entries(&f).await, vec![report("arm").metadata]);
-            assert_eq!(f.http_client.call_count(Call::ListLatestCalibrations), 1);
-        }
-
-        #[tokio::test]
-        async fn a_failed_pull_is_retried_on_a_later_sync() {
-            let f = Fixture::new("sync_latest_cals_retry").await;
-            f.http_client.set_list_latest_calibrations(|| {
-                Err(HTTPErr::MockErr(MockErr {
-                    is_network_conn_err: false,
-                }))
-            });
-
-            f.syncer.sync().await.unwrap();
-            serve_arm(&f);
-            // sync until a pull after the failed one fills the store
-            for _ in 0..500 {
-                f.reset_cooldown().await;
-                f.syncer.sync().await.unwrap();
-                if !entries(&f).await.is_empty() {
-                    break;
-                }
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-
-            assert_eq!(entries(&f).await, vec![report("arm").metadata]);
-        }
-
-        #[tokio::test]
-        async fn skipped_when_backend_unreachable() {
-            let f = Fixture::new("sync_latest_cals_unreachable").await;
-            f.http_client.set_list_all_deployments(|| {
-                Err(HTTPErr::MockErr(MockErr {
-                    is_network_conn_err: true,
-                }))
-            });
-
-            f.syncer.sync().await.unwrap_err();
-
-            assert_eq!(f.http_client.call_count(Call::ListLatestCalibrations), 0);
         }
     }
 
