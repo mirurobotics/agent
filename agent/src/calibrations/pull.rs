@@ -1,7 +1,15 @@
 //! Pulling Miru's latest calibrations into a latest calibrations store.
 
+// standard crates
+use std::collections::HashMap;
+
 // internal crates
-use crate::calibrations::{errors::CalibrationsErr, latest::LatestStore, report::ReportMetadata};
+use crate::calibrations::{
+    errors::CalibrationsErr,
+    latest::LatestStore,
+    report::{Key, ReportMetadata},
+    Filter,
+};
 use crate::disk::layout::LatestCalsLayout;
 use crate::http::{
     self,
@@ -9,13 +17,15 @@ use crate::http::{
 };
 
 // external crates
+use chrono::{DateTime, Utc};
 use tracing::info;
 
 /// Write Miru's latest calibration for each key into the latest store in
-/// `layout`, one key at a time, overwriting the entry already there for that
-/// key. Any failure fails the call, so a store emptied first ends up holding
-/// every calibration Miru has; more than `capacity` keys is
-/// `CalibrationStoreFullErr`.
+/// `layout`, one key at a time, unless the store's entry for that key is as new
+/// or newer, so reports Miru hasn't received yet are kept. Any failure fails
+/// the call, so an emptied store ends up holding every calibration Miru has;
+/// more than `capacity` keys is `CalibrationStoreFullErr`. The caller must keep
+/// the agent from writing the store meanwhile.
 pub async fn pull_latest<HTTPClientT: http::ClientI>(
     http_client: &HTTPClientT,
     layout: LatestCalsLayout,
@@ -29,7 +39,8 @@ pub async fn pull_latest<HTTPClientT: http::ClientI>(
     Ok(())
 }
 
-/// Put Miru's latest calibration for each key. Returns the number put.
+/// Put Miru's latest calibration for each key the store has nothing as new
+/// for. Returns the number put.
 async fn put_mirus_latest<HTTPClientT: http::ClientI>(
     store: &LatestStore,
     http_client: &HTTPClientT,
@@ -45,15 +56,31 @@ async fn put_mirus_latest<HTTPClientT: http::ClientI>(
         )
     })
     .await?;
+    let entries = store.list(&Filter::default()).await?;
+    let stored: HashMap<Key<'_>, DateTime<Utc>> =
+        entries.iter().map(|m| (m.key(), m.reported_at)).collect();
 
-    let put = calibrations.len();
+    let mut put = 0;
     for calibration in calibrations {
-        let id = calibration.id.as_str();
+        let id = calibration.id.clone();
+        let metadata = ReportMetadata::from(calibration);
+        if !is_newer(&metadata, &stored) {
+            continue;
+        }
         let data = http::with_retry(|| {
-            http::calibrations::get_content(http_client, GetContentParams { id, token })
+            http::calibrations::get_content(http_client, GetContentParams { id: &id, token })
         })
         .await?;
-        store.put(ReportMetadata::from(calibration), &data).await?;
+        store.put(metadata, &data).await?;
+        put += 1;
     }
     Ok(put)
+}
+
+/// Whether `metadata` was reported after the stored entry for its key, or the
+/// store has none.
+fn is_newer(metadata: &ReportMetadata, stored: &HashMap<Key<'_>, DateTime<Utc>>) -> bool {
+    stored
+        .get(&metadata.key())
+        .is_none_or(|reported_at| metadata.reported_at > *reported_at)
 }

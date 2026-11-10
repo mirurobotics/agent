@@ -1,5 +1,6 @@
 // internal crates
 use crate::authn;
+use crate::calibrations;
 use crate::disk;
 use crate::filesys;
 use crate::http;
@@ -14,4 +15,6 @@ pub enum UpgradeErr {
     AuthnErr(#[from] authn::AuthnErr),
     #[error(transparent)]
     FileSysErr(#[from] filesys::FileSysErr),
+    #[error(transparent)]
+    CalibrationsErr(#[from] calibrations::CalibrationsErr),
 }

@@ -10,6 +10,9 @@ use backend_api::models::CalibrationList;
 use miru_agent::calibrations::{self, latest, CalibrationsErr, Filter, Report, ReportMetadata};
 use miru_agent::http::{errors::MockErr, HTTPErr};
 
+// external crates
+use chrono::TimeDelta;
+
 struct Fixture {
     dir: test_dirs::TempDir,
     client: MockClient,
@@ -82,20 +85,59 @@ async fn writes_mirus_latest_calibrations_into_the_given_store() {
     assert!(requests[0].query.contains(&expand));
 }
 
-#[tokio::test]
-async fn overwrites_the_entry_already_there_for_a_key() {
-    let fx = Fixture::new();
+/// Seed the store with `entries`, each with content named by its component.
+async fn seed(fx: &Fixture, entries: &[ReportMetadata]) {
     let store = latest_store(&fx.dir, latest::DEFAULT_CAPACITY).await;
-    store
-        .put(reported("arm", None, None), "old content")
-        .await
-        .unwrap();
+    for entry in entries {
+        let data = format!("device's {}", entry.component);
+        store.put(entry.clone(), &data).await.unwrap();
+    }
     store.shutdown().await.unwrap();
+}
+
+/// A report for `component` reported `secs` after Miru's for that key.
+fn reported_after(component: &str, secs: i64) -> ReportMetadata {
+    let metadata = reported(component, None, None);
+    ReportMetadata {
+        reported_at: metadata.reported_at + TimeDelta::seconds(secs),
+        ..metadata
+    }
+}
+
+#[tokio::test]
+async fn replaces_an_older_entry_for_a_key() {
+    let fx = Fixture::new();
+    seed(&fx, &[reported_after("arm", -1)]).await;
     fx.serve(&["arm"]);
 
     fx.pull(latest::DEFAULT_CAPACITY).await.unwrap();
 
     assert_eq!(fx.entries().await, vec![report("arm").metadata]);
+}
+
+#[tokio::test]
+async fn keeps_an_entry_as_new_or_newer_without_downloading() {
+    let fx = Fixture::new();
+    let stored = vec![reported_after("arm", 0), reported_after("leg", 1)];
+    seed(&fx, &stored).await;
+    fx.serve(&["arm", "leg"]);
+
+    fx.pull(latest::DEFAULT_CAPACITY).await.unwrap();
+
+    assert_eq!(fx.entries().await, stored);
+    assert_eq!(fx.client.call_count(Call::GetCalibrationContent), 0);
+}
+
+#[tokio::test]
+async fn keeps_keys_miru_does_not_have() {
+    let fx = Fixture::new();
+    let leg = reported("leg", None, None);
+    seed(&fx, std::slice::from_ref(&leg)).await;
+    fx.serve(&["arm"]);
+
+    fx.pull(latest::DEFAULT_CAPACITY).await.unwrap();
+
+    assert_eq!(fx.entries().await, vec![report("arm").metadata, leg]);
 }
 
 #[tokio::test]

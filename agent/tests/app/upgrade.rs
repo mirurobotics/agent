@@ -5,10 +5,12 @@ use std::time::Duration as StdDuration;
 
 // internal crates
 use crate::mocks::http_client::{Call, MockClient};
+use crate::test_utils::calibrations::{latest_store, miru_calibration, report};
 use crate::test_utils::filesys::{dirs as test_dirs, files as test_files};
 use backend_api::models as backend_client;
 use miru_agent::app::upgrade::{needs_upgrade, reconcile, reconcile_impl, Outcome, Reconcile};
 use miru_agent::app::UpgradeErr;
+use miru_agent::calibrations::{latest, Filter};
 use miru_agent::crypt::rsa;
 use miru_agent::disk::{self, Backend, BackendHost, Layout, MQTTBroker, MqttHost, Settings};
 use miru_agent::filesys::{dirs, files, FileSysErr, Overwrite, PathExt, WriteOptions};
@@ -544,6 +546,70 @@ mod reconcile_impl {
             .await
             .unwrap();
         assert_eq!(marker, Some(version.to_string()));
+    }
+
+    #[tokio::test]
+    async fn pulls_mirus_latest_calibrations() {
+        let (layout, tmp) = prepare_layout("reconcile_impl_pull").await;
+        let mock = make_mock_client(backend_device("dvc_pl1", "pull"));
+        mock.set_list_latest_calibrations(|| {
+            Ok(backend_client::CalibrationList {
+                data: vec![miru_calibration("arm")],
+                ..backend_client::CalibrationList::default()
+            })
+        });
+
+        reconcile_impl(mock.as_ref(), &layout, "v1.0.0")
+            .await
+            .unwrap();
+
+        let store = latest_store(&tmp, latest::DEFAULT_CAPACITY).await;
+        let entries = store.list(&Filter::default()).await.unwrap();
+        assert_eq!(entries, vec![report("arm").metadata]);
+    }
+
+    #[tokio::test]
+    async fn a_network_failure_in_the_pull_fails_before_the_marker() {
+        let (layout, _tmp) = prepare_layout("reconcile_impl_pull_network").await;
+        let mock = make_mock_client(backend_device("dvc_pl2", "pull_network"));
+        mock.set_list_latest_calibrations(|| {
+            Err(HTTPErr::MockErr(HTTPMockErr {
+                is_network_conn_err: true,
+            }))
+        });
+
+        let err = reconcile_impl(mock.as_ref(), &layout, "v1.0.0")
+            .await
+            .expect_err("expected CalibrationsErr from the pull");
+
+        assert!(matches!(err, UpgradeErr::CalibrationsErr(_)), "{err:?}");
+        let marker = disk::agent_version::read(&layout.agent_version())
+            .await
+            .unwrap();
+        assert_eq!(marker, None);
+        assert_eq!(mock.num_update_device_calls(), 0);
+    }
+
+    #[tokio::test]
+    async fn any_other_pull_failure_still_upgrades() {
+        let (layout, _tmp) = prepare_layout("reconcile_impl_pull_other").await;
+        let mock = make_mock_client(backend_device("dvc_pl3", "pull_other"));
+        mock.set_list_latest_calibrations(|| {
+            Err(HTTPErr::MockErr(HTTPMockErr {
+                is_network_conn_err: false,
+            }))
+        });
+
+        let version = "v1.0.0";
+        reconcile_impl(mock.as_ref(), &layout, version)
+            .await
+            .unwrap();
+
+        let marker = disk::agent_version::read(&layout.agent_version())
+            .await
+            .unwrap();
+        assert_eq!(marker, Some(version.to_string()));
+        assert_eq!(mock.num_update_device_calls(), 1);
     }
 
     #[tokio::test]
