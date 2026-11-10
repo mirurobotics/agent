@@ -16,8 +16,8 @@ use crate::test_utils::calibrations::{
 };
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::calibrations::{
-    latest, CalibrationsErr, Filter, LatestStore, Queue, QueueSnapshotFile, ReportMetadata,
-    Uploader, UploaderArgs, UploaderOptions,
+    latest, CalibrationsErr, Filter, LatestStore, Queue, QueueSnapshotFile, Report,
+    ReportMetadata, Uploader, UploaderArgs, UploaderOptions,
 };
 use miru_agent::disk::layout::{CalibrationsLayout, LatestCalsLayout};
 use miru_agent::filesys::{dirs, files, File, PathExt, WriteOptions};
@@ -142,6 +142,12 @@ impl Harness {
         store.list(&Filter::default()).await.unwrap()
     }
 
+    /// The data the latest store holds for `report_id`.
+    async fn latest_data(&self, report_id: Uuid) -> String {
+        let store = self.store.as_ref().expect("spawned");
+        store.get(report_id).await.unwrap().data
+    }
+
     fn report_file(&self, id: Uuid) -> File {
         self.layout.reports().file(&id.to_string())
     }
@@ -176,10 +182,14 @@ impl Harness {
 /// Queue a report per slug at `h`'s layout, oldest first, as a previous run
 /// would have left them: metadata in `queue.json`, data in `reports/`.
 async fn preloaded(h: &Harness, slugs: &[&str]) -> Vec<Uuid> {
+    preloaded_reports(h, slugs.iter().map(|slug| report(slug)).collect()).await
+}
+
+/// Queue `reports` at `h`'s layout, as `preloaded` does.
+async fn preloaded_reports(h: &Harness, reports: Vec<Report>) -> Vec<Uuid> {
     let mut queue = Queue::from_snapshot(1000, h.snapshot_file().await, Persistence::Durable);
-    let mut ids = Vec::with_capacity(slugs.len());
-    for slug in slugs {
-        let report = report(slug);
+    let mut ids = Vec::with_capacity(reports.len());
+    for report in reports {
         let id = queue.enqueue(report.metadata).await.unwrap();
         let file = h.report_file(id);
         files::write_string(&file, &report.data, WriteOptions::OVERWRITE_ATOMIC)
@@ -261,8 +271,27 @@ async fn startup_stores_queued_reports_the_store_lacks() {
 
     // the worker stores queued reports before it starts the first upload
     h.await_started().await;
-    let expected = [report("a").metadata, newer_b, report("d").metadata];
+    let expected = [report("a").metadata, newer_b.clone(), report("d").metadata];
     assert_eq!(h.latest_entries().await, expected);
+    assert_eq!(h.latest_data(newer_b.report_id).await, "new b");
+    assert_eq!(h.latest_data(report("d").metadata.report_id).await, report("d").data);
+}
+
+#[tokio::test]
+async fn startup_stores_the_newest_of_a_keys_queued_reports() {
+    let mut h = Harness::new();
+    let newer_a = Report {
+        metadata: reported_after("a", 1),
+        data: "new a".to_string(),
+    };
+    preloaded_reports(&h, vec![newer_a.clone(), report("a")]).await;
+    let (_hold, hang) = oneshot::channel();
+    h.sender.push(Step::Hang(hang));
+
+    h.spawn().await;
+
+    h.await_started().await;
+    assert_eq!(h.latest_entries().await, [newer_a.metadata]);
 }
 
 #[tokio::test]

@@ -4,7 +4,6 @@
 use crate::calibrations::{
     errors::CalibrationsErr, latest::LatestStore, report::ReportMetadata, Filter,
 };
-use crate::disk::layout::LatestCalsLayout;
 use crate::http::{
     self,
     calibrations::{GetContentParams, ListAllLatestParams},
@@ -13,27 +12,13 @@ use crate::http::{
 // external crates
 use tracing::info;
 
-/// Merge Miru's latest calibrations into the latest store in `layout`, as
-/// [`merge_latest`] does. Any failure fails the call, so an emptied store ends
-/// up holding every calibration Miru has. Once the store's keys and Miru's
-/// new ones pass `capacity`, it fails with `CalibrationStoreFullErr`, possibly
-/// after putting some.
-pub async fn pull_latest<HTTPClientT: http::ClientI>(
-    http_client: &HTTPClientT,
-    layout: LatestCalsLayout,
-    capacity: usize,
-    token: &str,
-) -> Result<(), CalibrationsErr> {
-    // each command returns once done, so the worker exits idle when dropped
-    let (handle, _) = LatestStore::spawn(64, layout, capacity);
-    merge_latest(&handle, http_client, token).await
-}
-
 /// Put Miru's latest calibration for each key into `store`, one key at a time,
 /// unless the store's entry for that key was reported at the same time or
 /// later, so reports Miru hasn't received yet are kept. A key the store
-/// already has as new isn't downloaded, so a merge where nothing changed costs
-/// one list call.
+/// already has as new isn't downloaded, so a pull where nothing changed costs
+/// one list call. Any failure fails the call; a new key past the store's
+/// capacity fails it with `CalibrationStoreFullErr`, possibly after putting
+/// some.
 pub async fn merge_latest<HTTPClientT: http::ClientI>(
     store: &LatestStore,
     http_client: &HTTPClientT,
