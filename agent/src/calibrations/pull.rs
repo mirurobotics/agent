@@ -61,9 +61,7 @@ pub async fn merge_latest<HTTPClientT: http::ClientI>(
             http::calibrations::get_content(http_client, GetContentParams { id: &id, token })
         })
         .await?;
-        if store.put_if_newer(metadata, &data).await? {
-            put += 1;
-        }
+        put += usize::from(store.put_if_newer(metadata, &data).await?);
     }
     info!("calibrations: wrote {put} latest calibrations from Miru");
     Ok(())

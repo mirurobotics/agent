@@ -321,6 +321,22 @@ async fn put_if_newer_keeps_an_entry_reported_at_the_same_time_or_later() {
     assert_eq!(f.content_ids().await, [arm.report_id]);
 }
 
+#[tokio::test]
+async fn put_if_newer_rejects_a_new_key_at_capacity() {
+    let f = Fixture::with_capacity(1).await;
+    let arm = reported("arm", None, None);
+    put_all(&f.store, &[&arm]).await;
+
+    let err = f
+        .store
+        .put_if_newer(reported("leg", None, None), DATA)
+        .await
+        .unwrap_err();
+
+    assert!(matches!(err, CalibrationsErr::StoreFullErr(_)), "{err:?}");
+    assert_eq!(f.entries().await, [arm]);
+}
+
 // ================================= LIST ================================= //
 #[tokio::test]
 async fn list_sorts_by_component_then_role_then_aspect() {
@@ -452,6 +468,7 @@ async fn a_corrupt_index_fails_every_call() {
 
     let errs = [
         f.store.put(arm.clone(), DATA).await.unwrap_err(),
+        f.store.put_if_newer(arm.clone(), DATA).await.unwrap_err(),
         f.store.list(&Filter::default()).await.unwrap_err(),
         f.store.get(arm.report_id).await.unwrap_err(),
     ];
@@ -511,6 +528,7 @@ async fn commands_after_shutdown_fail() {
 
     let errs = [
         store.put(arm.clone(), DATA).await.unwrap_err(),
+        store.put_if_newer(arm.clone(), DATA).await.unwrap_err(),
         store.list(&Filter::default()).await.unwrap_err(),
         store.get(arm.report_id).await.unwrap_err(),
     ];
