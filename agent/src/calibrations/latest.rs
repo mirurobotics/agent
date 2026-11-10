@@ -14,17 +14,8 @@ use tokio::task::JoinHandle;
 use tracing::{error, info};
 use uuid::Uuid;
 
-macro_rules! dispatch {
-    ($op:expr, $respond_to:expr, $msg:expr) => {{
-        let result = $op;
-        if $respond_to.send(result).is_err() {
-            error!($msg);
-        }
-    }};
-}
-
 // ================================== WORKER ======================================= //
-pub(crate) enum Command {
+enum Command {
     Put {
         metadata: Box<ReportMetadata>,
         data: String,
@@ -39,55 +30,53 @@ pub(crate) enum Command {
         respond_to: oneshot::Sender<Result<String, CalibrationsErr>>,
     },
     Shutdown {
-        respond_to: oneshot::Sender<Result<(), CalibrationsErr>>,
+        respond_to: oneshot::Sender<()>,
     },
 }
 
-pub(crate) struct Worker {
-    store: LatestStoreImpl,
+struct Worker {
     receiver: mpsc::Receiver<Command>,
+    store: LatestStoreImpl,
 }
 
 impl Worker {
-    pub(crate) async fn run(mut self) {
+    /// Serve commands one at a time. Every handle dropping counts as a
+    /// shutdown.
+    async fn run(mut self) {
         while let Some(cmd) = self.receiver.recv().await {
             match cmd {
-                Command::Shutdown { respond_to } => {
-                    if respond_to.send(Ok(())).is_err() {
-                        error!("calibrations: failed to send the latest store's shutdown response");
-                    }
-                    break;
-                }
                 Command::Put {
                     metadata,
                     data,
                     respond_to,
                 } => {
-                    dispatch!(
-                        self.store.put(*metadata, &data).await,
-                        respond_to,
-                        "calibrations: failed to send the latest store's put response"
-                    );
+                    let result = self.store.put(*metadata, &data).await;
+                    respond(respond_to, result, "put");
                 }
                 Command::List { filter, respond_to } => {
-                    dispatch!(
-                        self.store.list(&filter).await,
-                        respond_to,
-                        "calibrations: failed to send the latest store's list response"
-                    );
+                    let result = self.store.list(&filter).await;
+                    respond(respond_to, result, "list");
                 }
                 Command::Content {
                     report_id,
                     respond_to,
                 } => {
-                    dispatch!(
-                        self.store.content(report_id).await,
-                        respond_to,
-                        "calibrations: failed to send the latest store's content response"
-                    );
+                    let result = self.store.content(report_id).await;
+                    respond(respond_to, result, "content");
+                }
+                Command::Shutdown { respond_to } => {
+                    respond(respond_to, (), "shutdown");
+                    break;
                 }
             }
         }
+        info!("calibrations: latest store shutdown complete");
+    }
+}
+
+fn respond<T>(respond_to: oneshot::Sender<T>, value: T, op: &str) {
+    if respond_to.send(value).is_err() {
+        error!("calibrations: failed to send the latest store's {op} response");
     }
 }
 
@@ -111,8 +100,8 @@ impl LatestStore {
     ) -> (Self, JoinHandle<()>) {
         let (sender, receiver) = mpsc::channel(buffer_size);
         let worker = Worker {
-            store: LatestStoreImpl::open(layout, capacity).await,
             receiver,
+            store: LatestStoreImpl::open(layout, capacity).await,
         };
         (Self { sender }, tokio::spawn(worker.run()))
     }
@@ -122,7 +111,7 @@ impl LatestStore {
     /// part way leaves at most content that no entry names, which the next
     /// open deletes.
     pub async fn put(&self, metadata: ReportMetadata, data: &str) -> Result<(), CalibrationsErr> {
-        self.send_command(|respond_to| Command::Put {
+        self.send_command("put", |respond_to| Command::Put {
             metadata: Box::new(metadata),
             data: data.to_string(),
             respond_to,
@@ -132,7 +121,7 @@ impl LatestStore {
 
     /// The entries `filter` matches, ordered by component, role and aspect.
     pub async fn list(&self, filter: &Filter) -> Result<Vec<ReportMetadata>, CalibrationsErr> {
-        self.send_command(|respond_to| Command::List {
+        self.send_command("list", |respond_to| Command::List {
             filter: filter.clone(),
             respond_to,
         })
@@ -142,7 +131,7 @@ impl LatestStore {
     /// The data of the entry for `report_id`. Not found unless an entry has
     /// that `report_id` and its content exists.
     pub async fn content(&self, report_id: Uuid) -> Result<String, CalibrationsErr> {
-        self.send_command(|respond_to| Command::Content {
+        self.send_command("content", |respond_to| Command::Content {
             report_id,
             respond_to,
         })
@@ -152,24 +141,25 @@ impl LatestStore {
     /// Stop the worker. Calls through any clone then fail.
     pub async fn shutdown(&self) -> Result<(), CalibrationsErr> {
         info!("calibrations: shutting down latest store...");
-        self.send_command(|respond_to| Command::Shutdown { respond_to })
-            .await??;
-        info!("calibrations: latest store shutdown complete");
-        Ok(())
+        self.send_command("shutdown", |respond_to| Command::Shutdown { respond_to })
+            .await
     }
 
     async fn send_command<R>(
         &self,
-        cmd: impl FnOnce(oneshot::Sender<R>) -> Command,
+        op: &str,
+        make_cmd: impl FnOnce(oneshot::Sender<R>) -> Command,
     ) -> Result<R, CalibrationsErr> {
         let (send, recv) = oneshot::channel();
-        self.sender.send(cmd(send)).await.map_err(|e| {
+        self.sender.send(make_cmd(send)).await.map_err(|e| {
+            error!("calibrations: failed to send the {op} command to the latest store: {e}");
             CalibrationsErr::SendActorMessageErr(SendActorMessageErr {
                 source: Box::new(e),
                 trace: trace!(),
             })
         })?;
         recv.await.map_err(|e| {
+            error!("calibrations: failed to receive the {op} response from the latest store: {e}");
             CalibrationsErr::ReceiveActorMessageErr(ReceiveActorMessageErr {
                 source: Box::new(e),
                 trace: trace!(),
