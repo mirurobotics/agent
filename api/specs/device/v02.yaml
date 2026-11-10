@@ -11,17 +11,17 @@ info:
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
-  x-release-version: v0.2.5-beta.5
+  x-release-version: v0.2.5-beta.6
   x-git-commit:
-    sha: c343509eba4e2624484491b244916dc489157702
-    url: https://github.com/mirurobotics/openapi/commit/c343509eba4e2624484491b244916dc489157702
-    message: 'feat(device): declare Content-Disposition on the calibration content
-      download (#465)'
+    sha: f82b3778ee4e8cb929924d8278e04817a98e4402
+    url: https://github.com/mirurobotics/openapi/commit/f82b3778ee4e8cb929924d8278e04817a98e4402
+    message: 'feat(device)!: drop is_confirmed from the latest calibrations response
+      (#466)'
     author: Ben's Agent
     branch: HEAD
     dirty: false
   x-build:
-    built_at: '2026-11-10T02:47:30.069509+00:00'
+    built_at: '2026-11-10T04:33:11.576798+00:00'
 servers:
 - url: http://localhost/v0.2
   description: localhost
@@ -323,14 +323,14 @@ components:
     ReleaseVersion:
       type: string
       enum:
-      - v0.2.5-beta.5
+      - v0.2.5-beta.6
       x-enum-varnames:
       - RELEASE_VERSION
       x-stainless-const: true
     APIGitCommit:
       type: string
       enum:
-      - c343509eba4e2624484491b244916dc489157702
+      - f82b3778ee4e8cb929924d8278e04817a98e4402
       x-enum-varnames:
       - API_GIT_COMMIT
       x-stainless-const: true
@@ -482,7 +482,7 @@ components:
         api_release_version:
           type: string
           description: The API release version of the agent.
-          example: v0.2.5-beta.5
+          example: v0.2.5-beta.6
         rust_version:
           type: string
           description: The version of Rust.
@@ -505,7 +505,7 @@ components:
         git_commit: a1b2c3d4
         api_version: v0.2
         api_git_commit: a1b2c3d4
-        api_release_version: v0.2.5-beta.5
+        api_release_version: v0.2.5-beta.6
         rust_version: 1.93.0
         build_date: '2026-02-24T10:30:00Z'
         os: linux
@@ -708,22 +708,14 @@ components:
       title: Latest Calibrations Response
       type: object
       required:
-      - is_confirmed
       - calibrations
       properties:
-        is_confirmed:
-          type: boolean
-          example: true
-          description: Whether the list includes the device's calibrations from Miru.
-            Until it does, `calibrations` holds only calibrations reported to this
-            agent.
         calibrations:
           type: array
           items:
             $ref: '#/components/schemas/Calibration'
           description: The latest calibrations, one for each component, role and aspect.
       example:
-        is_confirmed: true
         calibrations:
         - object: calibration
           report_id: 0b6f3c2e-6a51-4e0f-9a43-2f1d7c9e8b10
