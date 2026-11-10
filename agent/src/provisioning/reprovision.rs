@@ -3,8 +3,8 @@ use crate::authn;
 use crate::calibrations::{self, latest::DEFAULT_CAPACITY};
 use crate::cli;
 use crate::crypt::rsa;
-use crate::disk::{self, layout::CalibrationsLayout, settings};
-use crate::filesys::{self, dirs, files, Dir, Overwrite};
+use crate::disk::{self, settings};
+use crate::filesys::{self, dirs, files, Overwrite};
 use crate::http;
 use crate::models;
 use crate::provisioning::{errors::*, shared};
@@ -24,7 +24,6 @@ pub async fn reprovision<HTTPClientT: http::ClientI>(
     let temp_dir = layout.temp_dir();
     let private_key_file = temp_dir.file("private.key");
     let public_key_file = temp_dir.file("public.key");
-    let staged_cals = temp_dir.subdir("calibrations");
 
     let result = async {
         // generate new public and private keys in a temporary directory which
@@ -47,37 +46,30 @@ pub async fn reprovision<HTTPClientT: http::ClientI>(
             version::VERSION,
         )
         .await?;
-        stage_latest_calibrations(http_client, layout, &staged_cals).await?;
-        dirs::move_to(&staged_cals, &layout.calibrations().root, Overwrite::Allow).await?;
+        load_latest_calibrations(http_client, layout).await?;
         Ok(device)
     }
     .await;
 
     shared::cleanup_temp_files(&[&private_key_file, &public_key_file]).await;
-    if let Err(e) = dirs::delete(&staged_cals).await {
-        warn!("failed to clean up the staged calibrations: {e}");
-    }
     result
 }
 
-/// Load Miru's latest calibrations into a calibrations dir at `staged_cals`,
-/// which replaces the device's, upload queue included. Uses the keys
-/// `bootstrap` installed, so a failed load leaves the device able to reach
-/// Miru and its calibrations as they were.
-async fn stage_latest_calibrations<HTTPClientT: http::ClientI>(
+/// Replace the device's calibrations, upload queue included, with Miru's
+/// latest. Runs after `bootstrap`, so the old device's calibrations are gone
+/// even if the load fails, and the token comes from the installed keys.
+async fn load_latest_calibrations<HTTPClientT: http::ClientI>(
     http_client: &HTTPClientT,
     layout: &disk::Layout,
-    staged_cals: &Dir,
 ) -> Result<(), ProvisionErr> {
+    let cals = layout.calibrations();
+    dirs::delete(&cals.root).await?;
     let auth = layout.auth();
     let device_token =
         authn::issue_token(http_client, &auth.private_key(), &auth.public_key()).await?;
-    // created even when empty, so the swap always has a dir to move in
-    dirs::delete(staged_cals).await?;
-    dirs::create(staged_cals).await?;
     calibrations::load_latest(
         http_client,
-        CalibrationsLayout::new(staged_cals.clone()).latest(),
+        cals.latest(),
         DEFAULT_CAPACITY,
         &device_token.token,
     )
