@@ -16,5 +16,5 @@ pub async fn get_content(store: &LatestStore, report_id: &str) -> Result<Report,
         };
         return Err(CalibrationsErr::from(err).into());
     };
-    Ok(store.content(id).await?)
+    Ok(store.get(id).await?)
 }

@@ -91,7 +91,7 @@ impl LatestStoreImpl {
     }
 
     /// The entry for `report_id`, with its data.
-    pub(crate) async fn content(&self, report_id: Uuid) -> Result<Report, CalibrationsErr> {
+    pub(crate) async fn get(&self, report_id: Uuid) -> Result<Report, CalibrationsErr> {
         let index = self.read_index().await?;
         let Some(entry) = index.into_iter().find(|m| m.report_id == report_id) else {
             return Err(not_found(report_id));
