@@ -57,6 +57,9 @@ openssl = { workspace = true }
 windows-service = { workspace = true }
 windows-sys = { workspace = true }
 
+[build-dependencies]
+chrono = { workspace = true }
+
 [package.metadata.cargo-machete]
 ignored = ["openssl"]
 
