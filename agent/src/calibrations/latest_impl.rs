@@ -38,33 +38,31 @@ impl Filter {
 /// key in `index.json`, and each entry's data in its own file under `contents/`,
 /// named by its `report_id`. A report replaces its key's entry, and a new key
 /// past the capacity is rejected rather than evicting another.
-#[derive(Clone, Debug)]
-pub struct LatestStore {
+/// [`LatestStore`]'s worker owns it, so it is the store's only writer.
+///
+/// [`LatestStore`]: crate::calibrations::LatestStore
+pub(crate) struct LatestStoreImpl {
     index: File,
     contents: Dir,
     capacity: usize,
 }
 
-impl LatestStore {
-    /// Open the store in `layout`, holding at most `capacity` keys. It first
-    /// deletes the content no entry names, which a crash or a failed write or
-    /// delete leaves.
-    pub async fn open(layout: LatestCalsLayout, capacity: usize) -> Self {
-        let store = Self {
+impl LatestStoreImpl {
+    /// The store in `layout`, holding at most `capacity` keys.
+    pub(crate) fn new(layout: LatestCalsLayout, capacity: usize) -> Self {
+        Self {
             index: layout.index(),
             contents: layout.contents(),
             capacity,
-        };
-        store.prune_orphaned_contents().await;
-        store
+        }
     }
 
-    /// Make `metadata` its key's entry, with `data` as its content. A new key
-    /// past the capacity is rejected rather than evicting another. A failure
-    /// part way leaves at most content that no entry names, which the next
-    /// open deletes. Puts must not overlap, since each rewrites the whole
-    /// index.
-    pub async fn put(&self, metadata: ReportMetadata, data: &str) -> Result<(), CalibrationsErr> {
+    /// Make `metadata` its key's entry, with `data` as its content.
+    pub(crate) async fn put(
+        &self,
+        metadata: ReportMetadata,
+        data: &str,
+    ) -> Result<(), CalibrationsErr> {
         let mut index = self.read_index().await?;
         let replaced = take_entry(&mut index, &metadata);
         if replaced.is_none() {
@@ -82,16 +80,18 @@ impl LatestStore {
     }
 
     /// The entries `filter` matches, ordered by component, role and aspect.
-    pub async fn list(&self, filter: &Filter) -> Result<Vec<ReportMetadata>, CalibrationsErr> {
+    pub(crate) async fn list(
+        &self,
+        filter: &Filter,
+    ) -> Result<Vec<ReportMetadata>, CalibrationsErr> {
         let mut entries = self.read_index().await?;
         entries.retain(|metadata| filter.is_match(metadata));
         entries.sort_by(|a, b| key_parts(a).cmp(&key_parts(b)));
         Ok(entries)
     }
 
-    /// The data of the entry for `report_id`. Not found unless an entry has
-    /// that `report_id` and its content exists.
-    pub async fn content(&self, report_id: Uuid) -> Result<String, CalibrationsErr> {
+    /// The data of the entry for `report_id`.
+    pub(crate) async fn content(&self, report_id: Uuid) -> Result<String, CalibrationsErr> {
         let index = self.read_index().await?;
         if !index.iter().any(|m| m.report_id == report_id) {
             return Err(not_found(report_id));
@@ -127,9 +127,9 @@ impl LatestStore {
         files::delete_or_warn(&self.content_file(report_id)).await;
     }
 
-    /// Delete the content no entry names. If the index can't be read, nothing
-    /// is deleted.
-    async fn prune_orphaned_contents(&self) {
+    /// Delete the content no entry names, which a crash or a failed write or
+    /// delete leaves. If the index can't be read, nothing is deleted.
+    pub(crate) async fn prune_orphaned_contents(&self) {
         let index = match self.read_index().await {
             Ok(index) => index,
             Err(e) => {

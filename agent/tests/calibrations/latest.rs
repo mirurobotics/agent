@@ -1,5 +1,5 @@
 //! The latest calibrations store: its keys and capacity, write order,
-//! listing, content, and the prune when it opens.
+//! listing, content, the prune when its worker starts, and shutdown.
 
 // internal crates
 use crate::test_utils::calibrations::{latest_cals_layout, latest_store, reported};
@@ -9,6 +9,8 @@ use miru_agent::disk::layout::LatestCalsLayout;
 use miru_agent::filesys::{dirs, files, File, PathExt, WriteOptions};
 
 // external crates
+use futures::FutureExt;
+use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 /// The content every fixture report is put with.
@@ -35,9 +37,14 @@ impl Fixture {
         }
     }
 
-    /// Open the store again over the same files.
+    /// Spawn the store again over the same files.
     async fn reopen(&self) -> LatestStore {
         latest_store(&self.dir, latest::DEFAULT_CAPACITY).await
+    }
+
+    /// Spawn the store again over the same files, keeping its worker's handle.
+    fn spawn(&self) -> (LatestStore, JoinHandle<()>) {
+        LatestStore::spawn(64, latest_cals_layout(&self.dir), latest::DEFAULT_CAPACITY)
     }
 
     /// Every entry, in key order.
@@ -102,9 +109,9 @@ async fn put_all(store: &LatestStore, reports: &[&ReportMetadata]) {
     }
 }
 
-// ================================= OPEN ================================= //
+// ================================ SPAWN ================================= //
 #[tokio::test]
-async fn open_deletes_the_contents_no_entry_names() {
+async fn spawn_deletes_the_contents_no_entry_names() {
     let f = Fixture::new().await;
     let arm = reported("arm", None, None);
     put_all(&f.store, &[&arm]).await;
@@ -117,7 +124,7 @@ async fn open_deletes_the_contents_no_entry_names() {
 
 // paused, so the read's retries don't wait in real time
 #[tokio::test(start_paused = true)]
-async fn open_keeps_the_contents_when_the_index_cannot_be_read() {
+async fn spawn_keeps_the_contents_when_the_index_cannot_be_read() {
     let f = Fixture::new().await;
     let orphan = Uuid::new_v4();
     f.write_orphan(orphan).await;
@@ -130,7 +137,7 @@ async fn open_keeps_the_contents_when_the_index_cannot_be_read() {
 }
 
 #[tokio::test]
-async fn open_keeps_the_contents_when_the_index_is_corrupt() {
+async fn spawn_keeps_the_contents_when_the_index_is_corrupt() {
     let f = Fixture::new().await;
     let orphan = Uuid::new_v4();
     f.write_orphan(orphan).await;
@@ -427,4 +434,68 @@ async fn content_fails_when_its_file_cannot_be_read() {
     let err = f.store.content(arm.report_id).await.unwrap_err();
 
     assert!(matches!(err, CalibrationsErr::FileSysErr(_)), "{err:?}");
+}
+
+// =============================== SHUTDOWN =============================== //
+#[tokio::test]
+async fn commands_after_shutdown_fail() {
+    let f = Fixture::new().await;
+    let (store, handle) = f.spawn();
+    store.shutdown().await.unwrap();
+    // joined, so the worker has dropped its receiver
+    handle.await.unwrap();
+    let arm = reported("arm", None, None);
+
+    let errs = [
+        store.put(arm.clone(), DATA).await.unwrap_err(),
+        store.list(&Filter::default()).await.unwrap_err(),
+        store.content(arm.report_id).await.unwrap_err(),
+    ];
+
+    for err in errs {
+        assert!(
+            matches!(err, CalibrationsErr::SendActorMessageErr(_)),
+            "{err:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_command_queued_behind_shutdown_fails() {
+    let f = Fixture::new().await;
+    let (store, handle) = f.spawn();
+    let filter = Filter::default();
+
+    let (stopped, listed) = tokio::join!(store.shutdown(), store.list(&filter));
+
+    stopped.unwrap();
+    let err = listed.unwrap_err();
+    assert!(
+        matches!(err, CalibrationsErr::ReceiveActorMessageErr(_)),
+        "{err:?}"
+    );
+    handle.await.unwrap();
+}
+
+#[tokio::test]
+async fn a_caller_that_stops_waiting_does_not_stop_the_store() {
+    let f = Fixture::new().await;
+    let arm = reported("arm", None, None);
+    let filter = Filter::default();
+
+    // polled once: the command is sent, then its reply is abandoned
+    assert!(f.store.list(&filter).now_or_never().is_none());
+
+    put_all(&f.store, &[&arm]).await;
+    assert_eq!(f.entries().await, [arm]);
+}
+
+#[tokio::test]
+async fn dropping_every_handle_stops_the_store() {
+    let f = Fixture::new().await;
+    let (store, handle) = f.spawn();
+
+    drop(store);
+
+    handle.await.unwrap();
 }
