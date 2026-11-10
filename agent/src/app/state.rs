@@ -26,6 +26,12 @@ type DataUploadActors = (
     [tokio::task::JoinHandle<()>; 3],
 );
 
+type CalibrationActors = (
+    calibrations::LatestStore,
+    Arc<calibrations::Uploader>,
+    [tokio::task::JoinHandle<()>; 2],
+);
+
 #[derive(Clone, Debug)]
 pub struct AppState {
     pub storage: Arc<disk::Storage>,
@@ -81,16 +87,9 @@ impl AppState {
         let (deleter, uploader, scanner, [scanner_handle, deleter_handle, uploader_handle]) =
             Self::init_data_uploads(layout, http_client.clone(), token_mngr.clone()).await?;
 
-        // initialize the latest calibrations store before the calibration
-        // uploader, whose worker writes it
-        let (latest_cals, latest_cals_handle) = Self::init_latest_cals(layout);
-        let (cal_uploader, cal_uploader_handle) = Self::init_cal_uploader(
-            layout,
-            http_client.clone(),
-            token_mngr.clone(),
-            latest_cals.clone(),
-        )
-        .await;
+        // initialize the calibrations pipeline (latest store, uploader)
+        let (latest_cals, cal_uploader, [latest_cals_handle, cal_uploader_handle]) =
+            Self::init_calibrations(layout, http_client.clone(), token_mngr.clone()).await;
 
         let shutdown_handle = async move {
             let handles = [
@@ -266,6 +265,23 @@ impl AppState {
             chrono::Utc::now,
         )?;
         Ok((Arc::new(uploader), handle))
+    }
+
+    /// The latest calibrations store is initialized before the calibration
+    /// uploader, whose worker writes it.
+    async fn init_calibrations(
+        layout: &disk::Layout,
+        http_client: Arc<http::Client>,
+        token_mngr: Arc<authn::TokenManager>,
+    ) -> CalibrationActors {
+        let (latest_cals, latest_cals_handle) = Self::init_latest_cals(layout);
+        let (cal_uploader, cal_uploader_handle) =
+            Self::init_cal_uploader(layout, http_client, token_mngr, latest_cals.clone()).await;
+        (
+            latest_cals,
+            cal_uploader,
+            [latest_cals_handle, cal_uploader_handle],
+        )
     }
 
     /// Spawn the latest calibrations store's worker.
