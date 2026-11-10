@@ -71,20 +71,8 @@ impl LatestStoreImpl {
         metadata: ReportMetadata,
         data: &str,
     ) -> Result<(), CalibrationsErr> {
-        let mut index = self.read_index().await?;
-        let replaced = take_entry(&mut index, &metadata);
-        if replaced.is_none() {
-            check_capacity(index.len(), self.capacity)?;
-        }
-        let report_id = metadata.report_id;
-        self.write_content(report_id, data).await?;
-        index.push(metadata);
-        self.write_index(index).await?;
-        // the same report put again shares its content file, so keep it
-        if let Some(replaced) = replaced.filter(|r| r.report_id != report_id) {
-            self.delete_content(replaced.report_id).await;
-        }
-        Ok(())
+        let index = self.read_index().await?;
+        self.put_in(index, metadata, data).await
     }
 
     /// Put `metadata` unless its key's entry was reported at the same time or
@@ -98,8 +86,30 @@ impl LatestStoreImpl {
         if index.iter().any(|entry| entry.is_as_new_as(&metadata)) {
             return Ok(false);
         }
-        self.put(metadata, data).await?;
+        self.put_in(index, metadata, data).await?;
         Ok(true)
+    }
+
+    /// Put `metadata` into `index`, the index as read, and write both.
+    async fn put_in(
+        &self,
+        mut index: Index,
+        metadata: ReportMetadata,
+        data: &str,
+    ) -> Result<(), CalibrationsErr> {
+        let replaced = take_entry(&mut index, &metadata);
+        if replaced.is_none() {
+            check_capacity(index.len(), self.capacity)?;
+        }
+        let report_id = metadata.report_id;
+        self.write_content(report_id, data).await?;
+        index.push(metadata);
+        self.write_index(index).await?;
+        // the same report put again shares its content file, so keep it
+        if let Some(replaced) = replaced.filter(|r| r.report_id != report_id) {
+            self.delete_content(replaced.report_id).await;
+        }
+        Ok(())
     }
 
     /// The entries `filter` matches, ordered by component, role and aspect.
