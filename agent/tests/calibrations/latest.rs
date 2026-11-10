@@ -457,12 +457,13 @@ async fn spawn_retries_an_index_read_that_fails_for_a_moment() {
     put_all(&f.store, &[&arm]).await;
     let saved = f.block_index().await;
     let (store, _) = f.spawn();
+    let filter = Filter::default();
     let unblock = async {
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         f.unblock_index(&saved).await;
     };
 
-    let ((), entries) = tokio::join!(unblock, store.list(&Filter::default()));
+    let ((), entries) = tokio::join!(unblock, store.list(&filter));
 
     assert_eq!(entries.unwrap(), [arm]);
 }
