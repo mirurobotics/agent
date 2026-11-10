@@ -2,6 +2,7 @@
 //! store, merging by `reported_at`.
 
 // standard crates
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 // internal crates
@@ -86,13 +87,15 @@ async fn download<HTTPClientT: http::ClientI>(
 }
 
 /// Pulls the control plane's latest calibrations into the store until a pull
-/// succeeds this run. Concurrent callers wait for the pull already running.
+/// succeeds this run. Concurrent callers share the result of the pull already
+/// running.
 #[derive(Debug)]
 pub struct LatestPuller<HTTPClientT, TokenManagerT> {
     store: LatestStore,
     http_client: Arc<HTTPClientT>,
     token_mngr: Arc<TokenManagerT>,
     has_pulled: Mutex<bool>,
+    attempts: AtomicU64,
 }
 
 impl<HTTPClientT, TokenManagerT> LatestPuller<HTTPClientT, TokenManagerT>
@@ -110,20 +113,23 @@ where
             http_client,
             token_mngr,
             has_pulled: Mutex::new(false),
+            attempts: AtomicU64::new(0),
         }
     }
 
     /// Pulls unless a pull has succeeded this run. A failure is logged, and the
-    /// next call tries again.
+    /// next call tries again, but a caller that waited for a pull doesn't.
     pub async fn ensure_pulled(&self) {
+        let seen = self.attempts.load(Ordering::Acquire);
         let mut has_pulled = self.has_pulled.lock().await;
-        if *has_pulled {
+        if *has_pulled || self.attempts.load(Ordering::Acquire) != seen {
             return;
         }
         match self.pull().await {
             Ok(()) => *has_pulled = true,
             Err(e) => warn!("calibrations: unable to pull the latest calibrations: {e}"),
         }
+        self.attempts.fetch_add(1, Ordering::Release);
     }
 
     async fn pull(&self) -> Result<(), CalibrationsErr> {

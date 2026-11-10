@@ -259,3 +259,20 @@ async fn ensure_pulled_tries_again_after_a_token_failure() {
     puller.ensure_pulled().await;
     assert_eq!(fx.entries().await, vec![report("arm").metadata]);
 }
+
+#[tokio::test]
+async fn ensure_pulled_callers_share_a_failed_pull() {
+    let fx = Fixture::new();
+    // a network error makes the pull wait before it lists again
+    fx.client.set_list_latest_calibrations(|| {
+        Err(HTTPErr::MockErr(MockErr {
+            is_network_conn_err: true,
+        }))
+    });
+    let token_mngr = token_manager();
+    let puller = fx.puller(token_mngr.clone()).await;
+
+    tokio::join!(puller.ensure_pulled(), puller.ensure_pulled());
+
+    assert_eq!(token_mngr.num_get_token_calls(), 1);
+}
