@@ -183,7 +183,7 @@ pub async fn create_calibration(
             let params = calibration_svc::CreateParams::try_from(request)
                 .map_err(ServerErr::InvalidRequestErr)?;
             let created = calibration_svc::create(
-                &state.cal_mngr,
+                &state.cal_uploader,
                 &state.storage.deployments,
                 params,
                 Utc::now(),

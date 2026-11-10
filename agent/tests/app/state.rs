@@ -293,13 +293,13 @@ pub mod init {
     }
 
     #[tokio::test]
-    async fn cal_mngr_spawned() {
+    async fn cal_uploader_spawned() {
         let env = TestEnv::valid().await;
 
         let (state, state_handle) = env.init().await.unwrap();
 
         // the actor is spawned and its queue snapshot file is seeded on disk
-        state.cal_mngr.num_queued_uploads().await.unwrap();
+        state.cal_uploader.num_queued_uploads().await.unwrap();
         assert!(env.layout.calibrations().queue().exists());
 
         state.shutdown().await.unwrap();
@@ -307,12 +307,12 @@ pub mod init {
     }
 
     #[tokio::test]
-    async fn latest_cals_lists_what_cal_mngr_reports() {
+    async fn latest_cals_lists_what_cal_uploader_reports() {
         let env = TestEnv::valid().await;
         let (state, state_handle) = env.init().await.unwrap();
         let report = report("arm");
 
-        state.cal_mngr.report(report.clone()).await.unwrap();
+        state.cal_uploader.report(report.clone()).await.unwrap();
         let entries = state.latest_cals.list(&Filter::default()).await.unwrap();
 
         state.shutdown().await.unwrap();
@@ -321,7 +321,7 @@ pub mod init {
     }
 
     #[tokio::test]
-    async fn cal_mngr_degrades_when_queue_path_unwritable() {
+    async fn cal_uploader_degrades_when_queue_path_unwritable() {
         let env = TestEnv::valid().await;
         // a directory at the queue FILE path makes
         // QueueSnapshotFile::new_with_default fail on both read and create
@@ -331,7 +331,7 @@ pub mod init {
         let (state, state_handle) = env.init().await.unwrap();
 
         // fail-open: the agent boots and the uploader runs without persistence
-        state.cal_mngr.num_queued_uploads().await.unwrap();
+        state.cal_uploader.num_queued_uploads().await.unwrap();
 
         state.shutdown().await.unwrap();
         state_handle.await;
@@ -414,12 +414,12 @@ pub mod shutdown {
     }
 
     #[tokio::test]
-    async fn cal_mngr_shutdown_error_does_not_abort_teardown() {
+    async fn cal_uploader_shutdown_error_does_not_abort_teardown() {
         let env = TestEnv::valid().await;
         let (state, state_handle) = env.init().await.unwrap();
 
         // set the device online so the offline assertion below proves teardown
-        // continued through storage after the calibration manager error
+        // continued through storage after the calibration uploader error
         state
             .storage
             .device
@@ -427,14 +427,14 @@ pub mod shutdown {
             .await
             .unwrap();
 
-        // stop the calibration manager directly so AppState::shutdown errors
+        // stop the calibration uploader directly so AppState::shutdown errors
         // on it (it is torn down first, so its error is the one surfaced)
-        state.cal_mngr.shutdown().await.unwrap();
+        state.cal_uploader.shutdown().await.unwrap();
 
         let err = state
             .shutdown()
             .await
-            .expect_err("calibration manager error surfaces");
+            .expect_err("calibration uploader error surfaces");
         assert!(matches!(err, ServerErr::CalibrationsErr(_)));
         state_handle.await;
 

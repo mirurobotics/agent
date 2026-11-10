@@ -5,7 +5,7 @@ use std::time::Duration;
 // internal crates
 use crate::mocks::{calibration_sender::MockCalibrationSender, http_client::MockClient};
 use crate::test_utils::{
-    calibrations::cal_mngr,
+    calibrations::cal_uploader,
     filesys::dirs as test_dirs,
     sync::{create_storage, create_token_manager},
 };
@@ -50,7 +50,7 @@ impl Fixture {
         let log_file = dir.file("events.jsonl");
         let (event_hub, _handle) = EventHub::spawn(log_file, opts).await.unwrap();
 
-        let cal_mngr = cal_mngr(
+        let cal_uploader = cal_uploader(
             &dir,
             MockCalibrationSender::new().0,
             UploaderOptions::default(),
@@ -66,7 +66,7 @@ impl Fixture {
             syncer,
             Arc::new(token_mngr),
             event_hub,
-            Arc::new(cal_mngr),
+            Arc::new(cal_uploader),
             shutdown_tx.clone(),
         ));
 
