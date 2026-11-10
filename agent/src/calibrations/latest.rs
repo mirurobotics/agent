@@ -255,7 +255,8 @@ mod tests {
     // ============================== MATCHES ============================= //
     #[test]
     fn matches_listed_values_or_any_for_an_empty_list() {
-        let cases: [(&[Option<&str>], Option<&str>, bool); 5] = [
+        type Slug = Option<&'static str>;
+        let cases: [(&[Slug], Slug, bool); 5] = [
             (&[], Some("left"), true),
             (&[Some("left"), Some("right")], Some("left"), true),
             (&[Some("right")], Some("left"), false),
