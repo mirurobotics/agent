@@ -7,9 +7,10 @@ use std::time::Duration;
 use crate::calibrations::{
     errors::{CalibrationsErr, ReceiveActorMessageErr, SendActorMessageErr},
     latest::LatestStore,
-    report::{QueueEntry, QueueSnapshotFile, Report},
+    report::{self, QueueEntry, QueueSnapshotFile, Report},
     sender::Sender,
     uploader_impl::{NextAttempt, UploaderImpl, UploaderOptions},
+    Filter,
 };
 use crate::filesys::Dir;
 use crate::trace;
@@ -18,7 +19,7 @@ use crate::trace;
 use chrono::{DateTime, Utc};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 pub struct UploaderArgs<S, F, N> {
     /// Where the queue persists; `None` keeps it in memory only.
@@ -69,6 +70,7 @@ where
 {
     async fn run(mut self) {
         self.uploader.prune_orphans().await;
+        self.store_queued().await;
         loop {
             let flow = match self.uploader.next_attempt().await {
                 NextAttempt::Ready(entry) => self.run_attempt(entry).await,
@@ -80,6 +82,33 @@ where
             }
         }
         info!("calibrations: uploader shutdown complete");
+    }
+
+    /// Write each queued report to the latest store unless the store has its
+    /// key's report as new or newer, since an older agent queued reports
+    /// without writing the store. Failures are logged.
+    async fn store_queued(&self) {
+        let stored = match self.latest.list(&Filter::default()).await {
+            Ok(stored) => stored,
+            Err(e) => {
+                warn!("calibrations: not storing queued reports, store unreadable: {e}");
+                return;
+            }
+        };
+        for entry in self.uploader.queued() {
+            if stored.iter().any(|s| s.is_as_new_as(&entry.job)) {
+                continue;
+            }
+            if let Err(e) = self.store(entry).await {
+                warn!("calibrations: not storing queued report {}: {e}", entry.id);
+            }
+        }
+    }
+
+    async fn store(&self, entry: &QueueEntry) -> Result<bool, CalibrationsErr> {
+        let file = self.uploader.report_file(entry.id);
+        let data = report::read_data(&file).await?;
+        self.latest.put_if_newer(entry.job.clone(), &data).await
     }
 
     /// Upload the report queued as `entry` and settle it. A shutdown

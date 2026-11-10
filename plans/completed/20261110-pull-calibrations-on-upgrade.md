@@ -44,7 +44,7 @@ Observable: upgrade an agent on a device whose calibrations are in Miru but not 
 ## Progress
 
 - [x] PR 1: merge instead of overwrite.
-- [ ] PR 2: store queued reports at startup.
+- [x] PR 2: store queued reports at startup.
 - [ ] PR 3: pull once per run.
 
 ## Surprises & Discoveries

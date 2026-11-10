@@ -134,6 +134,11 @@ where
         self.queue.len()
     }
 
+    /// The queued reports' entries, in queue order.
+    pub(crate) fn queued(&self) -> impl Iterator<Item = &QueueEntry> {
+        self.queue.iter()
+    }
+
     /// The report to attempt now, or how long until one is due.
     pub(crate) async fn next_attempt(&mut self) -> NextAttempt {
         let now = (self.now_fn)();
@@ -230,7 +235,7 @@ where
         Err(err)
     }
 
-    fn report_file(&self, id: Uuid) -> File {
+    pub(crate) fn report_file(&self, id: Uuid) -> File {
         report::report_file(&self.reports, id)
     }
 

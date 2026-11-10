@@ -233,6 +233,55 @@ async fn startup_prunes_orphaned_report_files() {
     assert!(h.report_file(ids[0]).exists());
 }
 
+/// `slug`'s fixture report, reported `secs` after it, under a new `report_id`.
+fn reported_after(slug: &str, secs: i64) -> ReportMetadata {
+    let metadata = report(slug).metadata;
+    ReportMetadata {
+        report_id: Uuid::new_v4(),
+        reported_at: metadata.reported_at + TimeDelta::seconds(secs),
+        ..metadata
+    }
+}
+
+#[tokio::test]
+async fn startup_stores_queued_reports_the_store_lacks() {
+    let mut h = Harness::new();
+    let newer_b = reported_after("b", 1);
+    let seeded = latest_store(&h.dir, latest::DEFAULT_CAPACITY).await;
+    seeded.put(reported_after("a", -1), "old a").await.unwrap();
+    seeded.put(newer_b.clone(), "new b").await.unwrap();
+    seeded.shutdown().await.unwrap();
+    let ids = preloaded(&h, &["a", "b", "c"]).await;
+    // c's data is gone, so it can't be stored
+    files::delete(&h.report_file(ids[2])).await.unwrap();
+    let (_hold, hang) = oneshot::channel();
+    h.sender.push(Step::Hang(hang));
+
+    h.spawn().await;
+
+    // the worker stores queued reports before it starts the first upload
+    h.await_started().await;
+    assert_eq!(h.latest_entries().await, [report("a").metadata, newer_b]);
+}
+
+#[tokio::test]
+async fn startup_stores_nothing_when_the_store_is_unreadable() {
+    let mut h = Harness::new();
+    let index = h.latest_layout.index();
+    files::write_string(&index, "not json", WriteOptions::OVERWRITE_ATOMIC)
+        .await
+        .unwrap();
+    preloaded(&h, &["a"]).await;
+    let (_hold, hang) = oneshot::channel();
+    h.sender.push(Step::Hang(hang));
+
+    h.spawn().await;
+
+    h.await_started().await;
+    let content = files::read_string(&index).await.unwrap();
+    assert_eq!(content, "not json");
+}
+
 #[tokio::test]
 async fn drains_reports_buffered_before_start_in_order() {
     let mut h = Harness::new();
