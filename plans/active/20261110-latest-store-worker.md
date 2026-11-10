@@ -68,7 +68,8 @@ No new test files: actor tests go in the existing `agent/tests/calibrations/late
 - [x] Milestone 3: `AppState` shuts the store down; `ARCHITECTURE.md` updated; committed.
 - [x] Source written
 - [x] Design review findings applied: `LatestStore::spawn`, a private `latest_impl`, and the uploader's actor style.
-- [ ] Milestone 4 (tests stage): tests updated and added, committed.
+- [x] Milestone 4 (tests stage): tests updated and added, committed.
+- [x] Tests written
 - [ ] Validation: `$preflight` reports `CLEAN`.
 
 ## Surprises & Discoveries
@@ -89,10 +90,13 @@ No new test files: actor tests go in the existing `agent/tests/calibrations/late
 - 2026-11-10: The `ARCHITECTURE.md` path `latest::DEFAULT_CAPACITY` → `latest_impl::DEFAULT_CAPACITY` landed in milestone 3's commit with the rest of the doc edits, not in the move commit, which was already made when it turned up.
 - 2026-11-10 (self-review): `LatestStoreImpl` drops `Debug` too, replacing the plan's "keep `Debug`": nothing formats it now that the `LatestStore` handle holds only a sender, and `UploaderImpl` and `DeleterImpl` derive nothing.
 - 2026-11-10 (self-review): `ARCHITECTURE.md` says the worker reads the index "when it starts" and "if that read fails", replacing the plan's "when the store opens" and "at open": `open` became `spawn` in design review, so the store no longer opens.
+- 2026-11-10 (review, [agent#447](https://github.com/mirurobotics/agent/pull/447#discussion_r4520794215)): `AppState::init_latest_cals` spawns the store and `init` passes it to `init_cal_uploader`, as `init_data_uploads` passes the deleter to `init_uploader`, replacing the design-review entry that `init_cal_uploader` returns the store and its handle. `init_cal_uploader` returns `(Arc<Uploader>, JoinHandle<()>)` as on `main`.
+- 2026-11-10 (review, [agent#447](https://github.com/mirurobotics/agent/pull/447#discussion_r4520793591)): the `latest_store` fixture waits for one `list` reply (result ignored) before it returns, so a respawned store has pruned when a test checks its contents; the prune tests need no per-test wait.
+- 2026-11-10 (tests stage): Milestone 4's test names say `spawn`, not `open` (`spawn_deletes_…`, `spawn_keeps_…`, `a_corrupt_index_at_spawn_fails_every_call`, `spawn_retries_an_index_read_that_fails_for_a_moment`, `a_call_reads_an_index_that_could_not_be_read_at_spawn`), and `list_serves_the_index_read_at_open` is `list_serves_the_entries_from_memory`. The actor tests mirror the calibration uploader's set, adding `a_command_queued_behind_shutdown_fails`, `a_caller_that_stops_waiting_does_not_stop_the_store` and `dropping_every_handle_stops_the_store`, which cover the receive error, `respond` to a dropped receiver, and the loop ending without `Shutdown`.
 
 ## Outcomes & Retrospective
 
-(Summarize at completion.)
+The source and tests are written; CI validation (`$preflight`) is pending. `agent/tests/calibrations/latest.rs` now tests the store through its worker: the prune when the worker starts (through the `latest_store` fixture, which waits for one reply), the index read once and kept in memory (`list_serves_the_entries_from_memory`, `put_fails_and_keeps_the_entries_when_the_index_cannot_be_written`), an index unreadable at spawn (corrupt, blocked for a moment, blocked past the prune), and shutdown with the actor's send, receive and reply failures. `agent/tests/app/state.rs` adds `latest_cals_shutdown_error_does_not_abort_teardown`. Review on agent#447 split `AppState::init_latest_cals` out of `init_cal_uploader`. No source behavior differed from the plan's recorded decisions.
 
 ## Context and Orientation
 
