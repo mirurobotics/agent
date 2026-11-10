@@ -84,11 +84,9 @@ where
         info!("calibrations: uploader shutdown complete");
     }
 
-    /// Write each queued report to the latest store unless the store has its
-    /// key's report as new or newer, since an older agent queued reports
-    /// without writing the store. Failures are logged. Commands wait until it
-    /// finishes, which after an upgrade can mean a read and a put for every
-    /// queued report. `&mut self`, since the worker isn't `Sync`.
+    /// Put each queued report into the latest store unless it has the key's
+    /// report as new or newer: an older agent queued reports without writing
+    /// the store. Commands wait until this finishes.
     async fn store_queued(&mut self) {
         let stored = match self.latest.list(&Filter::default()).await {
             Ok(stored) => stored,
