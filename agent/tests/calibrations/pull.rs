@@ -3,6 +3,7 @@
 
 // standard crates
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 // internal crates
 use crate::mocks::http_client::{Call, MockClient};
@@ -12,12 +13,14 @@ use crate::test_utils::calibrations::{
 use crate::test_utils::filesys::dirs as test_dirs;
 use crate::test_utils::upload::token_manager;
 use backend_api::models::CalibrationList;
+use miru_agent::authn::errors::{AuthnErr, MockError as AuthnMockError};
 use miru_agent::calibrations::{self, latest, CalibrationsErr, Filter, Report, ReportMetadata};
 use miru_agent::filesys::{files, WriteOptions};
 use miru_agent::http::{errors::MockErr, HTTPErr};
 
 // external crates
 use chrono::TimeDelta;
+use tokio::time::Instant;
 
 struct Fixture {
     dir: test_dirs::TempDir,
@@ -210,7 +213,6 @@ async fn a_failed_download_fails_the_call() {
 #[tokio::test(start_paused = true)]
 async fn pull_latest_until_success_tries_again_after_a_failure() {
     let fx = Fixture::new();
-    fx.serve(&["arm"]);
     let list = CalibrationList {
         data: vec![miru_calibration("arm")],
         ..CalibrationList::default()
@@ -223,11 +225,33 @@ async fn pull_latest_until_success_tries_again_after_a_failure() {
             Err(mock_err())
         }
     });
+    fx.client
+        .set_get_calibration_content(|id| Ok(content(id)));
     let store = latest_store(&fx.dir, latest::DEFAULT_CAPACITY).await;
+    let start = Instant::now();
 
     calibrations::pull_latest_until_success(&store, &fx.client, token_manager().as_ref()).await;
 
+    assert!(start.elapsed() >= Duration::from_secs(1));
     let entries = store.list(&Filter::default()).await.unwrap();
     assert_eq!(entries, vec![report("arm").metadata]);
     assert_eq!(fx.client.call_count(Call::ListLatestCalibrations), 2);
+}
+
+#[tokio::test(start_paused = true)]
+async fn pull_latest_until_success_tries_again_after_a_token_failure() {
+    let fx = Fixture::new();
+    fx.serve(&["arm"]);
+    let token_mngr = token_manager();
+    token_mngr.fail_next_get_token(AuthnErr::MockError(AuthnMockError {
+        is_network_conn_err: false,
+        trace: miru_agent::trace!(),
+    }));
+    let store = latest_store(&fx.dir, latest::DEFAULT_CAPACITY).await;
+
+    calibrations::pull_latest_until_success(&store, &fx.client, token_mngr.as_ref()).await;
+
+    let entries = store.list(&Filter::default()).await.unwrap();
+    assert_eq!(entries, vec![report("arm").metadata]);
+    assert_eq!(token_mngr.num_get_token_calls(), 2);
 }
