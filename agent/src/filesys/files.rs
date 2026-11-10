@@ -75,12 +75,12 @@ pub async fn sha256_and_crc32c(file: &File) -> Result<(String, u32), FileSysErr>
     .await
 }
 
-/// Reads `file` through a fixed 64 KiB buffer, passing each chunk to
+/// Reads `file` through a fixed 8 KiB buffer, passing each chunk to
 /// `on_chunk`. Blocking: call it inside [`blocking::run`].
 fn read_chunks(file: &File, mut on_chunk: impl FnMut(&[u8])) -> Result<(), FileSysErr> {
     let mut f = std::fs::File::open(file.path()).map_err(|e| map_io_err_for_open(e, file))?;
 
-    let mut buf = vec![0u8; 64 * 1024];
+    let mut buf = [0u8; 8 * 1024];
     loop {
         let n = f.read(&mut buf).map_err(|e| {
             FileSysErr::ReadFileErr(ReadFileErr {
