@@ -46,8 +46,7 @@ pub async fn reprovision<HTTPClientT: http::ClientI>(
             version::VERSION,
         )
         .await?;
-        // drop the old device's calibrations, upload queue included, before
-        // the pull, which may fail
+        // drop the old device's calibrations, upload queue included
         dirs::delete(&layout.calibrations().root).await?;
         pull_calibrations(http_client, layout).await;
         Ok(device)
