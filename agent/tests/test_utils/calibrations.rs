@@ -71,8 +71,7 @@ pub fn latest_cals_layout(dir: &TempDir) -> LatestCalsLayout {
 
 /// A latest store under `dir` holding at most `capacity` keys.
 pub async fn latest_store(dir: &TempDir, capacity: usize) -> LatestStore {
-    let (store, _) = LatestStore::spawn(64, latest_cals_layout(dir), capacity)
-        .await;
+    let (store, _) = LatestStore::spawn(64, latest_cals_layout(dir), capacity).await;
     store
 }
 
