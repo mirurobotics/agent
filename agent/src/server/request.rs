@@ -79,3 +79,28 @@ fn split_slugs(list: Option<String>) -> Vec<Option<String>> {
         .map(|slug| (slug != NULL_SLUG).then_some(slug))
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    // internal crates
+    use super::*;
+
+    #[test]
+    fn split_slugs_maps_null_to_none() {
+        let slugs = split_slugs(Some("left, null ,,right".into()));
+
+        assert_eq!(slugs, [Some("left".to_string()), None, Some("right".to_string())]);
+    }
+
+    #[test]
+    fn split_slugs_matches_null_exactly() {
+        let slugs = split_slugs(Some("NULL,nullish".into()));
+
+        assert_eq!(slugs, [Some("NULL".to_string()), Some("nullish".to_string())]);
+    }
+
+    #[test]
+    fn split_slugs_of_no_list_is_empty() {
+        assert!(split_slugs(None).is_empty());
+    }
+}
