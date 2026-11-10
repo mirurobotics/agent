@@ -82,7 +82,7 @@ impl AppState {
             Self::init_data_uploads(layout, http_client.clone(), token_mngr.clone()).await?;
 
         // initialize the calibration uploader
-        let (cal_uploader, latest_cals, cal_uploader_handle) =
+        let (cal_uploader, latest_cals, [cal_uploader_handle, latest_cals_handle]) =
             Self::init_cal_uploader(layout, http_client.clone(), token_mngr.clone()).await;
 
         let shutdown_handle = async move {
@@ -94,6 +94,7 @@ impl AppState {
                 deleter_handle,
                 uploader_handle,
                 cal_uploader_handle,
+                latest_cals_handle,
             ];
             futures::future::join(futures::future::join_all(handles), storage_handle).await;
         };
@@ -272,9 +273,10 @@ impl AppState {
     ) -> (
         Arc<calibrations::Uploader>,
         calibrations::LatestStore,
-        tokio::task::JoinHandle<()>,
+        [tokio::task::JoinHandle<()>; 2],
     ) {
-        let latest_cals = calibrations::LatestStore::open(
+        let (latest_cals, latest_cals_handle) = calibrations::LatestStore::spawn(
+            64,
             layout.latest_cals(),
             calibrations::latest_impl::DEFAULT_CAPACITY,
         )
@@ -304,8 +306,12 @@ impl AppState {
             sleep_fn: tokio::time::sleep,
             now_fn: chrono::Utc::now,
         };
-        let (cal_uploader, handle) = calibrations::Uploader::spawn(64, args);
-        (Arc::new(cal_uploader), latest_cals, handle)
+        let (cal_uploader, cal_uploader_handle) = calibrations::Uploader::spawn(64, args);
+        (
+            Arc::new(cal_uploader),
+            latest_cals,
+            [cal_uploader_handle, latest_cals_handle],
+        )
     }
 
     pub async fn shutdown(&self) -> Result<(), server::ServerErr> {

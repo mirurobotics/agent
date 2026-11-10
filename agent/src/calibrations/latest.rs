@@ -9,6 +9,7 @@ use crate::trace;
 
 // external crates
 use tokio::sync::{mpsc, oneshot};
+use tokio::task::JoinHandle;
 use tracing::{error, info};
 use uuid::Uuid;
 
@@ -102,14 +103,17 @@ impl LatestStore {
     /// Open the store in `layout`, holding at most `capacity` keys, and start
     /// its worker. It first deletes the content no entry names, which a crash
     /// or a failed write or delete leaves.
-    pub async fn open(layout: LatestCalsLayout, capacity: usize) -> Self {
-        let (sender, receiver) = mpsc::channel(64);
+    pub async fn spawn(
+        buffer_size: usize,
+        layout: LatestCalsLayout,
+        capacity: usize,
+    ) -> (Self, JoinHandle<()>) {
+        let (sender, receiver) = mpsc::channel(buffer_size);
         let worker = Worker {
             store: LatestStoreImpl::open(layout, capacity).await,
             receiver,
         };
-        tokio::spawn(worker.run());
-        Self { sender }
+        (Self { sender }, tokio::spawn(worker.run()))
     }
 
     /// Make `metadata` its key's entry, with `data` as its content. A new key
