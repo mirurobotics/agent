@@ -429,7 +429,10 @@ pub mod reset {
             .await
             .unwrap();
 
-        assert_eq!(files::read_string(&index).await.unwrap(), r#"{"entries":[]}"#);
+        assert_eq!(
+            files::read_string(&index).await.unwrap(),
+            r#"{"entries":[]}"#
+        );
     }
 
     #[tokio::test]
