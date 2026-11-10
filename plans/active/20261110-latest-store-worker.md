@@ -87,6 +87,7 @@ No new test files: actor tests go in the existing `agent/tests/calibrations/late
 - 2026-11-10: The branch is stacked on the rename PR (agent#446) instead of waiting for it to merge, and is retargeted to `main` once #446 merges.
 - 2026-11-10: `LatestStoreImpl::index` returns `&Index`, not `&mut Index`: `put` edits a copy and every other caller only reads.
 - 2026-11-10: The `ARCHITECTURE.md` path `latest::DEFAULT_CAPACITY` → `latest_impl::DEFAULT_CAPACITY` landed in milestone 3's commit with the rest of the doc edits, not in the move commit, which was already made when it turned up.
+- 2026-11-10 (self-review): `LatestStoreImpl` drops `Debug` too, replacing the plan's "keep `Debug`": nothing formats it now that the `LatestStore` handle holds only a sender, and `UploaderImpl` and `DeleterImpl` derive nothing.
 
 ## Outcomes & Retrospective
 
