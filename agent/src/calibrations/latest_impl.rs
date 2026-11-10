@@ -40,35 +40,40 @@ impl Filter {
 /// The newest calibration for each component, role and aspect: one entry per
 /// key in `index.json`, and each entry's data in its own file under `contents/`,
 /// named by its `report_id`. A report replaces its key's entry, and a new key
-/// past the capacity is rejected rather than evicting another.
-#[derive(Clone, Debug)]
-pub struct LatestStore {
-    index: File,
+/// past the capacity is rejected rather than evicting another. The worker in
+/// `latest.rs` owns it, so it is the store's only writer.
+#[derive(Debug)]
+pub struct LatestStoreImpl {
+    index_file: File,
     contents: Dir,
     capacity: usize,
+    /// The entries read from `index_file`; `None` until a read succeeds.
+    index: Option<Index>,
 }
 
-impl LatestStore {
+impl LatestStoreImpl {
     /// Open the store in `layout`, holding at most `capacity` keys. It first
     /// deletes the content no entry names, which a crash or a failed write or
     /// delete leaves.
     pub async fn open(layout: LatestCalsLayout, capacity: usize) -> Self {
-        let store = Self {
-            index: layout.index(),
+        let mut store = Self {
+            index_file: layout.index(),
             contents: layout.contents(),
             capacity,
+            index: None,
         };
         store.prune_orphaned_contents().await;
         store
     }
 
-    /// Make `metadata` its key's entry, with `data` as its content. A new key
-    /// past the capacity is rejected rather than evicting another. A failure
-    /// part way leaves at most content that no entry names, which the next
-    /// open deletes. Puts must not overlap, since each rewrites the whole
-    /// index.
-    pub async fn put(&self, metadata: ReportMetadata, data: &str) -> Result<(), CalibrationsErr> {
-        let mut index = self.read_index().await?;
+    /// Make `metadata` its key's entry, with `data` as its content. The
+    /// entries in memory change only once the index is written.
+    pub(crate) async fn put(
+        &mut self,
+        metadata: ReportMetadata,
+        data: &str,
+    ) -> Result<(), CalibrationsErr> {
+        let mut index = self.index().await?.clone();
         let replaced = take_entry(&mut index, &metadata);
         if replaced.is_none() {
             check_capacity(index.len(), self.capacity)?;
@@ -77,6 +82,7 @@ impl LatestStore {
         self.write_content(report_id, data).await?;
         index.push(metadata);
         self.write_index(&index).await?;
+        self.index = Some(index);
         // the same report put again shares its content file, so keep it
         if let Some(replaced) = replaced.filter(|r| r.report_id != report_id) {
             self.delete_content(replaced.report_id).await;
@@ -85,17 +91,24 @@ impl LatestStore {
     }
 
     /// The entries `filter` matches, ordered by component, role and aspect.
-    pub async fn list(&self, filter: &Filter) -> Result<Vec<ReportMetadata>, CalibrationsErr> {
-        let mut entries = self.read_index().await?;
-        entries.retain(|metadata| filter.is_match(metadata));
+    pub(crate) async fn list(
+        &mut self,
+        filter: &Filter,
+    ) -> Result<Vec<ReportMetadata>, CalibrationsErr> {
+        let mut entries: Vec<ReportMetadata> = self
+            .index()
+            .await?
+            .iter()
+            .filter(|metadata| filter.is_match(metadata))
+            .cloned()
+            .collect();
         entries.sort_by(|a, b| key_parts(a).cmp(&key_parts(b)));
         Ok(entries)
     }
 
-    /// The data of the entry for `report_id`. Not found unless an entry has
-    /// that `report_id` and its content exists.
-    pub async fn content(&self, report_id: Uuid) -> Result<String, CalibrationsErr> {
-        let index = self.read_index().await?;
+    /// The data of the entry for `report_id`.
+    pub(crate) async fn content(&mut self, report_id: Uuid) -> Result<String, CalibrationsErr> {
+        let index = self.index().await?;
         if !index.iter().any(|m| m.report_id == report_id) {
             return Err(not_found(report_id));
         }
@@ -105,16 +118,25 @@ impl LatestStore {
         }
     }
 
+    /// The entries in memory, read from disk first if no read has succeeded.
+    async fn index(&mut self) -> Result<&Index, CalibrationsErr> {
+        let index = match self.index.take() {
+            Some(index) => index,
+            None => self.read_index().await?,
+        };
+        Ok(self.index.insert(index))
+    }
+
     /// The index, which is empty until the first put writes it.
     async fn read_index(&self) -> Result<Index, CalibrationsErr> {
-        match files::read_json_with_retry::<Index>(&self.index).await {
+        match files::read_json_with_retry::<Index>(&self.index_file).await {
             Err(FileSysErr::PathDoesNotExistErr(_)) => Ok(Index::new()),
             result => Ok(result?),
         }
     }
 
     async fn write_index(&self, index: &Index) -> Result<(), FileSysErr> {
-        files::write_json(&self.index, index, WriteOptions::OVERWRITE_ATOMIC).await
+        files::write_json(&self.index_file, index, WriteOptions::OVERWRITE_ATOMIC).await
     }
 
     fn content_file(&self, report_id: Uuid) -> File {
@@ -132,8 +154,8 @@ impl LatestStore {
 
     /// Delete the content no entry names. If the index can't be read, nothing
     /// is deleted.
-    async fn prune_orphaned_contents(&self) {
-        let index = match self.read_index().await {
+    async fn prune_orphaned_contents(&mut self) {
+        let index = match self.index().await {
             Ok(index) => index,
             Err(e) => {
                 error!("calibrations: not pruning latest contents, index unreadable: {e}");
