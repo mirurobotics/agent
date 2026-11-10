@@ -28,14 +28,15 @@ where
 {
     pub async fn new(file: File) -> Result<Self, FileSysErr> {
         let state = files::read_json::<ContentT>(&file).await?;
+        Ok(Self::from_state(file, state))
+    }
 
-        // initialize the struct with the read data
-        let state_file = Self {
+    fn from_state(file: File, state: ContentT) -> Self {
+        Self {
             file,
             state: Arc::new(state),
             _phantom: std::marker::PhantomData,
-        };
-        Ok(state_file)
+        }
     }
 
     /// Opens `file`:
@@ -74,11 +75,7 @@ where
     /// [`Self::new`], reading with [`files::read_json_with_retry`].
     async fn new_with_retry(file: &File) -> Result<Self, FileSysErr> {
         let state = files::read_json_with_retry::<ContentT>(file).await?;
-        Ok(Self {
-            file: file.clone(),
-            state: Arc::new(state),
-            _phantom: std::marker::PhantomData,
-        })
+        Ok(Self::from_state(file.clone(), state))
     }
 
     /// Copies `file` to a uniquely named `.corrupt-<uuid>` sibling, keeping
