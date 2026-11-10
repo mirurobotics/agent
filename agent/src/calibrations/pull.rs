@@ -16,17 +16,11 @@ use crate::http::{
     calibrations::{GetContentParams, ListAllLatestParams},
     HTTPErr,
 };
+use crate::queue::RetryPolicy;
 
 // external crates
 use backend_api::models::Calibration;
 use tracing::{debug, info, warn};
-
-// The uploaders' retry policy: 10 s doubling to an hour.
-const PULL_BACKOFF: cooldown::Backoff = cooldown::Backoff {
-    base_secs: 10,
-    growth_factor: 2,
-    max_secs: 3600,
-};
 
 /// Put the control plane's latest calibration for each key into `store`,
 /// unless the store's entry is as new or newer. Skipped keys aren't downloaded.
@@ -93,8 +87,9 @@ async fn download<HTTPClientT: http::ClientI>(
     .await
 }
 
-/// Pull into `store` until a pull succeeds. As the uploaders do, a network
-/// error waits a flat `base_secs`, and any other failure backs off further.
+/// Pull into `store` until a pull succeeds, waiting between pulls as the
+/// uploaders' default `RetryPolicy` does: a network error waits a flat
+/// `base_secs`, and any other failure backs off further.
 pub async fn pull_latest_until_success<HTTPClientT, TokenManagerT>(
     store: &LatestStore,
     http_client: &HTTPClientT,
@@ -103,6 +98,7 @@ pub async fn pull_latest_until_success<HTTPClientT, TokenManagerT>(
     HTTPClientT: http::ClientI,
     TokenManagerT: TokenManagerExt,
 {
+    let backoff = RetryPolicy::default().backoff;
     let mut failures: u32 = 0;
     loop {
         let result = match token_mngr.get_token().await {
@@ -115,10 +111,10 @@ pub async fn pull_latest_until_success<HTTPClientT, TokenManagerT>(
         };
         let wait = if e.is_network_conn_err() {
             debug!("calibrations: unable to reach the control plane to pull, retrying: {e}");
-            PULL_BACKOFF.base_secs
+            backoff.base_secs
         } else {
             failures = failures.saturating_add(1);
-            let wait = cooldown::calc(&PULL_BACKOFF, failures - 1);
+            let wait = cooldown::calc(&backoff, failures - 1);
             warn!("calibrations: unable to pull the latest calibrations, retrying in {wait}s: {e}");
             wait
         };
