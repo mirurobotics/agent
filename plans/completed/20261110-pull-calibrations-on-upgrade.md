@@ -12,11 +12,11 @@ Part of ENG-1726 (RFC: Latest Calibrations on the Device), after #450 and #451. 
 
 ## Purpose / Big Picture
 
-The latest calibrations store survives upgrades (#451), but agents before it never wrote the store at `calibrations/latest/`. A device that upgrades from one of them, or from a version it was rolled back to, starts with a store that lacks the reports that agent took, though Miru has them, and lacks the reports it queued but hadn't uploaded. Until each is reported again, `GET /v0.2/calibrations/latest` doesn't list it.
+The latest calibrations store survives upgrades (#451), but agents before it never wrote the store at `calibrations/latest/`. A device that upgrades from one of them, or from a version it was rolled back to, starts with a store that lacks the reports that agent took, though the control plane has them, and lacks the reports it queued but hadn't uploaded. Until each is reported again, `GET /v0.2/calibrations/latest` doesn't list it.
 
-After this change, the uploader stores each queued report the store lacks when it starts, and the first sync of each run that reaches Miru merges Miru's latest into the store. Both keep whichever report is newer per key, so a report the device took is never replaced by an older one.
+After this change, the uploader stores each queued report the store lacks when it starts, and the first sync of each run that reaches the control plane merges the control plane's latest into the store. Both keep whichever report is newer per key, so a report the device took is never replaced by an older one.
 
-Observable: upgrade an agent on a device whose calibrations are in Miru but not in `calibrations/latest/`. After the first sync that reaches Miru, the log shows `calibrations: wrote N latest calibrations from Miru` and `GET /v0.2/calibrations/latest` lists them.
+Observable: upgrade an agent on a device whose calibrations are in the control plane but not in `calibrations/latest/`. After the first sync that reaches the control plane, the log shows `calibrations: wrote N latest calibrations from the control plane` and `GET /v0.2/calibrations/latest` lists them.
 
 ## Plan of work
 
@@ -26,7 +26,7 @@ Observable: upgrade an agent on a device whose calibrations are in Miru but not 
 
 ## Decisions
 
-- **Pull on a later sync (the user's pick in the project thread).** The agent starts serving without waiting on the pull. Until the first successful pull of a run, the list can lack reports that only Miru has.
+- **Pull on a later sync (the user's pick in the project thread).** The agent starts serving without waiting on the pull. Until the first successful pull of a run, the list can lack reports that only the control plane has.
 - **Once per run, not a persisted mark** ([AI design review](https://github.com/mirurobotics/agent/pull/455)). An earlier draft marked the store in `index.json` on upgrade and pulled while marked. Pulling once per run needs no on-disk state or upgrade hook, covers rollbacks the same way, and costs one list call when nothing changed.
 - **Queued reports are stored by the queue's owner, at startup** ([AI design review](https://github.com/mirurobotics/agent/pull/455)). The uploader owns `queue.json` and the report files, so it reads them; no network is needed.
 - **Skip downloads the store doesn't need.** A pull after an upgrade from an agent that already writes the store costs one list call, and a pull that failed part way resumes.
@@ -49,7 +49,7 @@ Observable: upgrade an agent on a device whose calibrations are in Miru but not 
 
 ## Surprises & Discoveries
 
-- Upgrade reconcile already needs Miru, so pulling inside it was possible; the user chose the later-sync design.
+- Upgrade reconcile already needs the control plane, so pulling inside it was possible; the user chose the later-sync design.
 
 ## Decision Log
 
@@ -66,6 +66,6 @@ To be filled in when the last PR merges.
 
 CI runs the suite on each PR.
 
-- PR 1, `tests/calibrations/latest.rs`: `put_if_newer` puts a new key or a later report and keeps an entry reported at the same time or later. `tests/calibrations/pull.rs`: replaces an older entry; keeps an entry as new or newer without downloading; keeps keys Miru doesn't have.
+- PR 1, `tests/calibrations/latest.rs`: `put_if_newer` puts a new key or a later report and keeps an entry reported at the same time or later. `tests/calibrations/pull.rs`: replaces an older entry; keeps an entry as new or newer without downloading; keeps keys the control plane doesn't have.
 - PR 2, `tests/calibrations/uploader.rs`: queued reports the store lacks are stored at startup; a stored entry as new or newer is kept.
 - PR 3, `tests/workers/calibrations_pull.rs`: pulls after a successful sync, including one before it subscribed, and returns; doesn't pull after a failed sync; retries a failed pull after the next successful sync; skips the pull when it gets no token; stops on shutdown; returns when it can't subscribe or the events end.
