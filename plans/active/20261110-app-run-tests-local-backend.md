@@ -40,7 +40,8 @@ No new files. The helper sits in the `HELPERS` section of `agent/tests/app/run.r
 
 ## Progress
 
-- [ ] Milestone 1: set `backend_host` in `agent/tests/app/run.rs` and commit.
+- [x] Milestone 1: set `backend_host` in `agent/tests/app/run.rs` and commit.
+- [x] Source written
 - [ ] Validation: `$preflight` reports `CLEAN`.
 
 ## Surprises & Discoveries
