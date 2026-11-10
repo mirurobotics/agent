@@ -1,4 +1,4 @@
-//! The latest calibrations store: its keys and capacity, write order,
+//! The latest calibrations store: its keys and capacity, write order, merging,
 //! listing, content, the prune when its worker starts, and shutdown.
 
 // internal crates
@@ -12,6 +12,7 @@ use miru_agent::filesys::{dirs, files, File, PathExt, WriteOptions};
 use miru_agent::models::InstanceFormat;
 
 // external crates
+use chrono::TimeDelta;
 use futures::FutureExt;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
@@ -277,6 +278,47 @@ async fn put_succeeds_when_the_replaced_content_cannot_be_deleted() {
     f.store.put(new.clone(), DATA).await.unwrap();
 
     assert_eq!(f.entries().await, [new]);
+}
+
+// ============================= PUT IF NEWER ============================= //
+/// A report for `metadata`'s key, reported `secs` after it.
+fn reported_after(metadata: &ReportMetadata, secs: i64) -> ReportMetadata {
+    ReportMetadata {
+        reported_at: metadata.reported_at + TimeDelta::seconds(secs),
+        ..newer(metadata)
+    }
+}
+
+#[tokio::test]
+async fn put_if_newer_puts_a_new_key_or_a_later_report() {
+    let f = Fixture::new().await;
+    let old = reported("arm", None, None);
+    let later = reported_after(&old, 1);
+    let leg = reported("leg", None, None);
+    put_all(&f.store, &[&old]).await;
+
+    assert!(f.store.put_if_newer(later.clone(), DATA).await.unwrap());
+    assert!(f.store.put_if_newer(leg.clone(), DATA).await.unwrap());
+
+    assert_eq!(f.entries().await, [later, leg]);
+}
+
+#[tokio::test]
+async fn put_if_newer_keeps_an_entry_reported_at_the_same_time_or_later() {
+    let f = Fixture::new().await;
+    let arm = reported("arm", None, None);
+    put_all(&f.store, &[&arm]).await;
+
+    for secs in [0, -1] {
+        let candidate = reported_after(&arm, secs);
+        assert!(
+            !f.store.put_if_newer(candidate, DATA).await.unwrap(),
+            "{secs}"
+        );
+    }
+
+    assert_eq!(f.entries().await, std::slice::from_ref(&arm));
+    assert_eq!(f.content_ids().await, [arm.report_id]);
 }
 
 // ================================= LIST ================================= //

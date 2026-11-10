@@ -87,6 +87,21 @@ impl LatestStoreImpl {
         Ok(())
     }
 
+    /// Put `metadata` unless its key's entry was reported at the same time or
+    /// later. Returns whether it was put.
+    pub(crate) async fn put_if_newer(
+        &self,
+        metadata: ReportMetadata,
+        data: &str,
+    ) -> Result<bool, CalibrationsErr> {
+        let index = self.read_index().await?;
+        if index.iter().any(|entry| entry.is_as_new_as(&metadata)) {
+            return Ok(false);
+        }
+        self.put(metadata, data).await?;
+        Ok(true)
+    }
+
     /// The entries `filter` matches, ordered by component, role and aspect.
     pub(crate) async fn list(
         &self,
