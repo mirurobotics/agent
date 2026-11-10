@@ -155,11 +155,21 @@ where
         entry: &QueueEntry,
     ) -> impl Future<Output = Result<(), CalibrationsErr>> {
         let sender = self.sender.clone();
+        let report = self.read_report(entry);
+        async move { sender.send(report.await?).await }
+    }
+
+    /// The report queued as `entry`, read from its file. The future borrows
+    /// nothing from `self`.
+    pub(crate) fn read_report(
+        &self,
+        entry: &QueueEntry,
+    ) -> impl Future<Output = Result<Report, CalibrationsErr>> {
         let file = self.report_file(entry.id);
         let metadata = entry.job.clone();
         async move {
             let data = report::read_data(&file).await?;
-            sender.send(Report { metadata, data }).await
+            Ok(Report { metadata, data })
         }
     }
 
@@ -235,7 +245,7 @@ where
         Err(err)
     }
 
-    pub(crate) fn report_file(&self, id: Uuid) -> File {
+    fn report_file(&self, id: Uuid) -> File {
         report::report_file(&self.reports, id)
     }
 
