@@ -1,4 +1,4 @@
-//! Pulling Miru's latest calibrations into a latest calibrations store.
+//! Merging Miru's latest calibrations into a latest calibrations store.
 
 // internal crates
 use crate::mocks::http_client::{Call, MockClient};
