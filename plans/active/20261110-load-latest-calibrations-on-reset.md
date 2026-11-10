@@ -32,9 +32,8 @@ Observable: upgrade an agent whose device has calibrations in its store; `/var/l
 - **`load_latest` takes the target `LatestCalsLayout`,** not `disk::Layout`, so tests can load into any dir.
 - **One key at a time.** The loader keeps only metadata in memory and downloads and writes one content at a time, so memory stays bounded to one content of up to 1 MiB.
 - **Miru only, no merge.** Reprovision wipes `calibrations/` and writes Miru's latest; the loader never reads the upload queue ([review](https://github.com/mirurobotics/agent/pull/450#discussion_r4521677972)).
-- **Capacity: skip Miru's extra keys with a warning, never fail.** The store holds `latest::DEFAULT_CAPACITY` (1,000) keys; the rest are skipped with one warning naming the count.
-- **"Complete" means everything Miru can serve.** A content download that fails with a non-network error (after `http::with_retry`) is logged at `error!` and its key skipped.
-- **Any other failure fails the load.** A failed list, a network error on a download, or a store write error.
+- **Nothing is skipped** ([review](https://github.com/mirurobotics/agent/pull/450#discussion_r4521740894)). Every error fails the load: a failed list, a failed download (after `http::with_retry`), a store write error, or more keys than `latest::DEFAULT_CAPACITY` (the store's `CalibrationStoreFullErr`). A loaded store holds every calibration Miru has.
+
 - **RFC deviation.** The RFC planned a sync step that loads the store after every reset and an `is_confirmed` flag until it has. Here the store is never wiped by an upgrade, and only reprovision loads, synchronously, so the store is never served half-loaded and `is_confirmed` is not needed.
 
 ### Names
@@ -78,7 +77,6 @@ Observable: upgrade an agent whose device has calibrations in its store; `/var/l
 
 - What if a load outlasts the device token? Default: one token per reprovision; if it expires mid-load the reprovision fails and the operator reruns it. A per-page token refresh is the follow-up if seen.
 - What if Miru's `reported_at` does not parse? Default: log an error and use the Unix epoch, as `models::ConfigInstance` does for `created_at`.
-- What about a calibration whose content Miru won't serve (404, 403)? Default: log it at `error!` and skip the key; only network errors fail the load.
 - Should a failed load after Miru accepted the new key fall back to an empty store instead of failing? Default: no, the user's design fails reprovision so the operator can rerun it with the network up.
 
 ## Progress
@@ -109,6 +107,7 @@ Observable: upgrade an agent whose device has calibrations in its store; `/var/l
 - 2026-11-10 (user): split #450. #451, #452 and #453 landed the store move, the shared report helpers and the HTTP client on `main`; #450 was rebuilt on `main` with only the `Calibration` conversion, the loader and the reprovision load.
 - 2026-11-10 (review, [agent#450](https://github.com/mirurobotics/agent/pull/450#discussion_r4521677972)): reprovision wipes `calibrations/` and writes Miru's latest, with no queue merge. The loader no longer reads the queue, and the staged dir replaces all of `calibrations/`, dropping reports not yet uploaded. This supersedes the earlier entries on queued reports winning and the read-only queue read.
 - 2026-11-10 ([AI review](https://github.com/mirurobotics/agent/pull/450#discussion_r4521695982), pending the author): reprovision deletes `calibrations/` right after `bootstrap` and loads into it in place, with no staging dir. A load or token failure after `bootstrap` must not leave the previous device's calibrations or queue on a device that is already the new one; the cost is an empty or partial store until reprovision is rerun.
+- 2026-11-10 (review, [agent#450](https://github.com/mirurobotics/agent/pull/450#discussion_r4521740894)): nothing is skipped. A download that fails for any reason, or more keys than the store holds, fails the load; this supersedes skipping an unservable calibration and Miru's keys past capacity.
 
 ## Outcomes & Retrospective
 
@@ -155,11 +154,11 @@ Tests (tests stage):
         token: &str,
     ) -> Result<(), CalibrationsErr>
 
-It spawns `LatestStore` on `store`, puts Miru's latest for each key up to `capacity` (`put_mirus_latest`, `download` skipping a non-network content failure), drops the handle, awaits the worker and logs `calibrations: loaded {put} latest calibrations from Miru`.
+It spawns `LatestStore` on `store`, puts Miru's latest for each key (`put_mirus_latest`, any failure failing the load), drops the handle, awaits the worker and logs `calibrations: loaded {put} latest calibrations from Miru`.
 
 Tests (tests stage):
 
-- `agent/tests/calibrations/load.rs` (add `pub mod load;` to `agent/tests/calibrations/mod.rs`): a `Fixture` with a temp dir, a target store dir (for example `<dir>/target`) and `MockClient`; `load(capacity)` calls `load_latest(&client, LatestCalsLayout::new(target), capacity, "tok")` and reads back with `LatestStore::spawn` on the target. Cases: `loads_mirus_latest_calibrations_into_the_given_store`, `loads_nothing_when_miru_is_empty`, `skips_mirus_keys_past_capacity`, `skips_a_calibration_whose_download_fails`, `a_failed_list_fails_the_load`, `a_network_error_on_a_download_fails_the_load`.
+- `agent/tests/calibrations/load.rs` (add `pub mod load;` to `agent/tests/calibrations/mod.rs`): a `Fixture` with a temp dir, a target store dir (for example `<dir>/target`) and `MockClient`; `load(capacity)` calls `load_latest(&client, LatestCalsLayout::new(target), capacity, "tok")` and reads back with `LatestStore::spawn` on the target. Cases: `loads_mirus_latest_calibrations_into_the_given_store`, `loads_nothing_when_miru_is_empty`, `more_keys_than_capacity_fail_the_load`, `a_failed_download_fails_the_load`, `a_failed_list_fails_the_load`, `a_network_error_on_a_download_fails_the_load`.
 
 ### Milestone 3: the store survives reset; provision empties it; reprovision loads it (source done)
 
@@ -181,7 +180,7 @@ Tests (tests stage):
 
 ### Milestone 4: `ARCHITECTURE.md` (done)
 
-The store paragraph names `calibrations/latest/index.json`, says the store sits outside `resources/` so `reset` keeps it and upgrades leave it as is, that its format must stay readable by newer agents, that provision assumes a new device has no data and leaves it alone, that reprovision deletes `calibrations/` after `bootstrap`, dropping the upload queue, and loads Miru's latest into the empty store with a token from the new keys, that a failed list or network error fails reprovision with `ProvisionErr::CalibrationsErr` leaving an empty or partial store until rerun, and that nothing else loads it.
+The store paragraph names `calibrations/latest/index.json`, says the store sits outside `resources/` so `reset` keeps it and upgrades leave it as is, that its format must stay readable by newer agents, that provision assumes a new device has no data and leaves it alone, that reprovision deletes `calibrations/` after `bootstrap`, dropping the upload queue, and loads Miru's latest into the empty store with a token from the new keys, that any load failure fails reprovision with `ProvisionErr::CalibrationsErr` leaving an empty or partial store until rerun, with nothing skipped, and that nothing else loads it.
 
 ## Concrete Steps
 
@@ -196,7 +195,7 @@ Acceptance, as behavior the tests pin:
 - The store is at `calibrations/latest/` and `reset` and the upgrade reconcile leave it untouched with no calibrations request (`latest_cals_layout::*`, `keeps_the_latest_calibrations_store`, `leaves_the_latest_calibrations_store_untouched`).
 - Provision makes no calibrations request.
 - Reprovision replaces `calibrations/` with Miru's latest, queue included; a failed load returns `ProvisionErr::CalibrationsErr` with the old calibrations already gone (`replaces_the_calibrations_with_mirus_latest`, `a_failed_load_wipes_the_calibrations_and_returns_calibrations_err`).
-- `load_latest` writes only the given store, Miru's extra keys are skipped, an unservable calibration is skipped, and a failed list or network error fails (`agent/tests/calibrations/load.rs`).
+- `load_latest` writes only the given store, and a failed list, a failed download or too many keys fails (`agent/tests/calibrations/load.rs`).
 
 ## Idempotence and Recovery
 
