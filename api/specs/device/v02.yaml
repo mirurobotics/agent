@@ -11,17 +11,17 @@ info:
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
-  x-release-version: v0.2.5-beta.7
+  x-release-version: v0.2.5
   x-git-commit:
-    sha: 0d516d0e86daf588441c2d79f65cc759a260b6b6
-    url: https://github.com/mirurobotics/openapi/commit/0d516d0e86daf588441c2d79f65cc759a260b6b6
-    message: 'feat(device)!: move the calibration content download under /calibrations/latest
-      (#468)'
+    sha: 19eb0d408a2b07e39e7eaedb867ed2e8836bea30
+    url: https://github.com/mirurobotics/openapi/commit/19eb0d408a2b07e39e7eaedb867ed2e8836bea30
+    message: 'docs(device): title the latest calibration download "Download Latest"
+      (#471)'
     author: Ben's Agent
     branch: HEAD
     dirty: false
   x-build:
-    built_at: '2026-11-10T04:56:05.107964+00:00'
+    built_at: '2026-11-10T07:34:57+00:00'
 servers:
 - url: http://localhost/v0.2
   description: localhost
@@ -100,7 +100,7 @@ paths:
     get:
       tags:
       - Calibrations
-      summary: Download Content
+      summary: Download Latest
       operationId: getLatestCalibrationContent
       description: Download the content of a latest calibration by its report ID.
         An older report returns 404.
@@ -323,14 +323,14 @@ components:
     ReleaseVersion:
       type: string
       enum:
-      - v0.2.5-beta.7
+      - v0.2.5
       x-enum-varnames:
       - RELEASE_VERSION
       x-stainless-const: true
     APIGitCommit:
       type: string
       enum:
-      - 0d516d0e86daf588441c2d79f65cc759a260b6b6
+      - 19eb0d408a2b07e39e7eaedb867ed2e8836bea30
       x-enum-varnames:
       - API_GIT_COMMIT
       x-stainless-const: true
@@ -482,7 +482,7 @@ components:
         api_release_version:
           type: string
           description: The API release version of the agent.
-          example: v0.2.5-beta.7
+          example: v0.2.5
         rust_version:
           type: string
           description: The version of Rust.
@@ -505,7 +505,7 @@ components:
         git_commit: a1b2c3d4
         api_version: v0.2
         api_git_commit: a1b2c3d4
-        api_release_version: v0.2.5-beta.7
+        api_release_version: v0.2.5
         rust_version: 1.93.0
         build_date: '2026-02-24T10:30:00Z'
         os: linux
