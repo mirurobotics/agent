@@ -12,7 +12,7 @@ use crate::test_utils::{
     sync::{create_storage, create_token_manager},
 };
 use device_api::models::ApiVersion;
-use miru_agent::calibrations::UploaderOptions;
+use miru_agent::calibrations::{latest, UploaderOptions};
 use miru_agent::events::hub::{EventHub, SpawnOptions};
 use miru_agent::server::{auth::BearerToken, routes, tcp, ServerErr, State};
 use miru_agent::sync::Syncer;
@@ -44,6 +44,13 @@ impl Fixture {
         let (event_hub, _handle) = EventHub::spawn(log_file, SpawnOptions::default())
             .await
             .unwrap();
+        let cal_mngr = cal_mngr(
+            &dir,
+            MockCalibrationSender::new().0,
+            UploaderOptions::default(),
+            latest::DEFAULT_CAPACITY,
+        )
+        .await;
         let (shutdown_tx, _) = broadcast::channel::<()>(1);
 
         let state = Arc::new(State::new(
@@ -52,11 +59,7 @@ impl Fixture {
             syncer,
             Arc::new(token_mngr),
             event_hub,
-            Arc::new(cal_mngr(
-                &dir,
-                MockCalibrationSender::new().0,
-                UploaderOptions::default(),
-            )),
+            Arc::new(cal_mngr),
             shutdown_tx.clone(),
         ));
         Self {

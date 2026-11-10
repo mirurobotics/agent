@@ -4,13 +4,12 @@ use std::sync::Arc;
 
 // internal crates
 use crate::calibrations::{
-    cleanup,
     errors::{CalibrationTooLargeErr, CalibrationsErr, InvalidReportErr},
     report::{Queue, QueueEntry, QueueSnapshotFile, Report, ReportMetadata},
     sender::Sender,
 };
 use crate::errors::Error;
-use crate::filesys::{files, Dir, File, FileSysErr, WriteOptions};
+use crate::filesys::{dirs, files, Dir, File, FileSysErr, WriteOptions};
 use crate::queue::{self, Persistence, RetryPolicy, Verdict};
 use crate::trace;
 
@@ -112,19 +111,19 @@ where
             .queue
             .iter()
             .map(|entry| entry.id.hyphenated().to_string());
-        cleanup::prune(&self.reports, &queued.collect()).await;
+        dirs::delete_files_except(&self.reports, &queued.collect()).await;
     }
 
     /// Queue `report` and return its queue entry id. The entry is written
     /// before the report file, so a crash between the two leaves an entry
     /// without a file, which [`Self::attempt`] fails for good. On error nothing
     /// is queued.
-    pub(crate) async fn enqueue(&mut self, report: Report) -> Result<Uuid, CalibrationsErr> {
-        let bytes = report.data.into_bytes();
+    pub(crate) async fn enqueue(&mut self, report: &Report) -> Result<Uuid, CalibrationsErr> {
+        let bytes = report.data.as_bytes();
         self.verify_size(bytes.len() as u64)?;
-        let id = self.queue.enqueue(report.metadata).await?;
+        let id = self.queue.enqueue(report.metadata.clone()).await?;
         let file = self.report_file(id);
-        if let Err(e) = files::write_bytes(&file, &bytes, WriteOptions::OVERWRITE_ATOMIC).await {
+        if let Err(e) = files::write_bytes(&file, bytes, WriteOptions::OVERWRITE_ATOMIC).await {
             self.queue.ack(id).await;
             return Err(e.into());
         }
@@ -213,9 +212,9 @@ where
 
     /// Dequeue report `id`, then delete its file. The entry goes first, so a
     /// crash between the two leaves a file that [`Self::prune_orphans`] deletes.
-    async fn remove(&mut self, id: Uuid) {
+    pub(crate) async fn remove(&mut self, id: Uuid) {
         self.queue.ack(id).await;
-        cleanup::delete(&self.report_file(id)).await;
+        files::delete_or_warn(&self.report_file(id)).await;
     }
 
     fn verify_size(&self, report_bytes: u64) -> Result<(), CalibrationTooLargeErr> {
@@ -456,7 +455,7 @@ mod tests {
         let f = Fixture::new();
         let mut u = f.uploader_on(None, UploaderOptions::default());
 
-        u.enqueue(report("a")).await.unwrap();
+        u.enqueue(&report("a")).await.unwrap();
 
         assert_eq!(u.len(), 1);
         assert!(!f.layout.queue().exists());
@@ -524,7 +523,7 @@ mod tests {
         let f = Fixture::new();
         let mut u = f.uploader().await;
 
-        let id = u.enqueue(report("a")).await.unwrap();
+        let id = u.enqueue(&report("a")).await.unwrap();
 
         let entry = QueueEntry {
             id,
@@ -548,7 +547,7 @@ mod tests {
         let mut big = report("arm");
         big.data = "x".repeat(200);
 
-        let err = u.enqueue(big).await.unwrap_err();
+        let err = u.enqueue(&big).await.unwrap_err();
 
         assert!(matches!(err, CalibrationsErr::TooLargeErr(_)), "{err:?}");
         assert_eq!(u.len(), 0);
@@ -563,9 +562,9 @@ mod tests {
             ..UploaderOptions::default()
         };
         let mut u = f.uploader_with(options).await;
-        u.enqueue(report("a")).await.unwrap();
+        u.enqueue(&report("a")).await.unwrap();
 
-        let err = u.enqueue(report("b")).await.unwrap_err();
+        let err = u.enqueue(&report("b")).await.unwrap_err();
 
         assert!(matches!(err, CalibrationsErr::QueueFullErr(_)), "{err:?}");
         assert_eq!(u.len(), 1);
@@ -582,7 +581,7 @@ mod tests {
             .await
             .unwrap();
 
-        let err = u.enqueue(report("a")).await.unwrap_err();
+        let err = u.enqueue(&report("a")).await.unwrap_err();
 
         assert!(matches!(err, CalibrationsErr::FileSysErr(_)), "{err:?}");
         assert_eq!(u.len(), 0);
@@ -599,7 +598,7 @@ mod tests {
             .unwrap();
         let mut u = f.uploader().await;
 
-        let err = u.enqueue(report("a")).await.unwrap_err();
+        let err = u.enqueue(&report("a")).await.unwrap_err();
 
         assert!(matches!(err, CalibrationsErr::FileSysErr(_)), "{err:?}");
         assert_eq!(u.len(), 0);
@@ -627,7 +626,7 @@ mod tests {
         let mut u = f.uploader().await;
         let report = report("a");
         let id = report.metadata.report_id;
-        u.enqueue(report).await.unwrap();
+        u.enqueue(&report).await.unwrap();
 
         run_next_attempt(&mut u).await;
         f.advance_secs(10);
@@ -690,7 +689,7 @@ mod tests {
     async fn a_sent_report_is_dequeued_and_its_file_deleted() {
         let f = Fixture::new();
         let mut u = f.uploader().await;
-        let id = u.enqueue(report("a")).await.unwrap();
+        let id = u.enqueue(&report("a")).await.unwrap();
 
         run_next_attempt(&mut u).await;
 
@@ -729,7 +728,7 @@ mod tests {
             f.sender.push(Step::Server);
         }
         let mut u = f.uploader().await;
-        u.enqueue(report("a")).await.unwrap();
+        u.enqueue(&report("a")).await.unwrap();
 
         for expected in [10, 20, 40, 80, 160, 320, 640, 1280, 2560, 3600, 3600] {
             run_next_attempt(&mut u).await;
@@ -745,7 +744,7 @@ mod tests {
             f.sender.push(Step::Network);
         }
         let mut u = f.uploader().await;
-        u.enqueue(report("a")).await.unwrap();
+        u.enqueue(&report("a")).await.unwrap();
 
         for _ in 0..3 {
             run_next_attempt(&mut u).await;
@@ -768,7 +767,7 @@ mod tests {
             ..UploaderOptions::default()
         };
         let mut u = f.uploader_with(options).await;
-        u.enqueue(report("a")).await.unwrap();
+        u.enqueue(&report("a")).await.unwrap();
 
         for _ in 0..3 {
             run_next_attempt(&mut u).await;
@@ -806,7 +805,7 @@ mod tests {
         let f = Fixture::new();
         f.sender.push(Step::Terminal);
         let mut u = f.uploader().await;
-        let id = u.enqueue(report("a")).await.unwrap();
+        let id = u.enqueue(&report("a")).await.unwrap();
 
         run_next_attempt(&mut u).await;
 
@@ -828,7 +827,7 @@ mod tests {
             ..UploaderOptions::default()
         };
         let mut u = f.uploader_with(options).await;
-        u.enqueue(report("a")).await.unwrap();
+        u.enqueue(&report("a")).await.unwrap();
 
         for wait in [10, 20] {
             run_next_attempt(&mut u).await;
@@ -846,7 +845,7 @@ mod tests {
         f.sender.push(Step::Network);
         f.advance(TimeDelta::days(89));
         let mut u = f.uploader().await;
-        u.enqueue(report("a")).await.unwrap();
+        u.enqueue(&report("a")).await.unwrap();
 
         run_next_attempt(&mut u).await;
 
@@ -859,7 +858,7 @@ mod tests {
         f.sender.push(Step::Network);
         f.advance(TimeDelta::days(90));
         let mut u = f.uploader().await;
-        u.enqueue(report("a")).await.unwrap();
+        u.enqueue(&report("a")).await.unwrap();
 
         run_next_attempt(&mut u).await;
 
@@ -872,7 +871,7 @@ mod tests {
         f.sender.push(Step::Server);
         f.advance(TimeDelta::days(90));
         let mut u = f.uploader().await;
-        u.enqueue(report("a")).await.unwrap();
+        u.enqueue(&report("a")).await.unwrap();
 
         run_next_attempt(&mut u).await;
 

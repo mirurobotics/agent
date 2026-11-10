@@ -60,6 +60,10 @@ impl Layout {
         CalibrationsLayout::new(self.root().subdir("calibrations"))
     }
 
+    pub fn latest_cals(&self) -> LatestCalsLayout {
+        LatestCalsLayout::new(self.resources().subdir("latest_calibrations"))
+    }
+
     fn config_instances(&self) -> filesys::Dir {
         self.resources().subdir("config_instances")
     }
@@ -166,5 +170,24 @@ impl CalibrationsLayout {
 
     pub fn reports(&self) -> filesys::Dir {
         self.root.subdir("reports")
+    }
+}
+
+/// The latest calibrations store, a cache of Miru that `reset` wipes.
+pub struct LatestCalsLayout {
+    pub root: filesys::Dir,
+}
+
+impl LatestCalsLayout {
+    pub fn new(root: filesys::Dir) -> Self {
+        Self { root }
+    }
+
+    pub fn index(&self) -> filesys::File {
+        self.root.file("index.json")
+    }
+
+    pub fn contents(&self) -> filesys::Dir {
+        self.root.subdir("contents")
     }
 }

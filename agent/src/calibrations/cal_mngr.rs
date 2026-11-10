@@ -6,6 +6,7 @@ use std::time::Duration;
 // internal crates
 use crate::calibrations::{
     errors::{CalibrationsErr, ReceiveActorMessageErr, SendActorMessageErr},
+    latest::LatestStore,
     report::{QueueEntry, QueueSnapshotFile, Report},
     sender::Sender,
     uploader::{NextAttempt, Uploader, UploaderOptions},
@@ -24,6 +25,8 @@ pub struct CalMngrArgs<S, F, N> {
     pub snapshot_file: Option<QueueSnapshotFile>,
     /// The directory holding one data file per queued report.
     pub reports: Dir,
+    /// The latest calibrations store, which the worker writes beside the queue.
+    pub latest: LatestStore,
     pub sender: Arc<S>,
     pub options: UploaderOptions,
     pub sleep_fn: F,
@@ -53,6 +56,7 @@ enum Flow {
 struct Worker<S, F, N> {
     receiver: mpsc::Receiver<Command>,
     uploader: Uploader<S, N>,
+    latest: LatestStore,
     sleep_fn: F,
 }
 
@@ -87,6 +91,18 @@ where
         };
         self.uploader.finish_attempt(entry, result).await;
         Flow::Continue
+    }
+
+    /// Queue `report`, then write it to the latest store. A failed store
+    /// write removes the queued report, so on error nothing is queued or
+    /// stored.
+    async fn enqueue(&mut self, report: Report) -> Result<(), CalibrationsErr> {
+        let id = self.uploader.enqueue(&report).await?;
+        if let Err(e) = self.latest.put(report.metadata, &report.data).await {
+            self.uploader.remove(id).await;
+            return Err(e);
+        }
+        Ok(())
     }
 
     /// Drive `fut` to completion while serving commands, so intake never
@@ -132,7 +148,7 @@ where
         };
         match cmd {
             Command::Enqueue { report, respond_to } => {
-                let result = self.uploader.enqueue(*report).await.map(drop);
+                let result = self.enqueue(*report).await;
                 respond(respond_to, result, "enqueue");
             }
             Command::Len { respond_to } => respond(respond_to, self.uploader.len(), "len"),
@@ -153,9 +169,10 @@ fn respond<T>(respond_to: oneshot::Sender<T>, value: T, op: &str) {
 
 // ================================== HANDLE ======================================= //
 /// Handle to the calibration manager: one task that owns the calibration
-/// queue, queues what intake sends it, and uploads reports to Miru one at a
-/// time, oldest due first, retrying a failed report at the tail after its own
-/// backoff. It keeps serving intake during an upload or a backoff.
+/// queue, writes intake to it and the latest store, and uploads reports to
+/// Miru one at a time, oldest due first, retrying a failed report at the tail
+/// after its own backoff. It keeps serving intake during an upload or a
+/// backoff.
 #[derive(Debug)]
 pub struct CalibrationManager {
     sender: mpsc::Sender<Command>,
@@ -182,13 +199,15 @@ impl CalibrationManager {
                 args.options,
                 args.now_fn,
             ),
+            latest: args.latest,
             sleep_fn: args.sleep_fn,
         };
         (Self { sender }, tokio::spawn(worker.run()))
     }
 
-    /// Queue `report` durably. A full queue is the 507
-    /// [`CalibrationsErr::QueueFullErr`], and a report over the size cap the
+    /// Queue `report` durably and write it to the latest store. A full queue
+    /// is the 507 [`CalibrationsErr::QueueFullErr`], a full store the 507
+    /// [`CalibrationsErr::StoreFullErr`], and a report over the size cap the
     /// 413 [`CalibrationsErr::TooLargeErr`].
     pub async fn report(&self, report: Report) -> Result<(), CalibrationsErr> {
         self.send_command("enqueue", |respond_to| Command::Enqueue {

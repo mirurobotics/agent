@@ -4,9 +4,10 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 // internal crates
-use crate::test_utils::filesys::dirs as test_dirs;
+use crate::test_utils::{calibrations::report, filesys::dirs as test_dirs};
 use miru_agent::app::state::AppState;
 use miru_agent::authn::{Token, TokenManagerExt};
+use miru_agent::calibrations::Filter;
 use miru_agent::data_uploads::retention::DeleterExt;
 use miru_agent::data_uploads::scan::ScannerExt;
 use miru_agent::data_uploads::upload::UploaderExt;
@@ -303,6 +304,20 @@ pub mod init {
 
         state.shutdown().await.unwrap();
         state_handle.await;
+    }
+
+    #[tokio::test]
+    async fn latest_cals_lists_what_cal_mngr_reports() {
+        let env = TestEnv::valid().await;
+        let (state, state_handle) = env.init().await.unwrap();
+        let report = report("arm");
+
+        state.cal_mngr.report(report.clone()).await.unwrap();
+        let entries = state.latest_cals.list(&Filter::default()).await.unwrap();
+
+        state.shutdown().await.unwrap();
+        state_handle.await;
+        assert_eq!(entries, [report.metadata]);
     }
 
     #[tokio::test]

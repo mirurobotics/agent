@@ -256,3 +256,37 @@ pub mod calibrations_layout {
         assert_eq!(dir.to_string(), under_root(&["calibrations", "reports"]));
     }
 }
+
+pub mod latest_cals_layout {
+    use super::*;
+
+    #[test]
+    fn root_dir() {
+        let layout = Layout::default();
+        let latest = layout.latest_cals();
+        assert_eq!(
+            latest.root.to_string(),
+            under_root(&["resources", "latest_calibrations"])
+        );
+    }
+
+    #[test]
+    fn index_file() {
+        let layout = Layout::default();
+        let file = layout.latest_cals().index();
+        assert_eq!(
+            file.to_string(),
+            under_root(&["resources", "latest_calibrations", "index.json"])
+        );
+    }
+
+    #[test]
+    fn contents_dir() {
+        let layout = Layout::default();
+        let dir = layout.latest_cals().contents();
+        assert_eq!(
+            dir.to_string(),
+            under_root(&["resources", "latest_calibrations", "contents"])
+        );
+    }
+}

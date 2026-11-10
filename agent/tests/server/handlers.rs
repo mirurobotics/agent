@@ -60,7 +60,7 @@ pub mod routes {
     use tower::ServiceExt;
 
     use device_api::models as openapi;
-    use miru_agent::calibrations::UploaderOptions;
+    use miru_agent::calibrations::{latest, UploaderOptions};
     use miru_agent::events::hub::{EventHub, SpawnOptions};
     use miru_agent::filesys::Overwrite;
     use miru_agent::models::{
@@ -93,10 +93,15 @@ pub mod routes {
 
     impl Fixture {
         async fn new(name: &str) -> Self {
-            Self::with_calibration_options(name, UploaderOptions::default()).await
+            let options = UploaderOptions::default();
+            Self::with_calibration_options(name, options, latest::DEFAULT_CAPACITY).await
         }
 
-        async fn with_calibration_options(name: &str, options: UploaderOptions) -> Self {
+        async fn with_calibration_options(
+            name: &str,
+            options: UploaderOptions,
+            latest_capacity: usize,
+        ) -> Self {
             let dir = test_dirs::temp(name).unwrap();
             let storage = Arc::new(create_storage(dir.dir()).await);
             let http_client = Arc::new(MockClient::default());
@@ -121,7 +126,13 @@ pub mod routes {
                 .await
                 .unwrap();
 
-            let cal_mngr = cal_mngr(&dir, MockCalibrationSender::new().0, options);
+            let cal_mngr = cal_mngr(
+                &dir,
+                MockCalibrationSender::new().0,
+                options,
+                latest_capacity,
+            )
+            .await;
 
             let (shutdown_tx, _) = broadcast::channel::<()>(1);
             let state = Arc::new(State::new(
@@ -663,11 +674,23 @@ pub mod routes {
                 capacity: 0,
                 ..UploaderOptions::default()
             };
-            let f = Fixture::with_calibration_options("handler_calibration_full", options).await;
+            let name = "handler_calibration_full";
+            let capacity = latest::DEFAULT_CAPACITY;
+            let f = Fixture::with_calibration_options(name, options, capacity).await;
 
             let (status, bytes) = f.post_json(URI, request("json", "{}")).await;
             assert_eq!(status, StatusCode::INSUFFICIENT_STORAGE);
             assert_eq!(error_code(&bytes), "calibration_buffer_full");
+        }
+
+        #[tokio::test]
+        async fn create_calibration_returns_507_when_the_store_is_full() {
+            let options = UploaderOptions::default();
+            let f = Fixture::with_calibration_options("handler_store_full", options, 0).await;
+
+            let (status, bytes) = f.post_json(URI, request("json", "{}")).await;
+            assert_eq!(status, StatusCode::INSUFFICIENT_STORAGE);
+            assert_eq!(error_code(&bytes), "calibration_store_full");
         }
     }
 }

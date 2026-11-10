@@ -1,107 +1,15 @@
 //! Calibration intake: stamping a report and handing it to the calibration manager.
 
-// standard crates
-use std::sync::Arc;
-use std::time::Duration;
-
 // internal crates
-use crate::mocks::calibration_sender::{MockCalibrationSender, Step};
-use crate::test_utils::calibrations::{layout, received_at};
-use crate::test_utils::filesys::dirs as test_dirs;
-use miru_agent::calibrations::{
-    CalMngrArgs, CalibrationManager, CalibrationsErr, QueueSnapshotFile, Report, ReportMetadata,
-    UploaderOptions,
-};
-use miru_agent::disk::{self, Layout};
-use miru_agent::models::{Deployment, DplActivity, InstanceFormat};
-use miru_agent::services::calibration::{self, CreateParams, Created};
+use crate::mocks::calibration_sender::Step;
+use crate::services::calibration::helpers::{params, Fixture};
+use crate::test_utils::calibrations::received_at;
+use miru_agent::calibrations::{latest, CalibrationsErr, Report, ReportMetadata, UploaderOptions};
+use miru_agent::models::{DplActivity, InstanceFormat};
 use miru_agent::services::ServiceErr;
 
 // external crates
-use chrono::Utc;
-use tokio::sync::{mpsc, oneshot};
-
-struct Fixture {
-    _dir: test_dirs::TempDir,
-    cal_mngr: CalibrationManager,
-    sender: Arc<MockCalibrationSender>,
-    started: mpsc::UnboundedReceiver<()>,
-    deployments: disk::Deployments,
-}
-
-impl Fixture {
-    async fn new() -> Self {
-        Self::with_options(UploaderOptions::default()).await
-    }
-
-    async fn with_options(options: UploaderOptions) -> Self {
-        let dir = test_dirs::temp("calibration_service_test").unwrap();
-        let calibrations = layout(&dir);
-        let snapshot_file =
-            QueueSnapshotFile::new_with_default(calibrations.queue(), Default::default())
-                .await
-                .unwrap();
-        let (sender, started) = MockCalibrationSender::new();
-        let args = CalMngrArgs {
-            snapshot_file: Some(snapshot_file),
-            reports: calibrations.reports(),
-            sender: sender.clone(),
-            options,
-            sleep_fn: tokio::time::sleep,
-            now_fn: Utc::now,
-        };
-        let (cal_mngr, _) = CalibrationManager::spawn(64, args);
-        let deployments_file = Layout::new(dir.to_dir()).deployments();
-        let (deployments, _) = disk::Deployments::spawn(64, deployments_file, 1000)
-            .await
-            .unwrap();
-        Self {
-            _dir: dir,
-            cal_mngr,
-            sender,
-            started,
-            deployments,
-        }
-    }
-
-    async fn deploy(&self, id: &str, activity_status: DplActivity) {
-        let deployment = Deployment {
-            id: id.to_string(),
-            activity_status,
-            ..Default::default()
-        };
-        self.deployments
-            .write_if_absent(id.to_string(), deployment, |_, _| false)
-            .await
-            .unwrap();
-    }
-
-    async fn create(&self, params: CreateParams) -> Result<Created, ServiceErr> {
-        calibration::create(&self.cal_mngr, &self.deployments, params, received_at()).await
-    }
-
-    /// The first report the calibration manager sends.
-    async fn uploaded(&mut self) -> Report {
-        tokio::time::timeout(Duration::from_secs(60), self.started.recv())
-            .await
-            .unwrap()
-            .unwrap();
-        self.sender.reports().remove(0)
-    }
-}
-
-fn params() -> CreateParams {
-    CreateParams {
-        component: "arm".to_string(),
-        role: Some("left".to_string()),
-        aspect: Some("pose".to_string()),
-        serial_number: Some("SN-1".to_string()),
-        reported_by: Some("Ada Lovelace".to_string()),
-        format: InstanceFormat::Yaml,
-        // the caller's data is queued unchanged, comments and all
-        data: "offset: 1 # kept\n".to_string(),
-    }
-}
+use tokio::sync::oneshot;
 
 #[tokio::test]
 async fn queues_the_report_stamped_with_its_id_and_the_time() {
@@ -169,7 +77,7 @@ async fn a_cal_mngr_rejection_fails_intake() {
         max_report_bytes: 100,
         ..UploaderOptions::default()
     };
-    let f = Fixture::with_options(options).await;
+    let f = Fixture::with_options(options, latest::DEFAULT_CAPACITY).await;
     let mut big = params();
     big.data = "x".repeat(200);
 
@@ -182,4 +90,44 @@ async fn a_cal_mngr_rejection_fails_intake() {
         ),
         "{err:?}"
     );
+}
+
+#[tokio::test]
+async fn an_oversized_report_is_too_large_even_when_the_store_is_full() {
+    let options = UploaderOptions {
+        max_report_bytes: 100,
+        ..UploaderOptions::default()
+    };
+    let f = Fixture::with_options(options, 0).await;
+    let mut big = params();
+    big.data = "x".repeat(200);
+
+    let err = f.create(big).await.unwrap_err();
+
+    assert!(
+        matches!(
+            err,
+            ServiceErr::CalibrationsErr(CalibrationsErr::TooLargeErr(_))
+        ),
+        "{err:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_full_latest_store_fails_intake() {
+    let f = Fixture::with_options(UploaderOptions::default(), 0).await;
+    // without the rollback the report would stay in flight, so `num_queued_uploads` would count it
+    let (_hold, hang) = oneshot::channel();
+    f.sender.push(Step::Hang(hang));
+
+    let err = f.create(params()).await.unwrap_err();
+
+    assert!(
+        matches!(
+            err,
+            ServiceErr::CalibrationsErr(CalibrationsErr::StoreFullErr(_))
+        ),
+        "{err:?}"
+    );
+    assert_eq!(f.cal_mngr.num_queued_uploads().await.unwrap(), 0);
 }

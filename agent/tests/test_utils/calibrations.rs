@@ -8,9 +8,9 @@ use std::sync::Arc;
 // internal crates
 use super::filesys::dirs::TempDir;
 use miru_agent::calibrations::{
-    CalMngrArgs, CalibrationManager, Report, ReportMetadata, Sender, UploaderOptions,
+    CalMngrArgs, CalibrationManager, LatestStore, Report, ReportMetadata, Sender, UploaderOptions,
 };
-use miru_agent::disk::layout::CalibrationsLayout;
+use miru_agent::disk::layout::{CalibrationsLayout, LatestCalsLayout};
 use miru_agent::models::InstanceFormat;
 
 // external crates
@@ -47,21 +47,46 @@ pub fn report(slug: &str) -> Report {
     }
 }
 
+/// A fixture report's metadata for the key (`component`, `role`, `aspect`),
+/// with its own `report_id`.
+pub fn reported(component: &str, role: Option<&str>, aspect: Option<&str>) -> ReportMetadata {
+    ReportMetadata {
+        report_id: Uuid::new_v4(),
+        role: role.map(str::to_string),
+        aspect: aspect.map(str::to_string),
+        ..report(component).metadata
+    }
+}
+
 /// The calibrations layout under `dir`.
 pub fn layout(dir: &TempDir) -> CalibrationsLayout {
     CalibrationsLayout::new(dir.to_dir().subdir("calibrations"))
 }
 
-/// A calibration manager under `dir` that keeps its queue in memory and
-/// uploads through `sender`.
-pub fn cal_mngr<S: Sender + 'static>(
+/// The latest calibrations layout under `dir`.
+pub fn latest_cals_layout(dir: &TempDir) -> LatestCalsLayout {
+    let resources = dir.to_dir().subdir("resources");
+    LatestCalsLayout::new(resources.subdir("latest_calibrations"))
+}
+
+/// A latest store under `dir` holding at most `capacity` keys.
+pub async fn latest_store(dir: &TempDir, capacity: usize) -> LatestStore {
+    LatestStore::open(latest_cals_layout(dir), capacity).await
+}
+
+/// A calibration manager under `dir` that keeps its queue in memory, holds at
+/// most `latest_capacity` keys in its latest store, and uploads through
+/// `sender`.
+pub async fn cal_mngr<S: Sender + 'static>(
     dir: &TempDir,
     sender: Arc<S>,
     options: UploaderOptions,
+    latest_capacity: usize,
 ) -> CalibrationManager {
     let args = CalMngrArgs {
         snapshot_file: None,
         reports: layout(dir).reports(),
+        latest: latest_store(dir, latest_capacity).await,
         sender,
         options,
         sleep_fn: tokio::time::sleep,
