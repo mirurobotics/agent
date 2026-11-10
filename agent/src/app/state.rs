@@ -83,7 +83,6 @@ impl AppState {
             layout.system_metadata(),
         );
         let (syncer, syncer_handle) = sync::Syncer::spawn(64, syncer_args)?;
-        let syncer = Arc::new(syncer);
 
         // initialize the data upload pipeline (deleter, uploader, scanner)
         let (deleter, uploader, scanner, [scanner_handle, deleter_handle, uploader_handle]) =
@@ -111,7 +110,7 @@ impl AppState {
             AppState {
                 storage,
                 http_client,
-                syncer,
+                syncer: Arc::new(syncer),
                 scanner,
                 deleter,
                 uploader,
