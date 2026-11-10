@@ -4,8 +4,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 // internal crates
-use crate::test_utils::calibrations::report;
-use crate::test_utils::filesys::dirs as test_dirs;
+use crate::test_utils::{calibrations::report, filesys::dirs as test_dirs};
 use miru_agent::app::state::AppState;
 use miru_agent::authn::{Token, TokenManagerExt};
 use miru_agent::calibrations::Filter;
