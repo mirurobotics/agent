@@ -1,4 +1,4 @@
-//! Overwriting a latest calibrations store with Miru's latest.
+//! Pulling Miru's latest calibrations into a latest calibrations store.
 
 // internal crates
 use crate::calibrations::{errors::CalibrationsErr, latest::LatestStore, report::ReportMetadata};
@@ -16,7 +16,7 @@ use tracing::{error, info};
 /// key. Any failure fails the call, so a store emptied first ends up holding
 /// every calibration Miru has; more than `capacity` keys is
 /// `CalibrationStoreFullErr`.
-pub async fn overwrite_latest<HTTPClientT: http::ClientI>(
+pub async fn pull_latest<HTTPClientT: http::ClientI>(
     http_client: &HTTPClientT,
     store: LatestCalsLayout,
     capacity: usize,

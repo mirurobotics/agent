@@ -6,7 +6,7 @@ This ExecPlan is a living document. The sections Progress, Surprises & Discoveri
 
 | Repository | Access | Description |
 |-----------|--------|-------------|
-| `agent/` (mirurobotics/agent) | read-write | The `Calibration` → `ReportMetadata` conversion; `calibrations::overwrite_latest` into a given store; reprovision wiping `calibrations/` and loading Miru's latest into it; a `ProvisionErr` variant; mocks, tests and `ARCHITECTURE.md`. |
+| `agent/` (mirurobotics/agent) | read-write | The `Calibration` → `ReportMetadata` conversion; `calibrations::pull_latest` into a given store; reprovision wiping `calibrations/` and loading Miru's latest into it; a `ProvisionErr` variant; mocks, tests and `ARCHITECTURE.md`. |
 | `openapi/` (mirurobotics/openapi) | read-only | Source of the vendored Agent API spec `api/specs/backend/v05.yaml`, which already has `GET /calibrations/latest` and `GET /calibrations/{calibration_id}/content`. Nothing is regenerated and `libs/` is not touched. |
 
 This plan lives in `agent/plans/` because every change is in the agent repo. It is part of ENG-1726 (RFC: Latest Calibrations on the Device). Branch `claude/project-thread-212l69`, based on `main` at `de3967d`. All paths are relative to the agent repo root, `/home/user/agent`. The file name keeps its first title so links to it still work.
@@ -26,10 +26,10 @@ Observable: upgrade an agent whose device has calibrations in its store; `/var/l
 - **The store survives upgrades; only reprovision pulls it from Miru (the user's design).** Reports are created only on the device, so the store on the device is already the truth after an upgrade and pulling it would only repeat what the device holds. Only reprovision changes which device's data the store should hold, and reprovision already needs the network to register the new key, so it is the one place that pulls. Provision registers a new device, which has no calibrations in Miru, so it pulls nothing and starts empty.
 - **The store moves to `calibrations/latest/`.** `disk::CalibrationsLayout::latest()` returns `LatestCalsLayout::new(self.root.subdir("latest"))`, so callers write `layout.calibrations().latest()`. `reset` keeps `calibrations/` (the upload queue lives there), so it no longer touches the store, and `reset`, `bootstrap` and `app::upgrade::reconcile_impl` stay exactly as on `main`, writing the agent-version marker last. Consequence: the store's on-disk format (`index.json`, `{"entries": [...]}` of `ReportMetadata` since #451, and `contents/<report_id>`) must now stay readable by newer agents, as `calibrations/queue.json`'s already must.
 - **Provision leaves the store alone.** Provisioning assumes a new device has no data, so `provisioning::provision` is unchanged from `main`: it neither loads nor clears the store.
-- **Reprovision wipes `calibrations/`, then loads in place.** Order in `provisioning::reprovision`: generate the temp keys → `reprovision_with_backend` (Miru accepts the new public key) → `bootstrap` (installs the keys) → `overwrite_calibrations`: `dirs::delete(calibrations/)`, issue a device token from the installed keys (`authn::issue_token`), and run `calibrations::overwrite_latest` into `calibrations/latest/`. The old upload queue, its reports and the old store go first ([review](https://github.com/mirurobotics/agent/pull/450#discussion_r4521677972)), so a failure after `bootstrap` never leaves the previous device's calibrations ([AI review](https://github.com/mirurobotics/agent/pull/450#discussion_r4521695982)); it leaves an empty or partial store until reprovision is rerun. A load failure is `ProvisionErr::CalibrationsErr` ("failed to load the latest calibrations: ..."), a token failure stays `ProvisionErr::AuthnErr`. No staging dir.
+- **Reprovision wipes `calibrations/`, then loads in place.** Order in `provisioning::reprovision`: generate the temp keys → `reprovision_with_backend` (Miru accepts the new public key) → `bootstrap` (installs the keys) → `pull_calibrations`: `dirs::delete(calibrations/)`, issue a device token from the installed keys (`authn::issue_token`), and run `calibrations::pull_latest` into `calibrations/latest/`. The old upload queue, its reports and the old store go first ([review](https://github.com/mirurobotics/agent/pull/450#discussion_r4521677972)), so a failure after `bootstrap` never leaves the previous device's calibrations ([AI review](https://github.com/mirurobotics/agent/pull/450#discussion_r4521695982)); it leaves an empty or partial store until reprovision is rerun. A load failure is `ProvisionErr::CalibrationsErr` ("failed to load the latest calibrations: ..."), a token failure stays `ProvisionErr::AuthnErr`. No staging dir.
 - **Reprovision fails if it can't load.** It already needs the network. The load runs after `bootstrap`, so a failed load leaves a reprovisioned device that can reach Miru, with its old store, until reprovision is rerun (AI design review on #450). Loading before `bootstrap` would leave the device on old keys Miru no longer accepts.
-- **The loader spawns the store's actor for the length of the load.** `calibrations::overwrite_latest` calls `LatestStore::spawn` on the target layout, writes each report with the public `LatestStore::put`, then drops the handle and awaits the worker, so no task writes the store after the load. The loader never names `latest_impl`, as `AGENTS.md` requires. Alternative rejected: driving `LatestStoreImpl` directly, a second write path around the worker.
-- **`overwrite_latest` takes the target `LatestCalsLayout`,** not `disk::Layout`, so tests can load into any dir.
+- **The loader spawns the store's actor for the length of the load.** `calibrations::pull_latest` calls `LatestStore::spawn` on the target layout, writes each report with the public `LatestStore::put`, then drops the handle and awaits the worker, so no task writes the store after the load. The loader never names `latest_impl`, as `AGENTS.md` requires. Alternative rejected: driving `LatestStoreImpl` directly, a second write path around the worker.
+- **`pull_latest` takes the target `LatestCalsLayout`,** not `disk::Layout`, so tests can load into any dir.
 - **One key at a time.** The loader keeps only metadata in memory and downloads and writes one content at a time, so memory stays bounded to one content of up to 1 MiB.
 - **Miru only, no merge.** Reprovision wipes `calibrations/` and writes Miru's latest; the loader never reads the upload queue ([review](https://github.com/mirurobotics/agent/pull/450#discussion_r4521677972)).
 - **Nothing is skipped** ([review](https://github.com/mirurobotics/agent/pull/450#discussion_r4521740894)). Every error fails the load: a failed list, a failed download (after `http::with_retry`), a store write error, or more keys than `latest::DEFAULT_CAPACITY` (the store's `CalibrationStoreFullErr`). A loaded store holds every calibration Miru has.
@@ -41,9 +41,9 @@ Observable: upgrade an agent whose device has calibrations in its store; `/var/l
 | New name | Alternatives | Why this one |
 |----------|--------------|--------------|
 | `calibrations/latest/` (`layout.calibrations().latest()`) | `calibrations/latest_calibrations/`, a top-level `latest_calibrations/` | Beside `queue.json` and `reports/` in the dir `reset` keeps; the parent already says "calibrations". |
-| `calibrations::overwrite_latest(http_client, store, capacity, token)` (module `calibrations::overwrite`) | `calibrations::latest::load`, `restore_latest` | "Load" is the RFC's and the spec's word; a module of its own keeps HTTP out of `latest.rs`, as `sender.rs` holds the uploader's HTTP. |
-| `capacity` parameter of `overwrite_latest` | always `DEFAULT_CAPACITY` | Matches `LatestStore::spawn(buffer_size, layout, capacity)`; tests need a small one. |
-| `provisioning::reprovision::overwrite_calibrations` (private) | inline in `reprovision` | Keeps `reprovision` under 50 lines. Reprovision-only, so it lives in `reprovision.rs`, not `shared.rs`. |
+| `calibrations::pull_latest(http_client, store, capacity, token)` (module `calibrations::pull`) | `load_latest`, `overwrite_latest`, `replace_latest`, `restore_latest` | The user's pick: git's word for taking the remote's state locally. A module of its own keeps HTTP out of `latest.rs`, as `sender.rs` holds the uploader's HTTP. |
+| `capacity` parameter of `pull_latest` | always `DEFAULT_CAPACITY` | Matches `LatestStore::spawn(buffer_size, layout, capacity)`; tests need a small one. |
+| `provisioning::reprovision::pull_calibrations` (private) | inline in `reprovision` | Keeps `reprovision` under 50 lines. Reprovision-only, so it lives in `reprovision.rs`, not `shared.rs`. |
 | `ProvisionErr::CalibrationsErr` | `LoadCalibrationsErr` | Named after the wrapped type, as `AuthnErr(AuthnErr)` and `DiskErr(DiskErr)` are. |
 | `http::calibrations::list_latest`, `ListLatestParams` | `list`, `list_latest_page` | The endpoint is `/calibrations/latest`; shape of `http::deployments::list`/`ListParams`. |
 | `http::calibrations::list_all_latest`, `ListAllLatestParams` | `list_latest_all` | Mirrors `http::deployments::list_all`/`ListAllParams`. |
@@ -58,8 +58,8 @@ Observable: upgrade an agent whose device has calibrations in its store; `/var/l
 
 | New file | Mirrors |
 |----------|---------|
-| `agent/src/calibrations/overwrite.rs` | `agent/src/calibrations/sender.rs` (the module's HTTP through `http::calibrations`, with a backend-model conversion) and the fetch in `agent/src/sync/deployments.rs` (`http::with_retry` around `list_all`, then each item's content). |
-| `agent/tests/calibrations/overwrite.rs` | `agent/tests/calibrations/latest.rs` (a `Fixture` over a temp dir, read back through `test_utils::calibrations::latest_store`) with `MockClient` as in `agent/tests/calibrations/sender.rs`. Reprovision tests seed a queued report as `preloaded` does in `agent/tests/calibrations/uploader.rs`. |
+| `agent/src/calibrations/pull.rs` | `agent/src/calibrations/sender.rs` (the module's HTTP through `http::calibrations`, with a backend-model conversion) and the fetch in `agent/src/sync/deployments.rs` (`http::with_retry` around `list_all`, then each item's content). |
+| `agent/tests/calibrations/pull.rs` | `agent/tests/calibrations/latest.rs` (a `Fixture` over a temp dir, read back through `test_utils::calibrations::latest_store`) with `MockClient` as in `agent/tests/calibrations/sender.rs`. Reprovision tests seed a queued report as `preloaded` does in `agent/tests/calibrations/uploader.rs`. |
 
 `reprovision` deletes `calibrations/` with `filesys::dirs::delete`, as `reset` deletes `resources/`. No other new files.
 
@@ -82,7 +82,7 @@ Observable: upgrade an agent whose device has calibrations in its store; `/var/l
 ## Progress
 
 - [x] Milestone 1 source: HTTP calls, `Calibration` conversion, `ReportMetadata::key`, `report::read_data`, `report::report_file`.
-- [x] Milestone 2 source: `calibrations::overwrite_latest` into a given store.
+- [x] Milestone 2 source: `calibrations::pull_latest` into a given store.
 - [x] Milestone 3 source: store at `calibrations/latest/`; `reset`, `bootstrap` and the upgrade reconcile as on `main`; provision as on `main`; reprovision wipes `calibrations/` and loads in place; `ProvisionErr::CalibrationsErr`.
 - [x] Milestone 4: `ARCHITECTURE.md`.
 - [x] Split (user's request): the store move ([agent#451](https://github.com/mirurobotics/agent/pull/451)), the shared report helpers ([agent#452](https://github.com/mirurobotics/agent/pull/452)) and the HTTP client ([agent#453](https://github.com/mirurobotics/agent/pull/453)) are on `main` with their tests. This PR keeps the `Calibration` conversion, the loader and the reprovision load; skip the test steps below for the parts already on `main`.
@@ -101,7 +101,7 @@ Observable: upgrade an agent whose device has calibrations in its store; `/var/l
 - Source stage (`$implement stage: source`) wrote only source, plus the test edits a signature change forced (`tests/http/calibrations.rs` uses `CONTENT_TIMEOUT`).
 - `put_mirus_latest` takes `capacity` and computes `room` itself, so its warning can name the capacity. `newest_per_key` returns entries in `HashMap` order, so tests must not depend on the store's order for queued keys.
 - Design review: "complete" means everything Miru can serve (non-network download failures and an unopenable queue file are skipped); queued reports go in first and Miru fills every other key with the room left; `ReportMetadata::key()`, `report::read_data` and `report::report_file` replace the private helpers. `latest_impl`'s inline test became `key_is_the_component_role_and_aspect_only`; the tests stage moves it to `report.rs`.
-- Reshape (user's design): the earlier designs loaded the store after every reset, first in provision and reprovision, then only in the startup reconcile with `reset` deleting the agent-version marker first. The user ruled that the agent pulls calibrations from Miru only on reprovision: reports are created only on the device, so an upgrade has nothing to pull if the store survives it, and provision starts a device with no data. So the store moved out of `resources/` to `calibrations/latest/`; `reset`, `bootstrap`, `disk::agent_version` and `app::upgrade` (and their tests) went back to `main`, dropping `disk::agent_version::delete` and `UpgradeErr::CalibrationsErr`; `overwrite_latest` now takes the queue layout and a target store layout; provision deletes the store after `bootstrap`; reprovision loads into `tmp/latest_calibrations/` with a token from the new keys and swaps it in after `bootstrap`, failing with the new `ProvisionErr::CalibrationsErr`.
+- Reshape (user's design): the earlier designs loaded the store after every reset, first in provision and reprovision, then only in the startup reconcile with `reset` deleting the agent-version marker first. The user ruled that the agent pulls calibrations from Miru only on reprovision: reports are created only on the device, so an upgrade has nothing to pull if the store survives it, and provision starts a device with no data. So the store moved out of `resources/` to `calibrations/latest/`; `reset`, `bootstrap`, `disk::agent_version` and `app::upgrade` (and their tests) went back to `main`, dropping `disk::agent_version::delete` and `UpgradeErr::CalibrationsErr`; `pull_latest` now takes the queue layout and a target store layout; provision deletes the store after `bootstrap`; reprovision loads into `tmp/latest_calibrations/` with a token from the new keys and swaps it in after `bootstrap`, failing with the new `ProvisionErr::CalibrationsErr`.
 - 2026-11-10 (review, [agent#450](https://github.com/mirurobotics/agent/pull/450#discussion_r4521361846)): the store's layout comes from `CalibrationsLayout::latest()`, replacing `Layout::latest_cals()`, so callers write `layout.calibrations().latest()` and the path reads as part of the calibrations directory.
 - 2026-11-10 (review, [agent#450](https://github.com/mirurobotics/agent/pull/450#discussion_r4521374689)): provision no longer deletes `calibrations/`. Provisioning assumes a new device has no data, so clearing leftovers is not provision's job; this supersedes the entry above that had provision delete the queue and the store.
 - 2026-11-10 (user): split #450. #451, #452 and #453 landed the store move, the shared report helpers and the HTTP client on `main`; #450 was rebuilt on `main` with only the `Calibration` conversion, the loader and the reprovision load.
@@ -109,6 +109,7 @@ Observable: upgrade an agent whose device has calibrations in its store; `/var/l
 - 2026-11-10 ([AI review](https://github.com/mirurobotics/agent/pull/450#discussion_r4521695982), pending the author): reprovision deletes `calibrations/` right after `bootstrap` and loads into it in place, with no staging dir. A load or token failure after `bootstrap` must not leave the previous device's calibrations or queue on a device that is already the new one; the cost is an empty or partial store until reprovision is rerun.
 - 2026-11-10 (review, [agent#450](https://github.com/mirurobotics/agent/pull/450#discussion_r4521740894)): nothing is skipped. A download that fails for any reason, or more keys than the store holds, fails the load; this supersedes skipping an unservable calibration and Miru's keys past capacity.
 - 2026-11-10 (review, [agent#450](https://github.com/mirurobotics/agent/pull/450#discussion_r4521790285)): `calibrations::load_latest` (module `load`) is renamed `calibrations::overwrite_latest` (module `overwrite`), and reprovision's helper `overwrite_calibrations`, so the names say existing entries are overwritten.
+- 2026-11-10 (user, project thread): renamed again to `calibrations::pull_latest` (module `calibrations::pull`), and reprovision's helper `pull_calibrations`. "Pull" is git's word for taking the remote's state locally.
 
 ## Outcomes & Retrospective
 
@@ -144,11 +145,11 @@ Tests (tests stage):
 - `agent/tests/calibrations/report.rs`: `mod from_backend`: `maps_every_field`, `reported_by_is_none_when_not_expanded_or_null`, `an_unparseable_reported_at_is_the_epoch`.
 - Inline in `report.rs`: move `key_is_the_component_role_and_aspect_only` from `latest_impl.rs`; `read_data_returns_the_file_s_data`, `read_data_is_an_invalid_report_when_the_file_is_missing`, `read_data_is_an_invalid_report_when_the_file_is_not_utf8` (terminal), `read_data_returns_another_read_error`.
 
-### Milestone 2: `calibrations::overwrite_latest` into a given store (source done)
+### Milestone 2: `calibrations::pull_latest` into a given store (source done)
 
-`agent/src/calibrations/overwrite.rs`, re-exported as `calibrations::overwrite_latest`:
+`agent/src/calibrations/pull.rs`, re-exported as `calibrations::pull_latest`:
 
-    pub async fn overwrite_latest<HTTPClientT: http::ClientI>(
+    pub async fn pull_latest<HTTPClientT: http::ClientI>(
         http_client: &HTTPClientT,
         store: LatestCalsLayout,
         capacity: usize,
@@ -159,7 +160,7 @@ It spawns `LatestStore` on `store`, puts Miru's latest for each key (`put_mirus_
 
 Tests (tests stage):
 
-- `agent/tests/calibrations/overwrite.rs` (add `pub mod overwrite;` to `agent/tests/calibrations/mod.rs`): a `Fixture` with a temp dir, a target store dir (for example `<dir>/target`) and `MockClient`; `overwrite(capacity)` calls `overwrite_latest(&client, LatestCalsLayout::new(target), capacity, "tok")` and reads back with `LatestStore::spawn` on the target. Cases: `writes_mirus_latest_calibrations_into_the_given_store`, `writes_nothing_when_miru_is_empty`, `more_keys_than_capacity_fail_the_call`, `a_failed_download_fails_the_call`, `a_failed_list_fails_the_call`, `a_network_error_on_a_download_fails_the_call`.
+- `agent/tests/calibrations/pull.rs` (add `pub mod pull;` to `agent/tests/calibrations/mod.rs`): a `Fixture` with a temp dir, a target store dir (for example `<dir>/target`) and `MockClient`; `pull(capacity)` calls `pull_latest(&client, LatestCalsLayout::new(target), capacity, "tok")` and reads back with `LatestStore::spawn` on the target. Cases: `writes_mirus_latest_calibrations_into_the_given_store`, `writes_nothing_when_miru_is_empty`, `more_keys_than_capacity_fail_the_call`, `a_failed_download_fails_the_call`, `a_failed_list_fails_the_call`, `a_network_error_on_a_download_fails_the_call`.
 
 ### Milestone 3: the store survives reset; provision empties it; reprovision loads it (source done)
 
@@ -167,7 +168,7 @@ Tests (tests stage):
 - `agent/src/disk/setup.rs`, `agent/src/disk/agent_version.rs`, `agent/src/app/upgrade.rs`, `agent/src/app/errors.rs`: as on `main`.
 - `agent/src/provisioning/errors.rs`: `ProvisionErr::CalibrationsErr(calibrations::CalibrationsErr)` with `#[error("failed to load the latest calibrations: {0}")]`, a `From` impl and an `impl_error!` entry.
 - `agent/src/provisioning/provision.rs`: unchanged from `main`.
-- `agent/src/provisioning/reprovision.rs`: after `reprovision_with_backend`, `bootstrap`; then `overwrite_calibrations(http_client, layout)`: `dirs::delete(&layout.calibrations().root)`, issue a token with `authn::issue_token` from `layout.auth()`'s keys, `calibrations::overwrite_latest(http_client, layout.calibrations().latest(), DEFAULT_CAPACITY, &token)`.
+- `agent/src/provisioning/reprovision.rs`: after `reprovision_with_backend`, `bootstrap`; then `pull_calibrations(http_client, layout)`: `dirs::delete(&layout.calibrations().root)`, issue a token with `authn::issue_token` from `layout.auth()`'s keys, `calibrations::pull_latest(http_client, layout.calibrations().latest(), DEFAULT_CAPACITY, &token)`.
 
 Tests (tests stage):
 
@@ -196,7 +197,7 @@ Acceptance, as behavior the tests pin:
 - The store is at `calibrations/latest/` and `reset` and the upgrade reconcile leave it untouched with no calibrations request (`latest_cals_layout::*`, `keeps_the_latest_calibrations_store`, `leaves_the_latest_calibrations_store_untouched`).
 - Provision makes no calibrations request.
 - Reprovision replaces `calibrations/` with Miru's latest, queue included; a failed load returns `ProvisionErr::CalibrationsErr` with the old calibrations already gone (`replaces_the_calibrations_with_mirus_latest`, `a_failed_load_wipes_the_calibrations_and_returns_calibrations_err`).
-- `overwrite_latest` writes only the given store, and a failed list, a failed download or too many keys fails (`agent/tests/calibrations/overwrite.rs`).
+- `pull_latest` writes only the given store, and a failed list, a failed download or too many keys fails (`agent/tests/calibrations/pull.rs`).
 
 ## Idempotence and Recovery
 

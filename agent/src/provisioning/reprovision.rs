@@ -46,7 +46,7 @@ pub async fn reprovision<HTTPClientT: http::ClientI>(
             version::VERSION,
         )
         .await?;
-        overwrite_calibrations(http_client, layout).await?;
+        pull_calibrations(http_client, layout).await?;
         Ok(device)
     }
     .await;
@@ -58,7 +58,7 @@ pub async fn reprovision<HTTPClientT: http::ClientI>(
 /// Replace the device's calibrations, upload queue included, with Miru's
 /// latest. Runs after `bootstrap`, so the old device's calibrations are gone
 /// even if the load fails, and the token comes from the installed keys.
-async fn overwrite_calibrations<HTTPClientT: http::ClientI>(
+async fn pull_calibrations<HTTPClientT: http::ClientI>(
     http_client: &HTTPClientT,
     layout: &disk::Layout,
 ) -> Result<(), ProvisionErr> {
@@ -67,7 +67,7 @@ async fn overwrite_calibrations<HTTPClientT: http::ClientI>(
     let auth = layout.auth();
     let device_token =
         authn::issue_token(http_client, &auth.private_key(), &auth.public_key()).await?;
-    calibrations::overwrite_latest(
+    calibrations::pull_latest(
         http_client,
         cals.latest(),
         DEFAULT_CAPACITY,
