@@ -663,6 +663,60 @@ pub mod read_json {
     }
 }
 
+pub mod read_json_with_retry {
+    use super::*;
+
+    #[tokio::test(start_paused = true)]
+    async fn missing_file_is_not_retried() {
+        let dir = test_dirs::temp("testing").unwrap();
+        let file = dir.file("test-file.json");
+
+        let start = tokio::time::Instant::now();
+        let err = files::read_json_with_retry::<serde_json::Value>(&file)
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, FileSysErr::PathDoesNotExistErr { .. }));
+        assert_eq!(start.elapsed(), std::time::Duration::ZERO);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn unparseable_file_is_not_retried() {
+        let dir = test_dirs::temp("testing").unwrap();
+        let file = dir.file("test-file.json");
+        files::write_string(&file, "not valid json {{{", WriteOptions::default())
+            .await
+            .unwrap();
+
+        let start = tokio::time::Instant::now();
+        let err = files::read_json_with_retry::<serde_json::Value>(&file)
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, FileSysErr::ParseJSONErr { .. }));
+        assert_eq!(start.elapsed(), std::time::Duration::ZERO);
+    }
+
+    // a directory at the path fails every read, so each delay is waited out
+    #[tokio::test(start_paused = true)]
+    async fn lasting_error_is_retried_after_each_delay() {
+        let dir = test_dirs::temp("testing").unwrap();
+        let file = dir.file("test-file.json");
+        let blocker = filesys::Dir::new(file.path().clone());
+        filesys::dirs::create(&blocker).await.unwrap();
+
+        let start = tokio::time::Instant::now();
+        files::read_json_with_retry::<serde_json::Value>(&file)
+            .await
+            .unwrap_err();
+
+        assert_eq!(
+            start.elapsed(),
+            std::time::Duration::from_millis(50 + 250 + 1000)
+        );
+    }
+}
+
 pub mod write_bytes {
     use super::*;
 
