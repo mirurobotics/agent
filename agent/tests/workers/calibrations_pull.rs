@@ -6,7 +6,6 @@ use std::time::Duration;
 // internal crates
 use crate::mocks::{
     http_client::{Call, MockClient},
-    stub_token_manager::StubTokenManager,
     syncer::MockSyncer,
 };
 use crate::test_utils::{
@@ -202,6 +201,7 @@ async fn a_failed_pull_is_retried_after_the_next_successful_sync() {
     w.fire(SyncEvent::SyncSuccess);
     w.await_lists(1).await;
     assert!(w.is_running().await);
+    assert_eq!(w.num_lists(), 1);
 
     w.serve_arm();
     w.fire(SyncEvent::SyncSuccess);
@@ -211,18 +211,27 @@ async fn a_failed_pull_is_retried_after_the_next_successful_sync() {
 
 #[tokio::test]
 async fn a_failed_token_skips_the_pull_until_the_next_sync() {
-    let err = AuthnErr::MockError(AuthnMockError {
+    let token_mngr = token_manager();
+    token_mngr.fail_next_get_token(AuthnErr::MockError(AuthnMockError {
         is_network_conn_err: false,
         trace: miru_agent::trace!(),
-    });
-    let token_mngr = Arc::new(StubTokenManager::err(err));
-    let mut w = Worker::start_with(Arc::new(MockSyncer::default()), token_mngr).await;
+    }));
+    let mut w = Worker::start_with(Arc::new(MockSyncer::default()), token_mngr.clone()).await;
+    w.serve_arm();
 
     w.fire(SyncEvent::SyncSuccess);
-
+    guard(async {
+        while token_mngr.num_get_token_calls() < 1 {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await;
     assert!(w.is_running().await);
     assert_eq!(w.num_lists(), 0);
-    w.stop().await;
+
+    w.fire(SyncEvent::SyncSuccess);
+    w.await_lists(1).await;
+    w.await_return().await;
 }
 
 #[tokio::test]
