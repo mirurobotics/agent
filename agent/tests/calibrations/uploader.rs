@@ -452,8 +452,8 @@ async fn shutdown_mid_upload_keeps_the_report_for_replay() {
     h.stop().await;
 
     assert_eq!(h.queued_on_disk().await, 1);
-    // the next boot sends it again with the same report_id, so Miru records it
-    // once
+    // the next boot sends it again with the same report_id, so the control
+    // plane records it once
     h.spawn().await;
     h.await_drained(&["a", "a"]).await;
     let id = report("a").metadata.report_id;
