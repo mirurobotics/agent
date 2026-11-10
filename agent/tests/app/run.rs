@@ -9,6 +9,7 @@ use miru_agent::app::run::run;
 use miru_agent::disk::Layout;
 use miru_agent::filesys::{self, files, PathExt, WriteOptions};
 use miru_agent::models::Device;
+use miru_agent::network::BackendHost;
 use miru_agent::server::{tcp, Options, ServerErr};
 
 // external crates
@@ -68,6 +69,7 @@ fn options(layout: &Layout, lifecycle: LifecycleOptions, tcp_port: Option<u16>) 
         lifecycle,
         enable_tcp_server: tcp_port.is_some(),
         server,
+        backend_host: unreachable_backend_host(),
         ..Default::default()
     }
 }
@@ -77,6 +79,12 @@ fn lifecycle() -> LifecycleOptions {
     LifecycleOptions {
         max_shutdown_delay: SHUTDOWN_WATCHDOG,
     }
+}
+
+/// A backend host nothing listens on, so the agent's requests fail on
+/// this machine instead of reaching the control plane.
+fn unreachable_backend_host() -> BackendHost {
+    BackendHost::new("127.0.0.1:1").unwrap()
 }
 
 /// Run the agent until it exits on its own; ctrl-c is the only external
@@ -151,6 +159,7 @@ async fn invalid_app_state_initialization() {
             layout: layout.clone(),
             ..Default::default()
         },
+        backend_host: unreachable_backend_host(),
         ..Default::default()
     };
 
