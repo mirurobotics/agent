@@ -102,17 +102,6 @@ async fn put_all(store: &LatestStore, reports: &[&ReportMetadata]) {
     }
 }
 
-/// Set the mode of the store's root: 0o555 lets the index be read but not
-/// written, while the contents directory stays writable.
-#[cfg(unix)]
-async fn set_root_mode(f: &Fixture, mode: u32) {
-    use std::os::unix::fs::PermissionsExt;
-    let permissions = std::fs::Permissions::from_mode(mode);
-    dirs::set_permissions(&f.layout.root, permissions)
-        .await
-        .unwrap();
-}
-
 // ================================= OPEN ================================= //
 #[tokio::test]
 async fn open_deletes_the_contents_no_entry_names() {
@@ -239,18 +228,18 @@ async fn put_fails_and_changes_nothing_when_the_content_cannot_be_written() {
     assert!(f.entries().await.is_empty());
 }
 
-#[cfg(unix)]
 #[tokio::test]
-async fn put_fails_and_keeps_the_entry_when_the_entry_cannot_be_written() {
+async fn put_fails_and_keeps_the_replaced_entry_when_the_content_cannot_be_written() {
     let f = Fixture::new().await;
     let old = reported("arm", None, None);
+    let new = newer(&old);
     put_all(&f.store, &[&old]).await;
-    set_root_mode(&f, 0o555).await;
+    // a directory where the new content file would go
+    let blocker = f.layout.contents().subdir(&new.report_id.to_string());
+    dirs::create(&blocker).await.unwrap();
 
-    let result = f.store.put(newer(&old), DATA).await;
+    let err = f.store.put(new, DATA).await.unwrap_err();
 
-    set_root_mode(&f, 0o755).await;
-    let err = result.unwrap_err();
     assert!(matches!(err, CalibrationsErr::FileSysErr(_)), "{err:?}");
     assert_eq!(f.entries().await, std::slice::from_ref(&old));
     assert!(f.content_ids().await.contains(&old.report_id));
