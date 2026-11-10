@@ -15,8 +15,9 @@ use tracing::info;
 
 /// Merge Miru's latest calibrations into the latest store in `layout`, as
 /// `merge_latest` does. Any failure fails the call, so an emptied store ends
-/// up holding every calibration Miru has; more than `capacity` keys is
-/// `CalibrationStoreFullErr`.
+/// up holding every calibration Miru has. Once the store's keys and Miru's
+/// new ones pass `capacity`, it fails with `CalibrationStoreFullErr`, possibly
+/// after putting some.
 pub async fn pull_latest<HTTPClientT: http::ClientI>(
     http_client: &HTTPClientT,
     layout: LatestCalsLayout,

@@ -337,6 +337,24 @@ async fn put_if_newer_rejects_a_new_key_at_capacity() {
     assert_eq!(f.entries().await, [arm]);
 }
 
+#[tokio::test]
+async fn put_if_newer_checks_and_puts_in_one_command() {
+    let f = Fixture::new().await;
+    let old = reported("arm", None, None);
+    let later = reported_after(&old, 1);
+
+    // the put is queued behind the check, so it can't land between the
+    // check and its put
+    let (put_old, put_later) = tokio::join!(
+        f.store.put_if_newer(old, DATA),
+        f.store.put(later.clone(), DATA),
+    );
+
+    assert!(put_old.unwrap());
+    put_later.unwrap();
+    assert_eq!(f.entries().await, [later]);
+}
+
 // ================================= LIST ================================= //
 #[tokio::test]
 async fn list_sorts_by_component_then_role_then_aspect() {
