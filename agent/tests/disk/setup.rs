@@ -423,13 +423,13 @@ pub mod reset {
         write_existing_keys(&layout).await;
 
         let index = layout.calibrations().latest().index();
-        test_files::seed(&index, "[]").await;
+        test_files::seed(&index, r#"{"entries":[]}"#).await;
 
         disk::setup::reset(&layout, &Device::default(), &Settings::default(), "v1.0.0")
             .await
             .unwrap();
 
-        assert_eq!(files::read_string(&index).await.unwrap(), "[]");
+        assert_eq!(files::read_string(&index).await.unwrap(), r#"{"entries":[]}"#);
     }
 
     #[tokio::test]
