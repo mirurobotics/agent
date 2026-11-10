@@ -2,6 +2,7 @@
 //! store.
 
 // standard crates
+use std::future::pending;
 use std::sync::Arc;
 
 // internal crates
@@ -83,6 +84,12 @@ fn content(id: &str) -> String {
 fn mock_err() -> HTTPErr {
     HTTPErr::MockErr(MockErr {
         is_network_conn_err: false,
+    })
+}
+
+fn network_err() -> HTTPErr {
+    HTTPErr::MockErr(MockErr {
+        is_network_conn_err: true,
     })
 }
 
@@ -231,12 +238,12 @@ async fn ensure_pulled_pulls_until_a_pull_succeeds() {
     fx.client.set_list_latest_calibrations(|| Err(mock_err()));
     let puller = fx.puller(token_manager()).await;
 
-    puller.ensure_pulled().await;
+    puller.ensure_pulled(pending()).await;
     assert!(fx.entries().await.is_empty());
 
     fx.serve(&["arm"]);
-    puller.ensure_pulled().await;
-    puller.ensure_pulled().await;
+    puller.ensure_pulled(pending()).await;
+    puller.ensure_pulled(pending()).await;
 
     assert_eq!(fx.entries().await, vec![report("arm").metadata]);
     assert_eq!(fx.num_lists(), 2);
@@ -253,10 +260,10 @@ async fn ensure_pulled_tries_again_after_a_token_failure() {
     }));
     let puller = fx.puller(token_mngr).await;
 
-    puller.ensure_pulled().await;
+    puller.ensure_pulled(pending()).await;
     assert_eq!(fx.num_lists(), 0);
 
-    puller.ensure_pulled().await;
+    puller.ensure_pulled(pending()).await;
     assert_eq!(fx.entries().await, vec![report("arm").metadata]);
 }
 
@@ -264,15 +271,28 @@ async fn ensure_pulled_tries_again_after_a_token_failure() {
 async fn ensure_pulled_callers_share_a_failed_pull() {
     let fx = Fixture::new();
     // a network error makes the pull wait before it lists again
-    fx.client.set_list_latest_calibrations(|| {
-        Err(HTTPErr::MockErr(MockErr {
-            is_network_conn_err: true,
-        }))
-    });
+    fx.client.set_list_latest_calibrations(|| Err(network_err()));
     let token_mngr = token_manager();
     let puller = fx.puller(token_mngr.clone()).await;
 
-    tokio::join!(puller.ensure_pulled(), puller.ensure_pulled());
+    tokio::join!(puller.ensure_pulled(pending()), puller.ensure_pulled(pending()));
 
     assert_eq!(token_mngr.num_get_token_calls(), 1);
+}
+
+#[tokio::test]
+async fn ensure_pulled_stops_a_pull_midway_at_shutdown() {
+    let fx = Fixture::new();
+    // a network error makes the pull wait before it lists again
+    fx.client.set_list_latest_calibrations(|| Err(network_err()));
+    let puller = fx.puller(token_manager()).await;
+    let shutdown = async {
+        while fx.num_lists() == 0 {
+            tokio::task::yield_now().await;
+        }
+    };
+
+    puller.ensure_pulled(shutdown).await;
+
+    assert_eq!(fx.num_lists(), 1);
 }

@@ -339,10 +339,10 @@ async fn init_calibrations_pull(
 ) -> Result<(), ServerErr> {
     info!("Starting the calibrations pull...");
     let pull_handle = tokio::spawn(async move {
-        tokio::select! {
-            _ = shutdown_rx.recv() => {}
-            _ = app_state.latest_puller.ensure_pulled() => {}
-        }
+        let shutdown = async move {
+            let _ = shutdown_rx.recv().await;
+        };
+        app_state.latest_puller.ensure_pulled(shutdown).await;
     });
     shutdown_manager.register_handle(
         |mgr| &mut mgr.calibrations_pull_handle,

@@ -2,6 +2,7 @@
 //! store, merging by `reported_at`.
 
 // standard crates
+use std::future::Future;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -117,9 +118,22 @@ where
         }
     }
 
-    /// Pulls unless a pull has succeeded this run. A failure is logged, and the
-    /// next call tries again, but a caller that waited for a pull doesn't.
-    pub async fn ensure_pulled(&self) {
+    /// The store this puller pulls into.
+    pub fn store(&self) -> &LatestStore {
+        &self.store
+    }
+
+    /// Pulls unless a pull has succeeded this run, giving up once `shutdown`
+    /// resolves. A failure is logged, and the next call tries again, but a
+    /// caller that waited for a pull doesn't.
+    pub async fn ensure_pulled(&self, shutdown: impl Future<Output = ()>) {
+        tokio::select! {
+            _ = shutdown => {}
+            _ = self.pull_unless_pulled() => {}
+        }
+    }
+
+    async fn pull_unless_pulled(&self) {
         let seen = self.attempts.load(Ordering::Acquire);
         let mut has_pulled = self.has_pulled.lock().await;
         if *has_pulled || self.attempts.load(Ordering::Acquire) != seen {

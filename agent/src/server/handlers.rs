@@ -207,9 +207,12 @@ pub async fn list_latest_calibrations(
         async {
             let Query(query) = query.map_err(reject_query)?;
             let filter = query.into();
+            let mut shutdown_rx = state.shutdown_tx.subscribe();
+            let shutdown = async move {
+                let _ = shutdown_rx.recv().await;
+            };
             let latest =
-                calibration_svc::list_latest(&state.latest_cals, &state.latest_puller, &filter)
-                    .await?;
+                calibration_svc::list_latest(&state.latest_puller, &filter, shutdown).await?;
             Ok::<_, ServerErr>(response::latest_calibrations(&latest))
         },
         "Error listing latest calibrations",

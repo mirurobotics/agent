@@ -22,7 +22,7 @@ Observable: upgrade an agent on a device whose calibrations are in the control p
 
 1. **Merge instead of overwrite.** `ReportMetadata::is_as_new_as`; `LatestStore::put_if_newer`, which checks and puts in one worker command; the pull lists the store once, skips keys it has as new or newer before downloading, and puts the rest with `put_if_newer`. Reprovision, the only caller, pulls into an emptied store, so its behavior doesn't change.
 2. **Store queued reports at startup.** The uploader's worker, after `prune_orphans`, puts each queued report with `put_if_newer` unless the store has its key as new or newer. Failures are logged.
-3. **Pull once per run.** `calibrations::LatestPuller` runs `pull_latest` with the token manager's token until a pull succeeds this run. The agent starts a pull in the background at startup, which covers an upgrade, and `GET /v0.2/calibrations/latest` waits for a pull while none has succeeded. The startup pull joins on shutdown before `AppState` shuts the store down.
+3. **Pull once per run.** `calibrations::LatestPuller` runs `pull_latest` with the token manager's token until a pull succeeds this run. The agent starts a pull in the background at startup, which covers an upgrade, and `GET /v0.2/calibrations/latest` waits for a pull while none has succeeded. Shutdown stops a pull midway, and the startup pull joins before `AppState` shuts the store down.
 
 ## Decisions
 
@@ -68,4 +68,4 @@ CI runs the suite on each PR.
 
 - PR 1, `tests/calibrations/latest.rs`: `put_if_newer` puts a new key or a later report and keeps an entry reported at the same time or later. `tests/calibrations/pull.rs`: replaces an older entry; keeps an entry as new or newer without downloading; keeps keys the control plane doesn't have.
 - PR 2, `tests/calibrations/uploader.rs`: queued reports the store lacks are stored at startup; a stored entry as new or newer is kept.
-- PR 3, `tests/calibrations/pull.rs`: `LatestPuller::ensure_pulled` pulls until a pull succeeds and then stops, and tries again after a token failure. `tests/services/calibration/latest.rs`: `list_latest` pulls before it lists.
+- PR 3, `tests/calibrations/pull.rs`: `LatestPuller::ensure_pulled` pulls until a pull succeeds and then stops, tries again after a token failure, shares a failed pull with callers waiting on it, and stops midway at shutdown. `tests/services/calibration/latest.rs`: `list_latest` pulls before it lists.
