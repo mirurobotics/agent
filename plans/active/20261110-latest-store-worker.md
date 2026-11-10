@@ -29,17 +29,18 @@ Observable: start the agent, `POST /v0.2/calibrations` a report, and the latest 
 | `calibrations::latest_impl` (module, `agent/src/calibrations/latest_impl.rs`) | `latest_store.rs`, `latest/store.rs` | Matches `retention::deleter_impl`, `upload::uploader_impl` and the renamed `calibrations::uploader_impl`: the `<handle>_impl.rs` file beside the actor file. |
 | `LatestStoreImpl` | `SingleThreadLatestStore`, `LatestStoreState` | The `<Handle>Impl` convention (`DeleterImpl`, `UploaderImpl`, `ScannerImpl`); `SingleThread*` is the name #350 retired. |
 | `LatestStore::shutdown` | `close`, `stop` | Every actor handle in `AppState::shutdown` calls `shutdown`. |
-| `latest::Command` (`pub(crate)`, variants `Put`, `List`, `Content`, `Shutdown`) | `Request`, `Msg` | `deleter.rs` names its enum `Command` and its variants after the handle methods. |
-| `latest::Worker` (`pub(crate)`) | `StoreWorker`, `Actor` | `deleter.rs` and the calibration uploader both name it `Worker`. |
+| `LatestStore::spawn` (replaces `open`) | `open`, `start` | Every actor's constructor is `spawn(buffer_size, ..) -> (Self, JoinHandle<()>)`, as `calibrations::Uploader::spawn`. |
+| `latest::Command` (private, variants `Put`, `List`, `Content`, `Shutdown`) | `Request`, `Msg` | `deleter.rs` and the calibration uploader name their enum `Command` and its variants after the handle methods. |
+| `latest::Worker` (private) | `StoreWorker`, `Actor` | `deleter.rs` and the calibration uploader both name it `Worker`. |
 
-`LatestStore`, `LatestStore::{open, put, list, content}`, `Filter` and `DEFAULT_CAPACITY` keep their names and signatures; only the module that holds `Filter` and `DEFAULT_CAPACITY` changes (see Open questions).
+`LatestStore`, `LatestStore::{put, list, content}`, `Filter` and `calibrations::latest::DEFAULT_CAPACITY` keep their names and signatures. `Filter` and `DEFAULT_CAPACITY` are defined in the private `latest_impl.rs`; `calibrations/mod.rs` re-exports `Filter` and `latest.rs` re-exports `DEFAULT_CAPACITY`, so no caller names `latest_impl`.
 
 ### Precedent
 
 | New file | Mirrors |
 |----------|---------|
-| `agent/src/calibrations/latest_impl.rs` (today's `latest.rs`, moved) | `agent/src/data_uploads/retention/deleter_impl.rs`: the single-threaded logic the worker owns, `pub` constructor, `pub(crate)` operations, inline unit tests at the bottom. |
-| `agent/src/calibrations/latest.rs` (rewritten as the actor) | `agent/src/data_uploads/retention/deleter.rs`: local `dispatch!` macro, `pub(crate) enum Command`, `pub(crate) struct Worker` with a `while let Some(cmd)` loop whose `Shutdown` arm replies then breaks, and a handle with a private `send_command`. Error values come from `calibrations/errors.rs` (`SendActorMessageErr`, `ReceiveActorMessageErr`), as the calibration uploader's do. |
+| `agent/src/calibrations/latest_impl.rs` (today's `latest.rs`, moved) | `agent/src/calibrations/uploader_impl.rs`: a private module (`mod latest_impl;`) holding the single-threaded logic the worker owns, `pub(crate)` type, constructor and operations, inline unit tests at the bottom. |
+| `agent/src/calibrations/latest.rs` (rewritten as the actor) | `agent/src/calibrations/uploader.rs`: private `enum Command` (whose `Shutdown` replies `()`), private `struct Worker` with a `while let Some(cmd)` loop whose `Shutdown` arm replies then breaks and logs `shutdown complete` after the loop, a private `respond(respond_to, value, op)` function, `spawn(buffer_size, ..) -> (Self, JoinHandle<()>)`, and a handle whose private `send_command` takes an `op` and logs send and receive failures. Error values come from `calibrations/errors.rs` (`SendActorMessageErr`, `ReceiveActorMessageErr`). |
 
 No new test files: actor tests go in the existing `agent/tests/calibrations/latest.rs`, mirroring `agent/tests/data_uploads/retention/deleter.rs` (`enqueue_after_shutdown_errors`) and the calibration uploader's `commands_after_shutdown_fail`; the teardown test goes beside its siblings in `agent/tests/app/state.rs`.
 
@@ -55,9 +56,9 @@ No new test files: actor tests go in the existing `agent/tests/calibrations/late
 
 ### Open questions
 
-- Should `open` follow `Deleter::spawn` and return `(Self, JoinHandle<()>)`, taking a `buffer_size`, so `AppState` joins the worker like its other seven? Default: no. The brief keeps `LatestStore::open(layout, capacity) -> Self` so agent#421 and every fixture are untouched; `open` uses a channel of 64 (the size `AppState` gives every actor, and the literal `scan/scanner.rs` uses for its inner channel) and detaches the worker. `AppState::shutdown` awaits the worker's reply to `Shutdown`, and the worker holds nothing to flush after it, so not joining loses nothing.
+- Should `open` follow `Deleter::spawn` and return `(Self, JoinHandle<()>)`, taking a `buffer_size`, so `AppState` joins the worker like its other seven? Settled by the design review: yes (see Decision Log). Original default: no. The brief keeps `LatestStore::open(layout, capacity) -> Self` so agent#421 and every fixture are untouched; `open` uses a channel of 64 (the size `AppState` gives every actor, and the literal `scan/scanner.rs` uses for its inner channel) and detaches the worker. `AppState::shutdown` awaits the worker's reply to `Shutdown`, and the worker holds nothing to flush after it, so not joining loses nothing.
 - What does `open` do when the index can't be read? Default: what it does today, carried into memory. `open` reads the index with `files::read_json_with_retry` (a missing file is an empty index). On any error it logs, deletes no content, and the worker holds no index; each later call tries the read again (with the same retries) and fails with its error until a read succeeds, after which the index stays in memory. So a corrupt index still fails every call, and a read that fails for a moment at boot recovers on the next call. `StateFile` instead copies a corrupt file aside and starts from the default, and returns other read errors from its constructor; the store can't return an error from `open` without changing its signature, and copy-aside changes Device API behavior (see Left out). PR B, which loads the store from Miru, is the natural place to recover a corrupt index.
-- Where do `Filter` and `DEFAULT_CAPACITY` live? Default: in `latest_impl.rs`, where the move puts them, as `DeleterArgs` and `DEFAULT_QUEUE_CAPACITY` live in `deleter_impl.rs`. `calibrations::Filter` stays re-exported from `calibrations/mod.rs`, so its callers don't change; callers of `latest::DEFAULT_CAPACITY` change to `latest_impl::DEFAULT_CAPACITY` in the move commit. Alternative: move both back into `latest.rs` in milestone 2, keeping `latest::DEFAULT_CAPACITY` for agent#421 at the cost of moving the same lines twice.
+- Where do `Filter` and `DEFAULT_CAPACITY` live? Settled by the design review: defined in a private `latest_impl.rs`, with `DEFAULT_CAPACITY` re-exported from `latest.rs` (see Decision Log). Original default: in `latest_impl.rs`, where the move puts them, as `DeleterArgs` and `DEFAULT_QUEUE_CAPACITY` live in `deleter_impl.rs`. `calibrations::Filter` stays re-exported from `calibrations/mod.rs`, so its callers don't change; callers of `latest::DEFAULT_CAPACITY` change to `latest_impl::DEFAULT_CAPACITY` in the move commit. Alternative: move both back into `latest.rs` in milestone 2, keeping `latest::DEFAULT_CAPACITY` for agent#421 at the cost of moving the same lines twice.
 
 ## Progress
 
@@ -66,6 +67,7 @@ No new test files: actor tests go in the existing `agent/tests/calibrations/late
 - [x] Milestone 2: `LatestStoreImpl` with the in-memory index, and the actor in `latest.rs`, committed.
 - [x] Milestone 3: `AppState` shuts the store down; `ARCHITECTURE.md` updated; committed.
 - [x] Source written
+- [x] Design review findings applied: `LatestStore::spawn`, a private `latest_impl`, and the uploader's actor style.
 - [ ] Milestone 4 (tests stage): tests updated and added, committed.
 - [ ] Validation: `$preflight` reports `CLEAN`.
 
@@ -76,7 +78,10 @@ No new test files: actor tests go in the existing `agent/tests/calibrations/late
 
 ## Decision Log
 
-- 2026-11-10: The three open questions take their defaults (open keeps its signature and detaches the worker; an unreadable index fails each call until a read succeeds; `Filter` and `DEFAULT_CAPACITY` live in `latest_impl.rs`). The design review may revisit the first.
+- 2026-11-10: An unreadable index fails each call until a read succeeds (the second open question's default).
+- 2026-11-10 (design review): `LatestStore::open` becomes `pub async fn spawn(buffer_size, layout, capacity) -> (Self, JoinHandle<()>)`, infallible like `calibrations::Uploader::spawn`, replacing the default that `open` keeps its signature and detaches the worker. `AppState::init_cal_uploader` returns the store's join handle with the calibration uploader's, and the shutdown future joins it with the other actors'. The `latest_store` test fixture keeps its signature, calls `spawn(64, ..)` and drops the handle.
+- 2026-11-10 (design review): `latest_impl` is a private module, like `uploader_impl`, and `LatestStoreImpl` is `pub(crate)`, replacing the default that callers name `latest_impl::DEFAULT_CAPACITY`. `DEFAULT_CAPACITY` is defined in `latest_impl.rs` but re-exported from `latest.rs`, so `calibrations::latest::DEFAULT_CAPACITY` and every caller read as on `main` (the move commit's path edits and the `create.rs` import rewrap are undone). `Filter` stays re-exported from `calibrations/mod.rs`. The reviewer's rule that callers never import a `*_impl` module ([agent#447](https://github.com/mirurobotics/agent/pull/447#discussion_r4520743816)) is captured in `AGENTS.md`.
+- 2026-11-10 (design review): `latest.rs` follows `calibrations/uploader.rs`, one actor style per module: private `Command` and `Worker`, `Shutdown { respond_to: oneshot::Sender<()> }`, a private `respond` function instead of `dispatch!`, and `send_command` taking an `op` and logging send and receive failures. The worker, not `shutdown`, logs `calibrations: latest store shutdown complete` when its loop ends.
 - 2026-11-10: Coverage gates are never lowered; uncovered actor plumbing gets tests instead.
 - 2026-11-10: The branch is stacked on the rename PR (agent#446) instead of waiting for it to merge, and is retargeted to `main` once #446 merges.
 - 2026-11-10: `LatestStoreImpl::index` returns `&Index`, not `&mut Index`: `put` edits a copy and every other caller only reads.
@@ -185,7 +190,7 @@ In `ARCHITECTURE.md`, in the latest store paragraph (as the rename PR left it):
 - Add `list_serves_the_index_read_at_open`: put `arm`, delete `index.json`, and `f.store.list` still returns `[arm]`.
 - Add `a_call_reads_an_index_that_could_not_be_read_at_open` (paused time): put `arm`, put a directory where `index.json` goes, reopen, restore the file, and the reopened store lists `[arm]`.
 - Add `put_fails_and_keeps_the_entries_when_the_index_cannot_be_written`: put `arm`, replace `index.json` with a directory, put `leg` fails with `FileSysErr`, and `list` returns `[arm]`.
-- Add `commands_after_shutdown_fail`: `shutdown` succeeds, then `put`, `list` and `content` each fail with `CalibrationsErr::SendActorMessageErr`; mirrors `enqueue_after_shutdown_errors` in `agent/tests/data_uploads/retention/deleter.rs`.
+- Add `commands_after_shutdown_fail`: spawn the store with `LatestStore::spawn` to keep its join handle, `shutdown` succeeds, await the handle so the worker has dropped its receiver, then `put`, `list` and `content` each fail with `CalibrationsErr::SendActorMessageErr`; mirrors the calibration uploader's `commands_after_shutdown_fail` in `agent/tests/calibrations/uploader.rs`, whose harness joins the handle in `stop`.
 
 The other tests there (open, capacity, put, list, content) stay as they are and now run through the actor. The inline unit tests in `latest_impl.rs` need no change. The calibration uploader's tests (`agent/tests/calibrations/uploader.rs`) need none either; confirm `a_failed_store_write_queues_nothing` still holds a `LatestStore` clone and passes.
 
@@ -230,7 +235,7 @@ In `.github/workflows/ci.yml`: job `lint` passes (import order, the 50-line func
 
 Acceptance, as behavior:
 
-- Every existing test in `agent/tests/calibrations/latest.rs` (open, capacity, put, list, content), the calibration uploader's tests, `latest_cals_lists_what_cal_uploader_reports` in `agent/tests/app/state.rs`, and the Device API route tests in `agent/tests/server/handlers.rs` pass unchanged apart from the `latest_impl::DEFAULT_CAPACITY` path, showing the Device API and intake behave as before.
+- Every existing test in `agent/tests/calibrations/latest.rs` (open, capacity, put, list, content), the calibration uploader's tests, `latest_cals_lists_what_cal_uploader_reports` in `agent/tests/app/state.rs`, and the Device API route tests in `agent/tests/server/handlers.rs` pass unchanged, showing the Device API and intake behave as before.
 - `a_corrupt_index_at_open_fails_every_call`: a corrupt index still fails every call, as today.
 - `open_retries_an_index_read_that_fails_for_a_moment` and `a_call_reads_an_index_that_could_not_be_read_at_open`: an index read that fails at boot is retried, at open and then on each call.
 - `list_serves_the_index_read_at_open`: `list` no longer reads `index.json`.
