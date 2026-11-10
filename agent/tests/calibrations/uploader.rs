@@ -16,8 +16,8 @@ use crate::test_utils::calibrations::{
 };
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::calibrations::{
-    latest, CalibrationsErr, Filter, LatestStore, Queue, QueueSnapshotFile, Report,
-    ReportMetadata, Uploader, UploaderArgs, UploaderOptions,
+    latest, CalibrationsErr, Filter, LatestStore, Queue, QueueSnapshotFile, Report, ReportMetadata,
+    Uploader, UploaderArgs, UploaderOptions,
 };
 use miru_agent::disk::layout::{CalibrationsLayout, LatestCalsLayout};
 use miru_agent::filesys::{dirs, files, File, PathExt, WriteOptions};
@@ -274,7 +274,10 @@ async fn startup_stores_queued_reports_the_store_lacks() {
     let expected = [report("a").metadata, newer_b.clone(), report("d").metadata];
     assert_eq!(h.latest_entries().await, expected);
     assert_eq!(h.latest_data(newer_b.report_id).await, "new b");
-    assert_eq!(h.latest_data(report("d").metadata.report_id).await, report("d").data);
+    assert_eq!(
+        h.latest_data(report("d").metadata.report_id).await,
+        report("d").data
+    );
 }
 
 #[tokio::test]
