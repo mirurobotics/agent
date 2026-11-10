@@ -251,9 +251,9 @@ async fn startup_stores_queued_reports_the_store_lacks() {
     seeded.put(reported_after("a", -1), "old a").await.unwrap();
     seeded.put(newer_b.clone(), "new b").await.unwrap();
     seeded.shutdown().await.unwrap();
-    let ids = preloaded(&h, &["a", "b", "c"]).await;
+    let ids = preloaded(&h, &["c", "a", "b", "d"]).await;
     // c's data is gone, so it can't be stored
-    files::delete(&h.report_file(ids[2])).await.unwrap();
+    files::delete(&h.report_file(ids[0])).await.unwrap();
     let (_hold, hang) = oneshot::channel();
     h.sender.push(Step::Hang(hang));
 
@@ -261,11 +261,12 @@ async fn startup_stores_queued_reports_the_store_lacks() {
 
     // the worker stores queued reports before it starts the first upload
     h.await_started().await;
-    assert_eq!(h.latest_entries().await, [report("a").metadata, newer_b]);
+    let expected = [report("a").metadata, newer_b, report("d").metadata];
+    assert_eq!(h.latest_entries().await, expected);
 }
 
 #[tokio::test]
-async fn startup_stores_nothing_when_the_store_is_unreadable() {
+async fn startup_still_uploads_when_the_store_is_unreadable() {
     let mut h = Harness::new();
     let index = h.latest_layout.index();
     files::write_string(&index, "not json", WriteOptions::OVERWRITE_ATOMIC)
