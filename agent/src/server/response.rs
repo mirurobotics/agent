@@ -163,8 +163,7 @@ pub fn latest_calibrations(
 }
 
 /// The calibration content route's response: the data, with the
-/// `Content-Type` of its format and an inline `Content-Disposition` that names
-/// the file the way Miru does.
+/// `Content-Type` of its format and an inline `Content-Disposition`.
 pub fn calibration_content(content: calibration::Content) -> Response {
     let filename = match content.format.file_ext() {
         Some(ext) => format!("{}.{ext}", content.report_id),
