@@ -14,7 +14,7 @@ use crate::http::{
 use tracing::info;
 
 /// Merge Miru's latest calibrations into the latest store in `layout`, as
-/// `merge_latest` does. Any failure fails the call, so an emptied store ends
+/// [`merge_latest`] does. Any failure fails the call, so an emptied store ends
 /// up holding every calibration Miru has; more than `capacity` keys is
 /// `CalibrationStoreFullErr`.
 pub async fn pull_latest<HTTPClientT: http::ClientI>(
@@ -33,7 +33,7 @@ pub async fn pull_latest<HTTPClientT: http::ClientI>(
 /// later, so reports Miru hasn't received yet are kept. A key the store
 /// already has as new isn't downloaded, so a merge where nothing changed costs
 /// one list call.
-async fn merge_latest<HTTPClientT: http::ClientI>(
+pub async fn merge_latest<HTTPClientT: http::ClientI>(
     store: &LatestStore,
     http_client: &HTTPClientT,
     token: &str,

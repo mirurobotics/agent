@@ -1,9 +1,11 @@
 // standard crates
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
 // internal crates
 use crate::authn::{self, TokenManagerExt};
+use crate::calibrations;
 use crate::cooldown;
 use crate::deploy::apply;
 use crate::disk;
@@ -22,6 +24,7 @@ use crate::trace;
 // external crates
 use chrono::{TimeDelta, Utc};
 use tokio::sync::watch;
+use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
 
 pub struct SyncerImpl<HTTPClientT> {
@@ -31,6 +34,9 @@ pub struct SyncerImpl<HTTPClientT> {
     deploy_opts: apply::DeployOpts,
     event_hub: events::EventHub,
     system_metadata_cache: File,
+    latest_cals: calibrations::LatestStore,
+    calibrations_pull: Option<JoinHandle<()>>,
+    has_pulled_calibrations: Arc<AtomicBool>,
 
     // subscribers
     subscriber_tx: watch::Sender<SyncEvent>,
@@ -41,7 +47,7 @@ pub struct SyncerImpl<HTTPClientT> {
     state: State,
 }
 
-impl<HTTPClientT: http::ClientI> SyncerImpl<HTTPClientT> {
+impl<HTTPClientT: http::ClientI + 'static> SyncerImpl<HTTPClientT> {
     pub fn new(args: SyncerArgs<HTTPClientT, authn::TokenManager>) -> Self {
         let (subscriber_tx, subscriber_rx) = watch::channel(SyncEvent::SyncSuccess);
         Self {
@@ -52,6 +58,9 @@ impl<HTTPClientT: http::ClientI> SyncerImpl<HTTPClientT> {
             backoff: args.backoff,
             event_hub: args.event_hub,
             system_metadata_cache: args.system_metadata_cache,
+            latest_cals: args.latest_cals,
+            calibrations_pull: None,
+            has_pulled_calibrations: Arc::new(AtomicBool::new(false)),
             state: State::default(),
             subscriber_tx,
             subscriber_rx,
@@ -195,8 +204,34 @@ impl<HTTPClientT: http::ClientI> SyncerImpl<HTTPClientT> {
         // skip while the backend is unreachable; the next sync retries
         if !matches!(&result, Err(e) if e.is_network_conn_err()) {
             self.sync_system_metadata(&token.token).await;
+            self.pull_calibrations(&token.token);
         }
         result
+    }
+
+    /// Merge Miru's latest calibrations into the store once per run, for
+    /// reports an older agent took without writing the store. Best-effort, as
+    /// [`Self::sync_system_metadata`] is: a failed merge is retried on a later
+    /// sync. It runs in its own task so its downloads never hold up a sync, and
+    /// a sync leaves one still running.
+    fn pull_calibrations(&mut self, token: &str) {
+        let is_running = self
+            .calibrations_pull
+            .as_ref()
+            .is_some_and(|pull| !pull.is_finished());
+        if is_running || self.has_pulled_calibrations.load(Ordering::Acquire) {
+            return;
+        }
+        let store = self.latest_cals.clone();
+        let http_client = self.http_client.clone();
+        let has_pulled = self.has_pulled_calibrations.clone();
+        let token = token.to_string();
+        self.calibrations_pull = Some(tokio::spawn(async move {
+            match calibrations::merge_latest(&store, http_client.as_ref(), &token).await {
+                Ok(()) => has_pulled.store(true, Ordering::Release),
+                Err(e) => warn!("unable to pull the latest calibrations: {e}"),
+            }
+        }));
     }
 
     /// Best-effort: failures are logged and never affect the sync result or its
@@ -211,6 +246,16 @@ impl<HTTPClientT: http::ClientI> SyncerImpl<HTTPClientT> {
         match system_metadata::sync(&args).await {
             Ok(outcome) => debug!("system metadata sync completed: {outcome:?}"),
             Err(e) => warn!("unable to sync system metadata: {e}"),
+        }
+    }
+}
+
+impl<HTTPClientT> Drop for SyncerImpl<HTTPClientT> {
+    /// Stop a pull still running when the syncer stops. The store finishes any
+    /// write already sent to it.
+    fn drop(&mut self) {
+        if let Some(pull) = self.calibrations_pull.take() {
+            pull.abort();
         }
     }
 }
