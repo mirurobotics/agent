@@ -37,7 +37,7 @@ const HANG_GUARD: Duration = Duration::from_secs(60);
 struct Harness {
     dir: test_dirs::TempDir,
     layout: CalibrationsLayout,
-    latest: LatestCalsLayout,
+    latest_layout: LatestCalsLayout,
     sender: Arc<MockCalibrationSender>,
     started: mpsc::UnboundedReceiver<()>,
     sleep: Arc<SleepController>,
@@ -54,12 +54,12 @@ impl Harness {
     fn new() -> Self {
         let dir = test_dirs::temp("cal_mngr_test").unwrap();
         let layout = layout(&dir);
-        let latest = latest_cals_layout(&dir);
+        let latest_layout = latest_cals_layout(&dir);
         let (sender, started) = MockCalibrationSender::new();
         Self {
             dir,
             layout,
-            latest,
+            latest_layout,
             sender,
             started,
             sleep: Arc::new(SleepController::new()),
@@ -282,7 +282,7 @@ async fn a_failed_store_write_queues_nothing() {
     h.sender.push(Step::Hang(hang));
     h.spawn().await;
     // a regular file where the latest contents directory should be
-    let blocker = File::new(h.latest.contents().path().clone());
+    let blocker = File::new(h.latest_layout.contents().path().clone());
     files::write_string(&blocker, "x", WriteOptions::OVERWRITE_ATOMIC)
         .await
         .unwrap();
