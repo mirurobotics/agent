@@ -50,13 +50,13 @@ impl Fixture {
         let log_file = dir.file("events.jsonl");
         let (event_hub, _handle) = EventHub::spawn(log_file, opts).await.unwrap();
 
+        let latest_cals = latest_store(&dir, latest::DEFAULT_CAPACITY).await;
         let cal_uploader = cal_uploader(
             &dir,
             MockCalibrationSender::new().0,
             UploaderOptions::default(),
-            latest::DEFAULT_CAPACITY,
-        )
-        .await;
+            latest_cals.clone(),
+        );
 
         let (shutdown_tx, _) = broadcast::channel::<()>(1);
 
@@ -67,7 +67,7 @@ impl Fixture {
             token_mngr: Arc::new(token_mngr),
             event_hub,
             cal_uploader: Arc::new(cal_uploader),
-            latest_cals: latest_store(&dir, latest::DEFAULT_CAPACITY).await,
+            latest_cals,
             shutdown_tx: shutdown_tx.clone(),
         });
 

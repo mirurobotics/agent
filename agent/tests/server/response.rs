@@ -536,19 +536,18 @@ pub mod latest_calibrations_response {
     }
 
     #[test]
-    fn converts_latest_calibrations() {
-        let metadata = metadata(Uuid::new_v4());
-        let calibration = openapi::Calibration::from(&metadata);
+    fn converts_latest_calibrations_in_order() {
+        let (first, second) = (Uuid::new_v4(), Uuid::new_v4());
 
-        let expected = openapi::LatestCalibrationsResponse {
-            calibrations: vec![calibration],
-        };
+        let response = latest_calibrations(&[metadata(first), metadata(second)]);
 
-        assert_eq!(latest_calibrations(&[metadata]), expected);
+        let calibrations = response.calibrations;
+        let ids: Vec<Uuid> = calibrations.iter().map(|c| c.report_id).collect();
+        assert_eq!(ids, [first, second]);
     }
 }
 
-pub mod latest_content_response {
+pub mod calibration_content_response {
     use axum::body;
     use axum::http::{header, StatusCode};
     use miru_agent::models::InstanceFormat;

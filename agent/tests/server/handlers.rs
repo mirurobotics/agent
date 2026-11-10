@@ -126,13 +126,13 @@ pub mod routes {
                 .await
                 .unwrap();
 
+            let latest_cals = latest_store(&dir, latest_capacity).await;
             let cal_uploader = cal_uploader(
                 &dir,
                 MockCalibrationSender::new().0,
                 options,
-                latest_capacity,
-            )
-            .await;
+                latest_cals.clone(),
+            );
 
             let (shutdown_tx, _) = broadcast::channel::<()>(1);
             let state = Arc::new(State {
@@ -142,7 +142,7 @@ pub mod routes {
                 token_mngr: Arc::new(token_mngr),
                 event_hub,
                 cal_uploader: Arc::new(cal_uploader),
-                latest_cals: latest_store(&dir, latest_capacity).await,
+                latest_cals,
                 shutdown_tx,
             });
 
