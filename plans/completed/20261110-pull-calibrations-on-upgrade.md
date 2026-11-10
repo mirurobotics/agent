@@ -22,7 +22,7 @@ Observable: upgrade an agent on a device whose calibrations are in Miru but not 
 
 1. **Merge instead of overwrite.** `ReportMetadata::is_as_new_as`; `LatestStore::put_if_newer`, which checks and puts in one worker command; the pull lists the store once, skips keys it has as new or newer before downloading, and puts the rest with `put_if_newer`. Reprovision, the only caller, pulls into an emptied store, so its behavior doesn't change.
 2. **Store queued reports at startup.** The uploader's worker, after `prune_orphans`, puts each queued report with `put_if_newer` unless the store has its key as new or newer. Failures are logged.
-3. **Pull once per run.** A worker in `workers/` subscribes to the syncer's events and, after each successful sync until a pull succeeds, runs `calibrations::merge_latest` with a token from the token manager. It joins on shutdown before `AppState` shuts the store down, so the syncer and `AppState` are unchanged.
+3. **Pull once per run.** A worker in `workers/` subscribes to the syncer's events and, after each successful sync until a pull succeeds, runs `calibrations::pull_latest` with a token from the token manager. It joins on shutdown before `AppState` shuts the store down, so the syncer and `AppState` are unchanged.
 
 ## Decisions
 
@@ -66,6 +66,6 @@ To be filled in when the last PR merges.
 
 CI runs the suite on each PR.
 
-- PR 1, `tests/calibrations/latest.rs`: `put_if_newer` puts a new key or a later report and keeps an entry reported at the same time or later. `tests/calibrations/merge.rs`: replaces an older entry; keeps an entry as new or newer without downloading; keeps keys Miru doesn't have.
+- PR 1, `tests/calibrations/latest.rs`: `put_if_newer` puts a new key or a later report and keeps an entry reported at the same time or later. `tests/calibrations/pull.rs`: replaces an older entry; keeps an entry as new or newer without downloading; keeps keys Miru doesn't have.
 - PR 2, `tests/calibrations/uploader.rs`: queued reports the store lacks are stored at startup; a stored entry as new or newer is kept.
 - PR 3, `tests/workers/calibrations_pull.rs`: pulls after a successful sync, including one before it subscribed, and returns; doesn't pull after a failed sync; retries a failed pull after the next successful sync; skips the pull when it gets no token; stops on shutdown; returns when it can't subscribe or the events end.

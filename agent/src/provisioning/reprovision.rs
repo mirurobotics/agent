@@ -69,7 +69,7 @@ async fn pull_calibrations<HTTPClientT: http::ClientI>(
         authn::issue_token(http_client, &auth.private_key(), &auth.public_key()).await?;
     // each command returns once done, so the worker exits idle when dropped
     let (store, _) = LatestStore::spawn(64, cals.latest(), DEFAULT_CAPACITY);
-    calibrations::merge_latest(&store, http_client, &device_token.token).await?;
+    calibrations::pull_latest(&store, http_client, &device_token.token).await?;
     Ok(())
 }
 

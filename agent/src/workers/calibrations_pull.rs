@@ -68,7 +68,7 @@ async fn run_impl<SyncerT, HTTPClientT, TokenManagerT>(
                 continue;
             }
         };
-        match calibrations::merge_latest(store, http_client, &token.token).await {
+        match calibrations::pull_latest(store, http_client, &token.token).await {
             Ok(()) => return,
             Err(e) => warn!("calibrations pull: unable to pull the latest calibrations: {e}"),
         }
