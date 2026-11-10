@@ -1,5 +1,6 @@
 // internal crates
 use crate::authn;
+use crate::calibrations;
 use crate::crypt;
 use crate::disk::DiskErr;
 use crate::errors::Trace;
@@ -35,6 +36,8 @@ pub enum ProvisionErr {
     AlreadyProvisionedErr(AlreadyProvisionedErr),
     #[error(transparent)]
     AuthnErr(authn::AuthnErr),
+    #[error("failed to load the latest calibrations: {0}")]
+    CalibrationsErr(calibrations::CalibrationsErr),
     #[error(transparent)]
     CryptErr(crypt::CryptErr),
     #[error(transparent)]
@@ -50,6 +53,12 @@ pub enum ProvisionErr {
 impl From<authn::AuthnErr> for ProvisionErr {
     fn from(e: authn::AuthnErr) -> Self {
         Self::AuthnErr(e)
+    }
+}
+
+impl From<calibrations::CalibrationsErr> for ProvisionErr {
+    fn from(e: calibrations::CalibrationsErr) -> Self {
+        Self::CalibrationsErr(e)
     }
 }
 
@@ -87,6 +96,7 @@ crate::impl_error!(ProvisionErr {
     MissingEnvVarErr,
     AlreadyProvisionedErr,
     AuthnErr,
+    CalibrationsErr,
     CryptErr,
     FileSysErr,
     HTTPErr,
