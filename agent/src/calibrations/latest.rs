@@ -43,6 +43,7 @@ impl Worker {
     /// Serve commands one at a time. Every handle dropping counts as a
     /// shutdown.
     async fn run(mut self) {
+        self.store.prune_orphaned_contents().await;
         while let Some(cmd) = self.receiver.recv().await {
             match cmd {
                 Command::Put {
@@ -90,10 +91,9 @@ pub struct LatestStore {
 }
 
 impl LatestStore {
-    /// Open the store in `layout`, holding at most `capacity` keys, and start
-    /// its worker. It first deletes the content no entry names, which a crash
-    /// or a failed write or delete leaves.
-    pub async fn spawn(
+    /// Start the worker for the store in `layout`, holding at most `capacity`
+    /// keys. Before serving a command it deletes the content no entry names.
+    pub fn spawn(
         buffer_size: usize,
         layout: LatestCalsLayout,
         capacity: usize,
@@ -101,7 +101,7 @@ impl LatestStore {
         let (sender, receiver) = mpsc::channel(buffer_size);
         let worker = Worker {
             receiver,
-            store: LatestStoreImpl::open(layout, capacity).await,
+            store: LatestStoreImpl::new(layout, capacity),
         };
         (Self { sender }, tokio::spawn(worker.run()))
     }
@@ -109,7 +109,7 @@ impl LatestStore {
     /// Make `metadata` its key's entry, with `data` as its content. A new key
     /// past the capacity is rejected rather than evicting another. A failure
     /// part way leaves at most content that no entry names, which the next
-    /// open deletes.
+    /// spawn deletes.
     pub async fn put(&self, metadata: ReportMetadata, data: &str) -> Result<(), CalibrationsErr> {
         self.send_command("put", |respond_to| Command::Put {
             metadata: Box::new(metadata),

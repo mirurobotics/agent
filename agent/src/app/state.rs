@@ -279,8 +279,7 @@ impl AppState {
             64,
             layout.latest_cals(),
             calibrations::latest::DEFAULT_CAPACITY,
-        )
-        .await;
+        );
         let layout = layout.calibrations();
         let snapshot_file = match calibrations::QueueSnapshotFile::new_with_default(
             layout.queue(),

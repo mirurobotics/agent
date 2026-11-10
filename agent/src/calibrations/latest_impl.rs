@@ -52,18 +52,15 @@ pub(crate) struct LatestStoreImpl {
 }
 
 impl LatestStoreImpl {
-    /// Open the store in `layout`, holding at most `capacity` keys. It first
-    /// deletes the content no entry names, which a crash or a failed write or
-    /// delete leaves.
-    pub(crate) async fn open(layout: LatestCalsLayout, capacity: usize) -> Self {
-        let mut store = Self {
+    /// The store in `layout`, holding at most `capacity` keys. Nothing is read
+    /// until the first call.
+    pub(crate) fn new(layout: LatestCalsLayout, capacity: usize) -> Self {
+        Self {
             index_file: layout.index(),
             contents: layout.contents(),
             capacity,
             index: None,
-        };
-        store.prune_orphaned_contents().await;
-        store
+        }
     }
 
     /// Make `metadata` its key's entry, with `data` as its content. The
@@ -152,9 +149,9 @@ impl LatestStoreImpl {
         files::delete_or_warn(&self.content_file(report_id)).await;
     }
 
-    /// Delete the content no entry names. If the index can't be read, nothing
-    /// is deleted.
-    async fn prune_orphaned_contents(&mut self) {
+    /// Delete the content no entry names, which a crash or a failed write or
+    /// delete leaves. If the index can't be read, nothing is deleted.
+    pub(crate) async fn prune_orphaned_contents(&mut self) {
         let index = match self.index().await {
             Ok(index) => index,
             Err(e) => {
