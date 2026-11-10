@@ -1,4 +1,5 @@
-//! Pulling Miru's latest calibrations into a latest calibrations store.
+//! Pulling the control plane's latest calibrations into a latest calibrations
+//! store.
 
 // internal crates
 use crate::mocks::http_client::{Call, MockClient};
@@ -27,8 +28,8 @@ impl Fixture {
         }
     }
 
-    /// Miru serves the fixture calibration for each of `slugs`, and a content
-    /// named by its calibration's id.
+    /// The control plane serves the fixture calibration for each of `slugs`,
+    /// and a content named by its calibration's id.
     fn serve(&self, slugs: &[&str]) {
         let list = CalibrationList {
             data: slugs.iter().map(|slug| miru_calibration(slug)).collect(),
@@ -52,7 +53,7 @@ impl Fixture {
     }
 }
 
-/// The content Miru serves for the calibration `id`.
+/// The content the control plane serves for the calibration `id`.
 fn content(id: &str) -> String {
     format!("content of {id}")
 }
@@ -142,7 +143,7 @@ async fn keeps_keys_the_control_plane_does_not_have() {
 }
 
 #[tokio::test]
-async fn writes_nothing_when_miru_is_empty() {
+async fn writes_nothing_when_the_control_plane_is_empty() {
     let fx = Fixture::new();
     fx.serve(&[]);
 
