@@ -158,12 +158,14 @@ mod tests {
 
     // external crates
     use chrono::TimeDelta;
+    use uuid::Uuid;
 
     /// `metadata` reported `secs` later, as another report.
     fn reported_after(metadata: &ReportMetadata, secs: i64) -> ReportMetadata {
         ReportMetadata {
+            report_id: Uuid::new_v4(),
             reported_at: metadata.reported_at + TimeDelta::seconds(secs),
-            ..reported(&metadata.component, None, None)
+            ..metadata.clone()
         }
     }
 
