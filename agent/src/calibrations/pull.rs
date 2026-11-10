@@ -13,13 +13,8 @@ use crate::http::{
 // external crates
 use tracing::info;
 
-/// Put the control plane's latest calibration for each key into `store`, one
-/// key at a time, unless the store's entry for that key was reported at the
-/// same time or later, so reports the control plane hasn't received yet are
-/// kept. A key the store already has as new isn't downloaded, so a pull where
-/// nothing changed costs one list call. Any failure fails the call; a new key
-/// past the store's capacity fails it with `CalibrationStoreFullErr`, possibly
-/// after putting some.
+/// Put the control plane's latest calibration for each key into `store`,
+/// unless the store's entry is as new or newer. Skipped keys aren't downloaded.
 pub async fn pull_latest<HTTPClientT: http::ClientI>(
     store: &LatestStore,
     http_client: &HTTPClientT,
