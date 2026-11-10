@@ -71,7 +71,7 @@ async fn init(
     )
     .await?;
 
-    init_calibrations_pull(app_state.clone(), shutdown_manager, shutdown_tx.subscribe()).await?;
+    init_calibration_pull_task(app_state.clone(), shutdown_manager, shutdown_tx.subscribe()).await?;
     init_optional_services(options, &app_state, shutdown_manager, &shutdown_tx).await?;
     init_data_upload_workers(options, &app_state, shutdown_manager, &shutdown_tx).await?;
 
@@ -333,7 +333,7 @@ async fn init_sync_scan_bridge_worker(
 
 /// Pull the control plane's latest calibrations in the background, so the
 /// store has the reports an older agent took before this run's upgrade.
-async fn init_calibrations_pull(
+async fn init_calibration_pull_task(
     app_state: Arc<AppState>,
     shutdown_manager: &mut ShutdownManager,
     mut shutdown_rx: broadcast::Receiver<()>,
