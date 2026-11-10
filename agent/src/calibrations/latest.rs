@@ -254,15 +254,18 @@ mod tests {
 
     // ============================== MATCHES ============================= //
     #[test]
-    fn matches_any_value_for_an_empty_list() {
-        let cases: [(&[&str], &str, bool); 3] = [
-            (&[], "arm", true),
-            (&["arm", "leg"], "arm", true),
-            (&["leg"], "arm", false),
+    fn matches_listed_values_or_any_for_an_empty_list() {
+        let cases: [(&[Option<&str>], Option<&str>, bool); 5] = [
+            (&[], Some("left"), true),
+            (&[Some("left"), Some("right")], Some("left"), true),
+            (&[Some("right")], Some("left"), false),
+            // `None` is a value too, matching only an entry without one
+            (&[None], None, true),
+            (&[None], Some("left"), false),
         ];
 
         for (values, value, want) in cases {
-            assert_eq!(matches(values, &value), want, "{values:?} {value}");
+            assert_eq!(matches(values, &value), want, "{values:?} {value:?}");
         }
     }
 
