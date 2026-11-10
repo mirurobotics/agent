@@ -60,10 +60,6 @@ impl Layout {
         CalibrationsLayout::new(self.root().subdir("calibrations"))
     }
 
-    pub fn latest_cals(&self) -> LatestCalsLayout {
-        LatestCalsLayout::new(self.resources().subdir("latest_calibrations"))
-    }
-
     fn config_instances(&self) -> filesys::Dir {
         self.resources().subdir("config_instances")
     }
@@ -155,6 +151,7 @@ impl AuthLayout {
 
 /// The calibration queue: a queue snapshot plus one report file per queued
 /// calibration, so a queue write never rewrites the (possibly large) content.
+/// The latest calibrations store sits beside it.
 pub struct CalibrationsLayout {
     pub root: filesys::Dir,
 }
@@ -171,9 +168,15 @@ impl CalibrationsLayout {
     pub fn reports(&self) -> filesys::Dir {
         self.root.subdir("reports")
     }
+
+    pub fn latest(&self) -> LatestCalsLayout {
+        LatestCalsLayout::new(self.root.subdir("latest"))
+    }
 }
 
-/// The latest calibrations store, a cache of Miru that `reset` wipes.
+/// The latest calibrations store. It sits beside the calibration queue, which
+/// `reset` keeps, so it survives upgrades and its format must stay readable by
+/// newer agents.
 pub struct LatestCalsLayout {
     pub root: filesys::Dir,
 }

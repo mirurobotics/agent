@@ -290,7 +290,7 @@ impl AppState {
     ) -> (calibrations::LatestStore, tokio::task::JoinHandle<()>) {
         calibrations::LatestStore::spawn(
             64,
-            layout.latest_cals(),
+            layout.calibrations().latest(),
             calibrations::latest::DEFAULT_CAPACITY,
         )
     }

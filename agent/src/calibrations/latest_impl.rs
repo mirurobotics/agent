@@ -11,11 +11,19 @@ use crate::filesys::{dirs, files, Dir, File, FileSysErr, WriteOptions};
 use crate::trace;
 
 // external crates
+use serde::{Deserialize, Serialize};
 use tracing::{error, warn};
 use uuid::Uuid;
 
-/// The entries, one per key, as `index.json` holds them.
+/// The entries, one per key.
 type Index = Vec<ReportMetadata>;
+
+/// `index.json`. An object, as `queue.json` is, so a field for the whole store
+/// can be added without a reader for two shapes.
+#[derive(Default, Deserialize, Serialize)]
+struct IndexFile {
+    entries: Index,
+}
 
 /// Which entries to list. Empty means any; `None` in `role`/`aspect` matches an
 /// entry without one.
@@ -71,7 +79,7 @@ impl LatestStoreImpl {
         let report_id = metadata.report_id;
         self.write_content(report_id, data).await?;
         index.push(metadata);
-        self.write_index(&index).await?;
+        self.write_index(index).await?;
         // the same report put again shares its content file, so keep it
         if let Some(replaced) = replaced.filter(|r| r.report_id != report_id) {
             self.delete_content(replaced.report_id).await;
@@ -107,14 +115,15 @@ impl LatestStoreImpl {
 
     /// The index, which is empty until the first put writes it.
     async fn read_index(&self) -> Result<Index, CalibrationsErr> {
-        match files::read_json_with_retry::<Index>(&self.index).await {
+        match files::read_json_with_retry::<IndexFile>(&self.index).await {
             Err(FileSysErr::PathDoesNotExistErr(_)) => Ok(Index::new()),
-            result => Ok(result?),
+            result => Ok(result?.entries),
         }
     }
 
-    async fn write_index(&self, index: &Index) -> Result<(), FileSysErr> {
-        files::write_json(&self.index, index, WriteOptions::OVERWRITE_ATOMIC).await
+    async fn write_index(&self, index: Index) -> Result<(), FileSysErr> {
+        let file = IndexFile { entries: index };
+        files::write_json(&self.index, &file, WriteOptions::OVERWRITE_ATOMIC).await
     }
 
     fn content_file(&self, report_id: Uuid) -> File {

@@ -185,6 +185,19 @@ async fn put_adds_an_entry_and_its_content() {
     assert_eq!(f.content_ids().await, [arm.report_id]);
 }
 
+// newer agents must read this shape
+#[tokio::test]
+async fn put_writes_the_index_as_an_object_of_entries() {
+    let f = Fixture::new().await;
+    let arm = reported("arm", None, None);
+
+    f.store.put(arm.clone(), DATA).await.unwrap();
+
+    let index: serde_json::Value = files::read_json(&f.layout.index()).await.unwrap();
+    let expected = serde_json::json!({ "entries": [arm] });
+    assert_eq!(index, expected);
+}
+
 #[tokio::test]
 async fn put_replaces_the_keys_entry_and_deletes_its_content() {
     let f = Fixture::new().await;

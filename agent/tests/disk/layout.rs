@@ -263,30 +263,30 @@ pub mod latest_cals_layout {
     #[test]
     fn root_dir() {
         let layout = Layout::default();
-        let latest = layout.latest_cals();
+        let latest = layout.calibrations().latest();
         assert_eq!(
             latest.root.to_string(),
-            under_root(&["resources", "latest_calibrations"])
+            under_root(&["calibrations", "latest"])
         );
     }
 
     #[test]
     fn index_file() {
         let layout = Layout::default();
-        let file = layout.latest_cals().index();
+        let file = layout.calibrations().latest().index();
         assert_eq!(
             file.to_string(),
-            under_root(&["resources", "latest_calibrations", "index.json"])
+            under_root(&["calibrations", "latest", "index.json"])
         );
     }
 
     #[test]
     fn contents_dir() {
         let layout = Layout::default();
-        let dir = layout.latest_cals().contents();
+        let dir = layout.calibrations().latest().contents();
         assert_eq!(
             dir.to_string(),
-            under_root(&["resources", "latest_calibrations", "contents"])
+            under_root(&["calibrations", "latest", "contents"])
         );
     }
 }
