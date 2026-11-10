@@ -45,7 +45,6 @@ impl Worker {
     /// Serve commands one at a time. Every handle dropping counts as a
     /// shutdown.
     async fn run(mut self) {
-        self.store.set_aside_unparseable_index().await;
         self.store.prune_orphaned_contents().await;
         while let Some(cmd) = self.receiver.recv().await {
             match cmd {
