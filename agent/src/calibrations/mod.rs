@@ -4,7 +4,7 @@
 pub mod errors;
 pub mod latest;
 mod latest_impl;
-pub mod load;
+pub mod overwrite;
 pub mod report;
 pub mod sender;
 pub mod uploader;
@@ -16,7 +16,7 @@ pub use self::errors::{
 };
 pub use self::latest::LatestStore;
 pub use self::latest_impl::Filter;
-pub use self::load::load_latest;
+pub use self::overwrite::overwrite_latest;
 pub use self::report::{
     Queue, QueueEntry, QueueSnapshot, QueueSnapshotFile, Report, ReportMetadata,
 };

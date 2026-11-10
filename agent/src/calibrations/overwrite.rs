@@ -1,4 +1,4 @@
-//! Loading a latest calibrations store from Miru.
+//! Overwriting a latest calibrations store with Miru's latest.
 
 // internal crates
 use crate::calibrations::{errors::CalibrationsErr, latest::LatestStore, report::ReportMetadata};
@@ -11,11 +11,12 @@ use crate::http::{
 // external crates
 use tracing::{error, info};
 
-/// Fill the empty latest store in `store` with Miru's latest calibration for
-/// each key, one key at a time. Any failure fails the load, so a loaded store
-/// holds every calibration Miru has; more than `capacity` keys is
+/// Write Miru's latest calibration for each key into the latest store in
+/// `store`, one key at a time, overwriting the entry already there for that
+/// key. Any failure fails the call, so a store emptied first ends up holding
+/// every calibration Miru has; more than `capacity` keys is
 /// `CalibrationStoreFullErr`.
-pub async fn load_latest<HTTPClientT: http::ClientI>(
+pub async fn overwrite_latest<HTTPClientT: http::ClientI>(
     http_client: &HTTPClientT,
     store: LatestCalsLayout,
     capacity: usize,
@@ -23,13 +24,13 @@ pub async fn load_latest<HTTPClientT: http::ClientI>(
 ) -> Result<(), CalibrationsErr> {
     let (handle, worker) = LatestStore::spawn(64, store, capacity);
     let result = put_mirus_latest(&handle, http_client, token).await;
-    // awaiting the worker leaves no task writing the store after the load
+    // awaiting the worker leaves no task writing the store after the call
     drop(handle);
     if let Err(e) = worker.await {
         error!("calibrations: the latest store's worker failed: {e}");
     }
     let put = result?;
-    info!("calibrations: loaded {put} latest calibrations from Miru");
+    info!("calibrations: wrote {put} latest calibrations from Miru");
     Ok(())
 }
 
