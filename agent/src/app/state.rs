@@ -44,6 +44,7 @@ pub struct AppState {
     pub event_hub: events::EventHub,
     pub cal_uploader: Arc<calibrations::Uploader>,
     pub latest_cals: calibrations::LatestStore,
+    pub latest_puller: Arc<calibrations::LatestPuller<http::Client, authn::TokenManager>>,
 }
 
 impl AppState {
@@ -90,6 +91,11 @@ impl AppState {
         // initialize the calibrations pipeline (latest store, uploader)
         let (latest_cals, cal_uploader, [latest_cals_handle, cal_uploader_handle]) =
             Self::init_calibrations(layout, http_client.clone(), token_mngr.clone()).await;
+        let latest_puller = Arc::new(calibrations::LatestPuller::new(
+            latest_cals.clone(),
+            http_client.clone(),
+            token_mngr.clone(),
+        ));
 
         let shutdown_handle = async move {
             let handles = [
@@ -117,6 +123,7 @@ impl AppState {
                 event_hub,
                 cal_uploader,
                 latest_cals,
+                latest_puller,
             },
             shutdown_handle,
         ))

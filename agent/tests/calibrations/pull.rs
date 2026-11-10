@@ -1,14 +1,24 @@
 //! Pulling the control plane's latest calibrations into a latest calibrations
 //! store.
 
+// standard crates
+use std::sync::Arc;
+
 // internal crates
-use crate::mocks::http_client::{Call, MockClient};
+use crate::mocks::{
+    http_client::{Call, MockClient},
+    token_manager::MockTokenManager,
+};
 use crate::test_utils::calibrations::{
     latest_cals_layout, latest_store, miru_calibration, report, report_id, reported,
 };
 use crate::test_utils::filesys::dirs as test_dirs;
+use crate::test_utils::upload::token_manager;
 use backend_api::models::CalibrationList;
-use miru_agent::calibrations::{self, latest, CalibrationsErr, Filter, Report, ReportMetadata};
+use miru_agent::authn::errors::{AuthnErr, MockError as AuthnMockError};
+use miru_agent::calibrations::{
+    self, latest, CalibrationsErr, Filter, LatestPuller, Report, ReportMetadata,
+};
 use miru_agent::filesys::{files, WriteOptions};
 use miru_agent::http::{errors::MockErr, HTTPErr};
 
@@ -17,14 +27,14 @@ use chrono::TimeDelta;
 
 struct Fixture {
     dir: test_dirs::TempDir,
-    client: MockClient,
+    client: Arc<MockClient>,
 }
 
 impl Fixture {
     fn new() -> Self {
         Self {
             dir: test_dirs::temp("pull_latest_test").unwrap(),
-            client: MockClient::default(),
+            client: Arc::new(MockClient::default()),
         }
     }
 
@@ -43,7 +53,19 @@ impl Fixture {
 
     async fn pull(&self, capacity: usize) -> Result<(), CalibrationsErr> {
         let store = latest_store(&self.dir, capacity).await;
-        calibrations::pull_latest(&store, &self.client, "tok").await
+        calibrations::pull_latest(&store, self.client.as_ref(), "tok").await
+    }
+
+    async fn puller(
+        &self,
+        token_mngr: Arc<MockTokenManager>,
+    ) -> LatestPuller<MockClient, MockTokenManager> {
+        let store = latest_store(&self.dir, latest::DEFAULT_CAPACITY).await;
+        LatestPuller::new(store, self.client.clone(), token_mngr)
+    }
+
+    fn num_lists(&self) -> usize {
+        self.client.call_count(Call::ListLatestCalibrations)
     }
 
     /// Every entry in the store, in key order.
@@ -201,4 +223,39 @@ async fn a_failed_download_fails_the_call() {
     let result = fx.pull(latest::DEFAULT_CAPACITY).await;
 
     assert!(matches!(result, Err(CalibrationsErr::HTTPErr(_))));
+}
+
+#[tokio::test]
+async fn ensure_pulled_pulls_until_a_pull_succeeds() {
+    let fx = Fixture::new();
+    fx.client.set_list_latest_calibrations(|| Err(mock_err()));
+    let puller = fx.puller(token_manager()).await;
+
+    puller.ensure_pulled().await;
+    assert!(fx.entries().await.is_empty());
+
+    fx.serve(&["arm"]);
+    puller.ensure_pulled().await;
+    puller.ensure_pulled().await;
+
+    assert_eq!(fx.entries().await, vec![report("arm").metadata]);
+    assert_eq!(fx.num_lists(), 2);
+}
+
+#[tokio::test]
+async fn ensure_pulled_tries_again_after_a_token_failure() {
+    let fx = Fixture::new();
+    fx.serve(&["arm"]);
+    let token_mngr = token_manager();
+    token_mngr.fail_next_get_token(AuthnErr::MockError(AuthnMockError {
+        is_network_conn_err: false,
+        trace: miru_agent::trace!(),
+    }));
+    let puller = fx.puller(token_mngr).await;
+
+    puller.ensure_pulled().await;
+    assert_eq!(fx.num_lists(), 0);
+
+    puller.ensure_pulled().await;
+    assert_eq!(fx.entries().await, vec![report("arm").metadata]);
 }

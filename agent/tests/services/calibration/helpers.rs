@@ -1,16 +1,22 @@
 //! The calibration service fixture: a calibration uploader with a mock sender,
-//! its latest store and a deployments cache, under a temp dir.
+//! its latest store with a puller over a mock control plane, and a deployments
+//! cache, under a temp dir.
 
 // standard crates
 use std::sync::Arc;
 use std::time::Duration;
 
 // internal crates
-use crate::mocks::calibration_sender::MockCalibrationSender;
+use crate::mocks::{
+    calibration_sender::MockCalibrationSender, http_client::MockClient,
+    token_manager::MockTokenManager,
+};
 use crate::test_utils::calibrations::{latest_cals_layout, latest_store, layout, received_at};
 use crate::test_utils::filesys::dirs as test_dirs;
+use crate::test_utils::upload::token_manager;
 use miru_agent::calibrations::{
-    latest, LatestStore, QueueSnapshotFile, Report, Uploader, UploaderArgs, UploaderOptions,
+    latest, LatestPuller, LatestStore, QueueSnapshotFile, Report, Uploader, UploaderArgs,
+    UploaderOptions,
 };
 use miru_agent::disk::{self, Layout};
 use miru_agent::filesys::{files, WriteOptions};
@@ -27,6 +33,9 @@ pub struct Fixture {
     pub cal_uploader: Uploader,
     /// The latest store the calibration uploader writes.
     pub latest: LatestStore,
+    /// The control plane the puller pulls from.
+    pub client: Arc<MockClient>,
+    pub puller: LatestPuller<MockClient, MockTokenManager>,
     pub sender: Arc<MockCalibrationSender>,
     started: mpsc::UnboundedReceiver<()>,
     pub deployments: disk::Deployments,
@@ -58,6 +67,8 @@ impl Fixture {
             now_fn: Utc::now,
         };
         let (cal_uploader, _) = Uploader::spawn(64, args);
+        let client = Arc::new(MockClient::default());
+        let puller = LatestPuller::new(latest.clone(), client.clone(), token_manager());
         let deployments_file = Layout::new(dir.to_dir()).deployments();
         let (deployments, _) = disk::Deployments::spawn(64, deployments_file, 1000)
             .await
@@ -66,6 +77,8 @@ impl Fixture {
             dir,
             cal_uploader,
             latest,
+            client,
+            puller,
             sender,
             started,
             deployments,

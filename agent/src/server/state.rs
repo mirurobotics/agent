@@ -21,5 +21,6 @@ pub struct State {
     pub event_hub: events::EventHub,
     pub cal_uploader: Arc<calibrations::Uploader>,
     pub latest_cals: calibrations::LatestStore,
+    pub latest_puller: Arc<calibrations::LatestPuller<http::Client, authn::TokenManager>>,
     pub shutdown_tx: broadcast::Sender<()>,
 }

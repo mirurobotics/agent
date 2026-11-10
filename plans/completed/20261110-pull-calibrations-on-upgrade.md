@@ -22,7 +22,7 @@ Observable: upgrade an agent on a device whose calibrations are in the control p
 
 1. **Merge instead of overwrite.** `ReportMetadata::is_as_new_as`; `LatestStore::put_if_newer`, which checks and puts in one worker command; the pull lists the store once, skips keys it has as new or newer before downloading, and puts the rest with `put_if_newer`. Reprovision, the only caller, pulls into an emptied store, so its behavior doesn't change.
 2. **Store queued reports at startup.** The uploader's worker, after `prune_orphans`, puts each queued report with `put_if_newer` unless the store has its key as new or newer. Failures are logged.
-3. **Pull once per run.** A worker in `workers/` subscribes to the syncer's events and, after each successful sync until a pull succeeds, runs `calibrations::pull_latest` with a token from the token manager. It joins on shutdown before `AppState` shuts the store down, so the syncer and `AppState` are unchanged.
+3. **Pull once per run.** `calibrations::LatestPuller` runs `pull_latest` with the token manager's token until a pull succeeds this run. The agent starts a pull in the background at startup, which covers an upgrade, and `GET /v0.2/calibrations/latest` waits for a pull while none has succeeded. The startup pull joins on shutdown before `AppState` shuts the store down.
 
 ## Decisions
 
@@ -31,11 +31,11 @@ Observable: upgrade an agent on a device whose calibrations are in the control p
 - **Queued reports are stored by the queue's owner, at startup** ([AI design review](https://github.com/mirurobotics/agent/pull/455)). The uploader owns `queue.json` and the report files, so it reads them; no network is needed.
 - **Skip downloads the store doesn't need.** A pull after an upgrade from an agent that already writes the store costs one list call, and a pull that failed part way resumes.
 - **The merge compares inside the store's worker.** Intake may write the same key while the syncer pulls. `put_if_newer` checks `reported_at` and puts in one command. Equal times keep the stored entry.
-- **Its own worker, not the syncer** ([AI design review](https://github.com/mirurobotics/agent/pull/458)). The deployment syncer stays about deployments; the worker reacts to sync events as `sync_scan_bridge` does, and its downloads never hold up a sync.
+- **Pull at startup and on the first read, not on syncs** (the user's pick on #458). An upgrade restarts the agent, so the startup pull covers it, and the first read waits for a pull so it doesn't answer without the control plane's reports. The syncer is unchanged.
 
 ### Precedent
 
-`workers/sync_scan_bridge.rs` for a worker reacting to sync events; `prune_orphans` for the uploader's startup step; `pull_latest` (#450) for the pull.
+`init_sync_scan_bridge_worker` in `app/run.rs` for a task joined before the app state; `prune_orphans` for the uploader's startup step; `pull_latest` (#450) for the pull.
 
 ### Left out
 
@@ -56,7 +56,7 @@ Observable: upgrade an agent on a device whose calibrations are in the control p
 - First draft pulled inside reconcile; reworked to mark-then-sync after the user picked that option.
 - Replaced the persisted mark with a once-per-run pull and moved the queue merge to the uploader, after the AI design review.
 - Split #455 into three PRs at the user's request.
-- Moved the per-run pull from the syncer into its own worker, after the AI design review on #458.
+- Moved the per-run pull from the syncer into its own worker, after the AI design review on #458, then replaced the worker with a pull at startup and on the first read, at the user's request.
 
 ## Outcomes & Retrospective
 
@@ -68,4 +68,4 @@ CI runs the suite on each PR.
 
 - PR 1, `tests/calibrations/latest.rs`: `put_if_newer` puts a new key or a later report and keeps an entry reported at the same time or later. `tests/calibrations/pull.rs`: replaces an older entry; keeps an entry as new or newer without downloading; keeps keys the control plane doesn't have.
 - PR 2, `tests/calibrations/uploader.rs`: queued reports the store lacks are stored at startup; a stored entry as new or newer is kept.
-- PR 3, `tests/workers/calibrations_pull.rs`: pulls after a successful sync, including one before it subscribed, and returns; doesn't pull after a failed sync; retries a failed pull after the next successful sync; skips the pull when it gets no token; stops on shutdown; returns when it can't subscribe or the events end.
+- PR 3, `tests/calibrations/pull.rs`: `LatestPuller::ensure_pulled` pulls until a pull succeeds and then stops, and tries again after a token failure. `tests/services/calibration/latest.rs`: `list_latest` pulls before it lists.
