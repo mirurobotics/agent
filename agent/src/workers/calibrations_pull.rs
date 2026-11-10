@@ -14,11 +14,8 @@ use crate::sync::{
 // external crates
 use tracing::{error, info, warn};
 
-/// Merge the control plane's latest calibrations into the latest store once
-/// per run, after a successful sync, for the reports that an agent that
-/// doesn't write the store (an older one, or one rolled back to) took. A
-/// failed pull is retried after the next successful sync. Returns once a pull
-/// succeeds, or on shutdown, which stops a pull midway.
+/// Pulls the control plane's latest calibrations into the store after a
+/// successful sync, retrying after each later one until a pull succeeds.
 pub async fn run<SyncerT, HTTPClientT, TokenManagerT>(
     syncer: &SyncerT,
     store: &LatestStore,
