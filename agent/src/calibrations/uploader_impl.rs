@@ -31,9 +31,9 @@ pub struct UploaderOptions {
 
 impl Default for UploaderOptions {
     /// At most 1,000 reports of up to 1 MiB of data each (1 GiB at worst),
-    /// the most calibration data Miru accepts, retried as the data uploads
-    /// are but kept far longer: a calibration is costly to redo, and the cap
-    /// already bounds the storage it holds.
+    /// the most calibration data the control plane accepts, retried as the
+    /// data uploads are but kept far longer: a calibration is costly to redo,
+    /// and the cap already bounds the storage it holds.
     fn default() -> Self {
         Self {
             capacity: 1000,
@@ -261,7 +261,9 @@ where
 
     fn log_network_conn_err(entry: &QueueEntry, err: &CalibrationsErr) {
         let id = entry.id;
-        debug!("calibrations: failed to reach Miru with report {id}; will retry: {err}");
+        debug!(
+            "calibrations: failed to reach the control plane with report {id}; will retry: {err}"
+        );
     }
 
     fn log_counted_failure(entry: &QueueEntry, err: &CalibrationsErr) {

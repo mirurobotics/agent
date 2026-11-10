@@ -135,7 +135,8 @@ where
     }
 
     /// Drive `fut` to completion while serving commands, so intake never
-    /// waits on Miru. `None` when a shutdown arrived; `fut` is then dropped.
+    /// waits on the control plane. `None` when a shutdown arrived; `fut` is
+    /// then dropped.
     async fn serve_until<T>(&mut self, fut: impl Future<Output = T>) -> Option<T> {
         tokio::pin!(fut);
         loop {
@@ -199,9 +200,9 @@ fn respond<T>(respond_to: oneshot::Sender<T>, value: T, op: &str) {
 // ================================== HANDLE ======================================= //
 /// Handle to the calibration uploader: one task that owns the calibration
 /// queue, writes intake to it and the latest store, and uploads reports to
-/// Miru one at a time, oldest due first, retrying a failed report at the tail
-/// after its own backoff. It keeps serving intake during an upload or a
-/// backoff.
+/// the control plane one at a time, oldest due first, retrying a failed
+/// report at the tail after its own backoff. It keeps serving intake during
+/// an upload or a backoff.
 #[derive(Debug)]
 pub struct Uploader {
     sender: mpsc::Sender<Command>,

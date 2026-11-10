@@ -55,9 +55,9 @@ pub async fn reprovision<HTTPClientT: http::ClientI>(
     result
 }
 
-/// Replace the device's calibrations, upload queue included, with Miru's
-/// latest. Runs after `bootstrap`, so the old device's calibrations are gone
-/// even if the pull fails, and the token comes from the installed keys.
+/// Replace the device's calibrations, upload queue included, with the control
+/// plane's latest. Runs after `bootstrap`, so the old device's calibrations are
+/// gone even if the pull fails, and the token comes from the installed keys.
 async fn pull_calibrations<HTTPClientT: http::ClientI>(
     http_client: &HTTPClientT,
     layout: &disk::Layout,
