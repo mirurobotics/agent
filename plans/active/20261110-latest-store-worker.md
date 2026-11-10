@@ -61,7 +61,7 @@ No new test files: actor tests go in the existing `agent/tests/calibrations/late
 
 ## Progress
 
-- [x] Milestone 0: branch stacked on the calibration rename PR (agent#446).
+- [x] Milestone 0: branch rebased onto `main` after the calibration rename PR (agent#446) merged.
 - [x] Milestone 1: move `latest.rs` to `latest_impl.rs` (move only), committed.
 - [x] Milestone 2: `LatestStoreImpl` with the in-memory index, and the actor in `latest.rs`, committed.
 - [x] Milestone 3: `AppState` shuts the store down; `ARCHITECTURE.md` updated; committed.
