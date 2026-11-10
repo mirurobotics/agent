@@ -9,7 +9,7 @@
 use crate::models;
 use serde::{Deserialize, Serialize};
 
-/// Calibration : The newest calibration the device has for one component, role and aspect, uploaded or not.
+/// Calibration : The newest calibration the device has for one component, role and aspect.
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Calibration {
     /// The object type, which is always `calibration`.
@@ -18,8 +18,6 @@ pub struct Calibration {
     /// ID the agent gave the report this calibration came from. Download the content with it.
     #[serde(rename = "report_id")]
     pub report_id: uuid::Uuid,
-    #[serde(rename = "upload_status")]
-    pub upload_status: models::CalibrationUploadStatus,
     /// Slug of the component the calibrated unit belongs to, as it was reported.
     #[serde(rename = "component")]
     pub component: String,
@@ -41,12 +39,11 @@ pub struct Calibration {
 }
 
 impl Calibration {
-    /// The newest calibration the device has for one component, role and aspect, uploaded or not.
-    pub fn new(object: Object, report_id: uuid::Uuid, upload_status: models::CalibrationUploadStatus, component: String, role: Option<String>, aspect: Option<String>, serial_number: Option<String>, reported_by: Option<String>, reported_at: String) -> Calibration {
+    /// The newest calibration the device has for one component, role and aspect.
+    pub fn new(object: Object, report_id: uuid::Uuid, component: String, role: Option<String>, aspect: Option<String>, serial_number: Option<String>, reported_by: Option<String>, reported_at: String) -> Calibration {
         Calibration {
             object,
             report_id,
-            upload_status,
             component,
             role,
             aspect,
