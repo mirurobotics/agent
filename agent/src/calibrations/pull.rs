@@ -10,6 +10,7 @@ use crate::calibrations::{
     errors::CalibrationsErr, latest::LatestStore, report::ReportMetadata, Filter,
 };
 use crate::cooldown;
+use crate::errors::Error;
 use crate::http::{
     self,
     calibrations::{GetContentParams, ListAllLatestParams},
@@ -92,7 +93,8 @@ async fn download<HTTPClientT: http::ClientI>(
     .await
 }
 
-/// Pull into `store` until a pull succeeds, waiting longer after each failure.
+/// Pull into `store` until a pull succeeds. As the uploaders do, a network
+/// error waits a flat `base_secs`, and any other failure backs off further.
 pub async fn pull_latest_until_success<HTTPClientT, TokenManagerT>(
     store: &LatestStore,
     http_client: &HTTPClientT,
@@ -101,7 +103,7 @@ pub async fn pull_latest_until_success<HTTPClientT, TokenManagerT>(
     HTTPClientT: http::ClientI,
     TokenManagerT: TokenManagerExt,
 {
-    let mut attempts: u32 = 0;
+    let mut failures: u32 = 0;
     loop {
         let result = match token_mngr.get_token().await {
             Ok(token) => pull_latest(store, http_client, &token.token).await,
@@ -111,8 +113,12 @@ pub async fn pull_latest_until_success<HTTPClientT, TokenManagerT>(
             Ok(()) => return,
             Err(e) => e,
         };
-        attempts = attempts.saturating_add(1);
-        let wait = cooldown::calc(&PULL_BACKOFF, attempts);
+        let wait = if e.is_network_conn_err() {
+            PULL_BACKOFF.base_secs
+        } else {
+            failures = failures.saturating_add(1);
+            cooldown::calc(&PULL_BACKOFF, failures - 1)
+        };
         warn!("calibrations: unable to pull the latest calibrations, retrying in {wait}s: {e}");
         tokio::time::sleep(Duration::from_secs(wait as u64)).await;
     }

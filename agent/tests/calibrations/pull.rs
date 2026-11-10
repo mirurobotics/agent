@@ -2,7 +2,7 @@
 //! store.
 
 // standard crates
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 // internal crates
@@ -210,31 +210,81 @@ async fn a_failed_download_fails_the_call() {
     assert!(matches!(result, Err(CalibrationsErr::HTTPErr(_))));
 }
 
-#[tokio::test(start_paused = true)]
-async fn pull_latest_until_success_tries_again_after_a_failure() {
-    let fx = Fixture::new();
+/// The control plane fails the first `failures` lists with `err()` and then
+/// serves `arm`. Returns when each list came.
+fn fail_lists(fx: &Fixture, failures: usize, err: fn() -> HTTPErr) -> Arc<Mutex<Vec<Instant>>> {
     let list = CalibrationList {
         data: vec![miru_calibration("arm")],
         ..CalibrationList::default()
     };
-    let has_failed = AtomicBool::new(false);
+    let times = Arc::new(Mutex::new(Vec::new()));
+    let listed = times.clone();
     fx.client.set_list_latest_calibrations(move || {
-        if has_failed.swap(true, Ordering::Relaxed) {
+        let mut listed = listed.lock().unwrap();
+        listed.push(Instant::now());
+        if listed.len() > failures {
             Ok(list.clone())
         } else {
-            Err(mock_err())
+            Err(err())
         }
     });
     fx.client.set_get_calibration_content(|id| Ok(content(id)));
+    times
+}
+
+/// The waits between consecutive `times`.
+fn gaps(times: &Mutex<Vec<Instant>>) -> Vec<Duration> {
+    let times = times.lock().unwrap();
+    times.windows(2).map(|pair| pair[1] - pair[0]).collect()
+}
+
+fn network_err() -> HTTPErr {
+    HTTPErr::MockErr(MockErr {
+        is_network_conn_err: true,
+    })
+}
+
+#[tokio::test(start_paused = true)]
+async fn pull_latest_until_success_doubles_its_wait_after_each_failure() {
+    let fx = Fixture::new();
+    let times = fail_lists(&fx, 3, mock_err);
     let store = latest_store(&fx.dir, latest::DEFAULT_CAPACITY).await;
-    let start = Instant::now();
 
     calibrations::pull_latest_until_success(&store, &fx.client, token_manager().as_ref()).await;
 
-    assert!(start.elapsed() >= Duration::from_secs(1));
+    let secs = [1, 2, 4].map(Duration::from_secs);
+    assert_eq!(gaps(&times), secs);
     let entries = store.list(&Filter::default()).await.unwrap();
     assert_eq!(entries, vec![report("arm").metadata]);
-    assert_eq!(fx.client.call_count(Call::ListLatestCalibrations), 2);
+}
+
+#[tokio::test(start_paused = true)]
+async fn pull_latest_until_success_waits_at_most_an_hour() {
+    let fx = Fixture::new();
+    let times = fail_lists(&fx, 14, mock_err);
+    let store = latest_store(&fx.dir, latest::DEFAULT_CAPACITY).await;
+
+    calibrations::pull_latest_until_success(&store, &fx.client, token_manager().as_ref()).await;
+
+    let gaps = gaps(&times);
+    let hour = Duration::from_secs(3600);
+    assert_eq!(gaps[11..], [Duration::from_secs(2048), hour, hour]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn pull_latest_until_success_waits_a_second_after_each_network_error() {
+    let fx = Fixture::new();
+    // each pull lists three times on a network error, so this fails three pulls
+    let times = fail_lists(&fx, 9, network_err);
+    let store = latest_store(&fx.dir, latest::DEFAULT_CAPACITY).await;
+
+    calibrations::pull_latest_until_success(&store, &fx.client, token_manager().as_ref()).await;
+
+    let gaps = gaps(&times);
+    assert_eq!(gaps.len(), 9);
+    assert!(gaps.iter().all(|gap| *gap <= Duration::from_secs(1)), "{gaps:?}");
+    let entries = store.list(&Filter::default()).await.unwrap();
+    assert_eq!(entries, vec![report("arm").metadata]);
 }
 
 #[tokio::test(start_paused = true)]
