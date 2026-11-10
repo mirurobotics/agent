@@ -8,7 +8,7 @@ use std::sync::Arc;
 // internal crates
 use super::filesys::dirs::TempDir;
 use miru_agent::calibrations::{
-    LatestStore, Report, ReportMetadata, Sender, Uploader, UploaderArgs, UploaderOptions,
+    Filter, LatestStore, Report, ReportMetadata, Sender, Uploader, UploaderArgs, UploaderOptions,
 };
 use miru_agent::disk::layout::{CalibrationsLayout, LatestCalsLayout};
 use miru_agent::models::InstanceFormat;
@@ -69,9 +69,13 @@ pub fn latest_cals_layout(dir: &TempDir) -> LatestCalsLayout {
     LatestCalsLayout::new(resources.subdir("latest_calibrations"))
 }
 
-/// A latest store under `dir` holding at most `capacity` keys.
+/// A latest store under `dir` holding at most `capacity` keys, once its worker
+/// has pruned the content no entry names.
 pub async fn latest_store(dir: &TempDir, capacity: usize) -> LatestStore {
     let (store, _) = LatestStore::spawn(64, latest_cals_layout(dir), capacity);
+    // a reply means the prune ran, since commands queue behind it; an
+    // unreadable index fails the reply, so its result is ignored
+    let _ = store.list(&Filter::default()).await;
     store
 }
 
