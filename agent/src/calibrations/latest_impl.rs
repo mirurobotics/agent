@@ -72,7 +72,7 @@ impl LatestStoreImpl {
         data: &str,
     ) -> Result<(), CalibrationsErr> {
         let index = self.read_index().await?;
-        self.put_in(index, metadata, data).await
+        self.put_into_index(index, metadata, data).await
     }
 
     /// Put `metadata` unless its key's entry was reported at the same time or
@@ -86,12 +86,12 @@ impl LatestStoreImpl {
         if index.iter().any(|entry| entry.is_as_new_as(&metadata)) {
             return Ok(false);
         }
-        self.put_in(index, metadata, data).await?;
+        self.put_into_index(index, metadata, data).await?;
         Ok(true)
     }
 
-    /// Put `metadata` into `index`, the index as read, and write both.
-    async fn put_in(
+    /// Put `metadata` into `index`, which the caller just read, and write both.
+    async fn put_into_index(
         &self,
         mut index: Index,
         metadata: ReportMetadata,
