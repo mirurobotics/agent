@@ -7,7 +7,7 @@ use crate::calibrations::{
     report::{Report, ReportMetadata},
 };
 use crate::disk::layout::LatestCalsLayout;
-use crate::filesys::{dirs, files, Dir, File, FileSysErr, WriteOptions};
+use crate::filesys::{dirs, files, Dir, File, FileSysErr, Overwrite, WriteOptions};
 use crate::trace;
 
 // external crates
@@ -128,6 +128,33 @@ impl LatestStoreImpl {
 
     async fn delete_content(&self, report_id: Uuid) {
         files::delete_or_warn(&self.content_file(report_id)).await;
+    }
+
+    /// Move an index this agent can't parse aside, as a state file's is, so
+    /// the store starts empty instead of failing every call. `reset` keeps the
+    /// store, so an agent rolled back to may not read a newer format.
+    pub(crate) async fn set_aside_unparseable_index(&self) {
+        let Err(FileSysErr::ParseJSONErr(err)) =
+            files::read_json_with_retry::<Index>(&self.index).await
+        else {
+            return;
+        };
+        match self.move_index_aside().await {
+            Ok(aside) => error!(
+                "calibrations: latest index could not be parsed ({err}); moved it to {aside}"
+            ),
+            Err(move_err) => error!(
+                "calibrations: latest index could not be parsed ({err}) or moved aside \
+                 ({move_err})"
+            ),
+        }
+    }
+
+    async fn move_index_aside(&self) -> Result<File, FileSysErr> {
+        let name = format!("{}.corrupt-{}", self.index.name()?, Uuid::new_v4());
+        let aside = self.index.parent()?.file(&name);
+        files::move_to(&self.index, &aside, Overwrite::Deny).await?;
+        Ok(aside)
     }
 
     /// Delete the content no entry names, which a crash or a failed write or

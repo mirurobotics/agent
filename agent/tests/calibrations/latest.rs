@@ -140,15 +140,21 @@ async fn spawn_keeps_the_contents_when_the_index_cannot_be_read() {
 }
 
 #[tokio::test]
-async fn spawn_keeps_the_contents_when_the_index_is_corrupt() {
+async fn spawn_sets_aside_a_corrupt_index_and_starts_empty() {
     let f = Fixture::new().await;
-    let orphan = Uuid::new_v4();
-    f.write_orphan(orphan).await;
+    put_all(&f.store, &[&reported("arm", None, None)]).await;
     f.corrupt_index().await;
 
-    f.reopen().await;
+    let store = f.reopen().await;
 
-    assert_eq!(f.content_ids().await, [orphan]);
+    assert!(store.list(&Filter::default()).await.unwrap().is_empty());
+    assert!(f.content_ids().await.is_empty());
+    let asides = dirs::files(&f.layout.root).await.unwrap();
+    let [aside] = asides.as_slice() else {
+        panic!("expected only the set-aside index: {asides:?}");
+    };
+    assert!(aside.name().unwrap().starts_with("index.json.corrupt-"));
+    assert_eq!(files::read_string(aside).await.unwrap(), "{");
 }
 
 // =============================== CAPACITY =============================== //
