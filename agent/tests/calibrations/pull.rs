@@ -8,6 +8,7 @@ use crate::test_utils::calibrations::{
 use crate::test_utils::filesys::dirs as test_dirs;
 use backend_api::models::CalibrationList;
 use miru_agent::calibrations::{self, latest, CalibrationsErr, Filter, Report, ReportMetadata};
+use miru_agent::filesys::{files, WriteOptions};
 use miru_agent::http::{errors::MockErr, HTTPErr};
 
 // external crates
@@ -159,6 +160,21 @@ async fn more_keys_than_capacity_fail_the_call() {
     let result = fx.pull(1).await;
 
     assert!(matches!(result, Err(CalibrationsErr::StoreFullErr(_))));
+}
+
+#[tokio::test]
+async fn an_unreadable_store_fails_the_call() {
+    let fx = Fixture::new();
+    let index = latest_cals_layout(&fx.dir).index();
+    files::write_string(&index, "not json", WriteOptions::OVERWRITE_ATOMIC)
+        .await
+        .unwrap();
+    fx.serve(&["arm"]);
+
+    let result = fx.pull(latest::DEFAULT_CAPACITY).await;
+
+    assert!(matches!(result, Err(CalibrationsErr::FileSysErr(_))));
+    assert_eq!(fx.client.call_count(Call::GetCalibrationContent), 0);
 }
 
 #[tokio::test]
