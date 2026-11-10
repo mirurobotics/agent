@@ -4,12 +4,12 @@ use std::sync::Arc;
 
 // internal crates
 use crate::calibrations::{
-    errors::{CalibrationTooLargeErr, CalibrationsErr, InvalidReportErr},
-    report::{Queue, QueueEntry, QueueSnapshotFile, Report, ReportMetadata},
+    errors::{CalibrationTooLargeErr, CalibrationsErr},
+    report::{self, Queue, QueueEntry, QueueSnapshotFile, Report, ReportMetadata},
     sender::Sender,
 };
 use crate::errors::Error;
-use crate::filesys::{dirs, files, Dir, File, FileSysErr, WriteOptions};
+use crate::filesys::{dirs, files, Dir, File, WriteOptions};
 use crate::queue::{self, Persistence, RetryPolicy, Verdict};
 use crate::trace;
 
@@ -110,7 +110,7 @@ where
         let queued = self
             .queue
             .iter()
-            .map(|entry| entry.id.hyphenated().to_string());
+            .map(|entry| report::report_file_name(entry.id));
         dirs::delete_files_except(&self.reports, &queued.collect()).await;
     }
 
@@ -153,7 +153,7 @@ where
         let file = self.report_file(entry.id);
         let metadata = entry.job.clone();
         async move {
-            let data = read(&file).await?;
+            let data = report::read_data(&file).await?;
             sender.send(Report { metadata, data }).await
         }
     }
@@ -231,7 +231,7 @@ where
     }
 
     fn report_file(&self, id: Uuid) -> File {
-        self.reports.file(&id.hyphenated().to_string())
+        report::report_file(&self.reports, id)
     }
 
     /// A network error logs at debug, since it repeats every base backoff
@@ -272,27 +272,6 @@ where
         let id = entry.id;
         error!("calibrations: dropping report {id}, which can never be uploaded: {err}");
     }
-}
-
-/// The data in report `file`. A missing file or one that isn't UTF-8 can
-/// never be sent, so either is a terminal [`InvalidReportErr`]; any other
-/// read error is retried.
-async fn read(file: &File) -> Result<String, CalibrationsErr> {
-    match files::read_string(file).await {
-        Ok(data) => Ok(data),
-        Err(FileSysErr::PathDoesNotExistErr(_)) => Err(invalid("the report file is missing")),
-        Err(FileSysErr::ConvertUTF8Err(e)) => {
-            Err(invalid(&format!("the report file is not UTF-8: {e}")))
-        }
-        Err(e) => Err(e.into()),
-    }
-}
-
-fn invalid(reason: &str) -> CalibrationsErr {
-    CalibrationsErr::InvalidReportErr(InvalidReportErr {
-        reason: reason.to_string(),
-        trace: trace!(),
-    })
 }
 
 #[cfg(test)]

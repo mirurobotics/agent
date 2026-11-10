@@ -94,7 +94,7 @@ impl LatestStoreImpl {
     ) -> Result<Vec<ReportMetadata>, CalibrationsErr> {
         let mut entries = self.read_index().await?;
         entries.retain(|metadata| filter.is_match(metadata));
-        entries.sort_by(|a, b| key_parts(a).cmp(&key_parts(b)));
+        entries.sort_by(|a, b| a.key().cmp(&b.key()));
         Ok(entries)
     }
 
@@ -161,12 +161,8 @@ impl LatestStoreImpl {
 fn take_entry(index: &mut Index, metadata: &ReportMetadata) -> Option<ReportMetadata> {
     let slot = index
         .iter()
-        .position(|entry| key_parts(entry) == key_parts(metadata))?;
+        .position(|entry| entry.key() == metadata.key())?;
     Some(index.swap_remove(slot))
-}
-
-fn key_parts(metadata: &ReportMetadata) -> (&String, &Option<String>, &Option<String>) {
-    (&metadata.component, &metadata.role, &metadata.aspect)
 }
 
 /// Whether `value` is one of `values`, where an empty list matches any value.
@@ -197,7 +193,7 @@ fn not_found(report_id: Uuid) -> CalibrationsErr {
 #[cfg(test)]
 mod tests {
     // internal crates
-    use super::{check_capacity, key_parts, matches, not_found, take_entry, Index};
+    use super::{check_capacity, matches, not_found, take_entry, Index};
     use crate::test_utils::calibrations::reported;
     use miru_agent::calibrations::ReportMetadata;
     use miru_agent::models::InstanceFormat;
@@ -244,9 +240,9 @@ mod tests {
         assert_eq!(index, [arm]);
     }
 
-    // ============================= KEY PARTS ============================ //
+    // =============================== KEY ================================ //
     #[test]
-    fn key_parts_are_the_component_role_and_aspect_only() {
+    fn key_is_the_component_role_and_aspect_only() {
         let arm = reported("arm", Some("left"), Some("pose"));
         // each differs from `arm` in one part of the key
         let others = [
@@ -255,9 +251,9 @@ mod tests {
             reported("arm", Some("left"), Some("offset")),
         ];
 
-        assert_eq!(key_parts(&arm), key_parts(&same_key(&arm)));
+        assert_eq!(arm.key(), same_key(&arm).key());
         for other in &others {
-            assert_ne!(key_parts(&arm), key_parts(other), "{other:?}");
+            assert_ne!(arm.key(), other.key(), "{other:?}");
         }
     }
 
