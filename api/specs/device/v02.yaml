@@ -11,17 +11,17 @@ info:
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
-  x-release-version: v0.2.5-beta.6
+  x-release-version: v0.2.5-beta.7
   x-git-commit:
-    sha: f82b3778ee4e8cb929924d8278e04817a98e4402
-    url: https://github.com/mirurobotics/openapi/commit/f82b3778ee4e8cb929924d8278e04817a98e4402
-    message: 'feat(device)!: drop is_confirmed from the latest calibrations response
-      (#466)'
+    sha: 0d516d0e86daf588441c2d79f65cc759a260b6b6
+    url: https://github.com/mirurobotics/openapi/commit/0d516d0e86daf588441c2d79f65cc759a260b6b6
+    message: 'feat(device)!: move the calibration content download under /calibrations/latest
+      (#468)'
     author: Ben's Agent
     branch: HEAD
     dirty: false
   x-build:
-    built_at: '2026-11-10T04:33:11.576798+00:00'
+    built_at: '2026-11-10T04:56:05.107964+00:00'
 servers:
 - url: http://localhost/v0.2
   description: localhost
@@ -96,12 +96,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/LatestCalibrationsResponse'
-  /calibrations/{report_id}/content:
+  /calibrations/latest/{report_id}/content:
     get:
       tags:
       - Calibrations
       summary: Download Content
-      operationId: getCalibrationContent
+      operationId: getLatestCalibrationContent
       description: Download the content of a latest calibration by its report ID.
         An older report returns 404.
       parameters:
@@ -323,14 +323,14 @@ components:
     ReleaseVersion:
       type: string
       enum:
-      - v0.2.5-beta.6
+      - v0.2.5-beta.7
       x-enum-varnames:
       - RELEASE_VERSION
       x-stainless-const: true
     APIGitCommit:
       type: string
       enum:
-      - f82b3778ee4e8cb929924d8278e04817a98e4402
+      - 0d516d0e86daf588441c2d79f65cc759a260b6b6
       x-enum-varnames:
       - API_GIT_COMMIT
       x-stainless-const: true
@@ -482,7 +482,7 @@ components:
         api_release_version:
           type: string
           description: The API release version of the agent.
-          example: v0.2.5-beta.6
+          example: v0.2.5-beta.7
         rust_version:
           type: string
           description: The version of Rust.
@@ -505,7 +505,7 @@ components:
         git_commit: a1b2c3d4
         api_version: v0.2
         api_git_commit: a1b2c3d4
-        api_release_version: v0.2.5-beta.6
+        api_release_version: v0.2.5-beta.7
         rust_version: 1.93.0
         build_date: '2026-02-24T10:30:00Z'
         os: linux
