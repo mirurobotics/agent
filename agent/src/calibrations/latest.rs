@@ -1,7 +1,7 @@
 // internal crates
 use crate::calibrations::{
     errors::{CalibrationsErr, ReceiveActorMessageErr, SendActorMessageErr},
-    latest_impl::{Filter, LatestStoreImpl},
+    latest_impl::{Filter, LatestContent, LatestStoreImpl},
     report::ReportMetadata,
 };
 use crate::disk::layout::LatestCalsLayout;
@@ -29,7 +29,7 @@ enum Command {
     },
     Content {
         report_id: Uuid,
-        respond_to: oneshot::Sender<Result<String, CalibrationsErr>>,
+        respond_to: oneshot::Sender<Result<LatestContent, CalibrationsErr>>,
     },
     Shutdown {
         respond_to: oneshot::Sender<()>,
@@ -129,9 +129,9 @@ impl LatestStore {
         .await?
     }
 
-    /// The data of the entry for `report_id`. Not found unless an entry has
+    /// The content of the entry for `report_id`. Not found unless an entry has
     /// that `report_id` and its content exists.
-    pub async fn content(&self, report_id: Uuid) -> Result<String, CalibrationsErr> {
+    pub async fn content(&self, report_id: Uuid) -> Result<LatestContent, CalibrationsErr> {
         self.send_command("content", |respond_to| Command::Content {
             report_id,
             respond_to,

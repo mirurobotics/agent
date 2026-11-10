@@ -8,6 +8,7 @@ use crate::calibrations::{
 };
 use crate::disk::layout::LatestCalsLayout;
 use crate::filesys::{dirs, files, Dir, File, FileSysErr, WriteOptions};
+use crate::models::InstanceFormat;
 use crate::trace;
 
 // external crates
@@ -16,6 +17,14 @@ use uuid::Uuid;
 
 /// The entries, one per key, as `index.json` holds them.
 type Index = Vec<ReportMetadata>;
+
+/// A latest entry's data, the format it is in, and its report id.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LatestContent {
+    pub report_id: Uuid,
+    pub format: InstanceFormat,
+    pub data: String,
+}
 
 /// Which entries to list. Empty means any; `None` in `role`/`aspect` matches an
 /// entry without one.
@@ -90,15 +99,19 @@ impl LatestStoreImpl {
         Ok(entries)
     }
 
-    /// The data of the entry for `report_id`.
-    pub(crate) async fn content(&self, report_id: Uuid) -> Result<String, CalibrationsErr> {
+    /// The content of the entry for `report_id`.
+    pub(crate) async fn content(&self, report_id: Uuid) -> Result<LatestContent, CalibrationsErr> {
         let index = self.read_index().await?;
-        if !index.iter().any(|m| m.report_id == report_id) {
+        let Some(entry) = index.into_iter().find(|m| m.report_id == report_id) else {
             return Err(not_found(report_id));
-        }
+        };
         match files::read_string(&self.content_file(report_id)).await {
             Err(FileSysErr::PathDoesNotExistErr(_)) => Err(not_found(report_id)),
-            result => Ok(result?),
+            result => Ok(LatestContent {
+                report_id,
+                format: entry.format,
+                data: result?,
+            }),
         }
     }
 

@@ -369,15 +369,16 @@ async fn init_local_api_servers(
         return Ok(());
     }
 
-    let server_state = Arc::new(server::State::new(
-        app_state.storage.clone(),
-        app_state.http_client.clone(),
-        app_state.syncer.clone(),
-        app_state.token_mngr.clone(),
-        app_state.event_hub.clone(),
-        app_state.cal_uploader.clone(),
-        shutdown_tx.clone(),
-    ));
+    let server_state = Arc::new(server::State {
+        storage: app_state.storage.clone(),
+        http_client: app_state.http_client.clone(),
+        syncer: app_state.syncer.clone(),
+        token_mngr: app_state.token_mngr.clone(),
+        event_hub: app_state.event_hub.clone(),
+        cal_uploader: app_state.cal_uploader.clone(),
+        latest_cals: app_state.latest_cals.clone(),
+        shutdown_tx: shutdown_tx.clone(),
+    });
 
     #[cfg(unix)]
     if options.enable_socket_server {

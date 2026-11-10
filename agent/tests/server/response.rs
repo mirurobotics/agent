@@ -494,3 +494,106 @@ pub mod create_calibration_response {
         assert_eq!(sdk, expected);
     }
 }
+
+pub mod latest_calibrations_response {
+    use super::*;
+    use miru_agent::calibrations::ReportMetadata;
+    use miru_agent::models::InstanceFormat;
+    use miru_agent::services::calibration::LatestCalibrations;
+
+    fn metadata(report_id: Uuid) -> ReportMetadata {
+        ReportMetadata {
+            report_id,
+            component: "arm".into(),
+            format: InstanceFormat::Yaml,
+            role: Some("left".into()),
+            aspect: None,
+            serial_number: Some("SN-1".into()),
+            reported_by: Some("Ada Lovelace".into()),
+            deployment_id: Some("dpl_1".into()),
+            reported_at: fixed_time(),
+        }
+    }
+
+    #[test]
+    fn converts_report_metadata() {
+        let report_id = Uuid::new_v4();
+        let metadata = metadata(report_id);
+
+        let expected = openapi::Calibration {
+            object: openapi::calibration::Object::Calibration,
+            report_id,
+            component: "arm".into(),
+            role: Some("left".into()),
+            aspect: None,
+            serial_number: Some("SN-1".into()),
+            reported_by: Some("Ada Lovelace".into()),
+            reported_at: fixed_time().to_rfc3339(),
+        };
+
+        let sdk: openapi::Calibration = (&metadata).into();
+        assert_eq!(sdk, expected);
+    }
+
+    #[test]
+    fn converts_latest_calibrations() {
+        let metadata = metadata(Uuid::new_v4());
+        let calibration = openapi::Calibration::from(&metadata);
+        let latest = LatestCalibrations {
+            is_confirmed: true,
+            calibrations: vec![metadata],
+        };
+
+        let expected = openapi::LatestCalibrationsResponse {
+            is_confirmed: true,
+            calibrations: vec![calibration],
+        };
+
+        let sdk: openapi::LatestCalibrationsResponse = (&latest).into();
+        assert_eq!(sdk, expected);
+    }
+}
+
+pub mod latest_content_response {
+    use axum::body;
+    use axum::http::{header, StatusCode};
+    use axum::response::IntoResponse;
+    use miru_agent::calibrations::LatestContent;
+    use miru_agent::models::InstanceFormat;
+    use uuid::Uuid;
+
+    #[tokio::test]
+    async fn sends_the_data_with_the_headers_of_the_format() {
+        let report_id = Uuid::new_v4();
+        let content = LatestContent {
+            report_id,
+            format: InstanceFormat::Csv,
+            data: "a,b\n".to_string(),
+        };
+
+        let response = content.into_response();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let headers = response.headers();
+        assert_eq!(headers[header::CONTENT_TYPE], "text/csv");
+        let disposition = format!("inline; filename=\"{report_id}.csv\"");
+        assert_eq!(headers[header::CONTENT_DISPOSITION], disposition);
+        let bytes = body::to_bytes(response.into_body(), 1024).await.unwrap();
+        assert_eq!(bytes, "a,b\n".as_bytes());
+    }
+
+    #[test]
+    fn names_text_without_an_extension() {
+        let report_id = Uuid::new_v4();
+        let content = LatestContent {
+            report_id,
+            format: InstanceFormat::Text,
+            data: String::new(),
+        };
+
+        let response = content.into_response();
+
+        let disposition = format!("inline; filename=\"{report_id}\"");
+        assert_eq!(response.headers()[header::CONTENT_DISPOSITION], disposition);
+    }
+}

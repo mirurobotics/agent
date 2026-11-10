@@ -5,7 +5,7 @@ use std::time::Duration;
 // internal crates
 use crate::mocks::{calibration_sender::MockCalibrationSender, http_client::MockClient};
 use crate::test_utils::{
-    calibrations::cal_uploader,
+    calibrations::{cal_uploader, latest_store},
     filesys::dirs as test_dirs,
     sync::{create_storage, create_token_manager},
 };
@@ -60,15 +60,16 @@ impl Fixture {
 
         let (shutdown_tx, _) = broadcast::channel::<()>(1);
 
-        let state = Arc::new(State::new(
+        let state = Arc::new(State {
             storage,
-            real_http_client,
+            http_client: real_http_client,
             syncer,
-            Arc::new(token_mngr),
+            token_mngr: Arc::new(token_mngr),
             event_hub,
-            Arc::new(cal_uploader),
-            shutdown_tx.clone(),
-        ));
+            cal_uploader: Arc::new(cal_uploader),
+            latest_cals: latest_store(&dir, latest::DEFAULT_CAPACITY).await,
+            shutdown_tx: shutdown_tx.clone(),
+        });
 
         let app = routes::router(state.clone());
 

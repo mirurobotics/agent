@@ -20,27 +20,6 @@ pub struct State {
     pub token_mngr: Arc<authn::TokenManager>,
     pub event_hub: events::EventHub,
     pub cal_uploader: Arc<calibrations::Uploader>,
+    pub latest_cals: calibrations::LatestStore,
     pub shutdown_tx: broadcast::Sender<()>,
-}
-
-impl State {
-    pub fn new(
-        storage: Arc<Storage>,
-        http_client: Arc<http::Client>,
-        syncer: Arc<sync::Syncer>,
-        token_mngr: Arc<authn::TokenManager>,
-        event_hub: events::EventHub,
-        cal_uploader: Arc<calibrations::Uploader>,
-        shutdown_tx: broadcast::Sender<()>,
-    ) -> Self {
-        State {
-            storage,
-            http_client,
-            syncer,
-            token_mngr,
-            event_hub,
-            cal_uploader,
-            shutdown_tx,
-        }
-    }
 }

@@ -4,9 +4,12 @@
 // internal crates
 use crate::test_utils::calibrations::{latest_cals_layout, latest_store, reported};
 use crate::test_utils::filesys::dirs as test_dirs;
-use miru_agent::calibrations::{latest, CalibrationsErr, Filter, LatestStore, ReportMetadata};
+use miru_agent::calibrations::{
+    latest, CalibrationsErr, Filter, LatestContent, LatestStore, ReportMetadata,
+};
 use miru_agent::disk::layout::LatestCalsLayout;
 use miru_agent::filesys::{dirs, files, File, PathExt, WriteOptions};
+use miru_agent::models::InstanceFormat;
 
 // external crates
 use futures::FutureExt;
@@ -203,7 +206,7 @@ async fn putting_the_same_report_again_keeps_its_content() {
     put_all(&f.store, &[&arm, &arm]).await;
 
     assert_eq!(f.entries().await, std::slice::from_ref(&arm));
-    assert_eq!(f.store.content(arm.report_id).await.unwrap(), DATA);
+    assert_eq!(f.store.content(arm.report_id).await.unwrap().data, DATA);
 }
 
 #[tokio::test]
@@ -336,14 +339,20 @@ async fn list_filters_by_component_role_and_aspect() {
 
 // ================================ CONTENT =============================== //
 #[tokio::test]
-async fn content_returns_the_data() {
+async fn content_returns_the_data_and_its_format() {
     let f = Fixture::new().await;
-    let arm = reported("arm", None, None);
+    let mut arm = reported("arm", None, None);
+    arm.format = InstanceFormat::Yaml;
     put_all(&f.store, &[&arm]).await;
 
     let content = f.store.content(arm.report_id).await.unwrap();
 
-    assert_eq!(content, DATA);
+    let expected = LatestContent {
+        report_id: arm.report_id,
+        format: InstanceFormat::Yaml,
+        data: DATA.to_string(),
+    };
+    assert_eq!(content, expected);
 }
 
 #[tokio::test]
