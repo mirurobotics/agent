@@ -4,7 +4,7 @@
 // internal crates
 use crate::test_utils::calibrations::{latest_cals_layout, latest_store, reported};
 use crate::test_utils::filesys::dirs as test_dirs;
-use miru_agent::calibrations::{latest_impl, CalibrationsErr, Filter, LatestStore, ReportMetadata};
+use miru_agent::calibrations::{latest, CalibrationsErr, Filter, LatestStore, ReportMetadata};
 use miru_agent::disk::layout::LatestCalsLayout;
 use miru_agent::filesys::{dirs, files, File, PathExt, WriteOptions};
 
@@ -22,7 +22,7 @@ struct Fixture {
 
 impl Fixture {
     async fn new() -> Self {
-        Self::with_capacity(latest_impl::DEFAULT_CAPACITY).await
+        Self::with_capacity(latest::DEFAULT_CAPACITY).await
     }
 
     /// A fixture whose store holds at most `capacity` keys.
@@ -37,7 +37,7 @@ impl Fixture {
 
     /// Open the store again over the same files.
     async fn reopen(&self) -> LatestStore {
-        latest_store(&self.dir, latest_impl::DEFAULT_CAPACITY).await
+        latest_store(&self.dir, latest::DEFAULT_CAPACITY).await
     }
 
     /// Every entry, in key order.

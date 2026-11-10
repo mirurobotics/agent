@@ -16,7 +16,7 @@ use crate::test_utils::calibrations::{
 };
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::calibrations::{
-    latest_impl, CalibrationsErr, Filter, LatestStore, Queue, QueueSnapshotFile, ReportMetadata,
+    latest, CalibrationsErr, Filter, LatestStore, Queue, QueueSnapshotFile, ReportMetadata,
     Uploader, UploaderArgs, UploaderOptions,
 };
 use miru_agent::disk::layout::{CalibrationsLayout, LatestCalsLayout};
@@ -88,7 +88,7 @@ impl Harness {
 
     async fn spawn_with(&mut self, options: UploaderOptions) {
         let snapshot_file = Some(self.snapshot_file().await);
-        let latest = latest_store(&self.dir, latest_impl::DEFAULT_CAPACITY).await;
+        let latest = latest_store(&self.dir, latest::DEFAULT_CAPACITY).await;
         let args = UploaderArgs {
             snapshot_file,
             reports: self.layout.reports(),

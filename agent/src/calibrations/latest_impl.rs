@@ -43,7 +43,7 @@ impl Filter {
 /// past the capacity is rejected rather than evicting another. The worker in
 /// `latest.rs` owns it, so it is the store's only writer.
 #[derive(Debug)]
-pub struct LatestStoreImpl {
+pub(crate) struct LatestStoreImpl {
     index_file: File,
     contents: Dir,
     capacity: usize,
@@ -55,7 +55,7 @@ impl LatestStoreImpl {
     /// Open the store in `layout`, holding at most `capacity` keys. It first
     /// deletes the content no entry names, which a crash or a failed write or
     /// delete leaves.
-    pub async fn open(layout: LatestCalsLayout, capacity: usize) -> Self {
+    pub(crate) async fn open(layout: LatestCalsLayout, capacity: usize) -> Self {
         let mut store = Self {
             index_file: layout.index(),
             contents: layout.contents(),

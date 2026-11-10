@@ -278,7 +278,7 @@ impl AppState {
         let (latest_cals, latest_cals_handle) = calibrations::LatestStore::spawn(
             64,
             layout.latest_cals(),
-            calibrations::latest_impl::DEFAULT_CAPACITY,
+            calibrations::latest::DEFAULT_CAPACITY,
         )
         .await;
         let layout = layout.calibrations();

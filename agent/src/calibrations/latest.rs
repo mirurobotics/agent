@@ -1,4 +1,5 @@
 // internal crates
+pub use crate::calibrations::latest_impl::DEFAULT_CAPACITY;
 use crate::calibrations::{
     errors::{CalibrationsErr, ReceiveActorMessageErr, SendActorMessageErr},
     latest_impl::{Filter, LatestStoreImpl},
