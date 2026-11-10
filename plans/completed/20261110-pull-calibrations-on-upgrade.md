@@ -22,7 +22,7 @@ Observable: upgrade an agent on a device whose calibrations are in the control p
 
 1. **Merge instead of overwrite.** `ReportMetadata::is_as_new_as`; `LatestStore::put_if_newer`, which checks and puts in one worker command; the pull lists the store once, skips keys it has as new or newer before downloading, and puts the rest with `put_if_newer`. Reprovision, the only caller, pulls into an emptied store, so its behavior doesn't change.
 2. **Store queued reports at startup.** The uploader's worker, after `prune_orphans`, puts each queued report with `put_if_newer` unless the store has its key as new or newer. Failures are logged.
-3. **Pull once per run.** At startup the agent runs `calibrations::pull_latest_until_success` in the background, which covers an upgrade. It retries with a wait that grows to an hour until a pull succeeds, and shutdown stops it before `AppState` shuts the store down.
+3. **Pull once per run.** At startup the agent runs `calibrations::pull_latest_until_success` in the background, which covers an upgrade. It retries with the uploaders' waits (a flat 10 s after a network error, else 10 s doubling to an hour) until a pull succeeds, and shutdown stops it before `AppState` shuts the store down.
 
 ## Decisions
 

@@ -19,11 +19,11 @@ use crate::http::{
 
 // external crates
 use backend_api::models::Calibration;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
-// Caps at an hour, as the uploaders' retries do, since some failures persist.
+// The uploaders' retry policy: 10 s doubling to an hour.
 const PULL_BACKOFF: cooldown::Backoff = cooldown::Backoff {
-    base_secs: 1,
+    base_secs: 10,
     growth_factor: 2,
     max_secs: 3600,
 };
@@ -114,12 +114,14 @@ pub async fn pull_latest_until_success<HTTPClientT, TokenManagerT>(
             Err(e) => e,
         };
         let wait = if e.is_network_conn_err() {
+            debug!("calibrations: unable to reach the control plane to pull, retrying: {e}");
             PULL_BACKOFF.base_secs
         } else {
             failures = failures.saturating_add(1);
-            cooldown::calc(&PULL_BACKOFF, failures - 1)
+            let wait = cooldown::calc(&PULL_BACKOFF, failures - 1);
+            warn!("calibrations: unable to pull the latest calibrations, retrying in {wait}s: {e}");
+            wait
         };
-        warn!("calibrations: unable to pull the latest calibrations, retrying in {wait}s: {e}");
         tokio::time::sleep(Duration::from_secs(wait as u64)).await;
     }
 }
