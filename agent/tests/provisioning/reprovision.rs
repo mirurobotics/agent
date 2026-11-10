@@ -8,7 +8,7 @@ use crate::test_utils::calibrations::{miru_calibration, report};
 use backend_api::models::{CalibrationList, TokenResponse};
 use miru_agent::calibrations::{latest, Filter, LatestStore, ReportMetadata};
 use miru_agent::disk::Layout;
-use miru_agent::filesys::{files, PathExt, WriteOptions};
+use miru_agent::filesys::{files, File, PathExt, WriteOptions};
 use miru_agent::http::{errors::MockErr, HTTPErr};
 use miru_agent::provisioning::{errors::*, reprovision};
 
@@ -142,7 +142,29 @@ pub mod reprovision_fn {
     }
 
     #[tokio::test]
-    async fn a_failed_pull_wipes_the_calibrations_and_returns_calibrations_err() {
+    async fn a_failed_calibrations_delete_fails_reprovision() {
+        let env = Env::new("reprovision-test").await;
+        env.seed_provision("initial").await;
+        // a file where the calibrations dir belongs can't be deleted as a dir
+        let cals_root = File::new(env.layout.calibrations().root.path().clone());
+        files::write_string(&cals_root, "not a dir", WriteOptions::OVERWRITE_ATOMIC)
+            .await
+            .unwrap();
+        let mock = mock_ok_reprovision("after-reprovision");
+
+        let result = reprovision::reprovision(&mock, &env.layout, &env.settings, &env.token).await;
+
+        assert!(
+            matches!(result, Err(ProvisionErr::FileSysErr(_))),
+            "{result:?}"
+        );
+        assert_eq!(mock.call_count(mock::Call::ListLatestCalibrations), 0);
+
+        env.cleanup().await;
+    }
+
+    #[tokio::test]
+    async fn a_failed_pull_wipes_the_calibrations_and_still_reprovisions() {
         let env = Env::new("reprovision-test").await;
         env.seed_provision("initial").await;
         seed_calibrations(&env.layout).await;
@@ -153,9 +175,11 @@ pub mod reprovision_fn {
             }))
         });
 
-        let result = reprovision::reprovision(&mock, &env.layout, &env.settings, &env.token).await;
+        let device = reprovision::reprovision(&mock, &env.layout, &env.settings, &env.token)
+            .await
+            .unwrap();
 
-        assert!(matches!(result, Err(ProvisionErr::CalibrationsErr(_))));
+        assert_eq!(device.name, "after-reprovision");
         assert!(latest_entries(&env.layout).await.is_empty());
         assert_queue_deleted(&env.layout);
         validate_storage(&env.layout, "after-reprovision").await;
@@ -164,7 +188,7 @@ pub mod reprovision_fn {
     }
 
     #[tokio::test]
-    async fn a_failed_token_wipes_the_calibrations() {
+    async fn a_failed_token_wipes_the_calibrations_and_still_reprovisions() {
         let env = Env::new("reprovision-test").await;
         env.seed_provision("initial").await;
         seed_calibrations(&env.layout).await;
@@ -174,11 +198,14 @@ pub mod reprovision_fn {
             ..mock_ok_reprovision("after-reprovision")
         };
 
-        let result = reprovision::reprovision(&mock, &env.layout, &env.settings, &env.token).await;
+        reprovision::reprovision(&mock, &env.layout, &env.settings, &env.token)
+            .await
+            .unwrap();
 
-        assert!(matches!(result, Err(ProvisionErr::AuthnErr(_))));
+        assert_eq!(mock.call_count(mock::Call::ListLatestCalibrations), 0);
         assert!(latest_entries(&env.layout).await.is_empty());
         assert_queue_deleted(&env.layout);
+        validate_storage(&env.layout, "after-reprovision").await;
         assert_temp_dir_cleaned(&env.layout).await;
 
         env.cleanup().await;
