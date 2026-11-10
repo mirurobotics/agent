@@ -32,8 +32,8 @@ pub struct UploaderOptions {
 impl Default for UploaderOptions {
     /// At most 1,000 reports of up to 1 MiB of data each (1 GiB at worst),
     /// the most calibration data the control plane accepts, retried as the
-    /// data uploads are but kept far longer: a calibration is costly to redo, and the cap
-    /// already bounds the storage it holds.
+    /// data uploads are but kept far longer: a calibration is costly to redo,
+    /// and the cap already bounds the storage it holds.
     fn default() -> Self {
         Self {
             capacity: 1000,
