@@ -42,7 +42,8 @@ No new files. The helper sits in the `HELPERS` section of `agent/tests/app/run.r
 
 - [x] Milestone 1: set `backend_host` in `agent/tests/app/run.rs` and commit.
 - [x] Source written
-- [ ] Validation: `$preflight` reports `CLEAN`.
+- [x] Tests written (none new: the six existing tests in `agent/tests/app/run.rs` cover the change and passed in CI)
+- [x] Validation: CI green on d7a8313; the final run on this branch's head confirms it.
 
 ## Surprises & Discoveries
 
