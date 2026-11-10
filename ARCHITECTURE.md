@@ -84,7 +84,7 @@ The calibration uploader's worker also writes the latest calibrations store (`ca
 ### Background workers
 
 `workers/` — long-running tasks:
-- `calibrations_pull` — pulls Miru's latest calibrations into the latest store after each successful sync until one pull succeeds, then returns.
+- `calibrations_pull` — pulls the control plane's latest calibrations into the latest store after each successful sync until one pull succeeds, then returns.
 - `mqtt` — subscribes to MQTT topics, triggers sync on events.
 - `poller` — periodic backend sync on a timer.
 - `token_refresh` — rotates JWT before expiry.

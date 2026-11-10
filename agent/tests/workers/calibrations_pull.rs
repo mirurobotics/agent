@@ -30,7 +30,7 @@ use tokio::task::JoinHandle;
 /// Fails a test that would otherwise hang.
 const HANG_GUARD: Duration = Duration::from_secs(5);
 
-/// A running worker over a mock syncer and Miru, and a real latest store.
+/// A running worker over a mock syncer and control plane, and a real latest store.
 struct Worker {
     _dir: test_dirs::TempDir,
     syncer: Arc<MockSyncer>,
@@ -79,7 +79,7 @@ impl Worker {
         }
     }
 
-    /// Miru serves the fixture calibration for `arm`.
+    /// The control plane serves the fixture calibration for `arm`.
     fn serve_arm(&self) {
         let list = CalibrationList {
             data: vec![miru_calibration("arm")],
@@ -111,7 +111,7 @@ impl Worker {
         self.store.list(&Filter::default()).await.unwrap()
     }
 
-    /// Wait until `n` lists of Miru's latest have been made.
+    /// Wait until `n` lists of the control plane's latest have been made.
     async fn await_lists(&self, n: usize) {
         guard(async {
             while self.num_lists() < n {
