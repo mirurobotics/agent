@@ -191,6 +191,7 @@ mod tests {
     use super::{check_capacity, is_allowed, key_parts, not_found, take_entry, Index};
     use crate::test_utils::calibrations::reported;
     use miru_agent::calibrations::ReportMetadata;
+    use miru_agent::models::InstanceFormat;
 
     // external crates
     use chrono::TimeDelta;
@@ -200,6 +201,7 @@ mod tests {
     fn same_key(metadata: &ReportMetadata) -> ReportMetadata {
         ReportMetadata {
             report_id: Uuid::new_v4(),
+            format: InstanceFormat::Yaml,
             serial_number: Some("other".to_string()),
             reported_by: Some("other".to_string()),
             deployment_id: Some("other".to_string()),

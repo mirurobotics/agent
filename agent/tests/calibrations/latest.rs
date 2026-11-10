@@ -126,7 +126,8 @@ async fn open_deletes_the_contents_no_entry_names() {
     assert_eq!(f.content_ids().await, [arm.report_id]);
 }
 
-#[tokio::test]
+// paused, so the read's retries don't wait in real time
+#[tokio::test(start_paused = true)]
 async fn open_keeps_the_contents_when_the_index_cannot_be_read() {
     let f = Fixture::new().await;
     let orphan = Uuid::new_v4();
@@ -401,6 +402,32 @@ async fn a_corrupt_index_fails_every_call() {
     for err in errs {
         assert!(matches!(err, CalibrationsErr::FileSysErr(_)), "{err:?}");
     }
+}
+
+// The index is a directory until 10 ms, between the first read and the first
+// retry at 50 ms. Time is paused, so the order is fixed.
+#[tokio::test(start_paused = true)]
+async fn list_retries_an_index_read_that_fails_for_a_moment() {
+    let f = Fixture::new().await;
+    let arm = reported("arm", None, None);
+    put_all(&f.store, &[&arm]).await;
+    let index = f.layout.index();
+    let saved = files::read_string(&index).await.unwrap();
+    files::delete(&index).await.unwrap();
+    let blocker = f.layout.root.subdir("index.json");
+    dirs::create(&blocker).await.unwrap();
+
+    let fixer = tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        tokio::fs::remove_dir(blocker.path()).await.unwrap();
+        files::write_string(&index, &saved, WriteOptions::OVERWRITE_ATOMIC)
+            .await
+            .unwrap();
+    });
+
+    let entries = f.store.list(&Filter::default()).await.unwrap();
+    fixer.await.unwrap();
+    assert_eq!(entries, [arm]);
 }
 
 #[tokio::test]
