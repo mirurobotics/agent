@@ -3,6 +3,7 @@
 
 pub mod errors;
 pub mod latest;
+mod latest_impl;
 pub mod report;
 pub mod sender;
 pub mod uploader;
