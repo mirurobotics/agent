@@ -173,7 +173,10 @@ impl IntoResponse for Report {
         };
         let disposition = format!("inline; filename=\"{filename}\"");
         let headers = [
-            (header::CONTENT_TYPE, metadata.format.media_type().to_string()),
+            (
+                header::CONTENT_TYPE,
+                metadata.format.media_type().to_string(),
+            ),
             (header::CONTENT_DISPOSITION, disposition),
         ];
         (StatusCode::OK, headers, self.data).into_response()
