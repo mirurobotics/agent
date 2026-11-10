@@ -65,6 +65,6 @@ To be filled in when the last PR merges.
 
 CI runs the suite on each PR.
 
-- PR 1, `tests/calibrations/latest.rs`: `put_if_newer` puts a new key or a later report and keeps an entry reported at the same time or later. `tests/calibrations/pull.rs`: replaces an older entry; keeps an entry as new or newer without downloading; keeps keys Miru doesn't have.
+- PR 1, `tests/calibrations/latest.rs`: `put_if_newer` puts a new key or a later report and keeps an entry reported at the same time or later. `tests/calibrations/merge.rs`: replaces an older entry; keeps an entry as new or newer without downloading; keeps keys Miru doesn't have.
 - PR 2, `tests/calibrations/uploader.rs`: queued reports the store lacks are stored at startup; a stored entry as new or newer is kept.
 - PR 3, `sync/syncer.rs` `latest_calibrations`: a sync pulls once and a later sync doesn't; a failed pull is retried on the next sync; an unreachable Miru skips the pull.
