@@ -23,7 +23,8 @@ Observable: upgrade an agent on a device whose calibrations are in Miru but not 
 - **Mark on upgrade, pull on a later sync (the user's pick in the project thread).** The agent starts serving without waiting on the pull. Until the first successful pull after an upgrade, the list can lack reports that only Miru has; the docs say so. The alternative, pulling inside reconcile, would make the list complete at start but makes startup wait on the downloads.
 - **The mark lives in `index.json`.** `index.json` is an object so a store-wide field can be added (#451). `needs_pull` defaults to `false` when missing, so existing stores read as unmarked, and an agent rolled back to ignores it. An older agent that rewrites the index drops it, which is fine: the next upgrade marks it again.
 - **Mark before `reset`.** `reset` writes the version marker last, so a crash before the mark leaves the old marker and the next start reruns reconcile.
-- **A failed mark is logged.** A calibration problem never keeps the agent from starting.
+- **Upgrade also merges the upload queue** ([AI design review](https://github.com/mirurobotics/agent/pull/455#discussion_r4522167111)). Reports the older agent queued but hadn't uploaded aren't in Miru yet, and the uploader writes the store only at intake, so a pull alone would miss them. `calibrations::merge_queued` reads `queue.json` and each report file and puts each report with `put_if_newer`, needing no network. A report file that can't be read is skipped.
+- **Failures are logged.** A failed mark or queue merge never keeps the agent from starting.
 - **The merge compares inside the store's worker.** The agent runs while the syncer pulls, so intake may write the same key. `LatestStore::put_if_newer` checks `reported_at` and puts in one command, so a report the device just took is never overwritten by an older one from Miru. Equal times keep the stored entry.
 - **One merge for reprovision and the syncer.** Reprovision deletes `calibrations/` first, so merging into its empty store puts every key, as before; its behavior and tests are unchanged.
 - **Best-effort in the syncer, like the system metadata sync.** The pull runs after the deployments sync unless that hit a network error, and a failure is logged and never fails the sync.
@@ -36,6 +37,7 @@ Observable: upgrade an agent on a device whose calibrations are in Miru but not 
 | `needs_pull` (field, `LatestStore::needs_pull`, `set_needs_pull`) | A question, for a bool. |
 | `calibrations::mark_needs_pull` | Sets the mark on a store in a layout, while no agent runs. |
 | `calibrations::pull_if_needed` | Pulls only when marked. |
+| `calibrations::merge_queued` | Merges the upload queue's reports into the store. |
 | `LatestStore::put_if_newer` | `put`, with the condition. |
 
 ### Precedent
@@ -51,7 +53,7 @@ Observable: upgrade an agent on a device whose calibrations are in Miru but not 
 ## Progress
 
 - [x] Mark, `put_if_newer` and the merge.
-- [x] Upgrade reconcile marks; the syncer pulls a marked store.
+- [x] Upgrade reconcile marks and merges the queue; the syncer pulls a marked store.
 - [x] Tests written.
 - [x] `ARCHITECTURE.md`.
 - [ ] CI green.
@@ -75,4 +77,5 @@ CI runs the suite; preflight must report `CLEAN` (CI green on the pushed branch 
 - `tests/calibrations/latest.rs`: `put_if_newer` puts a new key or a later report, and keeps an entry reported at the same time or later; the mark persists, survives puts and clears; the index shape includes `needs_pull`.
 - `tests/calibrations/pull.rs`: replaces an older entry; keeps an entry as new or newer; keeps keys Miru doesn't have; `mark_needs_pull` marks; `pull_if_needed` pulls and unmarks a marked store, does nothing unmarked, and keeps the mark on failure.
 - `sync/syncer.rs` `latest_calibrations`: a sync pulls and unmarks a marked store; does nothing unmarked; skips the pull when Miru is unreachable; a failed pull keeps the mark and doesn't fail the sync.
-- `tests/app/upgrade.rs` `reconcile_impl`: marks the store without pulling.
+- `tests/calibrations/pull.rs` `merge_queued`: puts queued reports newer than the store, keeps a stored entry as new or newer, skips a report without data, and does nothing without a queue.
+- `tests/app/upgrade.rs` `reconcile_impl`: merges queued reports and marks the store, without pulling.

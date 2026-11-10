@@ -1,19 +1,21 @@
-//! Pulling Miru's latest calibrations into a latest calibrations store.
+//! Merging Miru's latest calibrations, and reports still queued for Miru, into
+//! a latest calibrations store.
 
 // internal crates
 use crate::calibrations::{
     errors::CalibrationsErr,
     latest::{LatestStore, DEFAULT_CAPACITY},
-    report::ReportMetadata,
+    report::{self, QueueSnapshot, ReportMetadata},
 };
-use crate::disk::layout::LatestCalsLayout;
+use crate::disk::layout::{CalibrationsLayout, LatestCalsLayout};
+use crate::filesys::{files, FileSysErr};
 use crate::http::{
     self,
     calibrations::{GetContentParams, ListAllLatestParams},
 };
 
 // external crates
-use tracing::info;
+use tracing::{info, warn};
 
 /// Merge Miru's latest calibrations into the latest store in `layout`, as
 /// [`merge_mirus_latest`] does. Any failure fails the call, so an emptied
@@ -35,6 +37,28 @@ pub async fn pull_latest<HTTPClientT: http::ClientI>(
 pub async fn mark_needs_pull(layout: LatestCalsLayout) -> Result<(), CalibrationsErr> {
     let (handle, _) = LatestStore::spawn(64, layout, DEFAULT_CAPACITY);
     handle.set_needs_pull(true).await
+}
+
+/// Put each report queued in `layout` into its latest store, unless the
+/// store's entry for that key was reported at the same time or later, for an
+/// agent that queued reports without writing the store. A report whose data
+/// can't be read is skipped.
+pub async fn merge_queued(layout: &CalibrationsLayout) -> Result<(), CalibrationsErr> {
+    let snapshot = match files::read_json::<QueueSnapshot>(&layout.queue()).await {
+        Err(FileSysErr::PathDoesNotExistErr(_)) => return Ok(()),
+        result => result?,
+    };
+    let (store, _) = LatestStore::spawn(64, layout.latest(), DEFAULT_CAPACITY);
+    let reports = layout.reports();
+    for entry in snapshot.entries {
+        match report::read_data(&report::report_file(&reports, entry.id)).await {
+            Ok(data) => {
+                store.put_if_newer(entry.job, &data).await?;
+            }
+            Err(e) => warn!("calibrations: not merging queued report {}: {e}", entry.id),
+        }
+    }
+    Ok(())
 }
 
 /// If `store` is marked, merge Miru's latest into it, then unmark it. A
@@ -77,10 +101,8 @@ async fn merge_mirus_latest<HTTPClientT: http::ClientI>(
             http::calibrations::get_content(http_client, GetContentParams { id, token })
         })
         .await?;
-        if store
-            .put_if_newer(ReportMetadata::from(calibration), &data)
-            .await?
-        {
+        let metadata = ReportMetadata::from(calibration);
+        if store.put_if_newer(metadata, &data).await? {
             put += 1;
         }
     }

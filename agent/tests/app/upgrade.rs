@@ -5,12 +5,14 @@ use std::time::Duration as StdDuration;
 
 // internal crates
 use crate::mocks::http_client::{Call, MockClient};
-use crate::test_utils::calibrations::latest_store;
-use crate::test_utils::filesys::{dirs as test_dirs, files as test_files};
+use crate::test_utils::{
+    calibrations::report,
+    filesys::{dirs as test_dirs, files as test_files},
+};
 use backend_api::models as backend_client;
 use miru_agent::app::upgrade::{needs_upgrade, reconcile, reconcile_impl, Outcome, Reconcile};
 use miru_agent::app::UpgradeErr;
-use miru_agent::calibrations::latest;
+use miru_agent::calibrations::{latest, Filter, LatestStore, QueueEntry, QueueSnapshot};
 use miru_agent::crypt::rsa;
 use miru_agent::disk::{self, Backend, BackendHost, Layout, MQTTBroker, MqttHost, Settings};
 use miru_agent::filesys::{dirs, files, FileSysErr, Overwrite, PathExt, WriteOptions};
@@ -21,6 +23,7 @@ use miru_agent::shutdown::Latch;
 // external crates
 use chrono::{Duration, Utc};
 use tokio::sync::oneshot;
+use uuid::Uuid;
 
 // ============================ TEST HARNESS ============================ //
 
@@ -549,15 +552,36 @@ mod reconcile_impl {
     }
 
     #[tokio::test]
-    async fn marks_the_latest_calibrations_for_a_pull() {
-        let (layout, tmp) = prepare_layout("reconcile_impl_marks_pull").await;
-        let mock = make_mock_client(backend_device("dvc_mp1", "marks_pull"));
+    async fn merges_queued_calibrations_and_marks_the_store_for_a_pull() {
+        let (layout, _tmp) = prepare_layout("reconcile_impl_catch_up_cals").await;
+        let cals = layout.calibrations();
+        let arm = report("arm");
+        let entry_id = Uuid::new_v4();
+        let snapshot = QueueSnapshot {
+            entries: vec![QueueEntry {
+                id: entry_id,
+                job: arm.metadata.clone(),
+                attempts: 0,
+                next_attempt_at: None,
+            }],
+        };
+        let opts = WriteOptions::OVERWRITE_ATOMIC;
+        files::write_json(&cals.queue(), &snapshot, opts)
+            .await
+            .unwrap();
+        let report_file = cals.reports().file(&entry_id.to_string());
+        files::write_string(&report_file, &arm.data, opts)
+            .await
+            .unwrap();
+        let mock = make_mock_client(backend_device("dvc_cu1", "catch_up"));
 
         reconcile_impl(mock.as_ref(), &layout, "v1.0.0")
             .await
             .unwrap();
 
-        let store = latest_store(&tmp, latest::DEFAULT_CAPACITY).await;
+        let (store, _) = LatestStore::spawn(64, cals.latest(), latest::DEFAULT_CAPACITY);
+        let entries = store.list(&Filter::default()).await.unwrap();
+        assert_eq!(entries, vec![arm.metadata]);
         assert!(store.needs_pull().await.unwrap());
         assert_eq!(mock.call_count(Call::ListLatestCalibrations), 0);
     }

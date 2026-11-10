@@ -3,15 +3,19 @@
 // internal crates
 use crate::mocks::http_client::{Call, MockClient};
 use crate::test_utils::calibrations::{
-    latest_cals_layout, latest_store, miru_calibration, report, report_id, reported,
+    latest_cals_layout, latest_store, layout, miru_calibration, report, report_id, reported,
 };
 use crate::test_utils::filesys::dirs as test_dirs;
 use backend_api::models::CalibrationList;
-use miru_agent::calibrations::{self, latest, CalibrationsErr, Filter, Report, ReportMetadata};
+use miru_agent::calibrations::{
+    self, latest, CalibrationsErr, Filter, QueueEntry, QueueSnapshot, Report, ReportMetadata,
+};
+use miru_agent::filesys::{files, WriteOptions};
 use miru_agent::http::{errors::MockErr, HTTPErr};
 
 // external crates
 use chrono::TimeDelta;
+use uuid::Uuid;
 
 struct Fixture {
     dir: test_dirs::TempDir,
@@ -238,4 +242,79 @@ async fn a_failed_pull_if_needed_keeps_the_mark() {
 
     assert!(matches!(result, Err(CalibrationsErr::HTTPErr(_))));
     assert!(store.needs_pull().await.unwrap());
+}
+
+// ============================ MERGE QUEUED ============================== //
+/// Queue each of `reports` in the fixture's upload queue, with a report file
+/// holding `data` for each except those named in `without_data`.
+async fn queue(fx: &Fixture, reports: &[ReportMetadata], without_data: &[&str]) {
+    let cals = layout(&fx.dir);
+    let opts = WriteOptions::OVERWRITE_ATOMIC;
+    let mut snapshot = QueueSnapshot::default();
+    for metadata in reports {
+        let entry = QueueEntry {
+            id: Uuid::new_v4(),
+            job: metadata.clone(),
+            attempts: 0,
+            next_attempt_at: None,
+        };
+        if !without_data.contains(&metadata.component.as_str()) {
+            let file = cals.reports().file(&entry.id.to_string());
+            let data = format!("queued {}", metadata.component);
+            files::write_string(&file, &data, opts).await.unwrap();
+        }
+        snapshot.entries.push(entry);
+    }
+    files::write_json(&cals.queue(), &snapshot, opts)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn merge_queued_puts_queued_reports_newer_than_the_store() {
+    let fx = Fixture::new();
+    let arm = reported_after("arm", 1);
+    let leg = reported("leg", None, None);
+    seed(&fx, &[reported("arm", None, None)]).await;
+    queue(&fx, &[arm.clone(), leg.clone()], &[]).await;
+
+    calibrations::merge_queued(&layout(&fx.dir)).await.unwrap();
+
+    assert_eq!(fx.entries().await, vec![arm.clone(), leg]);
+    let store = latest_store(&fx.dir, latest::DEFAULT_CAPACITY).await;
+    let found = store.get(arm.report_id).await.unwrap();
+    assert_eq!(found.data, "queued arm");
+}
+
+#[tokio::test]
+async fn merge_queued_keeps_a_stored_entry_as_new_or_newer() {
+    let fx = Fixture::new();
+    let stored = reported_after("arm", 1);
+    seed(&fx, std::slice::from_ref(&stored)).await;
+    queue(&fx, &[reported("arm", None, None)], &[]).await;
+
+    calibrations::merge_queued(&layout(&fx.dir)).await.unwrap();
+
+    assert_eq!(fx.entries().await, vec![stored]);
+}
+
+#[tokio::test]
+async fn merge_queued_skips_a_report_without_data() {
+    let fx = Fixture::new();
+    let arm = reported("arm", None, None);
+    let leg = reported("leg", None, None);
+    queue(&fx, &[arm, leg.clone()], &["arm"]).await;
+
+    calibrations::merge_queued(&layout(&fx.dir)).await.unwrap();
+
+    assert_eq!(fx.entries().await, vec![leg]);
+}
+
+#[tokio::test]
+async fn merge_queued_does_nothing_without_a_queue() {
+    let fx = Fixture::new();
+
+    calibrations::merge_queued(&layout(&fx.dir)).await.unwrap();
+
+    assert!(fx.entries().await.is_empty());
 }

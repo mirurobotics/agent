@@ -145,7 +145,7 @@ pub async fn reconcile_impl<HTTPClientT: ClientI>(
         }
     };
     // before reset writes the version marker, so a crash can't skip it
-    mark_calibrations_for_pull(layout).await;
+    catch_up_calibrations(layout).await;
     disk::setup::reset(layout, &device, &settings, version).await?;
     update_device(http_client, &device, version, &token).await?;
     Ok(())
@@ -162,13 +162,17 @@ async fn issue_token<HTTPClientT: ClientI>(
     Ok(token)
 }
 
-/// Mark the latest calibrations store to merge in Miru's latest once the
-/// agent syncs, since an older agent may not have written it. A failure is
-/// logged, so a calibration never keeps the agent from starting.
-async fn mark_calibrations_for_pull(layout: &Layout) {
-    let latest = layout.calibrations().latest();
-    if let Err(e) = calibrations::mark_needs_pull(latest).await {
+/// Bring the latest calibrations store up to date for an older agent that
+/// didn't write it: merge in the reports it queued, and mark the store so the
+/// syncer merges in Miru's latest. A failure is logged, so a calibration never
+/// keeps the agent from starting.
+async fn catch_up_calibrations(layout: &Layout) {
+    let cals = layout.calibrations();
+    if let Err(e) = calibrations::mark_needs_pull(cals.latest()).await {
         error!("upgrade: the latest calibrations may stay incomplete: {e}");
+    }
+    if let Err(e) = calibrations::merge_queued(&cals).await {
+        error!("upgrade: the latest calibrations may lack queued reports: {e}");
     }
 }
 
