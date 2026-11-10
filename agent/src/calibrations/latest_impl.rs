@@ -148,22 +148,9 @@ impl LatestStoreImpl {
         else {
             return;
         };
-        match self.move_index_aside().await {
-            Ok(aside) => error!(
-                "calibrations: latest index could not be parsed ({err}); moved it to {aside}"
-            ),
-            Err(move_err) => error!(
-                "calibrations: latest index could not be parsed ({err}) or moved aside \
-                 ({move_err})"
-            ),
-        }
-    }
-
-    async fn move_index_aside(&self) -> Result<File, FileSysErr> {
-        let name = format!("{}.corrupt-{}", self.index.name()?, Uuid::new_v4());
-        let aside = self.index.parent()?.file(&name);
-        files::move_to(&self.index, &aside, Overwrite::Deny).await?;
-        Ok(aside)
+        let aside = File::new(format!("{}.corrupt-{}", self.index, Uuid::new_v4()));
+        let moved = files::move_to(&self.index, &aside, Overwrite::Deny).await;
+        error!("calibrations: unparseable latest index ({err}) moved to {aside}: {moved:?}");
     }
 
     /// Delete the content no entry names, which a crash or a failed write or
