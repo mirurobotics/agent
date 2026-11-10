@@ -8,7 +8,7 @@ use crate::test_utils::calibrations::{miru_calibration, report};
 use backend_api::models::{CalibrationList, TokenResponse};
 use miru_agent::calibrations::{latest, Filter, LatestStore, ReportMetadata};
 use miru_agent::disk::Layout;
-use miru_agent::filesys::{files, PathExt, WriteOptions};
+use miru_agent::filesys::{files, File, PathExt, WriteOptions};
 use miru_agent::http::{errors::MockErr, HTTPErr};
 use miru_agent::provisioning::{errors::*, reprovision};
 
@@ -44,18 +44,6 @@ fn assert_queue_deleted(layout: &Layout) {
 
 pub mod reprovision_fn {
     use super::*;
-    #[cfg(unix)]
-    use std::os::unix::fs::PermissionsExt;
-
-    /// Set the mode of the device's calibration reports dir.
-    #[cfg(unix)]
-    async fn set_reports_mode(layout: &Layout, mode: u32) {
-        let reports = layout.calibrations().reports();
-        let permissions = std::fs::Permissions::from_mode(mode);
-        miru_agent::filesys::dirs::set_permissions(&reports, permissions)
-            .await
-            .unwrap();
-    }
 
     #[tokio::test]
     async fn success() {
@@ -153,19 +141,19 @@ pub mod reprovision_fn {
         env.cleanup().await;
     }
 
-    #[cfg(unix)]
     #[tokio::test]
     async fn a_failed_calibrations_delete_fails_reprovision() {
         let env = Env::new("reprovision-test").await;
         env.seed_provision("initial").await;
-        seed_calibrations(&env.layout).await;
-        // a queued report that can't be removed fails the delete
-        set_reports_mode(&env.layout, 0o555).await;
+        // a file where the calibrations dir belongs can't be deleted as a dir
+        let cals_root = File::new(env.layout.calibrations().root.path().clone());
+        files::write_string(&cals_root, "not a dir", WriteOptions::OVERWRITE_ATOMIC)
+            .await
+            .unwrap();
         let mock = mock_ok_reprovision("after-reprovision");
 
         let result = reprovision::reprovision(&mock, &env.layout, &env.settings, &env.token).await;
 
-        set_reports_mode(&env.layout, 0o755).await;
         assert!(
             matches!(result, Err(ProvisionErr::FileSysErr(_))),
             "{result:?}"
