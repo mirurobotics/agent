@@ -62,21 +62,25 @@ No new test files: actor tests go in the existing `agent/tests/calibrations/late
 ## Progress
 
 - [x] Milestone 0: branch stacked on the calibration rename PR (agent#446).
-- [ ] Milestone 1: move `latest.rs` to `latest_impl.rs` (move only), committed.
-- [ ] Milestone 2: `LatestStoreImpl` with the in-memory index, and the actor in `latest.rs`, committed.
-- [ ] Milestone 3: `AppState` shuts the store down; `ARCHITECTURE.md` updated; committed.
+- [x] Milestone 1: move `latest.rs` to `latest_impl.rs` (move only), committed.
+- [x] Milestone 2: `LatestStoreImpl` with the in-memory index, and the actor in `latest.rs`, committed.
+- [x] Milestone 3: `AppState` shuts the store down; `ARCHITECTURE.md` updated; committed.
+- [x] Source written
 - [ ] Milestone 4 (tests stage): tests updated and added, committed.
 - [ ] Validation: `$preflight` reports `CLEAN`.
 
 ## Surprises & Discoveries
 
-(Add entries as work proceeds.)
+- The move commit also rewraps the `miru_agent::calibrations` import in `agent/tests/services/calibration/create.rs`: `latest_impl` pushes it past 100 columns.
+- `ARCHITECTURE.md` names `calibrations::latest::DEFAULT_CAPACITY` too; Context's list of its users left it out.
 
 ## Decision Log
 
 - 2026-11-10: The three open questions take their defaults (open keeps its signature and detaches the worker; an unreadable index fails each call until a read succeeds; `Filter` and `DEFAULT_CAPACITY` live in `latest_impl.rs`). The design review may revisit the first.
 - 2026-11-10: Coverage gates are never lowered; uncovered actor plumbing gets tests instead.
 - 2026-11-10: The branch is stacked on the rename PR (agent#446) instead of waiting for it to merge, and is retargeted to `main` once #446 merges.
+- 2026-11-10: `LatestStoreImpl::index` returns `&Index`, not `&mut Index`: `put` edits a copy and every other caller only reads.
+- 2026-11-10: The `ARCHITECTURE.md` path `latest::DEFAULT_CAPACITY` → `latest_impl::DEFAULT_CAPACITY` landed in milestone 3's commit with the rest of the doc edits, not in the move commit, which was already made when it turned up.
 
 ## Outcomes & Retrospective
 
