@@ -4,7 +4,7 @@ use std::collections::HashSet;
 // internal crates
 use crate::calibrations::{
     errors::{CalibrationNotFoundErr, CalibrationStoreFullErr, CalibrationsErr},
-    report::ReportMetadata,
+    report::{Report, ReportMetadata},
 };
 use crate::disk::layout::LatestCalsLayout;
 use crate::filesys::{dirs, files, Dir, File, FileSysErr, WriteOptions};
@@ -90,15 +90,18 @@ impl LatestStoreImpl {
         Ok(entries)
     }
 
-    /// The data of the entry for `report_id`.
-    pub(crate) async fn content(&self, report_id: Uuid) -> Result<String, CalibrationsErr> {
+    /// The entry for `report_id`, with its data.
+    pub(crate) async fn get(&self, report_id: Uuid) -> Result<Report, CalibrationsErr> {
         let index = self.read_index().await?;
-        if !index.iter().any(|m| m.report_id == report_id) {
+        let Some(entry) = index.into_iter().find(|m| m.report_id == report_id) else {
             return Err(not_found(report_id));
-        }
+        };
         match files::read_string(&self.content_file(report_id)).await {
             Err(FileSysErr::PathDoesNotExistErr(_)) => Err(not_found(report_id)),
-            result => Ok(result?),
+            result => Ok(Report {
+                metadata: entry,
+                data: result?,
+            }),
         }
     }
 

@@ -79,19 +79,18 @@ pub async fn latest_store(dir: &TempDir, capacity: usize) -> LatestStore {
     store
 }
 
-/// A calibration uploader under `dir` that keeps its queue in memory, holds at
-/// most `latest_capacity` keys in its latest store, and uploads through
-/// `sender`.
-pub async fn cal_uploader<S: Sender + 'static>(
+/// A calibration uploader under `dir` that keeps its queue in memory, writes
+/// through to `latest`, and uploads through `sender`.
+pub fn cal_uploader<S: Sender + 'static>(
     dir: &TempDir,
     sender: Arc<S>,
     options: UploaderOptions,
-    latest_capacity: usize,
+    latest: LatestStore,
 ) -> Uploader {
     let args = UploaderArgs {
         snapshot_file: None,
         reports: layout(dir).reports(),
-        latest: latest_store(dir, latest_capacity).await,
+        latest,
         sender,
         options,
         sleep_fn: tokio::time::sleep,

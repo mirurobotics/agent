@@ -2,7 +2,7 @@
 use crate::calibrations::{
     errors::{CalibrationsErr, ReceiveActorMessageErr, SendActorMessageErr},
     latest_impl::{Filter, LatestStoreImpl},
-    report::ReportMetadata,
+    report::{Report, ReportMetadata},
 };
 use crate::disk::layout::LatestCalsLayout;
 use crate::trace;
@@ -27,9 +27,9 @@ enum Command {
         filter: Filter,
         respond_to: oneshot::Sender<Result<Vec<ReportMetadata>, CalibrationsErr>>,
     },
-    Content {
+    Get {
         report_id: Uuid,
-        respond_to: oneshot::Sender<Result<String, CalibrationsErr>>,
+        respond_to: oneshot::Sender<Result<Report, CalibrationsErr>>,
     },
     Shutdown {
         respond_to: oneshot::Sender<()>,
@@ -60,12 +60,12 @@ impl Worker {
                     let result = self.store.list(&filter).await;
                     respond(respond_to, result, "list");
                 }
-                Command::Content {
+                Command::Get {
                     report_id,
                     respond_to,
                 } => {
-                    let result = self.store.content(report_id).await;
-                    respond(respond_to, result, "content");
+                    let result = self.store.get(report_id).await;
+                    respond(respond_to, result, "get");
                 }
                 Command::Shutdown { respond_to } => {
                     respond(respond_to, (), "shutdown");
@@ -129,10 +129,10 @@ impl LatestStore {
         .await?
     }
 
-    /// The data of the entry for `report_id`. Not found unless an entry has
+    /// The entry for `report_id`, with its data. Not found unless an entry has
     /// that `report_id` and its content exists.
-    pub async fn content(&self, report_id: Uuid) -> Result<String, CalibrationsErr> {
-        self.send_command("content", |respond_to| Command::Content {
+    pub async fn get(&self, report_id: Uuid) -> Result<Report, CalibrationsErr> {
+        self.send_command("get", |respond_to| Command::Get {
             report_id,
             respond_to,
         })

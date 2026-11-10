@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 // internal crates
 use crate::errors::Error;
-use crate::server::{errors::*, routes, state::State};
+use crate::server::{errors::*, request, response, routes, state::State};
 use crate::services::{
     calibration as calibration_svc, deployment as dpl_svc, device as dvc_svc,
     file_rule as file_rule_svc, git_commit as git_cmt_svc, release as rls_svc, HttpBackend,
@@ -15,9 +15,12 @@ use device_api::models as device_server;
 
 // external crates
 use axum::{
-    extract::{rejection::JsonRejection, Path, State as AxumState},
+    extract::{
+        rejection::{JsonRejection, QueryRejection},
+        Path, Query, State as AxumState,
+    },
     http::StatusCode,
-    response::IntoResponse,
+    response::{IntoResponse, Response},
     Json,
 };
 use chrono::Utc;
@@ -196,6 +199,33 @@ pub async fn create_calibration(
     .await
 }
 
+pub async fn list_latest_calibrations(
+    AxumState(state): AxumState<Arc<State>>,
+    query: Result<Query<request::LatestCalibrationsQuery>, QueryRejection>,
+) -> impl IntoResponse {
+    handle(
+        async {
+            let Query(query) = query.map_err(reject_query)?;
+            let filter = query.into();
+            let latest = calibration_svc::list_latest(&state.latest_cals, &filter).await?;
+            Ok::<_, ServerErr>(response::latest_calibrations(&latest))
+        },
+        "Error listing latest calibrations",
+    )
+    .await
+}
+
+/// The content's bytes on success, rather than JSON.
+pub async fn get_latest_calibration_content(
+    AxumState(state): AxumState<Arc<State>>,
+    Path(report_id): Path<String>,
+) -> Response {
+    match calibration_svc::get_content(&state.latest_cals, &report_id).await {
+        Ok(content) => response::calibration_content(content),
+        Err(e) => error_response(e.into(), "Error getting calibration content").into_response(),
+    }
+}
+
 /// A body over the limit is 413; any other unreadable body is 422.
 fn reject_body(rejection: JsonRejection) -> ServerErr {
     if rejection.status() == StatusCode::PAYLOAD_TOO_LARGE {
@@ -204,6 +234,14 @@ fn reject_body(rejection: JsonRejection) -> ServerErr {
             trace: trace!(),
         });
     }
+    ServerErr::InvalidRequestErr(InvalidRequestErr {
+        msg: rejection.body_text(),
+        trace: trace!(),
+    })
+}
+
+/// An unreadable query, such as a repeated filter, is 422.
+fn reject_query(rejection: QueryRejection) -> ServerErr {
     ServerErr::InvalidRequestErr(InvalidRequestErr {
         msg: rejection.body_text(),
         trace: trace!(),
@@ -219,12 +257,13 @@ where
 {
     match service.await {
         Ok(val) => (StatusCode::OK, Json(json!(val))),
-        Err(e) => {
-            let e: ServerErr = e.into();
-            error!("{err_msg}: {e:?}");
-            (e.http_status(), Json(json!(to_error_response(e))))
-        }
+        Err(e) => error_response(e.into(), err_msg),
     }
+}
+
+fn error_response(e: ServerErr, err_msg: &str) -> (StatusCode, Json<Value>) {
+    error!("{err_msg}: {e:?}");
+    (e.http_status(), Json(json!(to_error_response(e))))
 }
 
 fn to_error_response(e: impl Error) -> device_server::ErrorResponse {

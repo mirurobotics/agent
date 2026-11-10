@@ -1,5 +1,5 @@
-//! The calibration service fixture: a calibration uploader with a mock sender
-//! and a deployments cache, under a temp dir.
+//! The calibration service fixture: a calibration uploader with a mock sender,
+//! its latest store and a deployments cache, under a temp dir.
 
 // standard crates
 use std::sync::Arc;
@@ -7,12 +7,13 @@ use std::time::Duration;
 
 // internal crates
 use crate::mocks::calibration_sender::MockCalibrationSender;
-use crate::test_utils::calibrations::{latest_store, layout, received_at};
+use crate::test_utils::calibrations::{latest_cals_layout, latest_store, layout, received_at};
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::calibrations::{
-    latest, QueueSnapshotFile, Report, Uploader, UploaderArgs, UploaderOptions,
+    latest, LatestStore, QueueSnapshotFile, Report, Uploader, UploaderArgs, UploaderOptions,
 };
 use miru_agent::disk::{self, Layout};
+use miru_agent::filesys::{files, WriteOptions};
 use miru_agent::models::{Deployment, DplActivity, InstanceFormat};
 use miru_agent::services::calibration::{self, CreateParams, Created};
 use miru_agent::services::ServiceErr;
@@ -22,8 +23,10 @@ use chrono::Utc;
 use tokio::sync::mpsc;
 
 pub struct Fixture {
-    _dir: test_dirs::TempDir,
+    dir: test_dirs::TempDir,
     pub cal_uploader: Uploader,
+    /// The latest store the calibration uploader writes.
+    pub latest: LatestStore,
     pub sender: Arc<MockCalibrationSender>,
     started: mpsc::UnboundedReceiver<()>,
     pub deployments: disk::Deployments,
@@ -44,10 +47,11 @@ impl Fixture {
                 .await
                 .unwrap();
         let (sender, started) = MockCalibrationSender::new();
+        let latest = latest_store(&dir, latest_capacity).await;
         let args = UploaderArgs {
             snapshot_file: Some(snapshot_file),
             reports: calibrations.reports(),
-            latest: latest_store(&dir, latest_capacity).await,
+            latest: latest.clone(),
             sender: sender.clone(),
             options,
             sleep_fn: tokio::time::sleep,
@@ -59,8 +63,9 @@ impl Fixture {
             .await
             .unwrap();
         Self {
-            _dir: dir,
+            dir,
             cal_uploader,
+            latest,
             sender,
             started,
             deployments,
@@ -81,6 +86,14 @@ impl Fixture {
 
     pub async fn create(&self, params: CreateParams) -> Result<Created, ServiceErr> {
         calibration::create(&self.cal_uploader, &self.deployments, params, received_at()).await
+    }
+
+    /// Makes the latest store's index unreadable.
+    pub async fn corrupt_latest_index(&self) {
+        let index = latest_cals_layout(&self.dir).index();
+        files::write_string(&index, "{", WriteOptions::OVERWRITE_ATOMIC)
+            .await
+            .unwrap();
     }
 
     /// The first report the calibration uploader sends.

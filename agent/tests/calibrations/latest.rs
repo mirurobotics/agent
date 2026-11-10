@@ -4,9 +4,12 @@
 // internal crates
 use crate::test_utils::calibrations::{latest_cals_layout, latest_store, reported};
 use crate::test_utils::filesys::dirs as test_dirs;
-use miru_agent::calibrations::{latest, CalibrationsErr, Filter, LatestStore, ReportMetadata};
+use miru_agent::calibrations::{
+    latest, CalibrationsErr, Filter, LatestStore, Report, ReportMetadata,
+};
 use miru_agent::disk::layout::LatestCalsLayout;
 use miru_agent::filesys::{dirs, files, File, PathExt, WriteOptions};
+use miru_agent::models::InstanceFormat;
 
 // external crates
 use futures::FutureExt;
@@ -203,7 +206,7 @@ async fn putting_the_same_report_again_keeps_its_content() {
     put_all(&f.store, &[&arm, &arm]).await;
 
     assert_eq!(f.entries().await, std::slice::from_ref(&arm));
-    assert_eq!(f.store.content(arm.report_id).await.unwrap(), DATA);
+    assert_eq!(f.store.get(arm.report_id).await.unwrap().data, DATA);
 }
 
 #[tokio::test]
@@ -334,47 +337,52 @@ async fn list_filters_by_component_role_and_aspect() {
     }
 }
 
-// ================================ CONTENT =============================== //
+// ================================= GET ================================== //
 #[tokio::test]
-async fn content_returns_the_data() {
+async fn get_returns_the_report() {
     let f = Fixture::new().await;
-    let arm = reported("arm", None, None);
+    let mut arm = reported("arm", None, None);
+    arm.format = InstanceFormat::Yaml;
     put_all(&f.store, &[&arm]).await;
 
-    let content = f.store.content(arm.report_id).await.unwrap();
+    let report = f.store.get(arm.report_id).await.unwrap();
 
-    assert_eq!(content, DATA);
+    let expected = Report {
+        metadata: arm,
+        data: DATA.to_string(),
+    };
+    assert_eq!(report, expected);
 }
 
 #[tokio::test]
-async fn content_is_not_found_for_an_unknown_report() {
+async fn get_is_not_found_for_an_unknown_report() {
     let f = Fixture::new().await;
     put_all(&f.store, &[&reported("arm", None, None)]).await;
 
-    let err = f.store.content(Uuid::new_v4()).await.unwrap_err();
+    let err = f.store.get(Uuid::new_v4()).await.unwrap_err();
 
     assert!(matches!(err, CalibrationsErr::NotFoundErr(_)), "{err:?}");
 }
 
 #[tokio::test]
-async fn content_is_not_found_when_no_entry_names_it() {
+async fn get_is_not_found_when_no_entry_names_it() {
     let f = Fixture::new().await;
     let unnamed = Uuid::new_v4();
     f.write_orphan(unnamed).await;
 
-    let err = f.store.content(unnamed).await.unwrap_err();
+    let err = f.store.get(unnamed).await.unwrap_err();
 
     assert!(matches!(err, CalibrationsErr::NotFoundErr(_)), "{err:?}");
 }
 
 #[tokio::test]
-async fn content_is_not_found_when_its_file_is_missing() {
+async fn get_is_not_found_when_its_content_file_is_missing() {
     let f = Fixture::new().await;
     let arm = reported("arm", None, None);
     put_all(&f.store, &[&arm]).await;
     files::delete(&f.content_file(arm.report_id)).await.unwrap();
 
-    let err = f.store.content(arm.report_id).await.unwrap_err();
+    let err = f.store.get(arm.report_id).await.unwrap_err();
 
     assert!(matches!(err, CalibrationsErr::NotFoundErr(_)), "{err:?}");
 }
@@ -390,7 +398,7 @@ async fn a_corrupt_index_fails_every_call() {
     let errs = [
         f.store.put(arm.clone(), DATA).await.unwrap_err(),
         f.store.list(&Filter::default()).await.unwrap_err(),
-        f.store.content(arm.report_id).await.unwrap_err(),
+        f.store.get(arm.report_id).await.unwrap_err(),
     ];
 
     for err in errs {
@@ -425,13 +433,13 @@ async fn list_retries_an_index_read_that_fails_for_a_moment() {
 }
 
 #[tokio::test]
-async fn content_fails_when_its_file_cannot_be_read() {
+async fn get_fails_when_its_content_file_cannot_be_read() {
     let f = Fixture::new().await;
     let arm = reported("arm", None, None);
     put_all(&f.store, &[&arm]).await;
     f.block_content(arm.report_id).await;
 
-    let err = f.store.content(arm.report_id).await.unwrap_err();
+    let err = f.store.get(arm.report_id).await.unwrap_err();
 
     assert!(matches!(err, CalibrationsErr::FileSysErr(_)), "{err:?}");
 }
@@ -449,7 +457,7 @@ async fn commands_after_shutdown_fail() {
     let errs = [
         store.put(arm.clone(), DATA).await.unwrap_err(),
         store.list(&Filter::default()).await.unwrap_err(),
-        store.content(arm.report_id).await.unwrap_err(),
+        store.get(arm.report_id).await.unwrap_err(),
     ];
 
     for err in errs {

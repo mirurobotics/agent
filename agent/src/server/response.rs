@@ -1,8 +1,15 @@
 // internal crates
+use crate::calibrations::ReportMetadata;
 use crate::events;
 use crate::models;
 use crate::services::calibration;
 use device_api::models as device_server;
+
+// external crates
+use axum::{
+    http::{header, StatusCode},
+    response::{IntoResponse, Response},
+};
 
 impl From<&models::Device> for device_server::Device {
     fn from(device: &models::Device) -> Self {
@@ -129,4 +136,46 @@ impl From<&calibration::Created> for device_server::CreateCalibrationResponse {
             reported_at: created.reported_at.to_rfc3339(),
         }
     }
+}
+
+impl From<&ReportMetadata> for device_server::Calibration {
+    fn from(metadata: &ReportMetadata) -> Self {
+        device_server::Calibration {
+            object: device_server::calibration::Object::Calibration,
+            report_id: metadata.report_id,
+            component: metadata.component.clone(),
+            role: metadata.role.clone(),
+            aspect: metadata.aspect.clone(),
+            serial_number: metadata.serial_number.clone(),
+            reported_by: metadata.reported_by.clone(),
+            reported_at: metadata.reported_at.to_rfc3339(),
+        }
+    }
+}
+
+/// The latest calibrations route's response.
+pub fn latest_calibrations(
+    calibrations: &[ReportMetadata],
+) -> device_server::LatestCalibrationsResponse {
+    device_server::LatestCalibrationsResponse {
+        calibrations: calibrations.iter().map(Into::into).collect(),
+    }
+}
+
+/// The calibration content route's response: the data, with the
+/// `Content-Type` of its format and an inline `Content-Disposition`.
+pub fn calibration_content(content: calibration::Content) -> Response {
+    let filename = match content.format.file_ext() {
+        Some(ext) => format!("{}.{ext}", content.report_id),
+        None => content.report_id.to_string(),
+    };
+    let disposition = format!("inline; filename=\"{filename}\"");
+    let headers = [
+        (
+            header::CONTENT_TYPE,
+            content.format.media_type().to_string(),
+        ),
+        (header::CONTENT_DISPOSITION, disposition),
+    ];
+    (StatusCode::OK, headers, content.data).into_response()
 }
