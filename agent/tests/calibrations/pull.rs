@@ -282,7 +282,10 @@ async fn pull_latest_until_success_waits_a_second_after_each_network_error() {
 
     let gaps = gaps(&times);
     assert_eq!(gaps.len(), 9);
-    assert!(gaps.iter().all(|gap| *gap <= Duration::from_secs(1)), "{gaps:?}");
+    assert!(
+        gaps.iter().all(|gap| *gap <= Duration::from_secs(1)),
+        "{gaps:?}"
+    );
     let entries = store.list(&Filter::default()).await.unwrap();
     assert_eq!(entries, vec![report("arm").metadata]);
 }

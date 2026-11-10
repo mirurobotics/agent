@@ -71,7 +71,8 @@ async fn init(
     )
     .await?;
 
-    init_calibration_pull_task(app_state.clone(), shutdown_manager, shutdown_tx.subscribe()).await?;
+    init_calibration_pull_task(app_state.clone(), shutdown_manager, shutdown_tx.subscribe())
+        .await?;
     init_optional_services(options, &app_state, shutdown_manager, &shutdown_tx).await?;
     init_data_upload_workers(options, &app_state, shutdown_manager, &shutdown_tx).await?;
 
