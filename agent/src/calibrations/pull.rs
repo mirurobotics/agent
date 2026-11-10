@@ -36,8 +36,9 @@ pub async fn pull_latest<HTTPClientT: http::ClientI>(
     for calibration in calibrations {
         let id = calibration.id.clone();
         let metadata = ReportMetadata::from(calibration);
-        // only saves the download: put_if_newer checks again as it writes,
-        // since intake may put a newer report for the key meanwhile
+        // `stored` predates the downloads, so this check only skips downloads.
+        // put_if_newer checks again as it writes, in case intake put a newer
+        // report for the key in the meantime.
         if stored.iter().any(|entry| entry.is_as_new_as(&metadata)) {
             continue;
         }
