@@ -445,6 +445,36 @@ pub mod shutdown {
     }
 
     #[tokio::test]
+    async fn latest_cals_shutdown_error_does_not_abort_teardown() {
+        let env = TestEnv::valid().await;
+        let (state, state_handle) = env.init().await.unwrap();
+
+        // set the device online so the offline assertion below proves teardown
+        // continued through storage after the latest store error
+        state
+            .storage
+            .device
+            .patch(models::device::Updates::connected())
+            .await
+            .unwrap();
+
+        // stop the latest store directly so AppState::shutdown errors on it
+        state.latest_cals.shutdown().await.unwrap();
+
+        let err = state
+            .shutdown()
+            .await
+            .expect_err("latest store error surfaces");
+        assert!(matches!(err, ServerErr::CalibrationsErr(_)));
+        state_handle.await;
+
+        let device = files::read_json::<Device>(&env.layout.device())
+            .await
+            .unwrap();
+        assert_eq!(device.status, DeviceStatus::Offline);
+    }
+
+    #[tokio::test]
     async fn uploader_shutdown_error_does_not_abort_teardown() {
         let env = TestEnv::valid().await;
         let (state, state_handle) = env.init().await.unwrap();
