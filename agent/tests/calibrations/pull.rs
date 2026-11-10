@@ -225,8 +225,7 @@ async fn pull_latest_until_success_tries_again_after_a_failure() {
             Err(mock_err())
         }
     });
-    fx.client
-        .set_get_calibration_content(|id| Ok(content(id)));
+    fx.client.set_get_calibration_content(|id| Ok(content(id)));
     let store = latest_store(&fx.dir, latest::DEFAULT_CAPACITY).await;
     let start = Instant::now();
 
