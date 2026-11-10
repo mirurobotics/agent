@@ -267,7 +267,7 @@ async fn ensure_pulled_tries_again_after_a_token_failure() {
     assert_eq!(fx.entries().await, vec![report("arm").metadata]);
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn ensure_pulled_callers_share_a_failed_pull() {
     let fx = Fixture::new();
     // a network error makes the pull wait before it lists again
