@@ -1,4 +1,5 @@
-//! Pulling Miru's latest calibrations into a latest calibrations store, merging by `reported_at`.
+//! Pulling the control plane's latest calibrations into a latest calibrations
+//! store, merging by `reported_at`.
 
 // internal crates
 use crate::calibrations::{
@@ -12,13 +13,13 @@ use crate::http::{
 // external crates
 use tracing::info;
 
-/// Put Miru's latest calibration for each key into `store`, one key at a time,
-/// unless the store's entry for that key was reported at the same time or
-/// later, so reports Miru hasn't received yet are kept. A key the store
-/// already has as new isn't downloaded, so a pull where nothing changed costs
-/// one list call. Any failure fails the call; a new key past the store's
-/// capacity fails it with `CalibrationStoreFullErr`, possibly after putting
-/// some.
+/// Put the control plane's latest calibration for each key into `store`, one
+/// key at a time, unless the store's entry for that key was reported at the
+/// same time or later, so reports the control plane hasn't received yet are
+/// kept. A key the store already has as new isn't downloaded, so a pull where
+/// nothing changed costs one list call. Any failure fails the call; a new key
+/// past the store's capacity fails it with `CalibrationStoreFullErr`, possibly
+/// after putting some.
 pub async fn pull_latest<HTTPClientT: http::ClientI>(
     store: &LatestStore,
     http_client: &HTTPClientT,
@@ -49,6 +50,6 @@ pub async fn pull_latest<HTTPClientT: http::ClientI>(
         .await?;
         put += usize::from(store.put_if_newer(metadata, &data).await?);
     }
-    info!("calibrations: wrote {put} latest calibrations from Miru");
+    info!("calibrations: wrote {put} latest calibrations from the control plane");
     Ok(())
 }
