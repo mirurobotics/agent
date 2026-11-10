@@ -60,10 +60,7 @@ impl LatestStoreImpl {
         }
     }
 
-    /// Make `metadata` its key's entry, with `data` as its content. A new key
-    /// past the capacity is rejected rather than evicting another. A failure
-    /// part way leaves at most content that no entry names, which the worker
-    /// deletes when it next starts.
+    /// Make `metadata` its key's entry, with `data` as its content.
     pub(crate) async fn put(
         &self,
         metadata: ReportMetadata,
@@ -96,8 +93,7 @@ impl LatestStoreImpl {
         Ok(entries)
     }
 
-    /// The data of the entry for `report_id`. Not found unless an entry has
-    /// that `report_id` and its content exists.
+    /// The data of the entry for `report_id`.
     pub(crate) async fn content(&self, report_id: Uuid) -> Result<String, CalibrationsErr> {
         let index = self.read_index().await?;
         if !index.iter().any(|m| m.report_id == report_id) {
