@@ -9,6 +9,7 @@ use crate::app::{
     state::AppState,
 };
 use crate::authn::{self, TokenManagerExt};
+use crate::calibrations;
 use crate::data_uploads::scan;
 use crate::disk::{self, Layout};
 use crate::filesys;
@@ -70,6 +71,8 @@ async fn init(
     )
     .await?;
 
+    init_calibration_pull_task(app_state.clone(), shutdown_manager, shutdown_tx.subscribe())
+        .await?;
     init_optional_services(options, &app_state, shutdown_manager, &shutdown_tx).await?;
     init_data_upload_workers(options, &app_state, shutdown_manager, &shutdown_tx).await?;
 
@@ -329,6 +332,33 @@ async fn init_sync_scan_bridge_worker(
     Ok(())
 }
 
+/// Pull the control plane's latest calibrations in the background, so the
+/// store has the reports an older agent took before this run's upgrade.
+async fn init_calibration_pull_task(
+    app_state: Arc<AppState>,
+    shutdown_manager: &mut ShutdownManager,
+    mut shutdown_rx: broadcast::Receiver<()>,
+) -> Result<(), ServerErr> {
+    info!("Starting the calibrations pull...");
+    let pull_handle = tokio::spawn(async move {
+        let pull = calibrations::pull_latest_until_success(
+            &app_state.latest_cals,
+            app_state.http_client.as_ref(),
+            app_state.token_mngr.as_ref(),
+        );
+        tokio::select! {
+            _ = shutdown_rx.recv() => {}
+            _ = pull => {}
+        }
+    });
+    shutdown_manager.register_handle(
+        |mgr| &mut mgr.calibrations_pull_handle,
+        "calibrations_pull_handle",
+        pull_handle,
+    )?;
+    Ok(())
+}
+
 async fn init_delete_worker(
     options: crate::workers::delete::Options,
     deleter: Arc<crate::data_uploads::retention::Deleter>,
@@ -470,6 +500,7 @@ struct ShutdownManager {
     scan_worker_handle: Option<JoinHandle<()>>,
     sync_scan_bridge_worker_handle: Option<JoinHandle<()>>,
     delete_worker_handle: Option<JoinHandle<()>>,
+    calibrations_pull_handle: Option<JoinHandle<()>>,
 }
 
 impl ShutdownManager {
@@ -487,6 +518,7 @@ impl ShutdownManager {
             scan_worker_handle: None,
             sync_scan_bridge_worker_handle: None,
             delete_worker_handle: None,
+            calibrations_pull_handle: None,
         }
     }
 
@@ -646,7 +678,12 @@ impl ShutdownManager {
         )
         .await;
 
-        // 8. app state
+        // 8. calibrations pull (must join before app state shutdown so no pull
+        // writes to the latest store after it stops)
+        let pull_handle = self.calibrations_pull_handle.take();
+        join_worker(pull_handle, "calibrations pull", &mut first_err).await;
+
+        // 9. app state
         self.shutdown_app_state(&mut first_err).await;
 
         match first_err {

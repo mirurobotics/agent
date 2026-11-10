@@ -116,11 +116,11 @@ impl crate::errors::Error for InvalidReportErr {
     }
 }
 
-/// Getting a device token for an upload failed. Never terminal, whatever the
-/// token request's status: a token failure says nothing about the report, so
-/// the report is retried, never dropped.
+/// Getting a device token for an upload or a pull failed. Never terminal,
+/// whatever the token request's status: a token failure says nothing about the
+/// calibration, so the caller retries.
 #[derive(Debug, thiserror::Error)]
-#[error("failed to get a token to upload a calibration: {0}")]
+#[error("failed to get a device token: {0}")]
 pub struct TokenErr(pub AuthnErr);
 
 impl crate::errors::Error for TokenErr {

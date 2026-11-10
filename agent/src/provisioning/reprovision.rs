@@ -1,6 +1,4 @@
 // internal crates
-use crate::authn;
-use crate::calibrations::{self, latest::DEFAULT_CAPACITY, LatestStore};
 use crate::cli;
 use crate::crypt::rsa;
 use crate::disk::{self, settings};
@@ -48,36 +46,12 @@ pub async fn reprovision<HTTPClientT: http::ClientI>(
         .await?;
         // drop the old device's calibrations, upload queue included
         dirs::delete(&layout.calibrations().root).await?;
-        pull_calibrations(http_client, layout).await;
         Ok(device)
     }
     .await;
 
     shared::cleanup_temp_files(&[&private_key_file, &public_key_file]).await;
     result
-}
-
-/// Pull the control plane's latest calibrations into the emptied store, best
-/// effort: a failure is logged and leaves the store empty or partial. The
-/// token comes from the keys `bootstrap` installed.
-async fn pull_calibrations<HTTPClientT: http::ClientI>(
-    http_client: &HTTPClientT,
-    layout: &disk::Layout,
-) {
-    let auth = layout.auth();
-    let device_token =
-        match authn::issue_token(http_client, &auth.private_key(), &auth.public_key()).await {
-            Ok(device_token) => device_token,
-            Err(e) => {
-                warn!("reprovision: unable to get a token to pull the latest calibrations: {e}");
-                return;
-            }
-        };
-    // each command returns once done, so the worker exits idle when dropped
-    let (store, _) = LatestStore::spawn(64, layout.calibrations().latest(), DEFAULT_CAPACITY);
-    if let Err(e) = calibrations::pull_latest(&store, http_client, &device_token.token).await {
-        warn!("reprovision: unable to pull the latest calibrations: {e}");
-    }
 }
 
 async fn reprovision_with_backend<HTTPClientT: http::ClientI>(

@@ -1,19 +1,26 @@
 //! Pulling the control plane's latest calibrations into a latest calibrations
 //! store, merging by `reported_at`.
 
+// standard crates
+use std::time::Duration;
+
 // internal crates
+use crate::authn::TokenManagerExt;
 use crate::calibrations::{
     errors::CalibrationsErr, latest::LatestStore, report::ReportMetadata, Filter,
 };
+use crate::cooldown;
+use crate::errors::Error;
 use crate::http::{
     self,
     calibrations::{GetContentParams, ListAllLatestParams},
     HTTPErr,
 };
+use crate::queue::RetryPolicy;
 
 // external crates
 use backend_api::models::Calibration;
-use tracing::info;
+use tracing::{debug, info, warn};
 
 /// Put the control plane's latest calibration for each key into `store`,
 /// unless the store's entry is as new or newer. Skipped keys aren't downloaded.
@@ -78,4 +85,39 @@ async fn download<HTTPClientT: http::ClientI>(
         http::calibrations::get_content(http_client, GetContentParams { id, token })
     })
     .await
+}
+
+/// Pull into `store` until a pull succeeds, waiting between pulls as the
+/// uploaders' default `RetryPolicy` does: a network error waits a flat
+/// `base_secs`, and any other failure backs off further.
+pub async fn pull_latest_until_success<HTTPClientT, TokenManagerT>(
+    store: &LatestStore,
+    http_client: &HTTPClientT,
+    token_mngr: &TokenManagerT,
+) where
+    HTTPClientT: http::ClientI,
+    TokenManagerT: TokenManagerExt,
+{
+    let backoff = RetryPolicy::default().backoff;
+    let mut failures: u32 = 0;
+    loop {
+        let result = match token_mngr.get_token().await {
+            Ok(token) => pull_latest(store, http_client, &token.token).await,
+            Err(e) => Err(e.into()),
+        };
+        let e = match result {
+            Ok(()) => return,
+            Err(e) => e,
+        };
+        let wait = if e.is_network_conn_err() {
+            debug!("calibrations: unable to reach the control plane to pull, retrying: {e}");
+            backoff.base_secs
+        } else {
+            failures = failures.saturating_add(1);
+            let wait = cooldown::calc(&backoff, failures - 1);
+            warn!("calibrations: unable to pull the latest calibrations, retrying in {wait}s: {e}");
+            wait
+        };
+        tokio::time::sleep(Duration::from_secs(wait as u64)).await;
+    }
 }
