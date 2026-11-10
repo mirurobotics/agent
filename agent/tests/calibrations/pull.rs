@@ -271,11 +271,15 @@ async fn ensure_pulled_tries_again_after_a_token_failure() {
 async fn ensure_pulled_callers_share_a_failed_pull() {
     let fx = Fixture::new();
     // a network error makes the pull wait before it lists again
-    fx.client.set_list_latest_calibrations(|| Err(network_err()));
+    fx.client
+        .set_list_latest_calibrations(|| Err(network_err()));
     let token_mngr = token_manager();
     let puller = fx.puller(token_mngr.clone()).await;
 
-    tokio::join!(puller.ensure_pulled(pending()), puller.ensure_pulled(pending()));
+    tokio::join!(
+        puller.ensure_pulled(pending()),
+        puller.ensure_pulled(pending())
+    );
 
     assert_eq!(token_mngr.num_get_token_calls(), 1);
 }
@@ -284,7 +288,8 @@ async fn ensure_pulled_callers_share_a_failed_pull() {
 async fn ensure_pulled_stops_a_pull_midway_at_shutdown() {
     let fx = Fixture::new();
     // a network error makes the pull wait before it lists again
-    fx.client.set_list_latest_calibrations(|| Err(network_err()));
+    fx.client
+        .set_list_latest_calibrations(|| Err(network_err()));
     let puller = fx.puller(token_manager()).await;
     let shutdown = async {
         while fx.num_lists() == 0 {

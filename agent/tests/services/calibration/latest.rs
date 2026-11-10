@@ -44,7 +44,8 @@ async fn list_latest_pulls_the_control_planes_latest_first() {
         data: vec![miru_calibration("arm")],
         ..CalibrationList::default()
     };
-    f.client.set_list_latest_calibrations(move || Ok(list.clone()));
+    f.client
+        .set_list_latest_calibrations(move || Ok(list.clone()));
 
     let latest = calibration::list_latest(&f.puller, &Filter::default(), pending()).await;
 
