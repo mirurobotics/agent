@@ -1,6 +1,9 @@
 // internal crates
+use crate::calibrations::errors::{CalibrationsErr, InvalidReportErr};
+use crate::filesys::{files, Dir, File, FileSysErr};
 use crate::models::InstanceFormat;
 use crate::queue;
+use crate::trace;
 
 // external crates
 use chrono::{DateTime, Utc};
@@ -45,6 +48,19 @@ pub struct ReportMetadata {
     pub reported_at: DateTime<Utc>,
 }
 
+/// A report's component, role and aspect: the store keeps one entry per key.
+pub(crate) type Key<'a> = (&'a str, Option<&'a str>, Option<&'a str>);
+
+impl ReportMetadata {
+    pub(crate) fn key(&self) -> Key<'_> {
+        (
+            self.component.as_str(),
+            self.role.as_deref(),
+            self.aspect.as_deref(),
+        )
+    }
+}
+
 impl queue::QueueJob for ReportMetadata {
     const LABEL: &'static str = "calibration";
 
@@ -63,6 +79,32 @@ impl queue::QueueJob for ReportMetadata {
         }
         format!("{name} received at {}", self.reported_at.to_rfc3339())
     }
+}
+
+/// The file holding the data of the report queued as `entry_id`.
+pub(crate) fn report_file(reports: &Dir, entry_id: Uuid) -> File {
+    reports.file(&entry_id.hyphenated().to_string())
+}
+
+/// The data in report `file`. A missing file or one that isn't UTF-8 can
+/// never be sent, so either is a terminal [`InvalidReportErr`]; any other
+/// read error is returned as is.
+pub(crate) async fn read_data(file: &File) -> Result<String, CalibrationsErr> {
+    match files::read_string(file).await {
+        Ok(data) => Ok(data),
+        Err(FileSysErr::PathDoesNotExistErr(_)) => Err(invalid("the report file is missing")),
+        Err(FileSysErr::ConvertUTF8Err(e)) => {
+            Err(invalid(&format!("the report file is not UTF-8: {e}")))
+        }
+        Err(e) => Err(e.into()),
+    }
+}
+
+fn invalid(reason: &str) -> CalibrationsErr {
+    CalibrationsErr::InvalidReportErr(InvalidReportErr {
+        reason: reason.to_string(),
+        trace: trace!(),
+    })
 }
 
 pub type Queue = queue::FileQueue<ReportMetadata>;
