@@ -2,7 +2,7 @@
 //! they reach Miru.
 
 pub mod errors;
-pub mod latest;
+pub mod latest_impl;
 pub mod report;
 pub mod sender;
 pub mod uploader;
@@ -12,7 +12,7 @@ pub use self::errors::{
     CalibrationBufferFullErr, CalibrationNotFoundErr, CalibrationStoreFullErr,
     CalibrationTooLargeErr, CalibrationsErr, InvalidReportErr, TokenErr,
 };
-pub use self::latest::{Filter, LatestStore};
+pub use self::latest_impl::{Filter, LatestStore};
 pub use self::report::{
     Queue, QueueEntry, QueueSnapshot, QueueSnapshotFile, Report, ReportMetadata,
 };

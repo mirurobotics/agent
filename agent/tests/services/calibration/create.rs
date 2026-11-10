@@ -4,7 +4,9 @@
 use crate::mocks::calibration_sender::Step;
 use crate::services::calibration::helpers::{params, Fixture};
 use crate::test_utils::calibrations::received_at;
-use miru_agent::calibrations::{latest, CalibrationsErr, Report, ReportMetadata, UploaderOptions};
+use miru_agent::calibrations::{
+    latest_impl, CalibrationsErr, Report, ReportMetadata, UploaderOptions,
+};
 use miru_agent::models::{DplActivity, InstanceFormat};
 use miru_agent::services::ServiceErr;
 
@@ -77,7 +79,7 @@ async fn a_cal_uploader_rejection_fails_intake() {
         max_report_bytes: 100,
         ..UploaderOptions::default()
     };
-    let f = Fixture::with_options(options, latest::DEFAULT_CAPACITY).await;
+    let f = Fixture::with_options(options, latest_impl::DEFAULT_CAPACITY).await;
     let mut big = params();
     big.data = "x".repeat(200);
 

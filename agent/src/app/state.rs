@@ -276,7 +276,7 @@ impl AppState {
     ) {
         let latest_cals = calibrations::LatestStore::open(
             layout.latest_cals(),
-            calibrations::latest::DEFAULT_CAPACITY,
+            calibrations::latest_impl::DEFAULT_CAPACITY,
         )
         .await;
         let layout = layout.calibrations();
