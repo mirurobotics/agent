@@ -61,6 +61,12 @@ impl ReportMetadata {
             self.aspect.as_deref(),
         )
     }
+
+    /// Whether `self` is for `other`'s key and was reported at the same time
+    /// or later, so a merge keeps it over `other`.
+    pub(crate) fn is_as_new_as(&self, other: &ReportMetadata) -> bool {
+        self.key() == other.key() && self.reported_at >= other.reported_at
+    }
 }
 
 impl From<backend_client::Calibration> for ReportMetadata {

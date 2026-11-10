@@ -6,6 +6,7 @@ use crate::calibrations::{
     errors::CalibrationsErr,
     latest::{LatestStore, DEFAULT_CAPACITY},
     report::{self, QueueSnapshot, ReportMetadata},
+    Filter,
 };
 use crate::disk::layout::{CalibrationsLayout, LatestCalsLayout};
 use crate::filesys::{files, FileSysErr};
@@ -77,7 +78,9 @@ pub async fn pull_if_needed<HTTPClientT: http::ClientI>(
 
 /// Put Miru's latest calibration for each key, one key at a time, unless the
 /// store's entry for that key was reported at the same time or later, so
-/// reports Miru hasn't received yet are kept.
+/// reports Miru hasn't received yet are kept. A key the store already has as
+/// new isn't downloaded, so a pull that failed part way resumes where it
+/// stopped.
 async fn merge_mirus_latest<HTTPClientT: http::ClientI>(
     store: &LatestStore,
     http_client: &HTTPClientT,
@@ -93,15 +96,19 @@ async fn merge_mirus_latest<HTTPClientT: http::ClientI>(
         )
     })
     .await?;
+    let stored = store.list(&Filter::default()).await?;
 
     let mut put = 0;
     for calibration in calibrations {
-        let id = calibration.id.as_str();
+        let id = calibration.id.clone();
+        let metadata = ReportMetadata::from(calibration);
+        if stored.iter().any(|entry| entry.is_as_new_as(&metadata)) {
+            continue;
+        }
         let data = http::with_retry(|| {
-            http::calibrations::get_content(http_client, GetContentParams { id, token })
+            http::calibrations::get_content(http_client, GetContentParams { id: &id, token })
         })
         .await?;
-        let metadata = ReportMetadata::from(calibration);
         if store.put_if_newer(metadata, &data).await? {
             put += 1;
         }

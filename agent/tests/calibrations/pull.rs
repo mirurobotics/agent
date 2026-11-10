@@ -120,7 +120,7 @@ async fn replaces_an_older_entry_for_a_key() {
 }
 
 #[tokio::test]
-async fn keeps_an_entry_reported_at_the_same_time_or_later() {
+async fn keeps_an_entry_as_new_or_newer_without_downloading() {
     let fx = Fixture::new();
     let stored = vec![reported_after("arm", 0), reported_after("leg", 1)];
     seed(&fx, &stored).await;
@@ -129,6 +129,7 @@ async fn keeps_an_entry_reported_at_the_same_time_or_later() {
     fx.pull(latest::DEFAULT_CAPACITY).await.unwrap();
 
     assert_eq!(fx.entries().await, stored);
+    assert_eq!(fx.client.call_count(Call::GetCalibrationContent), 0);
 }
 
 #[tokio::test]

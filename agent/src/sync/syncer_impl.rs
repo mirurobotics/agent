@@ -23,6 +23,7 @@ use crate::trace;
 // external crates
 use chrono::{TimeDelta, Utc};
 use tokio::sync::watch;
+use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
 
 pub struct SyncerImpl<HTTPClientT> {
@@ -33,6 +34,7 @@ pub struct SyncerImpl<HTTPClientT> {
     event_hub: events::EventHub,
     system_metadata_cache: File,
     latest_cals: calibrations::LatestStore,
+    calibrations_pull: Option<JoinHandle<()>>,
 
     // subscribers
     subscriber_tx: watch::Sender<SyncEvent>,
@@ -43,7 +45,7 @@ pub struct SyncerImpl<HTTPClientT> {
     state: State,
 }
 
-impl<HTTPClientT: http::ClientI> SyncerImpl<HTTPClientT> {
+impl<HTTPClientT: http::ClientI + 'static> SyncerImpl<HTTPClientT> {
     pub fn new(args: SyncerArgs<HTTPClientT, authn::TokenManager>) -> Self {
         let (subscriber_tx, subscriber_rx) = watch::channel(SyncEvent::SyncSuccess);
         Self {
@@ -55,6 +57,7 @@ impl<HTTPClientT: http::ClientI> SyncerImpl<HTTPClientT> {
             event_hub: args.event_hub,
             system_metadata_cache: args.system_metadata_cache,
             latest_cals: args.latest_cals,
+            calibrations_pull: None,
             state: State::default(),
             subscriber_tx,
             subscriber_rx,
@@ -198,18 +201,27 @@ impl<HTTPClientT: http::ClientI> SyncerImpl<HTTPClientT> {
         // skip while the backend is unreachable; the next sync retries
         if !matches!(&result, Err(e) if e.is_network_conn_err()) {
             self.sync_system_metadata(&token.token).await;
-            self.pull_calibrations(&token.token).await;
+            self.pull_calibrations(&token.token);
         }
         result
     }
 
     /// Best-effort, as [`Self::sync_system_metadata`] is: a failed pull stays
-    /// marked, so the next sync retries it.
-    async fn pull_calibrations(&self, token: &str) {
-        let http_client = self.http_client.as_ref();
-        if let Err(e) = calibrations::pull_if_needed(&self.latest_cals, http_client, token).await {
-            warn!("unable to pull the latest calibrations: {e}");
+    /// marked, so a later sync retries it. The pull runs in its own task so its
+    /// downloads never hold up a sync, and a sync leaves one still running.
+    fn pull_calibrations(&mut self, token: &str) {
+        if self.calibrations_pull.as_ref().is_some_and(|t| !t.is_finished()) {
+            return;
         }
+        let store = self.latest_cals.clone();
+        let http_client = self.http_client.clone();
+        let token = token.to_string();
+        self.calibrations_pull = Some(tokio::spawn(async move {
+            let result = calibrations::pull_if_needed(&store, http_client.as_ref(), &token).await;
+            if let Err(e) = result {
+                warn!("unable to pull the latest calibrations: {e}");
+            }
+        }));
     }
 
     /// Best-effort: failures are logged and never affect the sync result or its
@@ -224,6 +236,16 @@ impl<HTTPClientT: http::ClientI> SyncerImpl<HTTPClientT> {
         match system_metadata::sync(&args).await {
             Ok(outcome) => debug!("system metadata sync completed: {outcome:?}"),
             Err(e) => warn!("unable to sync system metadata: {e}"),
+        }
+    }
+}
+
+impl<HTTPClientT> Drop for SyncerImpl<HTTPClientT> {
+    /// Stop a pull still running when the syncer stops. The store finishes any
+    /// write already sent to it.
+    fn drop(&mut self) {
+        if let Some(pull) = self.calibrations_pull.take() {
+            pull.abort();
         }
     }
 }

@@ -25,9 +25,10 @@ Observable: upgrade an agent on a device whose calibrations are in Miru but not 
 - **Mark before `reset`.** `reset` writes the version marker last, so a crash before the mark leaves the old marker and the next start reruns reconcile.
 - **Upgrade also merges the upload queue** ([AI design review](https://github.com/mirurobotics/agent/pull/455#discussion_r4522167111)). Reports the older agent queued but hadn't uploaded aren't in Miru yet, and the uploader writes the store only at intake, so a pull alone would miss them. `calibrations::merge_queued` reads `queue.json` and each report file and puts each report with `put_if_newer`, needing no network. A report file that can't be read is skipped.
 - **Failures are logged.** A failed mark or queue merge never keeps the agent from starting.
+- **Skip downloads the store doesn't need** ([AI design review](https://github.com/mirurobotics/agent/pull/455#discussion_r4522194937)). The pull lists the store once and skips keys it has as new or newer before downloading, so a pull after an upgrade from an agent that already writes the store costs one list call, and a pull that failed part way resumes. `ReportMetadata::is_as_new_as` is the one rule both checks use.
 - **The merge compares inside the store's worker.** The agent runs while the syncer pulls, so intake may write the same key. `LatestStore::put_if_newer` checks `reported_at` and puts in one command, so a report the device just took is never overwritten by an older one from Miru. Equal times keep the stored entry.
 - **One merge for reprovision and the syncer.** Reprovision deletes `calibrations/` first, so merging into its empty store puts every key, as before; its behavior and tests are unchanged.
-- **Best-effort in the syncer, like the system metadata sync.** The pull runs after the deployments sync unless that hit a network error, and a failure is logged and never fails the sync.
+- **Best-effort in the syncer, in its own task** ([AI design review](https://github.com/mirurobotics/agent/pull/455#discussion_r4522194723)). The pull starts after the deployments sync unless that hit a network error, like the system metadata sync, but in a spawned task, so up to 1,000 downloads never hold up the syncer's actor (`POST /v0.2/device/sync`, the poller and MQTT syncs). A sync leaves a pull still running alone, and the syncer aborts it when it stops. A failure is logged and never fails the sync.
 - **The syncer gets the store's handle.** `AppState` spawns the calibrations pipeline before the syncer, and shuts the store down after the syncer.
 
 ### Names
@@ -47,7 +48,6 @@ Observable: upgrade an agent on a device whose calibrations are in Miru but not 
 ### Left out
 
 - Keying by component alone (ENG-1823). The merge keys by `ReportMetadata::key()`, so it follows that change.
-- Skipping the download for keys the store already has as new. Each pull downloads every content once per upgrade; the worker's check decides.
 - Marking on a failed reprovision pull.
 
 ## Progress

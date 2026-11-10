@@ -150,7 +150,7 @@ impl<HTTPClientT: Send> Worker<HTTPClientT> {
     }
 }
 
-impl<HTTPClientT: http::ClientI> Worker<HTTPClientT> {
+impl<HTTPClientT: http::ClientI + 'static> Worker<HTTPClientT> {
     pub async fn run(mut self) {
         while let Some(cmd) = self.receiver.recv().await {
             match cmd {
@@ -1041,6 +1041,28 @@ mod tests {
         use backend_api::models::CalibrationList;
         use miru_agent::calibrations::Filter;
 
+        /// Wait for the sync's background pull to unmark the store.
+        async fn wait_for_unmark(store: &LatestStore) {
+            for _ in 0..500 {
+                if !store.needs_pull().await.unwrap() {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            panic!("the store is still marked");
+        }
+
+        /// Wait for the sync's background pull to list Miru's latest.
+        async fn wait_for_list(client: &MockClient) {
+            for _ in 0..500 {
+                if client.call_count(Call::ListLatestCalibrations) > 0 {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            panic!("the latest calibrations were never listed");
+        }
+
         fn serve_arm(f: &Fixture) {
             f.http_client.set_list_latest_calibrations(|| {
                 Ok(CalibrationList {
@@ -1058,9 +1080,9 @@ mod tests {
 
             f.syncer.sync().await.unwrap();
 
+            wait_for_unmark(&f.latest_cals).await;
             let entries = f.latest_cals.list(&Filter::default()).await.unwrap();
             assert_eq!(entries, vec![report("arm").metadata]);
-            assert!(!f.latest_cals.needs_pull().await.unwrap());
         }
 
         #[tokio::test]
@@ -1103,6 +1125,7 @@ mod tests {
 
             f.syncer.sync().await.unwrap();
 
+            wait_for_list(&f.http_client).await;
             assert!(f.latest_cals.needs_pull().await.unwrap());
         }
     }

@@ -98,10 +98,7 @@ impl LatestStoreImpl {
         data: &str,
     ) -> Result<bool, CalibrationsErr> {
         let index = self.read_index().await?;
-        let is_stale = index.entries.iter().any(|entry| {
-            entry.key() == metadata.key() && entry.reported_at >= metadata.reported_at
-        });
-        if is_stale {
+        if index.entries.iter().any(|entry| entry.is_as_new_as(&metadata)) {
             return Ok(false);
         }
         self.put(metadata, data).await?;
