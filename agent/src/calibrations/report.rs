@@ -83,7 +83,12 @@ impl queue::QueueJob for ReportMetadata {
 
 /// The file holding the data of the report queued as `entry_id`.
 pub(crate) fn report_file(reports: &Dir, entry_id: Uuid) -> File {
-    reports.file(&entry_id.hyphenated().to_string())
+    reports.file(&report_file_name(entry_id))
+}
+
+/// The name of the file holding the data of the report queued as `entry_id`.
+pub(crate) fn report_file_name(entry_id: Uuid) -> String {
+    entry_id.hyphenated().to_string()
 }
 
 /// The data in report `file`. A missing file or one that isn't UTF-8 can

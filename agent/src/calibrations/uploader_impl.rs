@@ -110,7 +110,7 @@ where
         let queued = self
             .queue
             .iter()
-            .map(|entry| entry.id.hyphenated().to_string());
+            .map(|entry| report::report_file_name(entry.id));
         dirs::delete_files_except(&self.reports, &queued.collect()).await;
     }
 
