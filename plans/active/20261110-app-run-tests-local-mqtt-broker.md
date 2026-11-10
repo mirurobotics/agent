@@ -38,8 +38,8 @@ No new files. The `mqtt_worker` override copies `build_app_options` in `agent/sr
 
 ## Progress
 
-- [ ] Milestone 1: set the MQTT broker address in `options()`, route `invalid_app_state_initialization` through `options()`, inline the backend host, and commit.
-- [ ] Source written
+- [x] Milestone 1: set the MQTT broker address in `options()`, route `invalid_app_state_initialization` through `options()`, inline the backend host, and commit.
+- [x] Source written
 - [ ] Tests written (none new: the six existing tests in `agent/tests/app/run.rs` are the coverage)
 - [ ] Validation: `$preflight` reports `CLEAN`
 
