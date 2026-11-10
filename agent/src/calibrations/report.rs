@@ -149,3 +149,56 @@ pub type QueueEntry = queue::QueueEntry<ReportMetadata>;
 pub type QueueSnapshot = queue::QueueSnapshot<ReportMetadata>;
 
 pub type QueueSnapshotFile = queue::QueueSnapshotFile<ReportMetadata>;
+
+#[cfg(test)]
+mod tests {
+    // internal crates
+    use crate::test_utils::calibrations::reported;
+    use miru_agent::calibrations::ReportMetadata;
+
+    // external crates
+    use chrono::TimeDelta;
+
+    /// `metadata` reported `secs` later, as another report.
+    fn reported_after(metadata: &ReportMetadata, secs: i64) -> ReportMetadata {
+        ReportMetadata {
+            reported_at: metadata.reported_at + TimeDelta::seconds(secs),
+            ..reported(&metadata.component, None, None)
+        }
+    }
+
+    // ============================ IS AS NEW AS ============================ //
+    #[test]
+    fn is_as_new_as_a_report_for_its_key_at_the_same_time_or_earlier() {
+        let arm = reported("arm", None, None);
+
+        for secs in [0, 1] {
+            assert!(reported_after(&arm, secs).is_as_new_as(&arm), "{secs}");
+        }
+    }
+
+    #[test]
+    fn is_not_as_new_as_a_later_report_for_its_key() {
+        let arm = reported("arm", None, None);
+
+        assert!(!reported_after(&arm, -1).is_as_new_as(&arm));
+    }
+
+    #[test]
+    fn is_not_as_new_as_a_report_for_another_key() {
+        let arm = reported("arm", None, None);
+        let others = [
+            reported("leg", None, None),
+            reported("arm", Some("left"), None),
+            reported("arm", None, Some("pose")),
+        ];
+
+        for other in &others {
+            let later = ReportMetadata {
+                reported_at: arm.reported_at + TimeDelta::seconds(1),
+                ..other.clone()
+            };
+            assert!(!later.is_as_new_as(&arm), "{other:?}");
+        }
+    }
+}
