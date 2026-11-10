@@ -29,6 +29,7 @@ type DataUploadActors = (
 type CalibrationActors = (
     calibrations::LatestStore,
     Arc<calibrations::Uploader>,
+    Arc<calibrations::LatestPuller<http::Client, authn::TokenManager>>,
     [tokio::task::JoinHandle<()>; 2],
 );
 
@@ -88,14 +89,9 @@ impl AppState {
         let (deleter, uploader, scanner, [scanner_handle, deleter_handle, uploader_handle]) =
             Self::init_data_uploads(layout, http_client.clone(), token_mngr.clone()).await?;
 
-        // initialize the calibrations pipeline (latest store, uploader)
-        let (latest_cals, cal_uploader, [latest_cals_handle, cal_uploader_handle]) =
+        // initialize the calibrations pipeline (latest store, uploader, puller)
+        let (latest_cals, cal_uploader, latest_puller, [latest_cals_handle, cal_uploader_handle]) =
             Self::init_calibrations(layout, http_client.clone(), token_mngr.clone()).await;
-        let latest_puller = Arc::new(calibrations::LatestPuller::new(
-            latest_cals.clone(),
-            http_client.clone(),
-            token_mngr.clone(),
-        ));
 
         let shutdown_handle = async move {
             let handles = [
@@ -275,18 +271,24 @@ impl AppState {
     }
 
     /// The latest calibrations store is initialized before the calibration
-    /// uploader, whose worker writes it.
+    /// uploader, whose worker writes it, and the puller, which pulls into it.
     async fn init_calibrations(
         layout: &disk::Layout,
         http_client: Arc<http::Client>,
         token_mngr: Arc<authn::TokenManager>,
     ) -> CalibrationActors {
         let (latest_cals, latest_cals_handle) = Self::init_latest_cals(layout);
+        let latest_puller = Arc::new(calibrations::LatestPuller::new(
+            latest_cals.clone(),
+            http_client.clone(),
+            token_mngr.clone(),
+        ));
         let (cal_uploader, cal_uploader_handle) =
             Self::init_cal_uploader(layout, http_client, token_mngr, latest_cals.clone()).await;
         (
             latest_cals,
             cal_uploader,
+            latest_puller,
             [latest_cals_handle, cal_uploader_handle],
         )
     }
