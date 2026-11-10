@@ -37,13 +37,8 @@ impl Fixture {
     }
 
     async fn pull(&self, capacity: usize) -> Result<(), CalibrationsErr> {
-        calibrations::pull_latest(
-            &self.client,
-            latest_cals_layout(&self.dir),
-            capacity,
-            "tok",
-        )
-        .await
+        calibrations::pull_latest(&self.client, latest_cals_layout(&self.dir), capacity, "tok")
+            .await
     }
 
     /// Every entry in the store, in key order.
