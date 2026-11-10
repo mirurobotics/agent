@@ -9,7 +9,7 @@ use crate::calibrations::{
     latest::LatestStore,
     report::{QueueEntry, QueueSnapshotFile, Report},
     sender::Sender,
-    uploader::{NextAttempt, Uploader, UploaderOptions},
+    uploader_impl::{NextAttempt, UploaderImpl, UploaderOptions},
 };
 use crate::filesys::Dir;
 use crate::trace;
@@ -20,7 +20,7 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{error, info};
 
-pub struct CalMngrArgs<S, F, N> {
+pub struct UploaderArgs<S, F, N> {
     /// Where the queue persists; `None` keeps it in memory only.
     pub snapshot_file: Option<QueueSnapshotFile>,
     /// The directory holding one data file per queued report.
@@ -55,7 +55,7 @@ enum Flow {
 
 struct Worker<S, F, N> {
     receiver: mpsc::Receiver<Command>,
-    uploader: Uploader<S, N>,
+    uploader: UploaderImpl<S, N>,
     latest: LatestStore,
     sleep_fn: F,
 }
@@ -79,7 +79,7 @@ where
                 break;
             }
         }
-        info!("calibrations: manager shutdown complete");
+        info!("calibrations: uploader shutdown complete");
     }
 
     /// Upload the report queued as `entry` and settle it. A shutdown
@@ -168,20 +168,20 @@ fn respond<T>(respond_to: oneshot::Sender<T>, value: T, op: &str) {
 }
 
 // ================================== HANDLE ======================================= //
-/// Handle to the calibration manager: one task that owns the calibration
+/// Handle to the calibration uploader: one task that owns the calibration
 /// queue, writes intake to it and the latest store, and uploads reports to
 /// Miru one at a time, oldest due first, retrying a failed report at the tail
 /// after its own backoff. It keeps serving intake during an upload or a
 /// backoff.
 #[derive(Debug)]
-pub struct CalibrationManager {
+pub struct Uploader {
     sender: mpsc::Sender<Command>,
 }
 
-impl CalibrationManager {
+impl Uploader {
     pub fn spawn<S, F, Fut, N>(
         buffer_size: usize,
-        args: CalMngrArgs<S, F, N>,
+        args: UploaderArgs<S, F, N>,
     ) -> (Self, JoinHandle<()>)
     where
         S: Sender + 'static,
@@ -192,7 +192,7 @@ impl CalibrationManager {
         let (sender, receiver) = mpsc::channel(buffer_size);
         let worker = Worker {
             receiver,
-            uploader: Uploader::new(
+            uploader: UploaderImpl::new(
                 args.sender,
                 args.snapshot_file,
                 args.reports,
@@ -223,10 +223,10 @@ impl CalibrationManager {
             .await
     }
 
-    /// Stop the manager, dropping any in-flight upload. Queued reports,
+    /// Stop the uploader, dropping any in-flight upload. Queued reports,
     /// including the interrupted one, stay on disk for the next boot.
     pub async fn shutdown(&self) -> Result<(), CalibrationsErr> {
-        info!("calibrations: shutting down manager...");
+        info!("calibrations: shutting down uploader...");
         self.send_command("shutdown", |respond_to| Command::Shutdown { respond_to })
             .await
     }
@@ -238,14 +238,14 @@ impl CalibrationManager {
     ) -> Result<R, CalibrationsErr> {
         let (send, recv) = oneshot::channel();
         self.sender.send(make_cmd(send)).await.map_err(|e| {
-            error!("calibrations: failed to send the {op} command to the manager: {e}");
+            error!("calibrations: failed to send the {op} command to the uploader: {e}");
             CalibrationsErr::SendActorMessageErr(SendActorMessageErr {
                 source: Box::new(e),
                 trace: trace!(),
             })
         })?;
         recv.await.map_err(|e| {
-            error!("calibrations: failed to receive the {op} response from the manager: {e}");
+            error!("calibrations: failed to receive the {op} response from the uploader: {e}");
             CalibrationsErr::ReceiveActorMessageErr(ReceiveActorMessageErr {
                 source: Box::new(e),
                 trace: trace!(),

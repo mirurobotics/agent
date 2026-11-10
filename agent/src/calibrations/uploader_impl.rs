@@ -51,15 +51,15 @@ pub(crate) type NextAttempt = queue::NextAttempt<ReportMetadata>;
 
 /// Single-threaded calibration uploader state and logic: the queue of report
 /// metadata, the directory of report files, and the sender that uploads them.
-/// [`CalibrationManager`] runs it inside an actor and does the waiting.
+/// [`Uploader`] runs it inside an actor and does the waiting.
 ///
 /// Each queued report's data is its own file, `<reports>/<entry id>`, so large
 /// data is never rewritten with the queue. A failed report is
 /// retried at the tail of the queue after its own backoff, as in
 /// `data_uploads::upload`, so one failing report never blocks the others.
 ///
-/// [`CalibrationManager`]: crate::calibrations::CalibrationManager
-pub struct Uploader<S, N> {
+/// [`Uploader`]: crate::calibrations::Uploader
+pub struct UploaderImpl<S, N> {
     sender: Arc<S>,
     queue: Queue,
     /// Whether the queue is saved to a file, so it names every report file
@@ -70,7 +70,7 @@ pub struct Uploader<S, N> {
     now_fn: N,
 }
 
-impl<S, N> Uploader<S, N>
+impl<S, N> UploaderImpl<S, N>
 where
     S: Sender + 'static,
     N: Fn() -> DateTime<Utc> + Send + Sync + 'static,
@@ -302,7 +302,7 @@ mod tests {
     use std::time::Duration;
 
     // internal crates
-    use super::{NextAttempt, QueueEntry, Uploader, UploaderOptions};
+    use super::{NextAttempt, QueueEntry, UploaderImpl, UploaderOptions};
     use crate::test_utils::calibration_sender::{MockCalibrationSender, Step};
     use crate::test_utils::calibrations::{layout, received_at, report};
     use crate::test_utils::filesys::dirs as test_dirs;
@@ -316,7 +316,7 @@ mod tests {
     use uuid::Uuid;
 
     type Clock = Box<dyn Fn() -> DateTime<Utc> + Send + Sync>;
-    type TestUploader = Uploader<MockCalibrationSender, Clock>;
+    type TestUploader = UploaderImpl<MockCalibrationSender, Clock>;
 
     struct Fixture {
         _dir: test_dirs::TempDir,
@@ -369,7 +369,7 @@ mod tests {
         ) -> TestUploader {
             let clock = self.clock.clone();
             let now_fn: Clock = Box::new(move || *clock.lock().unwrap());
-            Uploader::new(
+            UploaderImpl::new(
                 self.sender.clone(),
                 snapshot_file,
                 self.layout.reports(),

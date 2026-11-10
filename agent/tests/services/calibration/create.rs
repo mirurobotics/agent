@@ -1,4 +1,4 @@
-//! Calibration intake: stamping a report and handing it to the calibration manager.
+//! Calibration intake: stamping a report and handing it to the calibration uploader.
 
 // internal crates
 use crate::mocks::calibration_sender::Step;
@@ -68,11 +68,11 @@ async fn a_deployments_cache_error_queues_nothing() {
     let err = f.create(params()).await.unwrap_err();
 
     assert!(matches!(err, ServiceErr::DiskErr(_)), "{err:?}");
-    assert_eq!(f.cal_mngr.num_queued_uploads().await.unwrap(), 0);
+    assert_eq!(f.cal_uploader.num_queued_uploads().await.unwrap(), 0);
 }
 
 #[tokio::test]
-async fn a_cal_mngr_rejection_fails_intake() {
+async fn a_cal_uploader_rejection_fails_intake() {
     let options = UploaderOptions {
         max_report_bytes: 100,
         ..UploaderOptions::default()
@@ -129,5 +129,5 @@ async fn a_full_latest_store_fails_intake() {
         ),
         "{err:?}"
     );
-    assert_eq!(f.cal_mngr.num_queued_uploads().await.unwrap(), 0);
+    assert_eq!(f.cal_uploader.num_queued_uploads().await.unwrap(), 0);
 }

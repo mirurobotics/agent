@@ -8,7 +8,7 @@ use std::sync::Arc;
 // internal crates
 use super::filesys::dirs::TempDir;
 use miru_agent::calibrations::{
-    CalMngrArgs, CalibrationManager, LatestStore, Report, ReportMetadata, Sender, UploaderOptions,
+    LatestStore, Report, ReportMetadata, Sender, Uploader, UploaderArgs, UploaderOptions,
 };
 use miru_agent::disk::layout::{CalibrationsLayout, LatestCalsLayout};
 use miru_agent::models::InstanceFormat;
@@ -74,16 +74,16 @@ pub async fn latest_store(dir: &TempDir, capacity: usize) -> LatestStore {
     LatestStore::open(latest_cals_layout(dir), capacity).await
 }
 
-/// A calibration manager under `dir` that keeps its queue in memory, holds at
+/// A calibration uploader under `dir` that keeps its queue in memory, holds at
 /// most `latest_capacity` keys in its latest store, and uploads through
 /// `sender`.
-pub async fn cal_mngr<S: Sender + 'static>(
+pub async fn cal_uploader<S: Sender + 'static>(
     dir: &TempDir,
     sender: Arc<S>,
     options: UploaderOptions,
     latest_capacity: usize,
-) -> CalibrationManager {
-    let args = CalMngrArgs {
+) -> Uploader {
+    let args = UploaderArgs {
         snapshot_file: None,
         reports: layout(dir).reports(),
         latest: latest_store(dir, latest_capacity).await,
@@ -92,5 +92,5 @@ pub async fn cal_mngr<S: Sender + 'static>(
         sleep_fn: tokio::time::sleep,
         now_fn: Utc::now,
     };
-    CalibrationManager::spawn(64, args).0
+    Uploader::spawn(64, args).0
 }

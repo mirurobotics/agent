@@ -1,4 +1,4 @@
-//! The calibration service fixture: a calibration manager with a mock sender
+//! The calibration service fixture: a calibration uploader with a mock sender
 //! and a deployments cache, under a temp dir.
 
 // standard crates
@@ -10,7 +10,7 @@ use crate::mocks::calibration_sender::MockCalibrationSender;
 use crate::test_utils::calibrations::{latest_store, layout, received_at};
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_agent::calibrations::{
-    latest, CalMngrArgs, CalibrationManager, QueueSnapshotFile, Report, UploaderOptions,
+    latest, QueueSnapshotFile, Report, Uploader, UploaderArgs, UploaderOptions,
 };
 use miru_agent::disk::{self, Layout};
 use miru_agent::models::{Deployment, DplActivity, InstanceFormat};
@@ -23,7 +23,7 @@ use tokio::sync::mpsc;
 
 pub struct Fixture {
     _dir: test_dirs::TempDir,
-    pub cal_mngr: CalibrationManager,
+    pub cal_uploader: Uploader,
     pub sender: Arc<MockCalibrationSender>,
     started: mpsc::UnboundedReceiver<()>,
     pub deployments: disk::Deployments,
@@ -34,7 +34,7 @@ impl Fixture {
         Self::with_options(UploaderOptions::default(), latest::DEFAULT_CAPACITY).await
     }
 
-    /// A fixture whose calibration manager takes `options` and whose latest store holds
+    /// A fixture whose calibration uploader takes `options` and whose latest store holds
     /// at most `latest_capacity` keys.
     pub async fn with_options(options: UploaderOptions, latest_capacity: usize) -> Self {
         let dir = test_dirs::temp("calibration_service_test").unwrap();
@@ -44,7 +44,7 @@ impl Fixture {
                 .await
                 .unwrap();
         let (sender, started) = MockCalibrationSender::new();
-        let args = CalMngrArgs {
+        let args = UploaderArgs {
             snapshot_file: Some(snapshot_file),
             reports: calibrations.reports(),
             latest: latest_store(&dir, latest_capacity).await,
@@ -53,14 +53,14 @@ impl Fixture {
             sleep_fn: tokio::time::sleep,
             now_fn: Utc::now,
         };
-        let (cal_mngr, _) = CalibrationManager::spawn(64, args);
+        let (cal_uploader, _) = Uploader::spawn(64, args);
         let deployments_file = Layout::new(dir.to_dir()).deployments();
         let (deployments, _) = disk::Deployments::spawn(64, deployments_file, 1000)
             .await
             .unwrap();
         Self {
             _dir: dir,
-            cal_mngr,
+            cal_uploader,
             sender,
             started,
             deployments,
@@ -80,10 +80,10 @@ impl Fixture {
     }
 
     pub async fn create(&self, params: CreateParams) -> Result<Created, ServiceErr> {
-        calibration::create(&self.cal_mngr, &self.deployments, params, received_at()).await
+        calibration::create(&self.cal_uploader, &self.deployments, params, received_at()).await
     }
 
-    /// The first report the calibration manager sends.
+    /// The first report the calibration uploader sends.
     pub async fn uploaded(&mut self) -> Report {
         tokio::time::timeout(Duration::from_secs(60), self.started.recv())
             .await
