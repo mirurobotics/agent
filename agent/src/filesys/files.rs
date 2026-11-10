@@ -1,8 +1,9 @@
 // standard crates
 use std::io::Write;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 // internal crates
+use crate::cooldown;
 use crate::filesys::{
     dirs,
     errors::*,
@@ -131,6 +132,32 @@ pub async fn read_json<T: DeserializeOwned>(file: &File) -> Result<T, FileSysErr
         })
     })?;
     Ok(obj)
+}
+
+/// Waits between retries of a read that failed for a reason other than
+/// "missing" or "unparseable" (e.g. a transient EIO).
+const READ_RETRY_DELAYS: [Duration; 3] = [
+    Duration::from_millis(50),
+    Duration::from_millis(250),
+    Duration::from_millis(1000),
+];
+
+/// [`read_json`], retrying errors other than "missing" and "unparseable",
+/// which a retry won't change, after each of [`READ_RETRY_DELAYS`].
+pub async fn read_json_with_retry<T: DeserializeOwned>(file: &File) -> Result<T, FileSysErr> {
+    let is_retryable = |err: &FileSysErr| {
+        !matches!(
+            err,
+            FileSysErr::PathDoesNotExistErr(_) | FileSysErr::ParseJSONErr(_)
+        )
+    };
+    cooldown::retry(
+        |n| READ_RETRY_DELAYS.get(n as usize).copied(),
+        is_retryable,
+        tokio::time::sleep,
+        move || read_json(file),
+    )
+    .await
 }
 
 pub async fn append_bytes(

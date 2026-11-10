@@ -6,13 +6,8 @@ use crate::calibrations::{
     errors::{CalibrationNotFoundErr, CalibrationStoreFullErr, CalibrationsErr},
     report::ReportMetadata,
 };
-use crate::cooldown;
 use crate::disk::layout::LatestCalsLayout;
-use crate::filesys::{
-    dirs, files,
-    state_file::{is_retryable_read, READ_RETRY_DELAYS},
-    Dir, File, FileSysErr, WriteOptions,
-};
+use crate::filesys::{dirs, files, Dir, File, FileSysErr, WriteOptions};
 use crate::trace;
 
 // external crates
@@ -110,18 +105,9 @@ impl LatestStore {
         }
     }
 
-    /// The index, which is empty until the first put writes it. A read that
-    /// fails for another reason is retried as a state file's is.
+    /// The index, which is empty until the first put writes it.
     async fn read_index(&self) -> Result<Index, CalibrationsErr> {
-        let file = &self.index;
-        let read = cooldown::retry(
-            |n| READ_RETRY_DELAYS.get(n as usize).copied(),
-            is_retryable_read,
-            tokio::time::sleep,
-            move || files::read_json::<Index>(file),
-        )
-        .await;
-        match read {
+        match files::read_json_with_retry::<Index>(&self.index).await {
             Err(FileSysErr::PathDoesNotExistErr(_)) => Ok(Index::new()),
             result => Ok(result?),
         }
