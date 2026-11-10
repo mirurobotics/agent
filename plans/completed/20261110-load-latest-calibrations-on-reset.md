@@ -28,7 +28,7 @@ Observable: upgrade an agent whose device has calibrations in its store; `/var/l
 - **Provision leaves the store alone.** Provisioning assumes a new device has no data, so `provisioning::provision` is unchanged from `main`: it neither loads nor clears the store.
 - **Reprovision wipes `calibrations/`, then loads in place.** Order in `provisioning::reprovision`: generate the temp keys → `reprovision_with_backend` (Miru accepts the new public key) → `bootstrap` (installs the keys) → `pull_calibrations`: `dirs::delete(calibrations/)`, issue a device token from the installed keys (`authn::issue_token`), and run `calibrations::pull_latest` into `calibrations/latest/`. The old upload queue, its reports and the old store go first ([review](https://github.com/mirurobotics/agent/pull/450#discussion_r4521677972)), so a failure after `bootstrap` never leaves the previous device's calibrations ([AI review](https://github.com/mirurobotics/agent/pull/450#discussion_r4521695982)); it leaves an empty or partial store until reprovision is rerun. A load failure is `ProvisionErr::CalibrationsErr` ("failed to load the latest calibrations: ..."), a token failure stays `ProvisionErr::AuthnErr`. No staging dir.
 - **Reprovision fails if it can't load.** It already needs the network. The load runs after `bootstrap`, so a failed load leaves a reprovisioned device that can reach Miru, with its old store, until reprovision is rerun (AI design review on #450). Loading before `bootstrap` would leave the device on old keys Miru no longer accepts.
-- **The loader spawns the store's actor for the length of the load.** `calibrations::pull_latest` calls `LatestStore::spawn` on the target layout, writes each report with the public `LatestStore::put`, then drops the handle and awaits the worker, so no task writes the store after the load. The loader never names `latest_impl`, as `AGENTS.md` requires. Alternative rejected: driving `LatestStoreImpl` directly, a second write path around the worker.
+- **The loader spawns the store's actor for the length of the load.** `calibrations::pull_latest` calls `LatestStore::spawn` on the target layout, writes each report with the public `LatestStore::put`, then drops the handle; every put returns once written, so nothing is left in flight. The loader never names `latest_impl`, as `AGENTS.md` requires. Alternative rejected: driving `LatestStoreImpl` directly, a second write path around the worker.
 - **`pull_latest` takes the target `LatestCalsLayout`,** not `disk::Layout`, so tests can load into any dir.
 - **One key at a time.** The loader keeps only metadata in memory and downloads and writes one content at a time, so memory stays bounded to one content of up to 1 MiB.
 - **Miru only, no merge.** Reprovision wipes `calibrations/` and writes Miru's latest; the loader never reads the upload queue ([review](https://github.com/mirurobotics/agent/pull/450#discussion_r4521677972)).
@@ -157,7 +157,7 @@ Tests (tests stage):
         token: &str,
     ) -> Result<(), CalibrationsErr>
 
-It spawns `LatestStore` on `store`, puts Miru's latest for each key (`put_mirus_latest`, any failure failing the call), drops the handle, awaits the worker and logs `calibrations: wrote {put} latest calibrations from Miru`.
+It spawns `LatestStore` on `store`, puts Miru's latest for each key (`put_mirus_latest`, any failure failing the call), drops the handle and logs `calibrations: wrote {put} latest calibrations from Miru`.
 
 Tests (tests stage):
 

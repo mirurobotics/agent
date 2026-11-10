@@ -9,7 +9,7 @@ use crate::http::{
 };
 
 // external crates
-use tracing::{error, info};
+use tracing::info;
 
 /// Write Miru's latest calibration for each key into the latest store in
 /// `store`, one key at a time, overwriting the entry already there for that
@@ -22,14 +22,9 @@ pub async fn pull_latest<HTTPClientT: http::ClientI>(
     capacity: usize,
     token: &str,
 ) -> Result<(), CalibrationsErr> {
-    let (handle, worker) = LatestStore::spawn(64, store, capacity);
-    let result = put_mirus_latest(&handle, http_client, token).await;
-    // awaiting the worker leaves no task writing the store after the call
-    drop(handle);
-    if let Err(e) = worker.await {
-        error!("calibrations: the latest store's worker failed: {e}");
-    }
-    let put = result?;
+    // each put returns once written, so the worker exits idle when dropped
+    let (handle, _) = LatestStore::spawn(64, store, capacity);
+    let put = put_mirus_latest(&handle, http_client, token).await?;
     info!("calibrations: wrote {put} latest calibrations from Miru");
     Ok(())
 }
