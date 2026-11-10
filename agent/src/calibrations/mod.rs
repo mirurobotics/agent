@@ -4,7 +4,7 @@
 pub mod errors;
 pub mod latest;
 mod latest_impl;
-pub mod merge;
+pub mod pull;
 pub mod report;
 pub mod sender;
 pub mod uploader;
@@ -16,7 +16,7 @@ pub use self::errors::{
 };
 pub use self::latest::LatestStore;
 pub use self::latest_impl::Filter;
-pub use self::merge::merge_latest;
+pub use self::pull::pull_latest;
 pub use self::report::{
     Queue, QueueEntry, QueueSnapshot, QueueSnapshotFile, Report, ReportMetadata,
 };

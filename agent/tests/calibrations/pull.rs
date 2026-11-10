@@ -1,4 +1,4 @@
-//! Merging Miru's latest calibrations into a latest calibrations store.
+//! Pulling Miru's latest calibrations into a latest calibrations store.
 
 // internal crates
 use crate::mocks::http_client::{Call, MockClient};
@@ -22,7 +22,7 @@ struct Fixture {
 impl Fixture {
     fn new() -> Self {
         Self {
-            dir: test_dirs::temp("merge_latest_test").unwrap(),
+            dir: test_dirs::temp("pull_latest_test").unwrap(),
             client: MockClient::default(),
         }
     }
@@ -40,9 +40,9 @@ impl Fixture {
             .set_get_calibration_content(|id| Ok(content(id)));
     }
 
-    async fn merge(&self, capacity: usize) -> Result<(), CalibrationsErr> {
+    async fn pull(&self, capacity: usize) -> Result<(), CalibrationsErr> {
         let store = latest_store(&self.dir, capacity).await;
-        calibrations::merge_latest(&store, &self.client, "tok").await
+        calibrations::pull_latest(&store, &self.client, "tok").await
     }
 
     /// Every entry in the store, in key order.
@@ -68,7 +68,7 @@ async fn writes_mirus_latest_calibrations_into_the_given_store() {
     let fx = Fixture::new();
     fx.serve(&["arm", "leg"]);
 
-    fx.merge(latest::DEFAULT_CAPACITY).await.unwrap();
+    fx.pull(latest::DEFAULT_CAPACITY).await.unwrap();
 
     let expected = vec![report("arm").metadata, report("leg").metadata];
     assert_eq!(fx.entries().await, expected);
@@ -111,7 +111,7 @@ async fn replaces_an_older_entry_for_a_key() {
     seed(&fx, &[reported_after("arm", -1)]).await;
     fx.serve(&["arm"]);
 
-    fx.merge(latest::DEFAULT_CAPACITY).await.unwrap();
+    fx.pull(latest::DEFAULT_CAPACITY).await.unwrap();
 
     assert_eq!(fx.entries().await, vec![report("arm").metadata]);
 }
@@ -123,7 +123,7 @@ async fn keeps_an_entry_as_new_or_newer_without_downloading() {
     seed(&fx, &stored).await;
     fx.serve(&["arm", "leg"]);
 
-    fx.merge(latest::DEFAULT_CAPACITY).await.unwrap();
+    fx.pull(latest::DEFAULT_CAPACITY).await.unwrap();
 
     assert_eq!(fx.entries().await, stored);
     assert_eq!(fx.client.call_count(Call::GetCalibrationContent), 0);
@@ -136,7 +136,7 @@ async fn keeps_keys_miru_does_not_have() {
     seed(&fx, std::slice::from_ref(&leg)).await;
     fx.serve(&["arm"]);
 
-    fx.merge(latest::DEFAULT_CAPACITY).await.unwrap();
+    fx.pull(latest::DEFAULT_CAPACITY).await.unwrap();
 
     assert_eq!(fx.entries().await, vec![report("arm").metadata, leg]);
 }
@@ -146,7 +146,7 @@ async fn writes_nothing_when_miru_is_empty() {
     let fx = Fixture::new();
     fx.serve(&[]);
 
-    fx.merge(latest::DEFAULT_CAPACITY).await.unwrap();
+    fx.pull(latest::DEFAULT_CAPACITY).await.unwrap();
 
     assert!(fx.entries().await.is_empty());
     assert_eq!(fx.client.call_count(Call::GetCalibrationContent), 0);
@@ -157,7 +157,7 @@ async fn more_keys_than_capacity_fail_the_call() {
     let fx = Fixture::new();
     fx.serve(&["arm", "leg"]);
 
-    let result = fx.merge(1).await;
+    let result = fx.pull(1).await;
 
     assert!(matches!(result, Err(CalibrationsErr::StoreFullErr(_))));
 }
@@ -171,7 +171,7 @@ async fn an_unreadable_store_fails_the_call() {
         .unwrap();
     fx.serve(&["arm"]);
 
-    let result = fx.merge(latest::DEFAULT_CAPACITY).await;
+    let result = fx.pull(latest::DEFAULT_CAPACITY).await;
 
     assert!(matches!(result, Err(CalibrationsErr::FileSysErr(_))));
     assert_eq!(fx.client.call_count(Call::GetCalibrationContent), 0);
@@ -182,7 +182,7 @@ async fn a_failed_list_fails_the_call() {
     let fx = Fixture::new();
     fx.client.set_list_latest_calibrations(|| Err(mock_err()));
 
-    let result = fx.merge(latest::DEFAULT_CAPACITY).await;
+    let result = fx.pull(latest::DEFAULT_CAPACITY).await;
 
     assert!(matches!(result, Err(CalibrationsErr::HTTPErr(_))));
     assert_eq!(fx.client.call_count(Call::GetCalibrationContent), 0);
@@ -197,7 +197,7 @@ async fn a_failed_download_fails_the_call() {
         _ => Ok(content(id)),
     });
 
-    let result = fx.merge(latest::DEFAULT_CAPACITY).await;
+    let result = fx.pull(latest::DEFAULT_CAPACITY).await;
 
     assert!(matches!(result, Err(CalibrationsErr::HTTPErr(_))));
 }

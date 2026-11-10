@@ -22,7 +22,7 @@ Observable: upgrade an agent on a device whose calibrations are in Miru but not 
 
 1. **Merge instead of overwrite.** `ReportMetadata::is_as_new_as`; `LatestStore::put_if_newer`, which checks and puts in one worker command; the pull lists the store once, skips keys it has as new or newer before downloading, and puts the rest with `put_if_newer`. Reprovision, the only caller, pulls into an emptied store, so its behavior doesn't change.
 2. **Store queued reports at startup.** The uploader's worker, after `prune_orphans`, puts each queued report with `put_if_newer` unless the store has its key as new or newer. Failures are logged.
-3. **Pull once per run.** `AppState` spawns the calibrations pipeline before the syncer and gives the syncer the store's handle. After each sync that isn't a network error, unless a pull is running or one has succeeded this run, the syncer spawns `calibrations::merge_latest` in its own task. It aborts a running pull when it stops, and the store shuts down after the syncer.
+3. **Pull once per run.** `AppState` spawns the calibrations pipeline before the syncer and gives the syncer the store's handle. After each sync that isn't a network error, unless a pull is running or one has succeeded this run, the syncer spawns `calibrations::pull_latest` in its own task. It aborts a running pull when it stops, and the store shuts down after the syncer.
 
 ## Decisions
 
@@ -65,6 +65,6 @@ To be filled in when the last PR merges.
 
 CI runs the suite on each PR.
 
-- PR 1, `tests/calibrations/latest.rs`: `put_if_newer` puts a new key or a later report and keeps an entry reported at the same time or later. `tests/calibrations/merge.rs`: replaces an older entry; keeps an entry as new or newer without downloading; keeps keys Miru doesn't have.
+- PR 1, `tests/calibrations/latest.rs`: `put_if_newer` puts a new key or a later report and keeps an entry reported at the same time or later. `tests/calibrations/pull.rs`: replaces an older entry; keeps an entry as new or newer without downloading; keeps keys Miru doesn't have.
 - PR 2, `tests/calibrations/uploader.rs`: queued reports the store lacks are stored at startup; a stored entry as new or newer is kept.
 - PR 3, `sync/syncer.rs` `latest_calibrations`: a sync pulls once and a later sync doesn't; a failed pull is retried on the next sync; an unreachable Miru skips the pull.
