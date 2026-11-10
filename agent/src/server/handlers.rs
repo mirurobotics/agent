@@ -221,7 +221,7 @@ pub async fn get_calibration_content(
     Path(report_id): Path<String>,
 ) -> Response {
     match calibration_svc::get_content(&state.latest_cals, &report_id).await {
-        Ok(report) => response::calibration_content(report),
+        Ok(content) => response::calibration_content(content),
         Err(e) => error_response(e.into(), "Error getting calibration content").into_response(),
     }
 }

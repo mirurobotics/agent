@@ -18,10 +18,12 @@ async fn get_content_returns_the_reported_data() {
 
     let content = calibration::get_content(&f.latest, &report_id).await;
 
-    let report = content.unwrap();
-    assert_eq!(report.metadata.report_id, created.report_id);
-    assert_eq!(report.metadata.format, InstanceFormat::Yaml);
-    assert_eq!(report.data, params().data);
+    let expected = calibration::Content {
+        report_id: created.report_id,
+        format: InstanceFormat::Yaml,
+        data: params().data,
+    };
+    assert_eq!(content.unwrap(), expected);
 }
 
 #[tokio::test]

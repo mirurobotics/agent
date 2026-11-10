@@ -1,5 +1,5 @@
 // internal crates
-use crate::calibrations::{Report, ReportMetadata};
+use crate::calibrations::ReportMetadata;
 use crate::events;
 use crate::models;
 use crate::services::calibration;
@@ -162,22 +162,21 @@ pub fn latest_calibrations(
     }
 }
 
-/// The calibration content route's response: the report's data, with the
+/// The calibration content route's response: the data, with the
 /// `Content-Type` of its format and an inline `Content-Disposition` that names
 /// the file the way Miru does.
-pub fn calibration_content(report: Report) -> Response {
-    let metadata = report.metadata;
-    let filename = match metadata.format.file_ext() {
-        Some(ext) => format!("{}.{ext}", metadata.report_id),
-        None => metadata.report_id.to_string(),
+pub fn calibration_content(content: calibration::Content) -> Response {
+    let filename = match content.format.file_ext() {
+        Some(ext) => format!("{}.{ext}", content.report_id),
+        None => content.report_id.to_string(),
     };
     let disposition = format!("inline; filename=\"{filename}\"");
     let headers = [
         (
             header::CONTENT_TYPE,
-            metadata.format.media_type().to_string(),
+            content.format.media_type().to_string(),
         ),
         (header::CONTENT_DISPOSITION, disposition),
     ];
-    (StatusCode::OK, headers, report.data).into_response()
+    (StatusCode::OK, headers, content.data).into_response()
 }
