@@ -1,5 +1,5 @@
 //! The latest calibrations store: its keys and capacity, write order,
-//! listing, content, and the prune when it opens.
+//! listing, content, the prune when its worker starts, and shutdown.
 
 // internal crates
 use crate::test_utils::calibrations::{latest_cals_layout, latest_store, reported};
@@ -9,6 +9,8 @@ use miru_agent::disk::layout::LatestCalsLayout;
 use miru_agent::filesys::{dirs, files, File, PathExt, WriteOptions};
 
 // external crates
+use futures::FutureExt;
+use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 /// The content every fixture report is put with.
@@ -35,9 +37,15 @@ impl Fixture {
         }
     }
 
-    /// Open the store again over the same files.
+    /// Spawn the store again over the same files. Its worker holds its own
+    /// index in memory, apart from `store`'s.
     async fn reopen(&self) -> LatestStore {
         latest_store(&self.dir, latest::DEFAULT_CAPACITY).await
+    }
+
+    /// Spawn the store again over the same files, keeping its worker's handle.
+    fn spawn(&self) -> (LatestStore, JoinHandle<()>) {
+        LatestStore::spawn(64, latest_cals_layout(&self.dir), latest::DEFAULT_CAPACITY)
     }
 
     /// Every entry, in key order.
@@ -84,6 +92,28 @@ impl Fixture {
             .await
             .unwrap();
     }
+
+    /// Put a directory where the index goes, so it can be neither read nor
+    /// written, and return what the index held.
+    async fn block_index(&self) -> String {
+        let index = self.layout.index();
+        let saved = files::read_string(&index).await.unwrap();
+        files::delete(&index).await.unwrap();
+        dirs::create(&self.layout.root.subdir("index.json"))
+            .await
+            .unwrap();
+        saved
+    }
+
+    /// Undo [`Self::block_index`], writing back what the index held.
+    async fn unblock_index(&self, saved: &str) {
+        dirs::delete(&self.layout.root.subdir("index.json"))
+            .await
+            .unwrap();
+        files::write_string(&self.layout.index(), saved, WriteOptions::OVERWRITE_ATOMIC)
+            .await
+            .unwrap();
+    }
 }
 
 /// A newer report for `metadata`'s key, with a fresh `report_id` as intake
@@ -102,9 +132,9 @@ async fn put_all(store: &LatestStore, reports: &[&ReportMetadata]) {
     }
 }
 
-// ================================= OPEN ================================= //
+// ================================ SPAWN ================================= //
 #[tokio::test]
-async fn open_deletes_the_contents_no_entry_names() {
+async fn spawn_deletes_the_contents_no_entry_names() {
     let f = Fixture::new().await;
     let arm = reported("arm", None, None);
     put_all(&f.store, &[&arm]).await;
@@ -117,7 +147,7 @@ async fn open_deletes_the_contents_no_entry_names() {
 
 // paused, so the read's retries don't wait in real time
 #[tokio::test(start_paused = true)]
-async fn open_keeps_the_contents_when_the_index_cannot_be_read() {
+async fn spawn_keeps_the_contents_when_the_index_cannot_be_read() {
     let f = Fixture::new().await;
     let orphan = Uuid::new_v4();
     f.write_orphan(orphan).await;
@@ -130,7 +160,7 @@ async fn open_keeps_the_contents_when_the_index_cannot_be_read() {
 }
 
 #[tokio::test]
-async fn open_keeps_the_contents_when_the_index_is_corrupt() {
+async fn spawn_keeps_the_contents_when_the_index_is_corrupt() {
     let f = Fixture::new().await;
     let orphan = Uuid::new_v4();
     f.write_orphan(orphan).await;
@@ -244,6 +274,20 @@ async fn put_fails_and_keeps_the_replaced_entry_when_the_content_cannot_be_writt
 }
 
 #[tokio::test]
+async fn put_fails_and_keeps_the_entries_when_the_index_cannot_be_written() {
+    let f = Fixture::new().await;
+    let arm = reported("arm", None, None);
+    put_all(&f.store, &[&arm]).await;
+    f.block_index().await;
+    let leg = reported("leg", None, None);
+
+    let err = f.store.put(leg, DATA).await.unwrap_err();
+
+    assert!(matches!(err, CalibrationsErr::FileSysErr(_)), "{err:?}");
+    assert_eq!(f.entries().await, [arm]);
+}
+
+#[tokio::test]
 async fn put_succeeds_when_the_replaced_content_cannot_be_deleted() {
     let f = Fixture::new().await;
     let old = reported("arm", None, None);
@@ -327,6 +371,17 @@ async fn list_filters_by_component_role_and_aspect() {
     }
 }
 
+#[tokio::test]
+async fn list_serves_the_entries_from_memory() {
+    let f = Fixture::new().await;
+    let arm = reported("arm", None, None);
+    put_all(&f.store, &[&arm]).await;
+
+    files::delete(&f.layout.index()).await.unwrap();
+
+    assert_eq!(f.entries().await, [arm]);
+}
+
 // ================================ CONTENT =============================== //
 #[tokio::test]
 async fn content_returns_the_data() {
@@ -374,16 +429,18 @@ async fn content_is_not_found_when_its_file_is_missing() {
 
 // ================================ ERRORS ================================ //
 #[tokio::test]
-async fn a_corrupt_index_fails_every_call() {
+async fn a_corrupt_index_at_spawn_fails_every_call() {
     let f = Fixture::new().await;
     let arm = reported("arm", None, None);
     put_all(&f.store, &[&arm]).await;
     f.corrupt_index().await;
 
+    let store = f.reopen().await;
+
     let errs = [
-        f.store.put(arm.clone(), DATA).await.unwrap_err(),
-        f.store.list(&Filter::default()).await.unwrap_err(),
-        f.store.content(arm.report_id).await.unwrap_err(),
+        store.put(arm.clone(), DATA).await.unwrap_err(),
+        store.list(&Filter::default()).await.unwrap_err(),
+        store.content(arm.report_id).await.unwrap_err(),
     ];
 
     for err in errs {
@@ -391,29 +448,37 @@ async fn a_corrupt_index_fails_every_call() {
     }
 }
 
-// The index is a directory until 10 ms, between the first read and the first
-// retry at 50 ms. Time is paused, so the order is fixed.
+// The index is a directory until 10 ms, between the worker's first read and
+// its first retry at 50 ms. Time is paused, so the order is fixed.
 #[tokio::test(start_paused = true)]
-async fn list_retries_an_index_read_that_fails_for_a_moment() {
+async fn spawn_retries_an_index_read_that_fails_for_a_moment() {
     let f = Fixture::new().await;
     let arm = reported("arm", None, None);
     put_all(&f.store, &[&arm]).await;
-    let index = f.layout.index();
-    let saved = files::read_string(&index).await.unwrap();
-    files::delete(&index).await.unwrap();
-    let blocker = f.layout.root.subdir("index.json");
-    dirs::create(&blocker).await.unwrap();
-
-    let fixer = tokio::spawn(async move {
+    let saved = f.block_index().await;
+    let unblock = async {
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        tokio::fs::remove_dir(blocker.path()).await.unwrap();
-        files::write_string(&index, &saved, WriteOptions::OVERWRITE_ATOMIC)
-            .await
-            .unwrap();
-    });
+        f.unblock_index(&saved).await;
+    };
 
-    let entries = f.store.list(&Filter::default()).await.unwrap();
-    fixer.await.unwrap();
+    let ((), store) = tokio::join!(unblock, f.reopen());
+
+    let entries = store.list(&Filter::default()).await.unwrap();
+    assert_eq!(entries, [arm]);
+}
+
+// paused, so the read's retries don't wait in real time
+#[tokio::test(start_paused = true)]
+async fn a_call_reads_an_index_that_could_not_be_read_at_spawn() {
+    let f = Fixture::new().await;
+    let arm = reported("arm", None, None);
+    put_all(&f.store, &[&arm]).await;
+    let saved = f.block_index().await;
+    let store = f.reopen().await;
+
+    f.unblock_index(&saved).await;
+
+    let entries = store.list(&Filter::default()).await.unwrap();
     assert_eq!(entries, [arm]);
 }
 
@@ -427,4 +492,68 @@ async fn content_fails_when_its_file_cannot_be_read() {
     let err = f.store.content(arm.report_id).await.unwrap_err();
 
     assert!(matches!(err, CalibrationsErr::FileSysErr(_)), "{err:?}");
+}
+
+// =============================== SHUTDOWN =============================== //
+#[tokio::test]
+async fn commands_after_shutdown_fail() {
+    let f = Fixture::new().await;
+    let (store, handle) = f.spawn();
+    store.shutdown().await.unwrap();
+    // joined, so the worker has dropped its receiver
+    handle.await.unwrap();
+    let arm = reported("arm", None, None);
+
+    let errs = [
+        store.put(arm.clone(), DATA).await.unwrap_err(),
+        store.list(&Filter::default()).await.unwrap_err(),
+        store.content(arm.report_id).await.unwrap_err(),
+    ];
+
+    for err in errs {
+        assert!(
+            matches!(err, CalibrationsErr::SendActorMessageErr(_)),
+            "{err:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_command_queued_behind_shutdown_fails() {
+    let f = Fixture::new().await;
+    let (store, handle) = f.spawn();
+    let filter = Filter::default();
+
+    let (stopped, listed) = tokio::join!(store.shutdown(), store.list(&filter));
+
+    stopped.unwrap();
+    let err = listed.unwrap_err();
+    assert!(
+        matches!(err, CalibrationsErr::ReceiveActorMessageErr(_)),
+        "{err:?}"
+    );
+    handle.await.unwrap();
+}
+
+#[tokio::test]
+async fn a_caller_that_stops_waiting_does_not_stop_the_store() {
+    let f = Fixture::new().await;
+    let arm = reported("arm", None, None);
+    let filter = Filter::default();
+
+    // polled once: the command is sent, then its reply is abandoned
+    assert!(f.store.list(&filter).now_or_never().is_none());
+
+    put_all(&f.store, &[&arm]).await;
+    assert_eq!(f.entries().await, [arm]);
+}
+
+#[tokio::test]
+async fn dropping_every_handle_stops_the_store() {
+    let f = Fixture::new().await;
+    let (store, handle) = f.spawn();
+
+    drop(store);
+
+    handle.await.unwrap();
 }
