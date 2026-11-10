@@ -31,9 +31,9 @@ pub struct Filter {
 
 impl Filter {
     pub fn is_match(&self, metadata: &ReportMetadata) -> bool {
-        is_allowed(&self.component, &metadata.component)
-            && is_allowed(&self.role, &metadata.role)
-            && is_allowed(&self.aspect, &metadata.aspect)
+        matches(&self.component, &metadata.component)
+            && matches(&self.role, &metadata.role)
+            && matches(&self.aspect, &metadata.aspect)
     }
 }
 
@@ -160,9 +160,9 @@ fn key_parts(metadata: &ReportMetadata) -> (&String, &Option<String>, &Option<St
     (&metadata.component, &metadata.role, &metadata.aspect)
 }
 
-/// Whether `value` is in `allowed`, where an empty list allows any value.
-fn is_allowed<T: PartialEq>(allowed: &[T], value: &T) -> bool {
-    allowed.is_empty() || allowed.contains(value)
+/// Whether `value` is one of `values`, where an empty list matches any value.
+fn matches<T: PartialEq>(values: &[T], value: &T) -> bool {
+    values.is_empty() || values.contains(value)
 }
 
 /// Reject a new key once the store holds `capacity` keys.
@@ -188,7 +188,7 @@ fn not_found(report_id: Uuid) -> CalibrationsErr {
 #[cfg(test)]
 mod tests {
     // internal crates
-    use super::{check_capacity, is_allowed, key_parts, not_found, take_entry, Index};
+    use super::{check_capacity, key_parts, matches, not_found, take_entry, Index};
     use crate::test_utils::calibrations::reported;
     use miru_agent::calibrations::ReportMetadata;
     use miru_agent::models::InstanceFormat;
@@ -252,17 +252,17 @@ mod tests {
         }
     }
 
-    // ============================ IS ALLOWED ============================ //
+    // ============================== MATCHES ============================= //
     #[test]
-    fn is_allowed_allows_any_value_for_an_empty_list() {
+    fn matches_any_value_for_an_empty_list() {
         let cases: [(&[&str], &str, bool); 3] = [
             (&[], "arm", true),
             (&["arm", "leg"], "arm", true),
             (&["leg"], "arm", false),
         ];
 
-        for (allowed, value, want) in cases {
-            assert_eq!(is_allowed(allowed, &value), want, "{allowed:?} {value}");
+        for (values, value, want) in cases {
+            assert_eq!(matches(values, &value), want, "{values:?} {value}");
         }
     }
 
