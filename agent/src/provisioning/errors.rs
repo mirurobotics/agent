@@ -36,7 +36,7 @@ pub enum ProvisionErr {
     AlreadyProvisionedErr(AlreadyProvisionedErr),
     #[error(transparent)]
     AuthnErr(authn::AuthnErr),
-    #[error("failed to pull the latest calibrations; rerun reprovision: {0}")]
+    #[error("failed to pull the latest calibrations: {0}")]
     CalibrationsErr(calibrations::CalibrationsErr),
     #[error(transparent)]
     CryptErr(crypt::CryptErr),
