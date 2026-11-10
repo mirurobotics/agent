@@ -318,6 +318,13 @@ impl AppState {
             first_err.get_or_insert(e.into());
         }
 
+        // shutdown the latest calibrations store after the calibration uploader,
+        // whose worker writes it
+        if let Err(e) = self.latest_cals.shutdown().await {
+            tracing::error!("failed to shutdown latest calibrations store: {e}");
+            first_err.get_or_insert(e.into());
+        }
+
         // shutdown the data uploader next: it depends on nothing else in the app. The
         // scanner's upload sink may still enqueue into the stopped uploader if a
         // scan tick races this shutdown; the sink logs a warn and the tick
