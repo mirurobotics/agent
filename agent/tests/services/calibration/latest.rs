@@ -1,13 +1,8 @@
-//! Listing the latest calibrations that intake wrote through or the puller
-//! pulled.
-
-// standard crates
-use std::future::pending;
+//! Listing the latest calibrations that intake wrote through.
 
 // internal crates
 use crate::services::calibration::helpers::{params, Fixture};
-use crate::test_utils::calibrations::{miru_calibration, received_at, report};
-use backend_api::models::CalibrationList;
+use crate::test_utils::calibrations::received_at;
 use miru_agent::calibrations::{Filter, ReportMetadata};
 use miru_agent::models::InstanceFormat;
 use miru_agent::services::calibration::{self, CreateParams};
@@ -21,7 +16,7 @@ async fn list_latest_includes_a_created_report() {
     let f = Fixture::new().await;
     let created = f.create(params()).await.unwrap();
 
-    let latest = calibration::list_latest(&f.puller, &Filter::default(), pending()).await;
+    let latest = calibration::list_latest(&f.latest, &Filter::default()).await;
 
     let metadata = ReportMetadata {
         report_id: created.report_id,
@@ -38,21 +33,6 @@ async fn list_latest_includes_a_created_report() {
 }
 
 #[tokio::test]
-async fn list_latest_pulls_the_control_planes_latest_first() {
-    let f = Fixture::new().await;
-    let list = CalibrationList {
-        data: vec![miru_calibration("arm")],
-        ..CalibrationList::default()
-    };
-    f.client
-        .set_list_latest_calibrations(move || Ok(list.clone()));
-
-    let latest = calibration::list_latest(&f.puller, &Filter::default(), pending()).await;
-
-    assert_eq!(latest.unwrap(), [report("arm").metadata]);
-}
-
-#[tokio::test]
 async fn list_latest_applies_the_filter() {
     let f = Fixture::new().await;
     f.create(params()).await.unwrap();
@@ -66,7 +46,7 @@ async fn list_latest_applies_the_filter() {
         ..Filter::default()
     };
 
-    let latest = calibration::list_latest(&f.puller, &filter, pending()).await;
+    let latest = calibration::list_latest(&f.latest, &filter).await;
 
     let listed = latest.unwrap().into_iter();
     let ids: Vec<Uuid> = listed.map(|metadata| metadata.report_id).collect();
@@ -78,7 +58,7 @@ async fn list_latest_fails_when_the_store_cannot_be_read() {
     let f = Fixture::new().await;
     f.corrupt_latest_index().await;
 
-    let result = calibration::list_latest(&f.puller, &Filter::default(), pending()).await;
+    let result = calibration::list_latest(&f.latest, &Filter::default()).await;
 
     let err = result.unwrap_err();
     assert!(matches!(err, ServiceErr::CalibrationsErr(_)), "{err:?}");

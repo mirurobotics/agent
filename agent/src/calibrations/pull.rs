@@ -2,15 +2,14 @@
 //! store, merging by `reported_at`.
 
 // standard crates
-use std::future::Future;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::time::Duration;
 
 // internal crates
 use crate::authn::TokenManagerExt;
 use crate::calibrations::{
     errors::CalibrationsErr, latest::LatestStore, report::ReportMetadata, Filter,
 };
+use crate::cooldown;
 use crate::http::{
     self,
     calibrations::{GetContentParams, ListAllLatestParams},
@@ -19,8 +18,13 @@ use crate::http::{
 
 // external crates
 use backend_api::models::Calibration;
-use tokio::sync::Mutex;
 use tracing::{info, warn};
+
+const PULL_BACKOFF: cooldown::Backoff = cooldown::Backoff {
+    base_secs: 1,
+    growth_factor: 2,
+    max_secs: 60,
+};
 
 /// Put the control plane's latest calibration for each key into `store`,
 /// unless the store's entry is as new or newer. Skipped keys aren't downloaded.
@@ -87,67 +91,28 @@ async fn download<HTTPClientT: http::ClientI>(
     .await
 }
 
-/// Pulls the control plane's latest calibrations into the store until a pull
-/// succeeds this run. Concurrent callers share the result of the pull already
-/// running.
-#[derive(Debug)]
-pub struct LatestPuller<HTTPClientT, TokenManagerT> {
-    store: LatestStore,
-    http_client: Arc<HTTPClientT>,
-    token_mngr: Arc<TokenManagerT>,
-    has_pulled: Mutex<bool>,
-    attempts: AtomicU64,
-}
-
-impl<HTTPClientT, TokenManagerT> LatestPuller<HTTPClientT, TokenManagerT>
-where
+/// Pull into `store` until a pull succeeds, waiting longer after each failure.
+pub async fn pull_latest_until_success<HTTPClientT, TokenManagerT>(
+    store: &LatestStore,
+    http_client: &HTTPClientT,
+    token_mngr: &TokenManagerT,
+) where
     HTTPClientT: http::ClientI,
     TokenManagerT: TokenManagerExt,
 {
-    pub fn new(
-        store: LatestStore,
-        http_client: Arc<HTTPClientT>,
-        token_mngr: Arc<TokenManagerT>,
-    ) -> Self {
-        Self {
-            store,
-            http_client,
-            token_mngr,
-            has_pulled: Mutex::new(false),
-            attempts: AtomicU64::new(0),
-        }
-    }
-
-    /// The store this puller pulls into.
-    pub fn store(&self) -> &LatestStore {
-        &self.store
-    }
-
-    /// Pulls unless a pull has succeeded this run, giving up once `shutdown`
-    /// resolves. A failure is logged, and the next call tries again, but a
-    /// caller that waited for a pull doesn't.
-    pub async fn ensure_pulled(&self, shutdown: impl Future<Output = ()>) {
-        tokio::select! {
-            _ = shutdown => {}
-            _ = self.pull_unless_pulled() => {}
-        }
-    }
-
-    async fn pull_unless_pulled(&self) {
-        let seen = self.attempts.load(Ordering::Acquire);
-        let mut has_pulled = self.has_pulled.lock().await;
-        if *has_pulled || self.attempts.load(Ordering::Acquire) != seen {
-            return;
-        }
-        match self.pull().await {
-            Ok(()) => *has_pulled = true,
-            Err(e) => warn!("calibrations: unable to pull the latest calibrations: {e}"),
-        }
-        self.attempts.fetch_add(1, Ordering::Release);
-    }
-
-    async fn pull(&self) -> Result<(), CalibrationsErr> {
-        let token = self.token_mngr.get_token().await?;
-        pull_latest(&self.store, self.http_client.as_ref(), &token.token).await
+    let mut attempts: u32 = 0;
+    loop {
+        let result = match token_mngr.get_token().await {
+            Ok(token) => pull_latest(store, http_client, &token.token).await,
+            Err(e) => Err(e.into()),
+        };
+        let e = match result {
+            Ok(()) => return,
+            Err(e) => e,
+        };
+        attempts = attempts.saturating_add(1);
+        let wait = cooldown::calc(&PULL_BACKOFF, attempts);
+        warn!("calibrations: unable to pull the latest calibrations, retrying in {wait}s: {e}");
+        tokio::time::sleep(Duration::from_secs(wait as u64)).await;
     }
 }

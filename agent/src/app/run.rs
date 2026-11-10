@@ -9,6 +9,7 @@ use crate::app::{
     state::AppState,
 };
 use crate::authn::{self, TokenManagerExt};
+use crate::calibrations;
 use crate::data_uploads::scan;
 use crate::disk::{self, Layout};
 use crate::filesys;
@@ -339,10 +340,15 @@ async fn init_calibrations_pull(
 ) -> Result<(), ServerErr> {
     info!("Starting the calibrations pull...");
     let pull_handle = tokio::spawn(async move {
-        let shutdown = async move {
-            let _ = shutdown_rx.recv().await;
-        };
-        app_state.latest_puller.ensure_pulled(shutdown).await;
+        let pull = calibrations::pull_latest_until_success(
+            &app_state.latest_cals,
+            app_state.http_client.as_ref(),
+            app_state.token_mngr.as_ref(),
+        );
+        tokio::select! {
+            _ = shutdown_rx.recv() => {}
+            _ = pull => {}
+        }
     });
     shutdown_manager.register_handle(
         |mgr| &mut mgr.calibrations_pull_handle,
@@ -400,7 +406,6 @@ async fn init_local_api_servers(
         event_hub: app_state.event_hub.clone(),
         cal_uploader: app_state.cal_uploader.clone(),
         latest_cals: app_state.latest_cals.clone(),
-        latest_puller: app_state.latest_puller.clone(),
         shutdown_tx: shutdown_tx.clone(),
     });
 
