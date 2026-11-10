@@ -86,8 +86,9 @@ where
 
     /// Write each queued report to the latest store unless the store has its
     /// key's report as new or newer, since an older agent queued reports
-    /// without writing the store. Failures are logged. `&mut self`, since the
-    /// worker isn't `Sync`.
+    /// without writing the store. Failures are logged. Commands wait until it
+    /// finishes, which after an upgrade can mean a read and a put for every
+    /// queued report. `&mut self`, since the worker isn't `Sync`.
     async fn store_queued(&mut self) {
         let stored = match self.latest.list(&Filter::default()).await {
             Ok(stored) => stored,
