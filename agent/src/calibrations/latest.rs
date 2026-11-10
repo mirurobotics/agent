@@ -83,8 +83,7 @@ fn respond<T>(respond_to: oneshot::Sender<T>, value: T, op: &str) {
 
 // ================================== HANDLE ======================================= //
 /// Handle to the latest calibrations store's worker, which owns the store's
-/// files and its index in memory, so it is the store's only writer. Clones
-/// share the worker.
+/// files, so it is the store's only writer. Clones share the worker.
 #[derive(Clone, Debug)]
 pub struct LatestStore {
     sender: mpsc::Sender<Command>,

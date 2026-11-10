@@ -45,33 +45,31 @@ impl Filter {
 ///
 /// [`LatestStore`]: crate::calibrations::LatestStore
 pub(crate) struct LatestStoreImpl {
-    index_file: File,
+    index: File,
     contents: Dir,
     capacity: usize,
-    /// The entries read from `index_file`; `None` until a read succeeds.
-    index: Option<Index>,
 }
 
 impl LatestStoreImpl {
-    /// The store in `layout`, holding at most `capacity` keys. Nothing is read
-    /// until the first call.
+    /// The store in `layout`, holding at most `capacity` keys.
     pub(crate) fn new(layout: LatestCalsLayout, capacity: usize) -> Self {
         Self {
-            index_file: layout.index(),
+            index: layout.index(),
             contents: layout.contents(),
             capacity,
-            index: None,
         }
     }
 
-    /// Make `metadata` its key's entry, with `data` as its content. The
-    /// entries in memory change only once the index is written.
+    /// Make `metadata` its key's entry, with `data` as its content. A new key
+    /// past the capacity is rejected rather than evicting another. A failure
+    /// part way leaves at most content that no entry names, which the worker
+    /// deletes when it next starts.
     pub(crate) async fn put(
-        &mut self,
+        &self,
         metadata: ReportMetadata,
         data: &str,
     ) -> Result<(), CalibrationsErr> {
-        let mut index = self.index().await?.clone();
+        let mut index = self.read_index().await?;
         let replaced = take_entry(&mut index, &metadata);
         if replaced.is_none() {
             check_capacity(index.len(), self.capacity)?;
@@ -80,7 +78,6 @@ impl LatestStoreImpl {
         self.write_content(report_id, data).await?;
         index.push(metadata);
         self.write_index(&index).await?;
-        self.index = Some(index);
         // the same report put again shares its content file, so keep it
         if let Some(replaced) = replaced.filter(|r| r.report_id != report_id) {
             self.delete_content(replaced.report_id).await;
@@ -90,23 +87,19 @@ impl LatestStoreImpl {
 
     /// The entries `filter` matches, ordered by component, role and aspect.
     pub(crate) async fn list(
-        &mut self,
+        &self,
         filter: &Filter,
     ) -> Result<Vec<ReportMetadata>, CalibrationsErr> {
-        let mut entries: Vec<ReportMetadata> = self
-            .index()
-            .await?
-            .iter()
-            .filter(|metadata| filter.is_match(metadata))
-            .cloned()
-            .collect();
+        let mut entries = self.read_index().await?;
+        entries.retain(|metadata| filter.is_match(metadata));
         entries.sort_by(|a, b| key_parts(a).cmp(&key_parts(b)));
         Ok(entries)
     }
 
-    /// The data of the entry for `report_id`.
-    pub(crate) async fn content(&mut self, report_id: Uuid) -> Result<String, CalibrationsErr> {
-        let index = self.index().await?;
+    /// The data of the entry for `report_id`. Not found unless an entry has
+    /// that `report_id` and its content exists.
+    pub(crate) async fn content(&self, report_id: Uuid) -> Result<String, CalibrationsErr> {
+        let index = self.read_index().await?;
         if !index.iter().any(|m| m.report_id == report_id) {
             return Err(not_found(report_id));
         }
@@ -116,25 +109,16 @@ impl LatestStoreImpl {
         }
     }
 
-    /// The entries in memory, read from disk first if no read has succeeded.
-    async fn index(&mut self) -> Result<&Index, CalibrationsErr> {
-        let index = match self.index.take() {
-            Some(index) => index,
-            None => self.read_index().await?,
-        };
-        Ok(self.index.insert(index))
-    }
-
     /// The index, which is empty until the first put writes it.
     async fn read_index(&self) -> Result<Index, CalibrationsErr> {
-        match files::read_json_with_retry::<Index>(&self.index_file).await {
+        match files::read_json_with_retry::<Index>(&self.index).await {
             Err(FileSysErr::PathDoesNotExistErr(_)) => Ok(Index::new()),
             result => Ok(result?),
         }
     }
 
     async fn write_index(&self, index: &Index) -> Result<(), FileSysErr> {
-        files::write_json(&self.index_file, index, WriteOptions::OVERWRITE_ATOMIC).await
+        files::write_json(&self.index, index, WriteOptions::OVERWRITE_ATOMIC).await
     }
 
     fn content_file(&self, report_id: Uuid) -> File {
@@ -152,8 +136,8 @@ impl LatestStoreImpl {
 
     /// Delete the content no entry names, which a crash or a failed write or
     /// delete leaves. If the index can't be read, nothing is deleted.
-    pub(crate) async fn prune_orphaned_contents(&mut self) {
-        let index = match self.index().await {
+    pub(crate) async fn prune_orphaned_contents(&self) {
+        let index = match self.read_index().await {
             Ok(index) => index,
             Err(e) => {
                 error!("calibrations: not pruning latest contents, index unreadable: {e}");
