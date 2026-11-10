@@ -243,6 +243,24 @@ async fn shutdown_stops_the_worker() {
 }
 
 #[tokio::test]
+async fn shutdown_stops_a_pull_midway() {
+    let w = Worker::start().await;
+    // a network error makes the pull wait before it lists again
+    w.client.set_list_latest_calibrations(|| {
+        Err(HTTPErr::MockErr(MockErr {
+            is_network_conn_err: true,
+        }))
+    });
+
+    w.fire(SyncEvent::SyncSuccess);
+    w.await_lists(1).await;
+    let client = w.client.clone();
+    w.stop().await;
+
+    assert_eq!(client.call_count(Call::ListLatestCalibrations), 1);
+}
+
+#[tokio::test]
 async fn returns_when_it_cannot_subscribe() {
     let syncer = Arc::new(MockSyncer::default());
     syncer.set_subscribe_fail(true);
