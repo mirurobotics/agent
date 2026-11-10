@@ -31,9 +31,9 @@ pub struct UploaderOptions {
 
 impl Default for UploaderOptions {
     /// At most 1,000 reports of up to 1 MiB of data each (1 GiB at worst),
-    /// the most calibration data the control plane accepts, retried as the
-    /// data uploads are but kept far longer: a calibration is costly to redo,
-    /// and the cap already bounds the storage it holds.
+    /// the most calibration data Miru accepts, retried as the data uploads
+    /// are but kept far longer: a calibration is costly to redo, and the cap
+    /// already bounds the storage it holds.
     fn default() -> Self {
         Self {
             capacity: 1000,
@@ -134,11 +134,6 @@ where
         self.queue.len()
     }
 
-    /// The queued reports' entries, in queue order.
-    pub(crate) fn queued(&self) -> impl Iterator<Item = &QueueEntry> {
-        self.queue.iter()
-    }
-
     /// The report to attempt now, or how long until one is due.
     pub(crate) async fn next_attempt(&mut self) -> NextAttempt {
         let now = (self.now_fn)();
@@ -155,21 +150,11 @@ where
         entry: &QueueEntry,
     ) -> impl Future<Output = Result<(), CalibrationsErr>> {
         let sender = self.sender.clone();
-        let report = self.read_report(entry);
-        async move { sender.send(report.await?).await }
-    }
-
-    /// The report queued as `entry`, read from its file. The future borrows
-    /// nothing from `self`.
-    pub(crate) fn read_report(
-        &self,
-        entry: &QueueEntry,
-    ) -> impl Future<Output = Result<Report, CalibrationsErr>> {
         let file = self.report_file(entry.id);
         let metadata = entry.job.clone();
         async move {
             let data = report::read_data(&file).await?;
-            Ok(Report { metadata, data })
+            sender.send(Report { metadata, data }).await
         }
     }
 
@@ -261,9 +246,7 @@ where
 
     fn log_network_conn_err(entry: &QueueEntry, err: &CalibrationsErr) {
         let id = entry.id;
-        debug!(
-            "calibrations: failed to reach the control plane with report {id}; will retry: {err}"
-        );
+        debug!("calibrations: failed to reach Miru with report {id}; will retry: {err}");
     }
 
     fn log_counted_failure(entry: &QueueEntry, err: &CalibrationsErr) {

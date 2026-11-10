@@ -10,7 +10,6 @@ use crate::calibrations::{
     report::{QueueEntry, QueueSnapshotFile, Report},
     sender::Sender,
     uploader_impl::{NextAttempt, UploaderImpl, UploaderOptions},
-    Filter,
 };
 use crate::filesys::Dir;
 use crate::trace;
@@ -19,7 +18,7 @@ use crate::trace;
 use chrono::{DateTime, Utc};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 pub struct UploaderArgs<S, F, N> {
     /// Where the queue persists; `None` keeps it in memory only.
@@ -70,7 +69,6 @@ where
 {
     async fn run(mut self) {
         self.uploader.prune_orphans().await;
-        self.store_queued().await;
         loop {
             let flow = match self.uploader.next_attempt().await {
                 NextAttempt::Ready(entry) => self.run_attempt(entry).await,
@@ -82,31 +80,6 @@ where
             }
         }
         info!("calibrations: uploader shutdown complete");
-    }
-
-    /// Put each queued report into the latest store unless it has the key's
-    /// report as new or newer: an older agent queued reports without writing
-    /// the store. Commands wait until this finishes.
-    async fn store_queued(&mut self) {
-        let stored = match self.latest.list(&Filter::default()).await {
-            Ok(stored) => stored,
-            Err(e) => {
-                warn!("calibrations: not storing queued reports, store unreadable: {e}");
-                return;
-            }
-        };
-        for entry in self.uploader.queued() {
-            if stored.iter().any(|s| s.is_as_new_as(&entry.job)) {
-                continue;
-            }
-            let result = match self.uploader.read_report(entry).await {
-                Ok(r) => self.latest.put_if_newer(r.metadata, &r.data).await,
-                Err(e) => Err(e),
-            };
-            if let Err(e) = result {
-                warn!("calibrations: not storing queued report {}: {e}", entry.id);
-            }
-        }
     }
 
     /// Upload the report queued as `entry` and settle it. A shutdown
@@ -133,8 +106,7 @@ where
     }
 
     /// Drive `fut` to completion while serving commands, so intake never
-    /// waits on the control plane. `None` when a shutdown arrived; `fut` is
-    /// then dropped.
+    /// waits on Miru. `None` when a shutdown arrived; `fut` is then dropped.
     async fn serve_until<T>(&mut self, fut: impl Future<Output = T>) -> Option<T> {
         tokio::pin!(fut);
         loop {
@@ -198,9 +170,9 @@ fn respond<T>(respond_to: oneshot::Sender<T>, value: T, op: &str) {
 // ================================== HANDLE ======================================= //
 /// Handle to the calibration uploader: one task that owns the calibration
 /// queue, writes intake to it and the latest store, and uploads reports to
-/// the control plane one at a time, oldest due first, retrying a failed
-/// report at the tail after its own backoff. It keeps serving intake during
-/// an upload or a backoff.
+/// Miru one at a time, oldest due first, retrying a failed report at the tail
+/// after its own backoff. It keeps serving intake during an upload or a
+/// backoff.
 #[derive(Debug)]
 pub struct Uploader {
     sender: mpsc::Sender<Command>,
