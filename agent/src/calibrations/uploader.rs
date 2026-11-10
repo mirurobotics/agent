@@ -86,8 +86,9 @@ where
 
     /// Write each queued report to the latest store unless the store has its
     /// key's report as new or newer, since an older agent queued reports
-    /// without writing the store. Failures are logged.
-    async fn store_queued(&self) {
+    /// without writing the store. Failures are logged. `&mut self`, since the
+    /// worker isn't `Sync`.
+    async fn store_queued(&mut self) {
         let stored = match self.latest.list(&Filter::default()).await {
             Ok(stored) => stored,
             Err(e) => {
@@ -99,15 +100,14 @@ where
             if stored.iter().any(|s| s.is_as_new_as(&entry.job)) {
                 continue;
             }
-            if let Err(e) = self.store(entry).await {
+            let result = match self.uploader.read_report(entry).await {
+                Ok(r) => self.latest.put_if_newer(r.metadata, &r.data).await,
+                Err(e) => Err(e),
+            };
+            if let Err(e) = result {
                 warn!("calibrations: not storing queued report {}: {e}", entry.id);
             }
         }
-    }
-
-    async fn store(&self, entry: &QueueEntry) -> Result<bool, CalibrationsErr> {
-        let report = self.uploader.read_report(entry).await?;
-        self.latest.put_if_newer(report.metadata, &report.data).await
     }
 
     /// Upload the report queued as `entry` and settle it. A shutdown
