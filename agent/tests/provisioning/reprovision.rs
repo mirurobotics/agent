@@ -166,7 +166,10 @@ pub mod reprovision_fn {
         let result = reprovision::reprovision(&mock, &env.layout, &env.settings, &env.token).await;
 
         set_reports_mode(&env.layout, 0o755).await;
-        assert!(matches!(result, Err(ProvisionErr::FileSysErr(_))), "{result:?}");
+        assert!(
+            matches!(result, Err(ProvisionErr::FileSysErr(_))),
+            "{result:?}"
+        );
         assert_eq!(mock.call_count(mock::Call::ListLatestCalibrations), 0);
 
         env.cleanup().await;
