@@ -87,6 +87,10 @@ Each `impl_status_enum!` enum also gets a hand-written `StatusEnumFixture` table
 and `status_enum_tests!` in its integration test file
 (`agent/tests/models/harnesses.rs`), so a slip in the macro's mapping fails a test.
 
+### Terminology
+
+Call the backend the control plane in code, comments, logs and docs, not "Miru": Miru is the whole system ([agent#456](https://github.com/mirurobotics/agent/pull/456#discussion_r4522530489)).
+
 ## Testing
 
 AI agents: don't run the commands in this section or in Linting locally. Push the branch and let CI run them, then fix failures from the CI logs. They are documented here for humans and so you know what CI checks. One-off checks outside the regular suite, such as benchmarks or spikes, may run locally.

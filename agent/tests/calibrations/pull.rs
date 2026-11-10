@@ -96,7 +96,7 @@ async fn seed(fx: &Fixture, entries: &[ReportMetadata]) {
     store.shutdown().await.unwrap();
 }
 
-/// A report for `component` reported `secs` after Miru's for that key.
+/// A report for `component` reported `secs` after the control plane's for that key.
 fn reported_after(component: &str, secs: i64) -> ReportMetadata {
     let metadata = reported(component, None, None);
     ReportMetadata {
@@ -130,7 +130,7 @@ async fn keeps_an_entry_as_new_or_newer_without_downloading() {
 }
 
 #[tokio::test]
-async fn keeps_keys_miru_does_not_have() {
+async fn keeps_keys_the_control_plane_does_not_have() {
     let fx = Fixture::new();
     let leg = reported("leg", None, None);
     seed(&fx, std::slice::from_ref(&leg)).await;
