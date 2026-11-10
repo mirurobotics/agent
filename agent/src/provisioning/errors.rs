@@ -124,6 +124,18 @@ mod tests {
         }
 
         #[test]
+        fn from_calibrations_err() {
+            let err = calibrations::CalibrationsErr::StoreFullErr(
+                calibrations::errors::CalibrationStoreFullErr {
+                    capacity: 1,
+                    trace: crate::trace!(),
+                },
+            );
+            let install_err = ProvisionErr::from(err);
+            assert!(matches!(install_err, ProvisionErr::CalibrationsErr(_)));
+        }
+
+        #[test]
         fn from_crypt_err() {
             let err = crypt::CryptErr::InvalidJWTErr(crate::crypt::errors::InvalidJWTErr {
                 msg: "test".to_string(),

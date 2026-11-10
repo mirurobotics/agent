@@ -86,7 +86,7 @@ Observable: upgrade an agent whose device has calibrations in its store; `/var/l
 - [x] Milestone 3 source: store at `calibrations/latest/`; `reset`, `bootstrap` and the upgrade reconcile as on `main`; provision as on `main`; reprovision wipes `calibrations/` and loads in place; `ProvisionErr::CalibrationsErr`.
 - [x] Milestone 4: `ARCHITECTURE.md`.
 - [x] Split (user's request): the store move ([agent#451](https://github.com/mirurobotics/agent/pull/451)), the shared report helpers ([agent#452](https://github.com/mirurobotics/agent/pull/452)) and the HTTP client ([agent#453](https://github.com/mirurobotics/agent/pull/453)) are on `main` with their tests. This PR keeps the `Calibration` conversion, the loader and the reprovision load; skip the test steps below for the parts already on `main`.
-- [ ] Tests for the `Calibration` conversion, the loader and reprovision (tests stage).
+- [x] Tests for the `Calibration` conversion, `pull_latest`, reprovision and the error conversion (tests stage).
 
 ## Surprises & Discoveries
 
@@ -106,14 +106,15 @@ Observable: upgrade an agent whose device has calibrations in its store; `/var/l
 - 2026-11-10 (review, [agent#450](https://github.com/mirurobotics/agent/pull/450#discussion_r4521374689)): provision no longer deletes `calibrations/`. Provisioning assumes a new device has no data, so clearing leftovers is not provision's job; this supersedes the entry above that had provision delete the queue and the store.
 - 2026-11-10 (user): split #450. #451, #452 and #453 landed the store move, the shared report helpers and the HTTP client on `main`; #450 was rebuilt on `main` with only the `Calibration` conversion, the loader and the reprovision load.
 - 2026-11-10 (review, [agent#450](https://github.com/mirurobotics/agent/pull/450#discussion_r4521677972)): reprovision wipes `calibrations/` and writes Miru's latest, with no queue merge. The loader no longer reads the queue, and the staged dir replaces all of `calibrations/`, dropping reports not yet uploaded. This supersedes the earlier entries on queued reports winning and the read-only queue read.
-- 2026-11-10 ([AI review](https://github.com/mirurobotics/agent/pull/450#discussion_r4521695982), pending the author): reprovision deletes `calibrations/` right after `bootstrap` and loads into it in place, with no staging dir. A load or token failure after `bootstrap` must not leave the previous device's calibrations or queue on a device that is already the new one; the cost is an empty or partial store until reprovision is rerun.
+- 2026-11-10 ([AI review](https://github.com/mirurobotics/agent/pull/450#discussion_r4521695982), confirmed by the author in the project thread): reprovision deletes `calibrations/` right after `bootstrap` and loads into it in place, with no staging dir. A load or token failure after `bootstrap` must not leave the previous device's calibrations or queue on a device that is already the new one; the cost is an empty or partial store until reprovision is rerun.
 - 2026-11-10 (review, [agent#450](https://github.com/mirurobotics/agent/pull/450#discussion_r4521740894)): nothing is skipped. A download that fails for any reason, or more keys than the store holds, fails the load; this supersedes skipping an unservable calibration and Miru's keys past capacity.
 - 2026-11-10 (review, [agent#450](https://github.com/mirurobotics/agent/pull/450#discussion_r4521790285)): `calibrations::load_latest` (module `load`) is renamed `calibrations::overwrite_latest` (module `overwrite`), and reprovision's helper `overwrite_calibrations`, so the names say existing entries are overwritten.
 - 2026-11-10 (user, project thread): renamed again to `calibrations::pull_latest` (module `calibrations::pull`), and reprovision's helper `pull_calibrations`. "Pull" is git's word for taking the remote's state locally.
+- 2026-11-10 (tests stage): the tests cover only what this PR changes. Left out: the provision, `reset`, upgrade and layout tests, since this PR leaves that code as on `main`, and a network-error download case, since `http::with_retry` has its own tests and a retried failure fails the same way.
 
 ## Outcomes & Retrospective
 
-(Summarize at completion or major milestones.)
+Reprovision now wipes `calibrations/` after `bootstrap` and pulls Miru's latest calibrations into the empty store with `calibrations::pull_latest`, failing if it can't, so the store is always complete and the Device API needs no `is_confirmed`. Splitting the work into #451, #452 and #453 first kept this PR to the conversion, the pull and the reprovision change. The design moved a long way in review, from loading on every reset with a queue merge to a Miru-only pull on reprovision alone; settling who pulls and when before writing code would have saved several rounds.
 
 ## Context and Orientation
 
