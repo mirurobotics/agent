@@ -116,6 +116,9 @@ async fn an_oversized_report_is_too_large_even_when_the_store_is_full() {
 #[tokio::test]
 async fn a_full_latest_store_fails_intake() {
     let f = Fixture::with_options(UploaderOptions::default(), 0).await;
+    // without the rollback the report would stay in flight, so `num_queued_uploads` would count it
+    let (_hold, hang) = oneshot::channel();
+    f.sender.push(Step::Hang(hang));
 
     let err = f.create(params()).await.unwrap_err();
 

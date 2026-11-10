@@ -306,6 +306,21 @@ pub mod init {
     }
 
     #[tokio::test]
+    async fn latest_cals_lists_what_cal_mngr_reports() {
+        let env = TestEnv::valid().await;
+        let (state, state_handle) = env.init().await.unwrap();
+        let report = crate::test_utils::calibrations::report("arm");
+
+        state.cal_mngr.report(report.clone()).await.unwrap();
+        let filter = miru_agent::calibrations::Filter::default();
+        let entries = state.latest_cals.list(&filter).await.unwrap();
+
+        state.shutdown().await.unwrap();
+        state_handle.await;
+        assert_eq!(entries, [report.metadata]);
+    }
+
+    #[tokio::test]
     async fn cal_mngr_degrades_when_queue_path_unwritable() {
         let env = TestEnv::valid().await;
         // a directory at the queue FILE path makes
