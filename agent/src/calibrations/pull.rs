@@ -20,10 +20,11 @@ use crate::http::{
 use backend_api::models::Calibration;
 use tracing::{info, warn};
 
+// Caps at an hour, as the uploaders' retries do, since some failures persist.
 const PULL_BACKOFF: cooldown::Backoff = cooldown::Backoff {
     base_secs: 1,
     growth_factor: 2,
-    max_secs: 60,
+    max_secs: 3600,
 };
 
 /// Put the control plane's latest calibration for each key into `store`,
