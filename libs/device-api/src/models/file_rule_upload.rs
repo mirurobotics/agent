@@ -23,7 +23,7 @@ pub struct FileRuleUpload {
     /// Name of the bucket this rule uploads to.
     #[serde(rename = "bucket_name")]
     pub bucket_name: String,
-    /// Object-path template for the uploaded file. Contains `{upload_id}`, is at most 1024 bytes, has balanced braces, and contains no `..` or empty segments. Variables: `{device_id}`, `{device_name}`, `{file_name}`, `{upload_id}`, `{bundle_id}`, `{year}`, `{month}`, `{day}`, `{hour}`, `{minute}`, `{timezone}`, plus any `source.glob` capture. `{bundle_id}` requires `bundle`. The time variables are zero-padded and rendered from the file's mtime (its last-modified time, from the device clock) in `timezone`; `{timezone}` is that instant's UTC offset in ISO 8601 basic format (`+0000`, `-0500`).
+    /// Object-path template for the uploaded file. Contains `{upload_id}` or at least one of `{device_id}`, `{device_name}` or `{bundle_id}`; without `{upload_id}`, a file whose rendered path another upload already holds is not uploaded. It is at most 1024 bytes, has balanced braces, and contains no `..` or empty segments. Variables: `{device_id}`, `{device_name}`, `{file_name}`, `{upload_id}`, `{bundle_id}`, `{year}`, `{month}`, `{day}`, `{hour}`, `{minute}`, `{timezone}`, plus any `source.glob` capture. `{bundle_id}` requires `bundle`. The time variables are zero-padded and rendered from the file's mtime (its last-modified time, from the device clock) in `timezone`; `{timezone}` is that instant's UTC offset in ISO 8601 basic format (`+0000`, `-0500`).
     #[serde(rename = "path")]
     pub path: String,
     /// The time zone the time variables in `path` are rendered in: `utc`, or `device` for the device's local time zone. `utc` for a rule created without one.

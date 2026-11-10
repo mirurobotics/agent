@@ -11,81 +11,1537 @@ info:
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
-  x-release-version: v0.2.5-beta.2
+  x-release-version: v0.2.5-beta.3
   x-git-commit:
-    sha: a63e8decca702f2d3d40332b66aa43c723f73751
-    url: https://github.com/mirurobotics/openapi/commit/a63e8decca702f2d3d40332b66aa43c723f73751
-    message: 'fix(platform): type the deployment queued_by expansion as a principal
-      (#424)
+    sha: cc81ea86830d3ee5b197df6876cb62df92161f45
+    url: https://github.com/mirurobotics/openapi/commit/cc81ea86830d3ee5b197df6876cb62df92161f45
+    message: 'chore(deps): bump the actions-minor group with 3 updates (#460)
 
 
-      <!-- claude-projects-attribution: {"github_login":"miru-agents"} -->
+      Bumps the actions-minor group with 3 updates:
 
-      _Requested by **bens-agent** · [project
+      [github/codeql-action/init](https://github.com/github/codeql-action),
 
-      thread](https://claude.ai/code/project/chan_01W54mXXA94pinqkNqYMQ549?thread=cmsg_01W54mXXA94pinqkNqYMQ549CJ4RCoajGnsM245oaR2Ap3)_
+      [github/codeql-action/autobuild](https://github.com/github/codeql-action)
 
+      and
 
-      Fixes the `queued_by` expansion from #418. It declared `type: object`
-
-      alongside its `allOf` ref, so openapi-generator emits
-
-      `optnull.OptNullRef[map[string]interface{}]` for `Deployment.QueuedBy`
-
-      instead of a typed `Principal`. The backend can''t map an expanded
-
-      principal into an untyped map.
+      [github/codeql-action/analyze](https://github.com/github/codeql-action).
 
 
-      ## Changes
+      Updates `github/codeql-action/init` from 4.39.1 to 4.39.3
 
-      - Drop `type: object` from the platform `Deployment.queued_by`.
+      <details>
 
-      - Add `Deployment/.../queued_by/nullable` to the platform
+      <summary>Release notes</summary>
 
-      `nullable-type-sibling` ignores, in both the generated spec and
+      <p><em>Sourced from <a
 
-      `build/dist/platform.yaml`.
+      href="https://github.com/github/codeql-action/releases">github/codeql-action/init''s
+
+      releases</a>.</em></p>
+
+      <blockquote>
+
+      <h2>v4.39.3</h2>
+
+      <ul>
+
+      <li>Fixed diff-informed alert filtering incorrectly removing alerts in
+
+      changed files whose paths contain spaces, special characters, or
+
+      non-ASCII characters. <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4283">#4283</a></li>
+
+      </ul>
+
+      <h2>v4.39.2</h2>
+
+      <ul>
+
+      <li>Update default CodeQL bundle version to <a
+
+      href="https://github.com/github/codeql-action/releases/tag/codeql-bundle-v2.27.4">2.27.4</a>.
+
+      <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4284">#4284</a></li>
+
+      <li><em>Upcoming breaking change</em>: CodeQL version 2.22.3 and earlier
+
+      were discontinued on 16 October 2026 alongside GitHub Enterprise Server
+
+      3.18, and will be unsupported by the next minor release of the CodeQL
+
+      Action. Added a deprecation warning for customers using these versions
+
+      of CodeQL. <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4266">#4266</a></li>
+
+      <li>Starting with macOS 27 and Xcode 27, traced analyses are
+
+      unsupported. See <a
+
+      href="https://github.blog/changelog/2026-10-19-codeql-changes-for-macos-27-xcode-27-and-swift-6-4/">this
+
+      blog post for more information</a>. The CodeQL Action will now try to
+
+      identify if a workflow is about to perform a traced analysis on version
+
+      27 or above of macOS or Xcode. If so, the CodeQL Action will emit a
+
+      corresponding warning that will also be visible on the <a
+
+      href="https://docs.github.com/en/code-security/how-tos/find-and-fix-code-vulnerabilities/manage-your-configuration/use-the-tools-status-page-for-code-scanning">Tool
+
+      Status Page</a>. This check will be rolled out following this release of
+
+      the CodeQL Action. <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4221">#4221</a></li>
+
+      <li>The undocumented TRAP cache cleanup feature that could be enabled
+
+      using the <code>CODEQL_ACTION_CLEANUP_TRAP_CACHES</code> environment
+
+      variable has been removed, as announced in the release notes for CodeQL
+
+      Action 4.35.2. The <code>analyze</code> Action now warns if this
+
+      environment variable is set. If you used TRAP cache cleanup to limit
+
+      Actions cache usage, we recommend disabling TRAP caching by passing the
+
+      <code>trap-caching: false</code> input to the <code>init</code> Action.
+
+      <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4243">#4243</a></li>
+
+      </ul>
+
+      </blockquote>
+
+      </details>
+
+      <details>
+
+      <summary>Changelog</summary>
+
+      <p><em>Sourced from <a
+
+      href="https://github.com/github/codeql-action/blob/main/CHANGELOG.md">github/codeql-action/init''s
+
+      changelog</a>.</em></p>
+
+      <blockquote>
+
+      <h1>CodeQL Action Changelog</h1>
+
+      <p>See the <a
+
+      href="https://github.com/github/codeql-action/releases">releases
+
+      page</a> for the relevant changes to the CodeQL CLI and language
+
+      packs.</p>
+
+      <h2>[UNRELEASED]</h2>
+
+      <p>No user facing changes.</p>
+
+      <h2>4.39.3 - 04 Nov 2026</h2>
+
+      <ul>
+
+      <li>Fixed diff-informed alert filtering incorrectly removing alerts in
+
+      changed files whose paths contain spaces, special characters, or
+
+      non-ASCII characters. <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4283">#4283</a></li>
+
+      </ul>
+
+      <h2>4.39.2 - 03 Nov 2026</h2>
+
+      <ul>
+
+      <li>Update default CodeQL bundle version to <a
+
+      href="https://github.com/github/codeql-action/releases/tag/codeql-bundle-v2.27.4">2.27.4</a>.
+
+      <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4284">#4284</a></li>
+
+      <li><em>Upcoming breaking change</em>: CodeQL version 2.22.3 and earlier
+
+      were discontinued on 16 October 2026 alongside GitHub Enterprise Server
+
+      3.18, and will be unsupported by the next minor release of the CodeQL
+
+      Action. Added a deprecation warning for customers using these versions
+
+      of CodeQL. <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4266">#4266</a></li>
+
+      <li>Starting with macOS 27 and Xcode 27, traced analyses are
+
+      unsupported. See <a
+
+      href="https://github.blog/changelog/2026-10-19-codeql-changes-for-macos-27-xcode-27-and-swift-6-4/">this
+
+      blog post for more information</a>. The CodeQL Action will now try to
+
+      identify if a workflow is about to perform a traced analysis on version
+
+      27 or above of macOS or Xcode. If so, the CodeQL Action will emit a
+
+      corresponding warning that will also be visible on the <a
+
+      href="https://docs.github.com/en/code-security/how-tos/find-and-fix-code-vulnerabilities/manage-your-configuration/use-the-tools-status-page-for-code-scanning">Tool
+
+      Status Page</a>. This check will be rolled out following this release of
+
+      the CodeQL Action. <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4221">#4221</a></li>
+
+      <li>The undocumented TRAP cache cleanup feature that could be enabled
+
+      using the <code>CODEQL_ACTION_CLEANUP_TRAP_CACHES</code> environment
+
+      variable has been removed, as announced in the release notes for CodeQL
+
+      Action 4.35.2. The <code>analyze</code> Action now warns if this
+
+      environment variable is set. If you used TRAP cache cleanup to limit
+
+      Actions cache usage, we recommend disabling TRAP caching by passing the
+
+      <code>trap-caching: false</code> input to the <code>init</code> Action.
+
+      <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4243">#4243</a></li>
+
+      </ul>
+
+      <h2>4.39.1 - 21 Oct 2026</h2>
+
+      <ul>
+
+      <li>Update default CodeQL bundle version to <a
+
+      href="https://github.com/github/codeql-action/releases/tag/codeql-bundle-v2.27.3">2.27.3</a>.
+
+      <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4256">#4256</a></li>
+
+      </ul>
+
+      <h2>4.39.0 - 15 Oct 2026</h2>
+
+      <ul>
+
+      <li><em>Breaking change</em>: Bump the minimum required CodeQL bundle
+
+      version to 2.20.7. <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4205">#4205</a></li>
+
+      <li>The <code>codeql-action/analyze</code> step now validates that a
+
+      correct argument for the <code>checkout_path</code> input has been
+
+      provided. The <code>checkout_path</code> input must be set to the path
+
+      where the repository that is being analyzed is checked out at on the
+
+      runner, if that path is something other than the workspace root. If the
+
+      path does not point to a repository checkout or is different from the
+
+      path that was used by <code>codeql-action/init</code>, then the CodeQL
+
+      Action now produces a warning. <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4148">#4148</a></li>
+
+      <li>Resolved an issue with third-party caching implementations that
+
+      prevented caches from being restored correctly. <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4206">#4206</a></li>
+
+      <li>The <code>codeql-action/start-proxy</code> step that is used in Code
+
+      Scanning Default Setup now finds CodeQL releases using the same logic as
+
+      <code>codeql-action/init</code>. This primarily benefits customers who
+
+      are using GitHub instances other than <code>github.com</code> where the
+
+      <code>codeql-action/start-proxy</code> step may previously have been
+
+      unable to locate recent releases and ended up using outdated versions of
+
+      the private registry authentication proxy as a result. <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4198">#4198</a></li>
+
+      </ul>
+
+      <h2>4.38.3 - 08 Oct 2026</h2>
+
+      <ul>
+
+      <li><em>Upcoming breaking change</em>: CodeQL version 2.21.2 and earlier
+
+      were discontinued on 24 September 2026 alongside GitHub Enterprise
+
+      Server 3.17, and will be unsupported by the next minor release of the
+
+      CodeQL Action. Added a deprecation warning for customers using these
+
+      versions of CodeQL. <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4188">#4188</a></li>
+
+      <li>Update default CodeQL bundle version to <a
+
+      href="https://github.com/github/codeql-action/releases/tag/codeql-bundle-v2.27.2">2.27.2</a>.
+
+      <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4203">#4203</a></li>
+
+      <li>Fixed a bug where the decision of whether to use a per-language
+
+      bundle did not account for custom configurations that reference queries
+
+      outside of compiled CodeQL packs. This issue was caught during internal
+
+      testing and did not affect any customer repositories. We will resume the
+
+      roll out of per-language bundles in the coming weeks. <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4184">#4184</a></li>
+
+      </ul>
+
+      <h2>4.38.2 - 24 Sept 2026</h2>
+
+      <ul>
+
+      <li>Update default CodeQL bundle version to <a
+
+      href="https://github.com/github/codeql-action/releases/tag/codeql-bundle-v2.27.1">2.27.1</a>.
+
+      <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4160">#4160</a></li>
+
+      </ul>
+
+      <h2>4.38.1 - 18 Sept 2026</h2>
+
+      <ul>
+
+      <li>The CodeQL Action now has experimental support for CodeQL releases
+
+      for which per-language bundles are available. Per-language bundles
+
+      support analysis for a single language and are therefore smaller than
+
+      the combined bundles that allow analysis for all supported languages. As
+
+      a result, per-language bundles take up less space on disk and are faster
+
+      to download. We expect to roll this change out to everyone in the coming
+
+      weeks. <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4146">#4146</a></li>
+
+      </ul>
+
+      <h2>4.38.0 - 09 Sept 2026</h2>
+
+      <ul>
+
+      <li>On GitHub-hosted runners, the CodeQL Action now deletes unused
+
+      CodeQL bundles from the toolcache before downloading a different bundle,
+
+      which frees up disk space for the analysis. We expect to roll this
+
+      change out to everyone in September. <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4124">#4124</a></li>
+
+      <li>The CodeQL Action now supports CodeQL releases that are compatible
+
+      with Linux Arm64 and downloads the native <code>linux-arm64</code>
+
+      CodeQL bundle when available. <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4072">#4072</a></li>
+
+      <li>Update default CodeQL bundle version to <a
+
+      href="https://github.com/github/codeql-action/releases/tag/codeql-bundle-v2.27.0">2.27.0</a>.
+
+      <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4129">#4129</a></li>
+
+      </ul>
+
+      <!-- raw HTML omitted -->
+
+      </blockquote>
+
+      <p>... (truncated)</p>
+
+      </details>
+
+      <details>
+
+      <summary>Commits</summary>
+
+      <ul>
+
+      <li><a
+
+      href="https://github.com/github/codeql-action/commit/33d7b85da1a04171e211befe2c739303b9a4c066"><code>33d7b85</code></a>
+
+      Merge pull request <a
+
+      href="https://redirect.github.com/github/codeql-action/issues/4299">#4299</a>
+
+      from github/update-v4.39.3-064910ba2</li>
+
+      <li><a
+
+      href="https://github.com/github/codeql-action/commit/24393f8692ae5a8fb94c4f5829ffa08cea01bd1b"><code>24393f8</code></a>
+
+      Update changelog for v4.39.3</li>
+
+      <li><a
+
+      href="https://github.com/github/codeql-action/commit/064910ba27454a2e49b06301d31c8bdb6260942f"><code>064910b</code></a>
+
+      Merge pull request <a
+
+      href="https://redirect.github.com/github/codeql-action/issues/4297">#4297</a>
+
+      from github/mbg/update-glob</li>
+
+      <li><a
+
+      href="https://github.com/github/codeql-action/commit/f532ac59513f8fec856dc3741f181dfde834861b"><code>f532ac5</code></a>
+
+      Update <code>glob</code> to <code>14.0.3</code></li>
+
+      <li><a
+
+      href="https://github.com/github/codeql-action/commit/8cd4dfa419b17fd3b276bcb3b5c8748f295b8282"><code>8cd4dfa</code></a>
+
+      Merge pull request <a
+
+      href="https://redirect.github.com/github/codeql-action/issues/4280">#4280</a>
+
+      from github/mbg/ci/validate-yaml</li>
+
+      <li><a
+
+      href="https://github.com/github/codeql-action/commit/cea289b43230a13cdddc3fc4cfd8e356d5d768cd"><code>cea289b</code></a>
+
+      Return different exit code when a language is not recognised</li>
+
+      <li><a
+
+      href="https://github.com/github/codeql-action/commit/7287bb3627bde2ffd3789afa43a43a0511810b81"><code>7287bb3</code></a>
+
+      Remove <code>exclude</code> entry that''s no longer needed</li>
+
+      <li><a
+
+      href="https://github.com/github/codeql-action/commit/8eb7cdf7ab805363e62b913faddb8a2784cc67a1"><code>8eb7cdf</code></a>
+
+      Use normal <code>.editorconfig</code> pattern</li>
+
+      <li><a
+
+      href="https://github.com/github/codeql-action/commit/160e5474d2e750e875371c96fdc89d206270114a"><code>160e547</code></a>
+
+      Merge remote-tracking branch ''origin/main'' into
+
+      mbg/ci/validate-yaml</li>
+
+      <li><a
+
+      href="https://github.com/github/codeql-action/commit/913e1bb775545322a3613f16c3483c0ac3050da5"><code>913e1bb</code></a>
+
+      Merge pull request <a
+
+      href="https://redirect.github.com/github/codeql-action/issues/4283">#4283</a>
+
+      from github/sam-robson/decode-diff-informed-sarif-uris</li>
+
+      <li>Additional commits viewable in <a
+
+      href="https://github.com/github/codeql-action/compare/9b3254085494b55a0f7c4c2b3d2d52cc712ce370...33d7b85da1a04171e211befe2c739303b9a4c066">compare
+
+      view</a></li>
+
+      </ul>
+
+      </details>
+
+      <br />
 
 
-      ## Precedent
+      Updates `github/codeql-action/autobuild` from 4.39.1 to 4.39.3
 
-      The ignore file''s own comment covers this: "Nullable expandable fields
+      <details>
 
-      omit type: object so codegen produces typed references instead of
+      <summary>Release notes</summary>
 
-      map[string]interface{}." `Deployment.parent`, `Device.group` and
+      <p><em>Sourced from <a
 
-      `Group.parent` already follow it. I added `type: object` in #418 to
+      href="https://github.com/github/codeql-action/releases">github/codeql-action/autobuild''s
 
-      satisfy the lint rule instead of adding the ignore, which was the wrong
+      releases</a>.</em></p>
 
-      call.
+      <blockquote>
+
+      <h2>v4.39.3</h2>
+
+      <ul>
+
+      <li>Fixed diff-informed alert filtering incorrectly removing alerts in
+
+      changed files whose paths contain spaces, special characters, or
+
+      non-ASCII characters. <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4283">#4283</a></li>
+
+      </ul>
+
+      <h2>v4.39.2</h2>
+
+      <ul>
+
+      <li>Update default CodeQL bundle version to <a
+
+      href="https://github.com/github/codeql-action/releases/tag/codeql-bundle-v2.27.4">2.27.4</a>.
+
+      <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4284">#4284</a></li>
+
+      <li><em>Upcoming breaking change</em>: CodeQL version 2.22.3 and earlier
+
+      were discontinued on 16 October 2026 alongside GitHub Enterprise Server
+
+      3.18, and will be unsupported by the next minor release of the CodeQL
+
+      Action. Added a deprecation warning for customers using these versions
+
+      of CodeQL. <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4266">#4266</a></li>
+
+      <li>Starting with macOS 27 and Xcode 27, traced analyses are
+
+      unsupported. See <a
+
+      href="https://github.blog/changelog/2026-10-19-codeql-changes-for-macos-27-xcode-27-and-swift-6-4/">this
+
+      blog post for more information</a>. The CodeQL Action will now try to
+
+      identify if a workflow is about to perform a traced analysis on version
+
+      27 or above of macOS or Xcode. If so, the CodeQL Action will emit a
+
+      corresponding warning that will also be visible on the <a
+
+      href="https://docs.github.com/en/code-security/how-tos/find-and-fix-code-vulnerabilities/manage-your-configuration/use-the-tools-status-page-for-code-scanning">Tool
+
+      Status Page</a>. This check will be rolled out following this release of
+
+      the CodeQL Action. <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4221">#4221</a></li>
+
+      <li>The undocumented TRAP cache cleanup feature that could be enabled
+
+      using the <code>CODEQL_ACTION_CLEANUP_TRAP_CACHES</code> environment
+
+      variable has been removed, as announced in the release notes for CodeQL
+
+      Action 4.35.2. The <code>analyze</code> Action now warns if this
+
+      environment variable is set. If you used TRAP cache cleanup to limit
+
+      Actions cache usage, we recommend disabling TRAP caching by passing the
+
+      <code>trap-caching: false</code> input to the <code>init</code> Action.
+
+      <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4243">#4243</a></li>
+
+      </ul>
+
+      </blockquote>
+
+      </details>
+
+      <details>
+
+      <summary>Changelog</summary>
+
+      <p><em>Sourced from <a
+
+      href="https://github.com/github/codeql-action/blob/main/CHANGELOG.md">github/codeql-action/autobuild''s
+
+      changelog</a>.</em></p>
+
+      <blockquote>
+
+      <h1>CodeQL Action Changelog</h1>
+
+      <p>See the <a
+
+      href="https://github.com/github/codeql-action/releases">releases
+
+      page</a> for the relevant changes to the CodeQL CLI and language
+
+      packs.</p>
+
+      <h2>[UNRELEASED]</h2>
+
+      <p>No user facing changes.</p>
+
+      <h2>4.39.3 - 04 Nov 2026</h2>
+
+      <ul>
+
+      <li>Fixed diff-informed alert filtering incorrectly removing alerts in
+
+      changed files whose paths contain spaces, special characters, or
+
+      non-ASCII characters. <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4283">#4283</a></li>
+
+      </ul>
+
+      <h2>4.39.2 - 03 Nov 2026</h2>
+
+      <ul>
+
+      <li>Update default CodeQL bundle version to <a
+
+      href="https://github.com/github/codeql-action/releases/tag/codeql-bundle-v2.27.4">2.27.4</a>.
+
+      <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4284">#4284</a></li>
+
+      <li><em>Upcoming breaking change</em>: CodeQL version 2.22.3 and earlier
+
+      were discontinued on 16 October 2026 alongside GitHub Enterprise Server
+
+      3.18, and will be unsupported by the next minor release of the CodeQL
+
+      Action. Added a deprecation warning for customers using these versions
+
+      of CodeQL. <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4266">#4266</a></li>
+
+      <li>Starting with macOS 27 and Xcode 27, traced analyses are
+
+      unsupported. See <a
+
+      href="https://github.blog/changelog/2026-10-19-codeql-changes-for-macos-27-xcode-27-and-swift-6-4/">this
+
+      blog post for more information</a>. The CodeQL Action will now try to
+
+      identify if a workflow is about to perform a traced analysis on version
+
+      27 or above of macOS or Xcode. If so, the CodeQL Action will emit a
+
+      corresponding warning that will also be visible on the <a
+
+      href="https://docs.github.com/en/code-security/how-tos/find-and-fix-code-vulnerabilities/manage-your-configuration/use-the-tools-status-page-for-code-scanning">Tool
+
+      Status Page</a>. This check will be rolled out following this release of
+
+      the CodeQL Action. <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4221">#4221</a></li>
+
+      <li>The undocumented TRAP cache cleanup feature that could be enabled
+
+      using the <code>CODEQL_ACTION_CLEANUP_TRAP_CACHES</code> environment
+
+      variable has been removed, as announced in the release notes for CodeQL
+
+      Action 4.35.2. The <code>analyze</code> Action now warns if this
+
+      environment variable is set. If you used TRAP cache cleanup to limit
+
+      Actions cache usage, we recommend disabling TRAP caching by passing the
+
+      <code>trap-caching: false</code> input to the <code>init</code> Action.
+
+      <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4243">#4243</a></li>
+
+      </ul>
+
+      <h2>4.39.1 - 21 Oct 2026</h2>
+
+      <ul>
+
+      <li>Update default CodeQL bundle version to <a
+
+      href="https://github.com/github/codeql-action/releases/tag/codeql-bundle-v2.27.3">2.27.3</a>.
+
+      <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4256">#4256</a></li>
+
+      </ul>
+
+      <h2>4.39.0 - 15 Oct 2026</h2>
+
+      <ul>
+
+      <li><em>Breaking change</em>: Bump the minimum required CodeQL bundle
+
+      version to 2.20.7. <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4205">#4205</a></li>
+
+      <li>The <code>codeql-action/analyze</code> step now validates that a
+
+      correct argument for the <code>checkout_path</code> input has been
+
+      provided. The <code>checkout_path</code> input must be set to the path
+
+      where the repository that is being analyzed is checked out at on the
+
+      runner, if that path is something other than the workspace root. If the
+
+      path does not point to a repository checkout or is different from the
+
+      path that was used by <code>codeql-action/init</code>, then the CodeQL
+
+      Action now produces a warning. <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4148">#4148</a></li>
+
+      <li>Resolved an issue with third-party caching implementations that
+
+      prevented caches from being restored correctly. <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4206">#4206</a></li>
+
+      <li>The <code>codeql-action/start-proxy</code> step that is used in Code
+
+      Scanning Default Setup now finds CodeQL releases using the same logic as
+
+      <code>codeql-action/init</code>. This primarily benefits customers who
+
+      are using GitHub instances other than <code>github.com</code> where the
+
+      <code>codeql-action/start-proxy</code> step may previously have been
+
+      unable to locate recent releases and ended up using outdated versions of
+
+      the private registry authentication proxy as a result. <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4198">#4198</a></li>
+
+      </ul>
+
+      <h2>4.38.3 - 08 Oct 2026</h2>
+
+      <ul>
+
+      <li><em>Upcoming breaking change</em>: CodeQL version 2.21.2 and earlier
+
+      were discontinued on 24 September 2026 alongside GitHub Enterprise
+
+      Server 3.17, and will be unsupported by the next minor release of the
+
+      CodeQL Action. Added a deprecation warning for customers using these
+
+      versions of CodeQL. <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4188">#4188</a></li>
+
+      <li>Update default CodeQL bundle version to <a
+
+      href="https://github.com/github/codeql-action/releases/tag/codeql-bundle-v2.27.2">2.27.2</a>.
+
+      <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4203">#4203</a></li>
+
+      <li>Fixed a bug where the decision of whether to use a per-language
+
+      bundle did not account for custom configurations that reference queries
+
+      outside of compiled CodeQL packs. This issue was caught during internal
+
+      testing and did not affect any customer repositories. We will resume the
+
+      roll out of per-language bundles in the coming weeks. <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4184">#4184</a></li>
+
+      </ul>
+
+      <h2>4.38.2 - 24 Sept 2026</h2>
+
+      <ul>
+
+      <li>Update default CodeQL bundle version to <a
+
+      href="https://github.com/github/codeql-action/releases/tag/codeql-bundle-v2.27.1">2.27.1</a>.
+
+      <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4160">#4160</a></li>
+
+      </ul>
+
+      <h2>4.38.1 - 18 Sept 2026</h2>
+
+      <ul>
+
+      <li>The CodeQL Action now has experimental support for CodeQL releases
+
+      for which per-language bundles are available. Per-language bundles
+
+      support analysis for a single language and are therefore smaller than
+
+      the combined bundles that allow analysis for all supported languages. As
+
+      a result, per-language bundles take up less space on disk and are faster
+
+      to download. We expect to roll this change out to everyone in the coming
+
+      weeks. <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4146">#4146</a></li>
+
+      </ul>
+
+      <h2>4.38.0 - 09 Sept 2026</h2>
+
+      <ul>
+
+      <li>On GitHub-hosted runners, the CodeQL Action now deletes unused
+
+      CodeQL bundles from the toolcache before downloading a different bundle,
+
+      which frees up disk space for the analysis. We expect to roll this
+
+      change out to everyone in September. <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4124">#4124</a></li>
+
+      <li>The CodeQL Action now supports CodeQL releases that are compatible
+
+      with Linux Arm64 and downloads the native <code>linux-arm64</code>
+
+      CodeQL bundle when available. <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4072">#4072</a></li>
+
+      <li>Update default CodeQL bundle version to <a
+
+      href="https://github.com/github/codeql-action/releases/tag/codeql-bundle-v2.27.0">2.27.0</a>.
+
+      <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4129">#4129</a></li>
+
+      </ul>
+
+      <!-- raw HTML omitted -->
+
+      </blockquote>
+
+      <p>... (truncated)</p>
+
+      </details>
+
+      <details>
+
+      <summary>Commits</summary>
+
+      <ul>
+
+      <li><a
+
+      href="https://github.com/github/codeql-action/commit/33d7b85da1a04171e211befe2c739303b9a4c066"><code>33d7b85</code></a>
+
+      Merge pull request <a
+
+      href="https://redirect.github.com/github/codeql-action/issues/4299">#4299</a>
+
+      from github/update-v4.39.3-064910ba2</li>
+
+      <li><a
+
+      href="https://github.com/github/codeql-action/commit/24393f8692ae5a8fb94c4f5829ffa08cea01bd1b"><code>24393f8</code></a>
+
+      Update changelog for v4.39.3</li>
+
+      <li><a
+
+      href="https://github.com/github/codeql-action/commit/064910ba27454a2e49b06301d31c8bdb6260942f"><code>064910b</code></a>
+
+      Merge pull request <a
+
+      href="https://redirect.github.com/github/codeql-action/issues/4297">#4297</a>
+
+      from github/mbg/update-glob</li>
+
+      <li><a
+
+      href="https://github.com/github/codeql-action/commit/f532ac59513f8fec856dc3741f181dfde834861b"><code>f532ac5</code></a>
+
+      Update <code>glob</code> to <code>14.0.3</code></li>
+
+      <li><a
+
+      href="https://github.com/github/codeql-action/commit/8cd4dfa419b17fd3b276bcb3b5c8748f295b8282"><code>8cd4dfa</code></a>
+
+      Merge pull request <a
+
+      href="https://redirect.github.com/github/codeql-action/issues/4280">#4280</a>
+
+      from github/mbg/ci/validate-yaml</li>
+
+      <li><a
+
+      href="https://github.com/github/codeql-action/commit/cea289b43230a13cdddc3fc4cfd8e356d5d768cd"><code>cea289b</code></a>
+
+      Return different exit code when a language is not recognised</li>
+
+      <li><a
+
+      href="https://github.com/github/codeql-action/commit/7287bb3627bde2ffd3789afa43a43a0511810b81"><code>7287bb3</code></a>
+
+      Remove <code>exclude</code> entry that''s no longer needed</li>
+
+      <li><a
+
+      href="https://github.com/github/codeql-action/commit/8eb7cdf7ab805363e62b913faddb8a2784cc67a1"><code>8eb7cdf</code></a>
+
+      Use normal <code>.editorconfig</code> pattern</li>
+
+      <li><a
+
+      href="https://github.com/github/codeql-action/commit/160e5474d2e750e875371c96fdc89d206270114a"><code>160e547</code></a>
+
+      Merge remote-tracking branch ''origin/main'' into
+
+      mbg/ci/validate-yaml</li>
+
+      <li><a
+
+      href="https://github.com/github/codeql-action/commit/913e1bb775545322a3613f16c3483c0ac3050da5"><code>913e1bb</code></a>
+
+      Merge pull request <a
+
+      href="https://redirect.github.com/github/codeql-action/issues/4283">#4283</a>
+
+      from github/sam-robson/decode-diff-informed-sarif-uris</li>
+
+      <li>Additional commits viewable in <a
+
+      href="https://github.com/github/codeql-action/compare/9b3254085494b55a0f7c4c2b3d2d52cc712ce370...33d7b85da1a04171e211befe2c739303b9a4c066">compare
+
+      view</a></li>
+
+      </ul>
+
+      </details>
+
+      <br />
 
 
-      ## Reviewer notes
+      Updates `github/codeql-action/analyze` from 4.39.1 to 4.39.3
 
-      - The wire shape doesn''t change, only the generated types.
+      <details>
 
-      - Found while adding backend support for the #418 expansions. The next
+      <summary>Release notes</summary>
 
-      platform beta tag should include this.
+      <p><em>Sourced from <a
+
+      href="https://github.com/github/codeql-action/releases">github/codeql-action/analyze''s
+
+      releases</a>.</em></p>
+
+      <blockquote>
+
+      <h2>v4.39.3</h2>
+
+      <ul>
+
+      <li>Fixed diff-informed alert filtering incorrectly removing alerts in
+
+      changed files whose paths contain spaces, special characters, or
+
+      non-ASCII characters. <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4283">#4283</a></li>
+
+      </ul>
+
+      <h2>v4.39.2</h2>
+
+      <ul>
+
+      <li>Update default CodeQL bundle version to <a
+
+      href="https://github.com/github/codeql-action/releases/tag/codeql-bundle-v2.27.4">2.27.4</a>.
+
+      <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4284">#4284</a></li>
+
+      <li><em>Upcoming breaking change</em>: CodeQL version 2.22.3 and earlier
+
+      were discontinued on 16 October 2026 alongside GitHub Enterprise Server
+
+      3.18, and will be unsupported by the next minor release of the CodeQL
+
+      Action. Added a deprecation warning for customers using these versions
+
+      of CodeQL. <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4266">#4266</a></li>
+
+      <li>Starting with macOS 27 and Xcode 27, traced analyses are
+
+      unsupported. See <a
+
+      href="https://github.blog/changelog/2026-10-19-codeql-changes-for-macos-27-xcode-27-and-swift-6-4/">this
+
+      blog post for more information</a>. The CodeQL Action will now try to
+
+      identify if a workflow is about to perform a traced analysis on version
+
+      27 or above of macOS or Xcode. If so, the CodeQL Action will emit a
+
+      corresponding warning that will also be visible on the <a
+
+      href="https://docs.github.com/en/code-security/how-tos/find-and-fix-code-vulnerabilities/manage-your-configuration/use-the-tools-status-page-for-code-scanning">Tool
+
+      Status Page</a>. This check will be rolled out following this release of
+
+      the CodeQL Action. <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4221">#4221</a></li>
+
+      <li>The undocumented TRAP cache cleanup feature that could be enabled
+
+      using the <code>CODEQL_ACTION_CLEANUP_TRAP_CACHES</code> environment
+
+      variable has been removed, as announced in the release notes for CodeQL
+
+      Action 4.35.2. The <code>analyze</code> Action now warns if this
+
+      environment variable is set. If you used TRAP cache cleanup to limit
+
+      Actions cache usage, we recommend disabling TRAP caching by passing the
+
+      <code>trap-caching: false</code> input to the <code>init</code> Action.
+
+      <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4243">#4243</a></li>
+
+      </ul>
+
+      </blockquote>
+
+      </details>
+
+      <details>
+
+      <summary>Changelog</summary>
+
+      <p><em>Sourced from <a
+
+      href="https://github.com/github/codeql-action/blob/main/CHANGELOG.md">github/codeql-action/analyze''s
+
+      changelog</a>.</em></p>
+
+      <blockquote>
+
+      <h1>CodeQL Action Changelog</h1>
+
+      <p>See the <a
+
+      href="https://github.com/github/codeql-action/releases">releases
+
+      page</a> for the relevant changes to the CodeQL CLI and language
+
+      packs.</p>
+
+      <h2>[UNRELEASED]</h2>
+
+      <p>No user facing changes.</p>
+
+      <h2>4.39.3 - 04 Nov 2026</h2>
+
+      <ul>
+
+      <li>Fixed diff-informed alert filtering incorrectly removing alerts in
+
+      changed files whose paths contain spaces, special characters, or
+
+      non-ASCII characters. <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4283">#4283</a></li>
+
+      </ul>
+
+      <h2>4.39.2 - 03 Nov 2026</h2>
+
+      <ul>
+
+      <li>Update default CodeQL bundle version to <a
+
+      href="https://github.com/github/codeql-action/releases/tag/codeql-bundle-v2.27.4">2.27.4</a>.
+
+      <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4284">#4284</a></li>
+
+      <li><em>Upcoming breaking change</em>: CodeQL version 2.22.3 and earlier
+
+      were discontinued on 16 October 2026 alongside GitHub Enterprise Server
+
+      3.18, and will be unsupported by the next minor release of the CodeQL
+
+      Action. Added a deprecation warning for customers using these versions
+
+      of CodeQL. <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4266">#4266</a></li>
+
+      <li>Starting with macOS 27 and Xcode 27, traced analyses are
+
+      unsupported. See <a
+
+      href="https://github.blog/changelog/2026-10-19-codeql-changes-for-macos-27-xcode-27-and-swift-6-4/">this
+
+      blog post for more information</a>. The CodeQL Action will now try to
+
+      identify if a workflow is about to perform a traced analysis on version
+
+      27 or above of macOS or Xcode. If so, the CodeQL Action will emit a
+
+      corresponding warning that will also be visible on the <a
+
+      href="https://docs.github.com/en/code-security/how-tos/find-and-fix-code-vulnerabilities/manage-your-configuration/use-the-tools-status-page-for-code-scanning">Tool
+
+      Status Page</a>. This check will be rolled out following this release of
+
+      the CodeQL Action. <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4221">#4221</a></li>
+
+      <li>The undocumented TRAP cache cleanup feature that could be enabled
+
+      using the <code>CODEQL_ACTION_CLEANUP_TRAP_CACHES</code> environment
+
+      variable has been removed, as announced in the release notes for CodeQL
+
+      Action 4.35.2. The <code>analyze</code> Action now warns if this
+
+      environment variable is set. If you used TRAP cache cleanup to limit
+
+      Actions cache usage, we recommend disabling TRAP caching by passing the
+
+      <code>trap-caching: false</code> input to the <code>init</code> Action.
+
+      <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4243">#4243</a></li>
+
+      </ul>
+
+      <h2>4.39.1 - 21 Oct 2026</h2>
+
+      <ul>
+
+      <li>Update default CodeQL bundle version to <a
+
+      href="https://github.com/github/codeql-action/releases/tag/codeql-bundle-v2.27.3">2.27.3</a>.
+
+      <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4256">#4256</a></li>
+
+      </ul>
+
+      <h2>4.39.0 - 15 Oct 2026</h2>
+
+      <ul>
+
+      <li><em>Breaking change</em>: Bump the minimum required CodeQL bundle
+
+      version to 2.20.7. <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4205">#4205</a></li>
+
+      <li>The <code>codeql-action/analyze</code> step now validates that a
+
+      correct argument for the <code>checkout_path</code> input has been
+
+      provided. The <code>checkout_path</code> input must be set to the path
+
+      where the repository that is being analyzed is checked out at on the
+
+      runner, if that path is something other than the workspace root. If the
+
+      path does not point to a repository checkout or is different from the
+
+      path that was used by <code>codeql-action/init</code>, then the CodeQL
+
+      Action now produces a warning. <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4148">#4148</a></li>
+
+      <li>Resolved an issue with third-party caching implementations that
+
+      prevented caches from being restored correctly. <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4206">#4206</a></li>
+
+      <li>The <code>codeql-action/start-proxy</code> step that is used in Code
+
+      Scanning Default Setup now finds CodeQL releases using the same logic as
+
+      <code>codeql-action/init</code>. This primarily benefits customers who
+
+      are using GitHub instances other than <code>github.com</code> where the
+
+      <code>codeql-action/start-proxy</code> step may previously have been
+
+      unable to locate recent releases and ended up using outdated versions of
+
+      the private registry authentication proxy as a result. <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4198">#4198</a></li>
+
+      </ul>
+
+      <h2>4.38.3 - 08 Oct 2026</h2>
+
+      <ul>
+
+      <li><em>Upcoming breaking change</em>: CodeQL version 2.21.2 and earlier
+
+      were discontinued on 24 September 2026 alongside GitHub Enterprise
+
+      Server 3.17, and will be unsupported by the next minor release of the
+
+      CodeQL Action. Added a deprecation warning for customers using these
+
+      versions of CodeQL. <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4188">#4188</a></li>
+
+      <li>Update default CodeQL bundle version to <a
+
+      href="https://github.com/github/codeql-action/releases/tag/codeql-bundle-v2.27.2">2.27.2</a>.
+
+      <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4203">#4203</a></li>
+
+      <li>Fixed a bug where the decision of whether to use a per-language
+
+      bundle did not account for custom configurations that reference queries
+
+      outside of compiled CodeQL packs. This issue was caught during internal
+
+      testing and did not affect any customer repositories. We will resume the
+
+      roll out of per-language bundles in the coming weeks. <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4184">#4184</a></li>
+
+      </ul>
+
+      <h2>4.38.2 - 24 Sept 2026</h2>
+
+      <ul>
+
+      <li>Update default CodeQL bundle version to <a
+
+      href="https://github.com/github/codeql-action/releases/tag/codeql-bundle-v2.27.1">2.27.1</a>.
+
+      <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4160">#4160</a></li>
+
+      </ul>
+
+      <h2>4.38.1 - 18 Sept 2026</h2>
+
+      <ul>
+
+      <li>The CodeQL Action now has experimental support for CodeQL releases
+
+      for which per-language bundles are available. Per-language bundles
+
+      support analysis for a single language and are therefore smaller than
+
+      the combined bundles that allow analysis for all supported languages. As
+
+      a result, per-language bundles take up less space on disk and are faster
+
+      to download. We expect to roll this change out to everyone in the coming
+
+      weeks. <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4146">#4146</a></li>
+
+      </ul>
+
+      <h2>4.38.0 - 09 Sept 2026</h2>
+
+      <ul>
+
+      <li>On GitHub-hosted runners, the CodeQL Action now deletes unused
+
+      CodeQL bundles from the toolcache before downloading a different bundle,
+
+      which frees up disk space for the analysis. We expect to roll this
+
+      change out to everyone in September. <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4124">#4124</a></li>
+
+      <li>The CodeQL Action now supports CodeQL releases that are compatible
+
+      with Linux Arm64 and downloads the native <code>linux-arm64</code>
+
+      CodeQL bundle when available. <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4072">#4072</a></li>
+
+      <li>Update default CodeQL bundle version to <a
+
+      href="https://github.com/github/codeql-action/releases/tag/codeql-bundle-v2.27.0">2.27.0</a>.
+
+      <a
+
+      href="https://redirect.github.com/github/codeql-action/pull/4129">#4129</a></li>
+
+      </ul>
+
+      <!-- raw HTML omitted -->
+
+      </blockquote>
+
+      <p>... (truncated)</p>
+
+      </details>
+
+      <details>
+
+      <summary>Commits</summary>
+
+      <ul>
+
+      <li><a
+
+      href="https://github.com/github/codeql-action/commit/33d7b85da1a04171e211befe2c739303b9a4c066"><code>33d7b85</code></a>
+
+      Merge pull request <a
+
+      href="https://redirect.github.com/github/codeql-action/issues/4299">#4299</a>
+
+      from github/update-v4.39.3-064910ba2</li>
+
+      <li><a
+
+      href="https://github.com/github/codeql-action/commit/24393f8692ae5a8fb94c4f5829ffa08cea01bd1b"><code>24393f8</code></a>
+
+      Update changelog for v4.39.3</li>
+
+      <li><a
+
+      href="https://github.com/github/codeql-action/commit/064910ba27454a2e49b06301d31c8bdb6260942f"><code>064910b</code></a>
+
+      Merge pull request <a
+
+      href="https://redirect.github.com/github/codeql-action/issues/4297">#4297</a>
+
+      from github/mbg/update-glob</li>
+
+      <li><a
+
+      href="https://github.com/github/codeql-action/commit/f532ac59513f8fec856dc3741f181dfde834861b"><code>f532ac5</code></a>
+
+      Update <code>glob</code> to <code>14.0.3</code></li>
+
+      <li><a
+
+      href="https://github.com/github/codeql-action/commit/8cd4dfa419b17fd3b276bcb3b5c8748f295b8282"><code>8cd4dfa</code></a>
+
+      Merge pull request <a
+
+      href="https://redirect.github.com/github/codeql-action/issues/4280">#4280</a>
+
+      from github/mbg/ci/validate-yaml</li>
+
+      <li><a
+
+      href="https://github.com/github/codeql-action/commit/cea289b43230a13cdddc3fc4cfd8e356d5d768cd"><code>cea289b</code></a>
+
+      Return different exit code when a language is not recognised</li>
+
+      <li><a
+
+      href="https://github.com/github/codeql-action/commit/7287bb3627bde2ffd3789afa43a43a0511810b81"><code>7287bb3</code></a>
+
+      Remove <code>exclude</code> entry that''s no longer needed</li>
+
+      <li><a
+
+      href="https://github.com/github/codeql-action/commit/8eb7cdf7ab805363e62b913faddb8a2784cc67a1"><code>8eb7cdf</code></a>
+
+      Use normal <code>.editorconfig</code> pattern</li>
+
+      <li><a
+
+      href="https://github.com/github/codeql-action/commit/160e5474d2e750e875371c96fdc89d206270114a"><code>160e547</code></a>
+
+      Merge remote-tracking branch ''origin/main'' into
+
+      mbg/ci/validate-yaml</li>
+
+      <li><a
+
+      href="https://github.com/github/codeql-action/commit/913e1bb775545322a3613f16c3483c0ac3050da5"><code>913e1bb</code></a>
+
+      Merge pull request <a
+
+      href="https://redirect.github.com/github/codeql-action/issues/4283">#4283</a>
+
+      from github/sam-robson/decode-diff-informed-sarif-uris</li>
+
+      <li>Additional commits viewable in <a
+
+      href="https://github.com/github/codeql-action/compare/9b3254085494b55a0f7c4c2b3d2d52cc712ce370...33d7b85da1a04171e211befe2c739303b9a4c066">compare
+
+      view</a></li>
+
+      </ul>
+
+      </details>
+
+      <br />
 
 
-      ## Test plan
 
-      - `./scripts/regen.sh` and `./scripts/lint.sh` pass.
+      Dependabot will resolve any conflicts with this PR as long as you don''t
 
-      - Regenerating the backend platform models from this spec gives
+      alter it yourself. You can also trigger a rebase manually by commenting
 
-      `QueuedBy optnull.OptNullRef[Principal]`.
+      `@dependabot rebase`.
+
+
+      [//]: # (dependabot-automerge-start)
+
+      [//]: # (dependabot-automerge-end)
 
 
       ---
 
-      _Generated by [Claude
 
-      Code](https://claude.ai/code/session_01FjKfYyUQqmbhGR7ryuLdia)_
+      <details>
+
+      <summary>Dependabot commands and options</summary>
+
+      <br />
+
+
+      You can trigger Dependabot actions by commenting on this PR:
+
+      - `@dependabot rebase` will rebase this PR
+
+      - `@dependabot recreate` will recreate this PR, overwriting any edits
+
+      that have been made to it
+
+      - `@dependabot show <dependency name> ignore conditions` will show all
+
+      of the ignore conditions of the specified dependency
+
+      - `@dependabot ignore <dependency name> major version` will close this
+
+      group update PR and stop Dependabot creating any more for the specific
+
+      dependency''s major version (unless you unignore this specific
+
+      dependency''s major version or upgrade to it yourself)
+
+      - `@dependabot ignore <dependency name> minor version` will close this
+
+      group update PR and stop Dependabot creating any more for the specific
+
+      dependency''s minor version (unless you unignore this specific
+
+      dependency''s minor version or upgrade to it yourself)
+
+      - `@dependabot ignore <dependency name>` will close this group update PR
+
+      and stop Dependabot creating any more for the specific dependency
+
+      (unless you unignore this specific dependency or upgrade to it yourself)
+
+      - `@dependabot unignore <dependency name>` will remove all of the ignore
+
+      conditions of the specified dependency
+
+      - `@dependabot unignore <dependency name> <ignore condition>` will
+
+      remove the ignore condition of the specified dependency and ignore
+
+      conditions
+
+
+
+      </details>
 
 
       <!-- codesmith:footer -->
@@ -94,7 +1550,7 @@ info:
 
       <a
 
-      href="https://backend.blacksmith.sh/track/enable-autofix?expires=1796333166&installation_model_id=425273&pr_number=424&ref=codesmith_pr_footer&repository=mirurobotics%2Fopenapi&return_to=https%3A%2F%2Fgithub.com%2Fmirurobotics%2Fopenapi%2Fpull%2F424&signature=ba69434de171c28025ee01e49e8ba62ba804a3b2bdb2f0da8a6916711ab9e78c"><picture><source
+      href="https://backend.blacksmith.sh/track/enable-autofix?expires=1796811933&installation_model_id=425273&pr_number=460&ref=codesmith_pr_footer&repository=mirurobotics%2Fopenapi&return_to=https%3A%2F%2Fgithub.com%2Fmirurobotics%2Fopenapi%2Fpull%2F460&signature=795358373cace114170738618801b747c9308ac43df958feaee132edd87aaf76"><picture><source
 
       media="(prefers-color-scheme: dark)"
 
@@ -112,7 +1568,7 @@ info:
 
       <sup><a
 
-      href="https://app.blacksmith.sh/mirurobotics/codesmith/openapi/pr/424?autoLogin=true&ref=codesmith_pr_footer">Open
+      href="https://app.blacksmith.sh/mirurobotics/codesmith/openapi/pr/460?autoLogin=true&ref=codesmith_pr_footer">Open
 
       in [code]smith</a> · Need help on this PR? Tag <code>@codesmith</code>
 
@@ -124,12 +1580,16 @@ info:
       <!-- /codesmith:footer -->
 
 
-      Co-authored-by: Claude <noreply@anthropic.com>'
-    author: Ben's Agent
+      Signed-off-by: dependabot[bot] <support@github.com>
+
+      Co-authored-by: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>
+
+      Co-authored-by: Ben <ben@mirurobotics.com>'
+    author: dependabot[bot]
     branch: HEAD
     dirty: false
   x-build:
-    built_at: '2026-11-03T21:58:18.557538+00:00'
+    built_at: '2026-11-10T01:01:08.272914+00:00'
 servers:
 - url: http://localhost/v0.2
   description: localhost
@@ -192,7 +1652,7 @@ paths:
       summary: List Latest
       operationId: listLatestCalibrations
       description: List the latest calibration for each component, role and aspect
-        on the device, uploaded or not.
+        on the device.
       parameters:
       - $ref: '#/components/parameters/calibration_search_component'
       - $ref: '#/components/parameters/calibration_search_role'
@@ -429,14 +1889,14 @@ components:
     ReleaseVersion:
       type: string
       enum:
-      - v0.2.5-beta.2
+      - v0.2.5-beta.3
       x-enum-varnames:
       - RELEASE_VERSION
       x-stainless-const: true
     APIGitCommit:
       type: string
       enum:
-      - a63e8decca702f2d3d40332b66aa43c723f73751
+      - cc81ea86830d3ee5b197df6876cb62df92161f45
       x-enum-varnames:
       - API_GIT_COMMIT
       x-stainless-const: true
@@ -588,7 +2048,7 @@ components:
         api_release_version:
           type: string
           description: The API release version of the agent.
-          example: v0.2.5-beta.2
+          example: v0.2.5-beta.3
         rust_version:
           type: string
           description: The version of Rust.
@@ -611,7 +2071,7 @@ components:
         git_commit: a1b2c3d4
         api_version: v0.2
         api_git_commit: a1b2c3d4
-        api_release_version: v0.2.5-beta.2
+        api_release_version: v0.2.5-beta.3
         rust_version: 1.93.0
         build_date: '2026-02-24T10:30:00Z'
         os: linux
@@ -736,36 +2196,14 @@ components:
       example:
         report_id: 0b6f3c2e-6a51-4e0f-9a43-2f1d7c9e8b10
         reported_at: '2026-03-10T12:00:00Z'
-    CalibrationUploadStatus:
-      title: Calibration Upload Status
-      type: string
-      description: 'Whether the agent has uploaded the calibration to Miru.
-
-        - `queued`: the agent will upload it once it can reach Miru.
-
-        - `uploaded`: Miru has recorded it.
-
-        - `dropped`: the agent gave up uploading it. The device still uses it, but
-        Miru never recorded it.
-
-        '
-      enum:
-      - queued
-      - uploaded
-      - dropped
-      x-enum-varnames:
-      - CALIBRATION_UPLOAD_STATUS_QUEUED
-      - CALIBRATION_UPLOAD_STATUS_UPLOADED
-      - CALIBRATION_UPLOAD_STATUS_DROPPED
     Calibration:
       title: Calibration
       type: object
       description: The newest calibration the device has for one component, role and
-        aspect, uploaded or not.
+        aspect.
       required:
       - object
       - report_id
-      - upload_status
       - component
       - role
       - aspect
@@ -786,8 +2224,6 @@ components:
           example: 0b6f3c2e-6a51-4e0f-9a43-2f1d7c9e8b10
           description: ID the agent gave the report this calibration came from. Download
             the content with it.
-        upload_status:
-          $ref: '#/components/schemas/CalibrationUploadStatus'
         component:
           type: string
           example: arm
@@ -828,7 +2264,6 @@ components:
       example:
         object: calibration
         report_id: 0b6f3c2e-6a51-4e0f-9a43-2f1d7c9e8b10
-        upload_status: uploaded
         component: arm
         role: front-left
         aspect: null
@@ -858,7 +2293,6 @@ components:
         calibrations:
         - object: calibration
           report_id: 0b6f3c2e-6a51-4e0f-9a43-2f1d7c9e8b10
-          upload_status: uploaded
           component: arm
           role: front-left
           aspect: null
@@ -1274,17 +2708,20 @@ components:
           description: Name of the bucket this rule uploads to.
         path:
           type: string
-          pattern: .*\{upload_id\}.*
+          pattern: .*\{(upload_id|device_id|device_name|bundle_id)\}.*
           maxLength: 1024
           example: '{device_id}/{year}-{month}-{day}/{upload_id}/{file_name}'
-          description: 'Object-path template for the uploaded file. Contains `{upload_id}`,
-            is at most 1024 bytes, has balanced braces, and contains no `..` or empty
-            segments. Variables: `{device_id}`, `{device_name}`, `{file_name}`, `{upload_id}`,
-            `{bundle_id}`, `{year}`, `{month}`, `{day}`, `{hour}`, `{minute}`, `{timezone}`,
-            plus any `source.glob` capture. `{bundle_id}` requires `bundle`. The time
-            variables are zero-padded and rendered from the file''s mtime (its last-modified
-            time, from the device clock) in `timezone`; `{timezone}` is that instant''s
-            UTC offset in ISO 8601 basic format (`+0000`, `-0500`).'
+          description: 'Object-path template for the uploaded file. Contains `{upload_id}`
+            or at least one of `{device_id}`, `{device_name}` or `{bundle_id}`; without
+            `{upload_id}`, a file whose rendered path another upload already holds
+            is not uploaded. It is at most 1024 bytes, has balanced braces, and contains
+            no `..` or empty segments. Variables: `{device_id}`, `{device_name}`,
+            `{file_name}`, `{upload_id}`, `{bundle_id}`, `{year}`, `{month}`, `{day}`,
+            `{hour}`, `{minute}`, `{timezone}`, plus any `source.glob` capture. `{bundle_id}`
+            requires `bundle`. The time variables are zero-padded and rendered from
+            the file''s mtime (its last-modified time, from the device clock) in `timezone`;
+            `{timezone}` is that instant''s UTC offset in ISO 8601 basic format (`+0000`,
+            `-0500`).'
         timezone:
           allOf:
           - $ref: '#/components/schemas/FileRuleUploadTimezone'
