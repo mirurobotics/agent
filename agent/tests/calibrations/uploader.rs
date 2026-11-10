@@ -261,7 +261,12 @@ async fn startup_stores_queued_reports_the_store_lacks() {
     seeded.put(reported_after("a", -1), "old a").await.unwrap();
     seeded.put(newer_b.clone(), "new b").await.unwrap();
     seeded.shutdown().await.unwrap();
-    let ids = preloaded(&h, &["c", "a", "b", "d"]).await;
+    let d = Report {
+        data: "d's data".to_string(),
+        ..report("d")
+    };
+    let queued = vec![report("c"), report("a"), report("b"), d.clone()];
+    let ids = preloaded_reports(&h, queued).await;
     // c's data is gone, so it can't be stored
     files::delete(&h.report_file(ids[0])).await.unwrap();
     let (_hold, hang) = oneshot::channel();
@@ -271,13 +276,10 @@ async fn startup_stores_queued_reports_the_store_lacks() {
 
     // the worker stores queued reports before it starts the first upload
     h.await_started().await;
-    let expected = [report("a").metadata, newer_b.clone(), report("d").metadata];
+    let expected = [report("a").metadata, newer_b.clone(), d.metadata.clone()];
     assert_eq!(h.latest_entries().await, expected);
     assert_eq!(h.latest_data(newer_b.report_id).await, "new b");
-    assert_eq!(
-        h.latest_data(report("d").metadata.report_id).await,
-        report("d").data
-    );
+    assert_eq!(h.latest_data(d.metadata.report_id).await, d.data);
 }
 
 #[tokio::test]
@@ -287,14 +289,23 @@ async fn startup_stores_the_newest_of_a_keys_queued_reports() {
         metadata: reported_after("a", 1),
         data: "new a".to_string(),
     };
-    preloaded_reports(&h, vec![newer_a.clone(), report("a")]).await;
+    let newer_b = Report {
+        metadata: reported_after("b", 1),
+        data: "new b".to_string(),
+    };
+    // a's newer report is queued first and b's last
+    let queued = vec![newer_a.clone(), report("a"), report("b"), newer_b.clone()];
+    preloaded_reports(&h, queued).await;
     let (_hold, hang) = oneshot::channel();
     h.sender.push(Step::Hang(hang));
 
     h.spawn().await;
 
     h.await_started().await;
-    assert_eq!(h.latest_entries().await, [newer_a.metadata]);
+    let expected = [newer_a.metadata.clone(), newer_b.metadata.clone()];
+    assert_eq!(h.latest_entries().await, expected);
+    assert_eq!(h.latest_data(newer_a.metadata.report_id).await, "new a");
+    assert_eq!(h.latest_data(newer_b.metadata.report_id).await, "new b");
 }
 
 #[tokio::test]
