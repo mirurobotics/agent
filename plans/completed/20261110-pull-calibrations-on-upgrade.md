@@ -29,6 +29,7 @@ Observable: upgrade an agent on a device whose calibrations are in the control p
 - **Pull on a later sync (the user's pick in the project thread).** The agent starts serving without waiting on the pull. Until the first successful pull of a run, the list can lack reports that only the control plane has.
 - **Once per run, not a persisted mark** ([AI design review](https://github.com/mirurobotics/agent/pull/455)). An earlier draft marked the store in `index.json` on upgrade and pulled while marked. Pulling once per run needs no on-disk state or upgrade hook, covers rollbacks the same way, and costs one list call when nothing changed.
 - **Queued reports are stored by the queue's owner, at startup** ([AI design review](https://github.com/mirurobotics/agent/pull/455)). The uploader owns `queue.json` and the report files, so it reads them; no network is needed.
+- **Reprovision deletes but doesn't pull** (the user's pick on #458). It runs with the agent stopped, so the next start's pull fills the store; it still deletes `calibrations/` so the previous device's reports never survive a pull that only adds.
 - **Skip downloads the store doesn't need.** A pull after an upgrade from an agent that already writes the store costs one list call, and a pull that failed part way resumes.
 - **The merge compares inside the store's worker.** Intake may write the same key while the syncer pulls. `put_if_newer` checks `reported_at` and puts in one command. Equal times keep the stored entry.
 - **Pull at startup, retrying until it succeeds** (the user's pick on #458). An upgrade restarts the agent, so the startup pull covers it. Reads don't pull: a pull on the first read helps only before the startup pull finishes and fails offline anyway, so it wasn't worth its lock and shutdown handling. The syncer is unchanged.
@@ -56,7 +57,7 @@ Observable: upgrade an agent on a device whose calibrations are in the control p
 - First draft pulled inside reconcile; reworked to mark-then-sync after the user picked that option.
 - Replaced the persisted mark with a once-per-run pull and moved the queue merge to the uploader, after the AI design review.
 - Split #455 into three PRs at the user's request.
-- Moved the per-run pull from the syncer into its own worker, after the AI design review on #458, then replaced the worker with a pull at startup and on the first read, then simplified that to a retrying startup pull, at the user's request.
+- Moved the per-run pull from the syncer into its own worker, after the AI design review on #458, then replaced the worker with a pull at startup and on the first read, then simplified that to a retrying startup pull and dropped reprovision's own pull, at the user's request.
 
 ## Outcomes & Retrospective
 

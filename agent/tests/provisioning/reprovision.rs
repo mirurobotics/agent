@@ -3,13 +3,11 @@ use super::shared::{
     assert_temp_dir_cleaned, mock_failing_reprovision, mock_ok_reprovision, validate_storage, Env,
     StorageSnapshot,
 };
-use crate::mocks::http_client::{self as mock, MockClient};
-use crate::test_utils::calibrations::{miru_calibration, report};
-use backend_api::models::{CalibrationList, TokenResponse};
+use crate::mocks::http_client as mock;
+use crate::test_utils::calibrations::report;
 use miru_agent::calibrations::{latest, Filter, LatestStore, ReportMetadata};
 use miru_agent::disk::Layout;
-use miru_agent::filesys::{files, PathExt, WriteOptions};
-use miru_agent::http::{errors::MockErr, HTTPErr};
+use miru_agent::filesys::{files, File, PathExt, WriteOptions};
 use miru_agent::provisioning::{errors::*, reprovision};
 
 /// Seed an upload queue, a queued report's file and a latest store entry for
@@ -109,77 +107,41 @@ pub mod reprovision_fn {
     }
 
     #[tokio::test]
-    async fn replaces_the_calibrations_with_mirus_latest() {
+    async fn deletes_the_old_devices_calibrations_without_pulling() {
         let env = Env::new("reprovision-test").await;
         env.seed_provision("initial").await;
         seed_calibrations(&env.layout).await;
         let mock = mock_ok_reprovision("after-reprovision");
-        mock.set_list_latest_calibrations(|| {
-            Ok(CalibrationList {
-                data: vec![miru_calibration("arm")],
-                ..CalibrationList::default()
-            })
-        });
 
         reprovision::reprovision(&mock, &env.layout, &env.settings, &env.token)
             .await
             .unwrap();
 
-        let expected = vec![report("arm").metadata];
-        assert_eq!(latest_entries(&env.layout).await, expected);
+        assert!(latest_entries(&env.layout).await.is_empty());
         assert_queue_deleted(&env.layout);
+        assert_eq!(mock.call_count(mock::Call::ListLatestCalibrations), 0);
         assert_temp_dir_cleaned(&env.layout).await;
-        // the pull uses the device token issued from the new keys
-        let tokens: Vec<_> = mock
-            .requests()
-            .into_iter()
-            .filter(|r| r.path.starts_with("/calibrations"))
-            .map(|r| r.token)
-            .collect();
-        assert_eq!(tokens, vec![Some("mock.jwt.token".to_string()); 2]);
 
         env.cleanup().await;
     }
 
     #[tokio::test]
-    async fn a_failed_pull_wipes_the_calibrations_and_returns_calibrations_err() {
+    async fn a_failed_calibrations_delete_fails_reprovision() {
         let env = Env::new("reprovision-test").await;
         env.seed_provision("initial").await;
-        seed_calibrations(&env.layout).await;
+        // a file where the calibrations dir belongs can't be deleted as a dir
+        let cals_root = File::new(env.layout.calibrations().root.path().clone());
+        files::write_string(&cals_root, "not a dir", WriteOptions::OVERWRITE_ATOMIC)
+            .await
+            .unwrap();
         let mock = mock_ok_reprovision("after-reprovision");
-        mock.set_list_latest_calibrations(|| {
-            Err(HTTPErr::MockErr(MockErr {
-                is_network_conn_err: false,
-            }))
-        });
 
         let result = reprovision::reprovision(&mock, &env.layout, &env.settings, &env.token).await;
 
-        assert!(matches!(result, Err(ProvisionErr::CalibrationsErr(_))));
-        assert!(latest_entries(&env.layout).await.is_empty());
-        assert_queue_deleted(&env.layout);
-        validate_storage(&env.layout, "after-reprovision").await;
-
-        env.cleanup().await;
-    }
-
-    #[tokio::test]
-    async fn a_failed_token_wipes_the_calibrations() {
-        let env = Env::new("reprovision-test").await;
-        env.seed_provision("initial").await;
-        seed_calibrations(&env.layout).await;
-        // the default token response has an unparseable expiry
-        let mock = MockClient {
-            issue_device_token_fn: Box::new(|| Ok(TokenResponse::default())),
-            ..mock_ok_reprovision("after-reprovision")
-        };
-
-        let result = reprovision::reprovision(&mock, &env.layout, &env.settings, &env.token).await;
-
-        assert!(matches!(result, Err(ProvisionErr::AuthnErr(_))));
-        assert!(latest_entries(&env.layout).await.is_empty());
-        assert_queue_deleted(&env.layout);
-        assert_temp_dir_cleaned(&env.layout).await;
+        assert!(
+            matches!(result, Err(ProvisionErr::FileSysErr(_))),
+            "{result:?}"
+        );
 
         env.cleanup().await;
     }
