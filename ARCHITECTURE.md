@@ -19,6 +19,8 @@ All source lives under `agent/src/`. The binary entry point is `main.rs`.
 
 ### Core infrastructure
 
+`blocking` — runs blocking work (atomic file writes, file hashing, RSA keygen) on Tokio's blocking pool via `blocking::run`, so it never stalls an async worker thread. A panic in the work is re-raised to the caller.
+
 `cli` — command-line argument parsing. Determines provision vs runtime mode and parses `--console` (foreground instead of Windows service).
 
 `errors` — custom Error trait with `code()`, `http_status()`, `params()`, `is_network_conn_err()` methods. All error types derive `thiserror::Error`. Aggregating enums use the `impl_error!` macro defined here.

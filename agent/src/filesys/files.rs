@@ -3,6 +3,7 @@ use std::io::{Read, Write};
 use std::time::{Duration, SystemTime};
 
 // internal crates
+use crate::blocking;
 use crate::cooldown;
 use crate::filesys::{
     dirs,
@@ -47,7 +48,7 @@ pub async fn read_bytes(file: &File) -> Result<Vec<u8>, FileSysErr> {
 /// file is CPU-heavy.
 pub async fn sha256(file: &File) -> Result<String, FileSysErr> {
     let file = file.clone();
-    run_blocking(move || {
+    blocking::run(move || {
         let mut hasher = Sha256::new();
         read_chunks(&file, |chunk| hasher.update(chunk))?;
         let digest = hasher.finalize();
@@ -60,7 +61,7 @@ pub async fn sha256(file: &File) -> Result<String, FileSysErr> {
 /// one read.
 pub async fn sha256_and_crc32c(file: &File) -> Result<(String, u32), FileSysErr> {
     let file = file.clone();
-    run_blocking(move || {
+    blocking::run(move || {
         let mut hasher = Sha256::new();
         let mut crc32c = crc_fast::Digest::new(CrcAlgorithm::Crc32Iscsi);
         read_chunks(&file, |chunk| {
@@ -74,16 +75,8 @@ pub async fn sha256_and_crc32c(file: &File) -> Result<(String, u32), FileSysErr>
     .await
 }
 
-/// Runs blocking file work on Tokio's blocking pool, so a slow disk never
-/// stalls an async worker thread. A panic in `op` is re-raised here.
-async fn run_blocking<T: Send + 'static>(op: impl FnOnce() -> T + Send + 'static) -> T {
-    tokio::task::spawn_blocking(op)
-        .await
-        .unwrap_or_else(|e| std::panic::resume_unwind(e.into_panic()))
-}
-
 /// Reads `file` through a fixed 64 KiB buffer, passing each chunk to
-/// `on_chunk`. Blocking: call it inside [`run_blocking`].
+/// `on_chunk`. Blocking: call it inside [`blocking::run`].
 fn read_chunks(file: &File, mut on_chunk: impl FnMut(&[u8])) -> Result<(), FileSysErr> {
     let mut f = std::fs::File::open(file.path()).map_err(|e| map_io_err_for_open(e, file))?;
 
@@ -249,7 +242,7 @@ pub async fn write_bytes(file: &File, buf: &[u8], opts: WriteOptions) -> Result<
         // the atomic write syncs to disk, so keep it off the async threads
         let file = file.clone();
         let buf = buf.to_vec();
-        run_blocking(move || write_bytes_atomic(&file, &buf, opts)).await
+        blocking::run(move || write_bytes_atomic(&file, &buf, opts)).await
     } else {
         write_bytes_direct(file, buf, opts).await
     }
@@ -595,20 +588,5 @@ mod tests {
         // dropping the guard deletes the file
         drop(tf);
         assert!(!path.exists());
-    }
-
-    // ============================= run_blocking ============================ //
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn run_blocking_runs_off_the_runtime_thread() {
-        let runtime_thread = std::thread::current().id();
-        let op_thread = run_blocking(|| std::thread::current().id()).await;
-        assert_ne!(op_thread, runtime_thread);
-    }
-
-    #[tokio::test]
-    #[should_panic(expected = "boom")]
-    async fn run_blocking_reraises_a_panic() {
-        run_blocking(|| -> u8 { panic!("boom") }).await;
     }
 }
