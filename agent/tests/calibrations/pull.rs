@@ -65,7 +65,7 @@ fn mock_err() -> HTTPErr {
 }
 
 #[tokio::test]
-async fn writes_mirus_latest_calibrations_into_the_given_store() {
+async fn writes_the_control_planes_latest_calibrations_into_the_given_store() {
     let fx = Fixture::new();
     fx.serve(&["arm", "leg"]);
 
