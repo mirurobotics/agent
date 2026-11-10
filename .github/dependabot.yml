@@ -11,13 +11,20 @@ updates:
           - patch
 
   - package-ecosystem: "cargo"
-    directory: "/"
+    directories:
+      - "/"
+      - "/tools/lint"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 10
+    groups:
+      cargo-minor:
+        update-types:
+          - minor
+          - patch
     labels:
       - "dependencies"
       - "rust"
     commit-message:
-      prefix: "deps"
+      prefix: "build"
       include: "scope"
