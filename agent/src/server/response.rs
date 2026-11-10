@@ -153,12 +153,12 @@ impl From<&ReportMetadata> for device_server::Calibration {
     }
 }
 
-impl From<&calibration::LatestCalibrations> for device_server::LatestCalibrationsResponse {
-    fn from(latest: &calibration::LatestCalibrations) -> Self {
-        device_server::LatestCalibrationsResponse {
-            is_confirmed: latest.is_confirmed,
-            calibrations: latest.calibrations.iter().map(Into::into).collect(),
-        }
+/// The latest calibrations route's response.
+pub fn latest_calibrations(
+    calibrations: &[ReportMetadata],
+) -> device_server::LatestCalibrationsResponse {
+    device_server::LatestCalibrationsResponse {
+        calibrations: calibrations.iter().map(Into::into).collect(),
     }
 }
 

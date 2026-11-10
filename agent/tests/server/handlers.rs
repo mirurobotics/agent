@@ -740,7 +740,7 @@ pub mod routes {
             let actual: openapi::LatestCalibrationsResponse =
                 serde_json::from_slice(&bytes).unwrap();
             let ids: Vec<_> = actual.calibrations.iter().map(|c| c.report_id).collect();
-            assert_eq!((actual.is_confirmed, ids), (false, vec![created.report_id]));
+            assert_eq!(ids, [created.report_id]);
         }
 
         #[tokio::test]

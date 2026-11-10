@@ -499,7 +499,7 @@ pub mod latest_calibrations_response {
     use super::*;
     use miru_agent::calibrations::ReportMetadata;
     use miru_agent::models::InstanceFormat;
-    use miru_agent::services::calibration::LatestCalibrations;
+    use miru_agent::server::response::latest_calibrations;
 
     fn metadata(report_id: Uuid) -> ReportMetadata {
         ReportMetadata {
@@ -539,18 +539,12 @@ pub mod latest_calibrations_response {
     fn converts_latest_calibrations() {
         let metadata = metadata(Uuid::new_v4());
         let calibration = openapi::Calibration::from(&metadata);
-        let latest = LatestCalibrations {
-            is_confirmed: true,
-            calibrations: vec![metadata],
-        };
 
         let expected = openapi::LatestCalibrationsResponse {
-            is_confirmed: true,
             calibrations: vec![calibration],
         };
 
-        let sdk: openapi::LatestCalibrationsResponse = (&latest).into();
-        assert_eq!(sdk, expected);
+        assert_eq!(latest_calibrations(&[metadata]), expected);
     }
 }
 

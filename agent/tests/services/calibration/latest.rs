@@ -5,7 +5,7 @@ use crate::services::calibration::helpers::{params, Fixture};
 use crate::test_utils::calibrations::received_at;
 use miru_agent::calibrations::{Filter, ReportMetadata};
 use miru_agent::models::InstanceFormat;
-use miru_agent::services::calibration::{self, CreateParams, LatestCalibrations};
+use miru_agent::services::calibration::{self, CreateParams};
 use miru_agent::services::ServiceErr;
 
 // external crates
@@ -29,11 +29,7 @@ async fn list_latest_includes_a_created_report() {
         deployment_id: None,
         reported_at: received_at(),
     };
-    let want = LatestCalibrations {
-        is_confirmed: false,
-        calibrations: vec![metadata],
-    };
-    assert_eq!(latest.unwrap(), want);
+    assert_eq!(latest.unwrap(), [metadata]);
 }
 
 #[tokio::test]
@@ -52,7 +48,7 @@ async fn list_latest_applies_the_filter() {
 
     let latest = calibration::list_latest(&f.latest, &filter).await;
 
-    let listed = latest.unwrap().calibrations.into_iter();
+    let listed = latest.unwrap().into_iter();
     let ids: Vec<Uuid> = listed.map(|metadata| metadata.report_id).collect();
     assert_eq!(ids, [created.report_id]);
 }
