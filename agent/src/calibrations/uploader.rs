@@ -7,7 +7,7 @@ use std::time::Duration;
 use crate::calibrations::{
     errors::{CalibrationsErr, ReceiveActorMessageErr, SendActorMessageErr},
     latest::LatestStore,
-    report::{self, QueueEntry, QueueSnapshotFile, Report},
+    report::{QueueEntry, QueueSnapshotFile, Report},
     sender::Sender,
     uploader_impl::{NextAttempt, UploaderImpl, UploaderOptions},
     Filter,
@@ -106,9 +106,8 @@ where
     }
 
     async fn store(&self, entry: &QueueEntry) -> Result<bool, CalibrationsErr> {
-        let file = self.uploader.report_file(entry.id);
-        let data = report::read_data(&file).await?;
-        self.latest.put_if_newer(entry.job.clone(), &data).await
+        let report = self.uploader.read_report(entry).await?;
+        self.latest.put_if_newer(report.metadata, &report.data).await
     }
 
     /// Upload the report queued as `entry` and settle it. A shutdown
