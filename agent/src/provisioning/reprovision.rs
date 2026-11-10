@@ -3,7 +3,7 @@ use crate::authn;
 use crate::calibrations::{self, latest::DEFAULT_CAPACITY};
 use crate::cli;
 use crate::crypt::rsa;
-use crate::disk::{self, layout::LatestCalsLayout, settings};
+use crate::disk::{self, layout::CalibrationsLayout, settings};
 use crate::filesys::{self, dirs, files, Dir, Overwrite};
 use crate::http;
 use crate::models;
@@ -24,7 +24,7 @@ pub async fn reprovision<HTTPClientT: http::ClientI>(
     let temp_dir = layout.temp_dir();
     let private_key_file = temp_dir.file("private.key");
     let public_key_file = temp_dir.file("public.key");
-    let staged_cals = temp_dir.subdir("latest_calibrations");
+    let staged_cals = temp_dir.subdir("calibrations");
 
     let result = async {
         // generate new public and private keys in a temporary directory which
@@ -48,12 +48,7 @@ pub async fn reprovision<HTTPClientT: http::ClientI>(
         )
         .await?;
         stage_latest_calibrations(http_client, layout, &staged_cals).await?;
-        dirs::move_to(
-            &staged_cals,
-            &layout.calibrations().latest().root,
-            Overwrite::Allow,
-        )
-        .await?;
+        dirs::move_to(&staged_cals, &layout.calibrations().root, Overwrite::Allow).await?;
         Ok(device)
     }
     .await;
@@ -65,9 +60,10 @@ pub async fn reprovision<HTTPClientT: http::ClientI>(
     result
 }
 
-/// Load the device's latest calibrations into `staged_cals` with the keys
-/// `bootstrap` installed. Runs after `bootstrap`, so a failed load leaves the
-/// device able to reach Miru and its store as is.
+/// Load Miru's latest calibrations into a calibrations dir at `staged_cals`,
+/// which replaces the device's, upload queue included. Uses the keys
+/// `bootstrap` installed, so a failed load leaves the device able to reach
+/// Miru and its calibrations as they were.
 async fn stage_latest_calibrations<HTTPClientT: http::ClientI>(
     http_client: &HTTPClientT,
     layout: &disk::Layout,
@@ -76,13 +72,12 @@ async fn stage_latest_calibrations<HTTPClientT: http::ClientI>(
     let auth = layout.auth();
     let device_token =
         authn::issue_token(http_client, &auth.private_key(), &auth.public_key()).await?;
-    // created even when empty, so the swap always has a store to move in
+    // created even when empty, so the swap always has a dir to move in
     dirs::delete(staged_cals).await?;
     dirs::create(staged_cals).await?;
     calibrations::load_latest(
         http_client,
-        &layout.calibrations(),
-        LatestCalsLayout::new(staged_cals.clone()),
+        CalibrationsLayout::new(staged_cals.clone()).latest(),
         DEFAULT_CAPACITY,
         &device_token.token,
     )
