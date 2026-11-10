@@ -753,10 +753,10 @@ pub mod routes {
         }
 
         #[tokio::test]
-        async fn get_calibration_content_returns_200_with_the_bytes_and_headers() {
-            let f = Fixture::new("handler_get_calibration_content").await;
+        async fn get_latest_calibration_content_returns_200_with_the_bytes_and_headers() {
+            let f = Fixture::new("handler_get_latest_calibration_content").await;
             let created = report(&f).await;
-            let uri = format!("{URI}/{}/content", created.report_id);
+            let uri = format!("{URI}/latest/{}/content", created.report_id);
 
             let (status, headers, bytes) = f.get_with_headers(&uri).await;
             assert_eq!(status, StatusCode::OK);
@@ -767,10 +767,11 @@ pub mod routes {
         }
 
         #[tokio::test]
-        async fn get_calibration_content_returns_404_for_a_non_uuid_report_id() {
-            let f = Fixture::new("handler_get_calibration_content_404").await;
+        async fn get_latest_calibration_content_returns_404_for_a_non_uuid_report_id() {
+            let f = Fixture::new("handler_get_latest_calibration_content_404").await;
 
-            let (status, bytes) = f.get("/v0.2/calibrations/not-a-report/content").await;
+            let uri = "/v0.2/calibrations/latest/not-a-report/content";
+            let (status, bytes) = f.get(uri).await;
             assert_eq!(status, StatusCode::NOT_FOUND);
             assert_eq!(error_code(&bytes), "resource_not_found");
         }

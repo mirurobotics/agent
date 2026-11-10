@@ -216,7 +216,7 @@ pub async fn list_latest_calibrations(
 }
 
 /// The content's bytes on success, rather than JSON.
-pub async fn get_calibration_content(
+pub async fn get_latest_calibration_content(
     AxumState(state): AxumState<Arc<State>>,
     Path(report_id): Path<String>,
 ) -> Response {

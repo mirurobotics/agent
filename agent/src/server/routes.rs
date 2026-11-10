@@ -124,8 +124,8 @@ fn table(state: Arc<State>) -> Router {
             get(handlers::list_latest_calibrations),
         )
         .route(
-            format!("/{api_version}/calibrations/{{report_id}}/content").as_str(),
-            get(handlers::get_calibration_content),
+            format!("/{api_version}/calibrations/latest/{{report_id}}/content").as_str(),
+            get(handlers::get_latest_calibration_content),
         )
         // ============================== EVENTS =================================== //
         .route(
