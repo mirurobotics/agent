@@ -551,7 +551,7 @@ struct ParsedGlob {
     level_patterns: Vec<glob::Pattern>,
     /// How deep a match can lie below `root`; any depth once there's a `**`.
     max_depth: Option<usize>,
-    /// As with `glob::glob`, a trailing `**` or separator names only directories.
+    /// As with `glob::glob`, a trailing `**`, `.` or separator names only directories.
     names_only_dirs: bool,
 }
 
@@ -579,6 +579,8 @@ impl ParsedGlob {
         let below = glob::Pattern::new(&below.to_string_lossy());
         let dir_names = &names[literal..names.len().saturating_sub(1).max(literal)];
         let is_recursive = names[literal..].iter().any(|name| name == "**");
+        // the raw last segment, since components drop a trailing separator or `.`
+        let last = pattern.rsplit(std::path::is_separator).next();
         Ok(Self {
             root: components[..literal].iter().collect(),
             below: below.map_err(invalid)?,
@@ -588,8 +590,7 @@ impl ParsedGlob {
                 .map(|name| glob::Pattern::new(name).map_err(invalid))
                 .collect::<Result<_, _>>()?,
             max_depth: (!is_recursive).then_some(dir_names.len() + 1),
-            names_only_dirs: names.last().is_some_and(|name| name == "**")
-                || pattern.ends_with(std::path::is_separator),
+            names_only_dirs: matches!(last, Some("" | "." | "**")),
         })
     }
 
