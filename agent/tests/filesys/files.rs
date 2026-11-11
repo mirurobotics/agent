@@ -1387,6 +1387,34 @@ pub mod glob {
     }
 
     #[test]
+    fn recursive_wildcard_spans_directories_before_literal() {
+        let tmp = test_dirs::temp("testing").unwrap();
+        fs::create_dir_all(tmp.path().join("a/b/logs")).unwrap();
+        let deep = tmp.path().join("a/b/logs/1.log");
+        fs::write(&deep, b"x").unwrap();
+
+        let pattern = tmp.path().join("**/logs/*.log");
+        let matches = files::glob(pattern.to_str().unwrap()).unwrap();
+
+        assert_eq!(matches, vec![filesys::File::new(deep)]);
+    }
+
+    #[test]
+    fn levels_before_recursive_wildcard_constrained() {
+        let tmp = test_dirs::temp("testing").unwrap();
+        fs::create_dir_all(tmp.path().join("p/x/q/r")).unwrap();
+        fs::create_dir_all(tmp.path().join("p/y/q")).unwrap();
+        let wanted = tmp.path().join("p/x/q/r/1.log");
+        fs::write(&wanted, b"x").unwrap();
+        fs::write(tmp.path().join("p/y/q/2.log"), b"x").unwrap();
+
+        let pattern = tmp.path().join("*/x/**/*.log");
+        let matches = files::glob(pattern.to_str().unwrap()).unwrap();
+
+        assert_eq!(matches, vec![filesys::File::new(wanted)]);
+    }
+
+    #[test]
     fn literal_path_matches_itself() {
         let tmp = test_dirs::temp("testing").unwrap();
         let path = tmp.path().join("data.txt");
