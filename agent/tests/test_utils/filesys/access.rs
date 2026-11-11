@@ -84,9 +84,9 @@ mod os {
         pub(super) fn new(path: &Path, access: Access) -> Self {
             let rights: &[&str] = match access {
                 Access::Read => &["(RD)"],
-                // Entries also inherit a deny on delete, since an entry's own
-                // delete right lets it be deleted despite the directory's deny.
-                Access::Write => &["(WD,AD,DC)", "(OI)(IO)(DE)"],
+                // Direct entries also inherit a deny on delete, since an entry's
+                // own delete right lets it be deleted despite the directory's deny.
+                Access::Write => &["(WD,AD,DC)", "(OI)(CI)(NP)(IO)(DE)"],
             };
             let mut args = vec!["/deny".to_string()];
             args.extend(rights.iter().map(|r| format!("{EVERYONE}:{r}")));
