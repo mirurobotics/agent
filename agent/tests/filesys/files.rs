@@ -269,7 +269,7 @@ pub mod copy_to {
         files::write_string(&src, "secret", WriteOptions::default())
             .await
             .unwrap();
-        let _unreadable = make_unreadable(&src);
+        let unreadable = make_unreadable(&src);
         let dest = dir.file("dest-file");
 
         let err = files::copy_to(&src, &dest, Overwrite::Deny)
@@ -282,6 +282,11 @@ pub mod copy_to {
         };
         assert_eq!(e.source.kind(), std::io::ErrorKind::PermissionDenied);
         assert!(!dest.exists(), "destination should not be created");
+
+        // the copy succeeds once read access is back
+        drop(unreadable);
+        files::copy_to(&src, &dest, Overwrite::Deny).await.unwrap();
+        assert_eq!(files::read_string(&dest).await.unwrap(), "secret");
     }
 
     #[tokio::test]
