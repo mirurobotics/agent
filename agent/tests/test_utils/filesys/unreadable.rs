@@ -1,6 +1,6 @@
 // internal crates
 pub use self::os::Unreadable;
-use miru_agent::filesys::File;
+use miru_agent::filesys::{File, PathExt};
 
 /// Denies this process read access to `file` until the returned guard drops,
 /// on every OS. Only reading is guaranteed to fail; the file can still be
