@@ -1,10 +1,9 @@
 // internal crates
-use crate::test_utils::filesys::dirs as test_dirs;
+use crate::test_utils::filesys::{access::make_read_only, dirs as test_dirs};
 use miru_agent::deploy::apply::{self, apply, Outcome};
 use miru_agent::deploy::fsm::RetryPolicy;
 use miru_agent::deploy::DeployErr;
 use miru_agent::disk;
-#[cfg(unix)]
 use miru_agent::filesys::dirs;
 use miru_agent::filesys::{files, File, Overwrite, PathExt};
 use miru_agent::models::{
@@ -580,8 +579,6 @@ mod deploy_success {
 
 mod deploy_errors {
     use super::*;
-    #[cfg(unix)]
-    use std::os::unix::fs::PermissionsExt;
 
     #[tokio::test]
     async fn empty_config_instances() {
@@ -768,16 +765,13 @@ mod deploy_errors {
         );
     }
 
-    #[cfg(unix)]
     #[tokio::test]
     async fn config_instance_write_permission_denied() {
         let f = Fixture::new().await;
 
         let locked_dir = f.temp_dir.subdir("locked");
         dirs::create(&locked_dir).await.unwrap();
-        dirs::set_permissions(&locked_dir, std::fs::Permissions::from_mode(0o555))
-            .await
-            .unwrap();
+        let _read_only = make_read_only(&locked_dir);
 
         let ci = make_cfg_inst(locked_dir.file("config.json").path().display().to_string());
         f.seed_cfg_inst(&ci, r#"{"locked": true}"#.into()).await;
@@ -800,10 +794,6 @@ mod deploy_errors {
         .await;
 
         let outcomes = f.apply().await.unwrap();
-
-        dirs::set_permissions(&locked_dir, std::fs::Permissions::from_mode(0o755))
-            .await
-            .unwrap();
 
         assert_eq!(outcomes.len(), 1);
         assert_eq!(
@@ -1094,8 +1084,6 @@ mod deploy_errors {
 
 mod remove_action {
     use super::*;
-    #[cfg(unix)]
-    use std::os::unix::fs::PermissionsExt;
 
     #[tokio::test]
     async fn archived_target_deployed_activity() {
@@ -1406,7 +1394,6 @@ mod remove_action {
         );
     }
 
-    #[cfg(unix)]
     #[tokio::test]
     async fn remove_io_error_permission_denied() {
         let f = Fixture::new().await;
@@ -1430,11 +1417,9 @@ mod remove_action {
             "file should exist after initial deploy"
         );
 
-        // Lock the parent directory so removal fails with EACCES
+        // Lock the parent directory so removal fails with access denied
         let parent_dir = dest.parent().unwrap();
-        dirs::set_permissions(&parent_dir, std::fs::Permissions::from_mode(0o555))
-            .await
-            .unwrap();
+        let _read_only = make_read_only(&parent_dir);
 
         // Seed deployment as target=Archived, activity=Deployed for removal
         let dpl = make_deployment(
@@ -1446,11 +1431,6 @@ mod remove_action {
         f.seed_deployment(&dpl).await;
 
         let outcomes = f.apply().await.unwrap();
-
-        // Restore permissions BEFORE assertions so tempdir cleanup succeeds
-        dirs::set_permissions(&parent_dir, std::fs::Permissions::from_mode(0o755))
-            .await
-            .unwrap();
 
         assert_eq!(outcomes.len(), 1);
         assert_eq!(
