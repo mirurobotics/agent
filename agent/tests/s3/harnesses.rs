@@ -187,16 +187,17 @@ pub async fn resuming_an_aborted_upload_fails_with_no_such_upload<B: RealBucket>
 }
 
 /// A put that finds its object already written, as when a retry follows a lost
-/// success response, succeeds. On GCS the upload token can't overwrite, so
-/// writes are create-only and the store counts GCS's 412 as done.
-pub async fn put_of_an_existing_object_succeeds<B: RealBucket>() {
+/// success response, succeeds without overwriting it: writes are create-only
+/// and the store counts the bucket's 412 as done.
+pub async fn put_of_an_existing_object_keeps_it<B: RealBucket>() {
     let bucket = B::load();
     for (name, len) in [("exists-single.bin", SMALL), ("exists-multi.bin", LARGE)] {
         let obj = bucket.object(name);
         let bytes = test_bytes(len);
-        let file = temp_file_with(&bytes).await;
+        let other: Vec<u8> = bytes.iter().map(|b| b.wrapping_add(1)).collect();
 
-        for _ in 0..2 {
+        for put in [&bytes, &other] {
+            let file = temp_file_with(put).await;
             let src = Source::open(file.to_file(), &obj).await.unwrap();
             let store = bucket.upload_store(&obj).await;
             store.put(src, &obj, &metadata()).await.expect(name);
@@ -233,8 +234,8 @@ macro_rules! real_bucket_tests {
             }
 
             #[tokio::test]
-            async fn put_of_an_existing_object_succeeds() {
-                harnesses::put_of_an_existing_object_succeeds::<$bucket>().await;
+            async fn put_of_an_existing_object_keeps_it() {
+                harnesses::put_of_an_existing_object_keeps_it::<$bucket>().await;
             }
         }
     };

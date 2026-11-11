@@ -57,6 +57,49 @@ impl crate::errors::Error for CalibrationTooLargeErr {
     }
 }
 
+/// The latest store is at its key cap and the report is for a new key: 507
+/// `calibration_store_full`. Nothing was written.
+#[derive(Debug, thiserror::Error)]
+#[error("latest calibrations store is full ({capacity} keys)")]
+pub struct CalibrationStoreFullErr {
+    pub capacity: usize,
+    pub trace: Box<Trace>,
+}
+
+impl crate::errors::Error for CalibrationStoreFullErr {
+    fn code(&self) -> Code {
+        Code::CalibrationStoreFull
+    }
+
+    fn http_status(&self) -> HTTPCode {
+        HTTPCode::INSUFFICIENT_STORAGE
+    }
+
+    fn params(&self) -> Option<serde_json::Value> {
+        Some(serde_json::json!({
+            "max_keys": self.capacity,
+        }))
+    }
+}
+
+/// No latest calibration has the report id: 404 `resource_not_found`.
+#[derive(Debug, thiserror::Error)]
+#[error("no latest calibration has report id {report_id}")]
+pub struct CalibrationNotFoundErr {
+    pub report_id: String,
+    pub trace: Box<Trace>,
+}
+
+impl crate::errors::Error for CalibrationNotFoundErr {
+    fn code(&self) -> Code {
+        Code::ResourceNotFound
+    }
+
+    fn http_status(&self) -> HTTPCode {
+        HTTPCode::NOT_FOUND
+    }
+}
+
 /// A buffered report that can never be sent, because its file is missing or
 /// not UTF-8.
 /// Terminal, so the worker drops it instead of retrying.
@@ -73,11 +116,11 @@ impl crate::errors::Error for InvalidReportErr {
     }
 }
 
-/// Getting a device token for an upload failed. Never terminal, whatever the
-/// token request's status: a token failure says nothing about the report, so
-/// the report is retried, never dropped.
+/// Getting a device token for an upload or a pull failed. Never terminal,
+/// whatever the token request's status: a token failure says nothing about the
+/// calibration, so the caller retries.
 #[derive(Debug, thiserror::Error)]
-#[error("failed to get a token to upload a calibration: {0}")]
+#[error("failed to get a device token: {0}")]
 pub struct TokenErr(pub AuthnErr);
 
 impl crate::errors::Error for TokenErr {
@@ -92,6 +135,10 @@ pub enum CalibrationsErr {
     QueueFullErr(CalibrationBufferFullErr),
     #[error(transparent)]
     TooLargeErr(CalibrationTooLargeErr),
+    #[error(transparent)]
+    StoreFullErr(CalibrationStoreFullErr),
+    #[error(transparent)]
+    NotFoundErr(CalibrationNotFoundErr),
     #[error(transparent)]
     FileSysErr(FileSysErr),
     #[error(transparent)]
@@ -128,6 +175,18 @@ impl From<CalibrationTooLargeErr> for CalibrationsErr {
     }
 }
 
+impl From<CalibrationStoreFullErr> for CalibrationsErr {
+    fn from(e: CalibrationStoreFullErr) -> Self {
+        Self::StoreFullErr(e)
+    }
+}
+
+impl From<CalibrationNotFoundErr> for CalibrationsErr {
+    fn from(e: CalibrationNotFoundErr) -> Self {
+        Self::NotFoundErr(e)
+    }
+}
+
 impl From<HTTPErr> for CalibrationsErr {
     fn from(e: HTTPErr) -> Self {
         Self::HTTPErr(e)
@@ -143,6 +202,8 @@ impl From<AuthnErr> for CalibrationsErr {
 crate::impl_error!(CalibrationsErr {
     QueueFullErr,
     TooLargeErr,
+    StoreFullErr,
+    NotFoundErr,
     FileSysErr,
     InvalidReportErr,
     HTTPErr,

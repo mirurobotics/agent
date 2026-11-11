@@ -2,7 +2,7 @@
 use crate::cli;
 use crate::crypt::rsa;
 use crate::disk::{self, settings};
-use crate::filesys::{self, files, Overwrite};
+use crate::filesys::{self, dirs, files, Overwrite};
 use crate::http;
 use crate::models;
 use crate::provisioning::{errors::*, shared};
@@ -44,6 +44,8 @@ pub async fn reprovision<HTTPClientT: http::ClientI>(
             version::VERSION,
         )
         .await?;
+        // drop the old device's calibrations, upload queue included
+        dirs::delete(&layout.calibrations().root).await?;
         Ok(device)
     }
     .await;

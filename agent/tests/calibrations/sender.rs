@@ -178,7 +178,7 @@ pub mod send {
         assert!(err.is_network_conn_err());
         assert!(!err.is_terminal());
         assert!(
-            err.to_string().starts_with("failed to get a token"),
+            err.to_string().starts_with("failed to get a device token"),
             "{err}"
         );
         assert!(client.requests().is_empty());

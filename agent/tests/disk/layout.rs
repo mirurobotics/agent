@@ -114,9 +114,9 @@ pub mod storage_layout {
     }
 
     #[test]
-    fn config_instance_meta() {
+    fn config_instance_index() {
         let layout = Layout::default();
-        let file = layout.config_instance_meta();
+        let file = layout.config_instance_index();
         assert_eq!(
             file.to_string(),
             under_root(&["resources", "config_instances", "metadata.json"])
@@ -254,5 +254,39 @@ pub mod calibrations_layout {
         let layout = Layout::default();
         let dir = layout.calibrations().reports();
         assert_eq!(dir.to_string(), under_root(&["calibrations", "reports"]));
+    }
+}
+
+pub mod latest_cals_layout {
+    use super::*;
+
+    #[test]
+    fn root_dir() {
+        let layout = Layout::default();
+        let latest = layout.calibrations().latest();
+        assert_eq!(
+            latest.root.to_string(),
+            under_root(&["calibrations", "latest"])
+        );
+    }
+
+    #[test]
+    fn index_file() {
+        let layout = Layout::default();
+        let file = layout.calibrations().latest().index();
+        assert_eq!(
+            file.to_string(),
+            under_root(&["calibrations", "latest", "index.json"])
+        );
+    }
+
+    #[test]
+    fn contents_dir() {
+        let layout = Layout::default();
+        let dir = layout.calibrations().latest().contents();
+        assert_eq!(
+            dir.to_string(),
+            under_root(&["calibrations", "latest", "contents"])
+        );
     }
 }

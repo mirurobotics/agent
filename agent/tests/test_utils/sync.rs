@@ -66,7 +66,7 @@ pub async fn create_storage(dir: &filesys::Dir) -> Storage {
     Storage {
         device: Arc::new(device_stor),
         cfg_insts: CfgInstStor {
-            meta: Arc::new(cfg_inst_stor),
+            index: Arc::new(cfg_inst_stor),
             content: Arc::new(cfg_inst_content_stor),
         },
         deployments: Arc::new(deployment_stor),
