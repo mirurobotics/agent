@@ -506,8 +506,8 @@ pub fn glob(pattern: &str) -> Result<Vec<File>, FileSysErr> {
         false => parsed.root.as_path(),
     };
     let mut walk = WalkDir::new(walk_from).min_depth(1).sort_by_file_name();
-    if !parsed.is_recursive {
-        walk = walk.max_depth(parsed.level_patterns.len() + 1);
+    if let Some(max_depth) = parsed.max_depth {
+        walk = walk.max_depth(max_depth);
     }
     let options = glob::MatchOptions {
         require_literal_separator: true,
@@ -546,7 +546,8 @@ struct ParsedGlob {
     below: glob::Pattern,
     /// One pattern per directory level below `root`, up to the first `**`.
     level_patterns: Vec<glob::Pattern>,
-    is_recursive: bool,
+    /// How deep a match can lie below `root`; any depth once there's a `**`.
+    max_depth: Option<usize>,
 }
 
 impl ParsedGlob {
@@ -572,6 +573,7 @@ impl ParsedGlob {
         let below: PathBuf = components[literal..].iter().collect();
         let below = glob::Pattern::new(&below.to_string_lossy());
         let dir_names = &names[literal..names.len().saturating_sub(1).max(literal)];
+        let is_recursive = names[literal..].iter().any(|name| name == "**");
         Ok(Self {
             root: components[..literal].iter().collect(),
             below: below.map_err(invalid)?,
@@ -580,7 +582,7 @@ impl ParsedGlob {
                 .take_while(|name| *name != "**")
                 .map(|name| glob::Pattern::new(name).map_err(invalid))
                 .collect::<Result<_, _>>()?,
-            is_recursive: names[literal..].iter().any(|name| name == "**"),
+            max_depth: (!is_recursive).then_some(dir_names.len() + 1),
         })
     }
 

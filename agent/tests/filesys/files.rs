@@ -1433,7 +1433,7 @@ pub mod glob {
     }
 
     #[test]
-    fn levels_before_recursive_wildcard_constrained() {
+    fn recursive_wildcard_after_constrained_levels_reaches_deep_files() {
         let tmp = test_dirs::temp("testing").unwrap();
         fs::create_dir_all(tmp.path().join("p/x/q/r")).unwrap();
         fs::create_dir_all(tmp.path().join("p/y/q")).unwrap();
