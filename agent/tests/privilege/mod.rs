@@ -42,22 +42,10 @@ fn verify_effective_user_rejects_non_target_user_when_not_root() {
 
 #[test]
 fn verify_effective_user_is_noop_when_already_target_user() {
-    // Resolve the current effective user from the passwd database. If the
-    // runner has no passwd entry for its euid (rare — minimal containers,
-    // chroots) we skip rather than fail, since we have nothing to verify
-    // against.
     let euid = nix::unistd::geteuid();
-    let user = match nix::unistd::User::from_uid(euid) {
-        Ok(Some(u)) => u,
-        Ok(None) => {
-            eprintln!("skipping: no passwd entry for euid {}", euid.as_raw());
-            return;
-        }
-        Err(e) => {
-            eprintln!("skipping: User::from_uid({}) failed: {e}", euid.as_raw(),);
-            return;
-        }
-    };
+    let user = nix::unistd::User::from_uid(euid)
+        .expect("look up the effective user")
+        .expect("the effective user has a passwd entry");
     privilege::verify_effective_user(&user.name)
         .expect("verify_effective_user on current effective user is a no-op");
 }
