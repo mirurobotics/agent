@@ -2346,6 +2346,7 @@ dependencies = [
  "tracing-appender",
  "tracing-subscriber",
  "uuid",
+ "walkdir",
  "windows-service",
  "windows-sys 0.61.2",
 ]

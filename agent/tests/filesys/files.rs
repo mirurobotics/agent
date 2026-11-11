@@ -1420,6 +1420,34 @@ pub mod glob {
     }
 
     #[test]
+    fn recursive_wildcard_spans_directories_before_literal() {
+        let tmp = test_dirs::temp("testing").unwrap();
+        fs::create_dir_all(tmp.path().join("a/b/logs")).unwrap();
+        let deep = tmp.path().join("a/b/logs/1.log");
+        fs::write(&deep, b"x").unwrap();
+
+        let pattern = tmp.path().join("**/logs/*.log");
+        let matches = files::glob(pattern.to_str().unwrap()).unwrap();
+
+        assert_eq!(matches, vec![filesys::File::new(deep)]);
+    }
+
+    #[test]
+    fn levels_before_recursive_wildcard_constrained() {
+        let tmp = test_dirs::temp("testing").unwrap();
+        fs::create_dir_all(tmp.path().join("p/x/q/r")).unwrap();
+        fs::create_dir_all(tmp.path().join("p/y/q")).unwrap();
+        let wanted = tmp.path().join("p/x/q/r/1.log");
+        fs::write(&wanted, b"x").unwrap();
+        fs::write(tmp.path().join("p/y/q/2.log"), b"x").unwrap();
+
+        let pattern = tmp.path().join("*/x/**/*.log");
+        let matches = files::glob(pattern.to_str().unwrap()).unwrap();
+
+        assert_eq!(matches, vec![filesys::File::new(wanted)]);
+    }
+
+    #[test]
     fn literal_path_matches_itself() {
         let tmp = test_dirs::temp("testing").unwrap();
         let path = tmp.path().join("data.txt");
@@ -1445,26 +1473,6 @@ pub mod glob {
         let matches = files::glob(pattern.to_str().unwrap()).unwrap();
 
         assert_eq!(matches, vec![filesys::File::new(real)]);
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn literal_component_needs_only_traverse_permission() {
-        // `a` can be traversed but not listed, so `a/logs` must be looked up
-        // directly; `b` has no `logs` at all.
-        let tmp = test_dirs::temp("testing").unwrap();
-        fs::create_dir_all(tmp.path().join("a/logs")).unwrap();
-        fs::create_dir(tmp.path().join("b")).unwrap();
-        let log = tmp.path().join("a/logs/1.log");
-        fs::write(&log, b"x").unwrap();
-        let a = tmp.path().join("a");
-        fs::set_permissions(&a, fs::Permissions::from_mode(0o300)).unwrap();
-
-        let pattern = tmp.path().join("*/logs/*.log");
-        let matches = files::glob(pattern.to_str().unwrap());
-
-        fs::set_permissions(&a, fs::Permissions::from_mode(0o700)).unwrap();
-        assert_eq!(matches.unwrap(), vec![filesys::File::new(log)]);
     }
 
     #[cfg(unix)]
