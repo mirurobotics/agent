@@ -16,7 +16,6 @@ mod os {
     use std::os::unix::fs::PermissionsExt;
     use std::path::{Path, PathBuf};
 
-    #[must_use = "read access is restored when the guard drops"]
     pub struct Unreadable {
         path: PathBuf,
         prev: Permissions,
@@ -51,7 +50,6 @@ mod os {
     // Everyone, which includes this process's user.
     const EVERYONE: &str = "*S-1-1-0";
 
-    #[must_use = "read access is restored when the guard drops"]
     pub struct Unreadable {
         path: PathBuf,
     }
