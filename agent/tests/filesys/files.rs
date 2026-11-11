@@ -6,6 +6,7 @@ use std::path::PathBuf;
 
 // internal crates
 use crate::test_utils::filesys::dirs as test_dirs;
+use crate::test_utils::filesys::unreadable::make_unreadable;
 use miru_agent::filesys::{self, files, Atomic, FileSysErr, Overwrite, PathExt, WriteOptions};
 
 // external crates
@@ -262,7 +263,6 @@ pub mod copy_to {
         assert!(dest_permissions.unwrap().readonly());
     }
 
-    #[cfg(unix)]
     #[tokio::test]
     async fn unreadable_source_returns_copy_file_err_permission_denied() {
         let dir = test_dirs::temp("testing").unwrap();
@@ -270,19 +270,12 @@ pub mod copy_to {
         files::write_string(&src, "secret", WriteOptions::default())
             .await
             .unwrap();
-        files::set_permissions(&src, std::fs::Permissions::from_mode(0o000))
-            .await
-            .unwrap();
+        let _unreadable = make_unreadable(&src);
         let dest = dir.file("dest-file");
 
         let err = files::copy_to(&src, &dest, Overwrite::Deny)
             .await
             .unwrap_err();
-
-        // restore permissions before the temp dir drops
-        files::set_permissions(&src, std::fs::Permissions::from_mode(0o644))
-            .await
-            .unwrap();
 
         assert!(matches!(err, FileSysErr::CopyFileErr(_)), "got {err:?}");
         let FileSysErr::CopyFileErr(e) = err else {
