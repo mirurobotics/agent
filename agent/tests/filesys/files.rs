@@ -1415,6 +1415,18 @@ pub mod glob {
     }
 
     #[test]
+    fn trailing_recursive_wildcard_matches_no_files() {
+        let tmp = test_dirs::temp("testing").unwrap();
+        fs::create_dir(tmp.path().join("x")).unwrap();
+        fs::write(tmp.path().join("x/1.log"), b"x").unwrap();
+
+        let pattern = tmp.path().join("**");
+        let matches = files::glob(pattern.to_str().unwrap()).unwrap();
+
+        assert!(matches.is_empty(), "{matches:?}");
+    }
+
+    #[test]
     fn literal_path_matches_itself() {
         let tmp = test_dirs::temp("testing").unwrap();
         let path = tmp.path().join("data.txt");

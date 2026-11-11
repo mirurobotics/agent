@@ -459,6 +459,10 @@ pub async fn set_permissions(
 /// unreadable directory) are skipped rather than aborting the walk.
 pub fn glob(pattern: &str) -> Result<Vec<File>, FileSysErr> {
     let parsed = ParsedGlob::new(pattern)?;
+    // as with `glob::glob`, a trailing `**` names only directories
+    if Path::new(pattern).ends_with("**") {
+        return Ok(Vec::new());
+    }
     let walk_from = match parsed.root.as_os_str().is_empty() {
         true => Path::new("."),
         false => parsed.root.as_path(),
