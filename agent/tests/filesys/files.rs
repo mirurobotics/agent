@@ -1427,6 +1427,17 @@ pub mod glob {
     }
 
     #[test]
+    fn trailing_separator_matches_no_files() {
+        let tmp = test_dirs::temp("testing").unwrap();
+        fs::write(tmp.path().join("1.log"), b"x").unwrap();
+
+        let pattern = format!("{}/*/", tmp.path().display());
+        let matches = files::glob(&pattern).unwrap();
+
+        assert!(matches.is_empty(), "{matches:?}");
+    }
+
+    #[test]
     fn literal_path_matches_itself() {
         let tmp = test_dirs::temp("testing").unwrap();
         let path = tmp.path().join("data.txt");
