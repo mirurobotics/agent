@@ -27,7 +27,7 @@ jobs:
   ai-review:
     uses: mirurobotics/.github/.github/workflows/ai-review.yml@bf0916104b6b5b5373c09a5f5b413ec6bded2cb5
     with:
-      runs-on: blacksmith-2vcpu-ubuntu-2404
+      runs-on: ubuntu-latest # standard GitHub-hosted runners are free in public repos
     secrets:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
