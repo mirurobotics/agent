@@ -1517,6 +1517,27 @@ pub mod glob {
         }
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn junction_not_walked() {
+        let tmp = test_dirs::temp("testing").unwrap();
+        let outside = test_dirs::temp("outside").unwrap();
+        fs::write(outside.path().join("x.log"), b"x").unwrap();
+        // unlike a symlink, a junction needs no privilege to create
+        let status = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(tmp.path().join("j"))
+            .arg(outside.path())
+            .status()
+            .unwrap();
+        assert!(status.success());
+
+        let pattern = tmp.path().join("**/*.log");
+        let matches = files::glob(pattern.to_str().unwrap()).unwrap();
+
+        assert!(matches.is_empty(), "{matches:?}");
+    }
+
     #[cfg(unix)]
     #[test]
     fn symlink_loop_terminates() {
