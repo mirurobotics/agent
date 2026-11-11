@@ -83,6 +83,34 @@ pub mod delete {
         assert!(!file.exists());
     }
 }
+
+pub mod delete_or_warn {
+    use super::*;
+
+    #[tokio::test]
+    async fn exists() {
+        let tmp = test_dirs::temp("testing").unwrap();
+        let file = tmp.to_dir().file("test-file");
+        files::write_string(&file, "test", WriteOptions::default())
+            .await
+            .unwrap();
+
+        files::delete_or_warn(&file).await;
+
+        assert!(!file.exists());
+    }
+
+    #[tokio::test]
+    async fn a_missing_file_is_fine() {
+        let tmp = test_dirs::temp("testing").unwrap();
+        let file = tmp.to_dir().file("missing");
+
+        files::delete_or_warn(&file).await;
+
+        assert!(!file.exists());
+    }
+}
+
 pub mod copy_to {
     use super::*;
 
@@ -665,6 +693,60 @@ pub mod read_json {
                 .unwrap_err(),
             FileSysErr::ParseJSONErr { .. }
         ));
+    }
+}
+
+pub mod read_json_with_retry {
+    use super::*;
+
+    #[tokio::test(start_paused = true)]
+    async fn missing_file_is_not_retried() {
+        let dir = test_dirs::temp("testing").unwrap();
+        let file = dir.file("test-file.json");
+
+        let start = tokio::time::Instant::now();
+        let err = files::read_json_with_retry::<serde_json::Value>(&file)
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, FileSysErr::PathDoesNotExistErr { .. }));
+        assert_eq!(start.elapsed(), std::time::Duration::ZERO);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn unparseable_file_is_not_retried() {
+        let dir = test_dirs::temp("testing").unwrap();
+        let file = dir.file("test-file.json");
+        files::write_string(&file, "not valid json {{{", WriteOptions::default())
+            .await
+            .unwrap();
+
+        let start = tokio::time::Instant::now();
+        let err = files::read_json_with_retry::<serde_json::Value>(&file)
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, FileSysErr::ParseJSONErr { .. }));
+        assert_eq!(start.elapsed(), std::time::Duration::ZERO);
+    }
+
+    // a directory at the path fails every read, so each delay is waited out
+    #[tokio::test(start_paused = true)]
+    async fn lasting_error_is_retried_after_each_delay() {
+        let dir = test_dirs::temp("testing").unwrap();
+        let file = dir.file("test-file.json");
+        let blocker = filesys::Dir::new(file.path().clone());
+        filesys::dirs::create(&blocker).await.unwrap();
+
+        let start = tokio::time::Instant::now();
+        files::read_json_with_retry::<serde_json::Value>(&file)
+            .await
+            .unwrap_err();
+
+        assert_eq!(
+            start.elapsed(),
+            std::time::Duration::from_millis(50 + 250 + 1000)
+        );
     }
 }
 
@@ -1338,6 +1420,58 @@ pub mod glob {
     }
 
     #[test]
+    fn recursive_wildcard_spans_directories_before_literal() {
+        let tmp = test_dirs::temp("testing").unwrap();
+        fs::create_dir_all(tmp.path().join("a/b/logs")).unwrap();
+        let deep = tmp.path().join("a/b/logs/1.log");
+        fs::write(&deep, b"x").unwrap();
+
+        let pattern = tmp.path().join("**/logs/*.log");
+        let matches = files::glob(pattern.to_str().unwrap()).unwrap();
+
+        assert_eq!(matches, vec![filesys::File::new(deep)]);
+    }
+
+    #[test]
+    fn recursive_wildcard_after_constrained_levels_reaches_deep_files() {
+        let tmp = test_dirs::temp("testing").unwrap();
+        fs::create_dir_all(tmp.path().join("p/x/q/r")).unwrap();
+        fs::create_dir_all(tmp.path().join("p/y/q")).unwrap();
+        let wanted = tmp.path().join("p/x/q/r/1.log");
+        fs::write(&wanted, b"x").unwrap();
+        fs::write(tmp.path().join("p/y/q/2.log"), b"x").unwrap();
+
+        let pattern = tmp.path().join("*/x/**/*.log");
+        let matches = files::glob(pattern.to_str().unwrap()).unwrap();
+
+        assert_eq!(matches, vec![filesys::File::new(wanted)]);
+    }
+
+    #[test]
+    fn trailing_recursive_wildcard_matches_no_files() {
+        let tmp = test_dirs::temp("testing").unwrap();
+        fs::create_dir(tmp.path().join("x")).unwrap();
+        fs::write(tmp.path().join("x/1.log"), b"x").unwrap();
+
+        let pattern = tmp.path().join("**");
+        let matches = files::glob(pattern.to_str().unwrap()).unwrap();
+
+        assert!(matches.is_empty(), "{matches:?}");
+    }
+
+    #[test]
+    fn trailing_separator_or_dot_matches_no_files() {
+        let tmp = test_dirs::temp("testing").unwrap();
+        fs::write(tmp.path().join("1.log"), b"x").unwrap();
+
+        for suffix in ["*/", "*/."] {
+            let pattern = format!("{}/{suffix}", tmp.path().display());
+            let matches = files::glob(&pattern).unwrap();
+            assert!(matches.is_empty(), "{pattern} matched {matches:?}");
+        }
+    }
+
+    #[test]
     fn literal_path_matches_itself() {
         let tmp = test_dirs::temp("testing").unwrap();
         let path = tmp.path().join("data.txt");
@@ -1363,26 +1497,6 @@ pub mod glob {
         let matches = files::glob(pattern.to_str().unwrap()).unwrap();
 
         assert_eq!(matches, vec![filesys::File::new(real)]);
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn literal_component_needs_only_traverse_permission() {
-        // `a` can be traversed but not listed, so `a/logs` must be looked up
-        // directly; `b` has no `logs` at all.
-        let tmp = test_dirs::temp("testing").unwrap();
-        fs::create_dir_all(tmp.path().join("a/logs")).unwrap();
-        fs::create_dir(tmp.path().join("b")).unwrap();
-        let log = tmp.path().join("a/logs/1.log");
-        fs::write(&log, b"x").unwrap();
-        let a = tmp.path().join("a");
-        fs::set_permissions(&a, fs::Permissions::from_mode(0o300)).unwrap();
-
-        let pattern = tmp.path().join("*/logs/*.log");
-        let matches = files::glob(pattern.to_str().unwrap());
-
-        fs::set_permissions(&a, fs::Permissions::from_mode(0o700)).unwrap();
-        assert_eq!(matches.unwrap(), vec![filesys::File::new(log)]);
     }
 
     #[cfg(unix)]
@@ -1425,6 +1539,29 @@ pub mod glob {
             let matches = files::glob(pattern.to_str().unwrap()).unwrap();
             assert!(matches.is_empty(), "{pattern:?} matched {matches:?}");
         }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn junction_not_walked() {
+        let tmp = test_dirs::temp("testing").unwrap();
+        let outside = test_dirs::temp("outside").unwrap();
+        fs::write(outside.path().join("x.log"), b"x").unwrap();
+        // unlike a symlink, a junction needs no privilege to create
+        let status = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(tmp.path().join("j"))
+            .arg(outside.path())
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let real = tmp.path().join("real.log");
+        fs::write(&real, b"x").unwrap();
+
+        let pattern = tmp.path().join("**/*.log");
+        let matches = files::glob(pattern.to_str().unwrap()).unwrap();
+
+        assert_eq!(matches, vec![filesys::File::new(real)]);
     }
 
     #[cfg(unix)]

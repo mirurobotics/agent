@@ -1,13 +1,14 @@
 // standard crates
-use std::ffi::{OsStr, OsString};
-use std::fs::FileType;
+#[cfg(unix)]
+use std::ffi::OsStr;
 use std::io::Write;
 #[cfg(windows)]
 use std::os::windows::fs::MetadataExt;
 use std::path::{Component, Path, PathBuf};
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 // internal crates
+use crate::cooldown;
 use crate::filesys::{
     dir::Dir,
     dirs,
@@ -28,6 +29,7 @@ use tokio::fs::File as TokioFile;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 #[allow(unused_imports)]
 use tracing::{debug, error, info, warn};
+use walkdir::WalkDir;
 #[cfg(windows)]
 use windows_sys::Win32::Storage::FileSystem::{
     FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_OPEN_REPARSE_POINT,
@@ -240,6 +242,32 @@ pub async fn read_json<T: DeserializeOwned>(file: &File) -> Result<T, FileSysErr
     Ok(obj)
 }
 
+/// Waits between retries of a read that failed for a reason other than
+/// "missing" or "unparseable" (e.g. a transient EIO).
+const READ_RETRY_DELAYS: [Duration; 3] = [
+    Duration::from_millis(50),
+    Duration::from_millis(250),
+    Duration::from_millis(1000),
+];
+
+/// [`read_json`], retrying errors other than "missing" and "unparseable",
+/// which a retry won't change, after each of [`READ_RETRY_DELAYS`].
+pub async fn read_json_with_retry<T: DeserializeOwned>(file: &File) -> Result<T, FileSysErr> {
+    let is_retryable = |err: &FileSysErr| {
+        !matches!(
+            err,
+            FileSysErr::PathDoesNotExistErr(_) | FileSysErr::ParseJSONErr(_)
+        )
+    };
+    cooldown::retry(
+        |n| READ_RETRY_DELAYS.get(n as usize).copied(),
+        is_retryable,
+        tokio::time::sleep,
+        move || read_json(file),
+    )
+    .await
+}
+
 pub async fn append_bytes(
     file: &File,
     buf: &[u8],
@@ -435,6 +463,14 @@ pub async fn delete_beneath(_root: &Dir, file: &File) -> Result<(), FileSysErr> 
     delete(file).await
 }
 
+/// Delete `file`, logging a failure instead of returning it. A file that is
+/// already gone is fine.
+pub async fn delete_or_warn(file: &File) {
+    if let Err(e) = delete(file).await {
+        warn!("failed to delete {file}: {e}");
+    }
+}
+
 /// Copy `file` to `dst`. Permissions follow `tokio::fs::copy` (Unix mode bits
 /// and Windows attributes).
 pub async fn copy_to(file: &File, dst: &File, overwrite: Overwrite) -> Result<(), FileSysErr> {
@@ -552,32 +588,48 @@ pub async fn set_permissions(
 ///
 /// A pattern-syntax error (an invalid glob) returns [`FileSysErr::InvalidGlobErr`].
 /// The walk starts at the pattern's literal prefix (the directories before the
-/// first wildcard) and matches each level below it against that level's
-/// pattern component, so it only enters directories that can hold a match. It
-/// never follows a symlink below the prefix: symlinked files and directories
-/// are skipped, and a `..` below the prefix matches nothing, so a match can't
-/// resolve outside the prefix. On Windows, entries behind any other reparse
-/// point, such as cloud placeholders, are skipped too. Directories that error
-/// mid-walk (e.g. unreadable ones) are skipped rather than aborting the walk.
+/// first wildcard) and enters only directories that can hold a match. It never
+/// follows a symlink below the prefix: symlinked files are skipped and
+/// symlinked directories aren't entered. On Windows, any other reparse point
+/// below the prefix, such as a cloud placeholder, is skipped too. A directory
+/// swapped for a link after it's listed isn't caught here. Entries that error
+/// mid-walk (e.g. an unreadable directory) are skipped rather than aborting the
+/// walk.
 pub fn glob(pattern: &str) -> Result<Vec<File>, FileSysErr> {
-    let (root, components) = parse_glob(pattern)?;
-    let mut walk = GlobWalk {
-        todo: vec![(root, components.as_slice())],
-        matches: Vec::new(),
+    let parsed = ParsedGlob::new(pattern)?;
+    if parsed.names_only_dirs {
+        return Ok(Vec::new());
+    }
+    let walk_from = match parsed.root.as_os_str().is_empty() {
+        true => Path::new("."),
+        false => parsed.root.as_path(),
     };
-    while let Some((dir, components)) = walk.todo.pop() {
-        let Some(first) = components.first() else {
+    let mut walk = WalkDir::new(walk_from).min_depth(1).sort_by_file_name();
+    if let Some(max_depth) = parsed.max_depth {
+        walk = walk.max_depth(max_depth);
+    }
+    let options = glob::MatchOptions {
+        require_literal_separator: true,
+        ..glob::MatchOptions::new()
+    };
+
+    let mut matches = Vec::new();
+    let entries = walk
+        .into_iter()
+        .filter_entry(|entry| !is_skipped_reparse_point(entry) && parsed.may_hold_match(entry));
+    for entry in entries.flatten() {
+        if entry.path_is_symlink() {
+            debug!("glob: skipping symlink {}", entry.path().display());
+            continue;
+        }
+        let Ok(relative) = entry.path().strip_prefix(walk_from) else {
             continue;
         };
-        for (path, file_type) in glob_entries(&dir, first) {
-            walk.visit(path, file_type, components);
+        if entry.file_type().is_file() && parsed.below.matches_path_with(relative, options) {
+            matches.push(File::new(parsed.root.join(relative)));
         }
     }
-    let mut matches = walk.matches;
-    matches.sort();
-    // two `**` components can reach one file by two routes
-    matches.dedup();
-    Ok(matches.into_iter().map(File::new).collect())
+    Ok(matches)
 }
 
 /// The directory [`glob`] walks `pattern` from: its literal prefix, the
@@ -592,61 +644,67 @@ pub fn glob_root(pattern: &str) -> Dir {
 /// Checks that `pattern` is a glob [`glob`] accepts, without walking the
 /// filesystem. An invalid pattern returns [`FileSysErr::InvalidGlobErr`].
 pub fn validate_glob(pattern: &str) -> Result<(), FileSysErr> {
-    parse_glob(pattern).map(drop)
+    ParsedGlob::new(pattern).map(drop)
 }
 
-const GLOB_META: [char; 3] = ['*', '?', '['];
-
-/// One path component of a glob pattern.
-enum GlobComponent {
-    /// A name with no wildcards, matched exactly.
-    Literal(OsString),
-    /// A name pattern such as `*.log`.
-    Wildcard(glob::Pattern),
-    /// `**`: zero or more directories.
-    AnyDirs,
+/// A glob pattern split at its literal prefix, where a walk starts.
+struct ParsedGlob {
+    root: PathBuf,
+    /// The pattern below `root`, matched against each file's relative path.
+    below: glob::Pattern,
+    /// One pattern per directory level below `root`, up to the first `**`.
+    level_patterns: Vec<glob::Pattern>,
+    /// How deep a match can lie below `root`; any depth once there's a `**`.
+    max_depth: Option<usize>,
+    /// As with `glob::glob`, a trailing `**`, `.` or separator names only directories.
+    names_only_dirs: bool,
 }
 
-impl GlobComponent {
-    fn parse(name: &OsStr) -> Result<Self, glob::PatternError> {
-        let text = name.to_string_lossy();
-        if text == "**" {
-            return Ok(Self::AnyDirs);
-        }
-        if !text.contains(GLOB_META) {
-            return Ok(Self::Literal(name.to_os_string()));
-        }
-        glob::Pattern::new(&text).map(Self::Wildcard)
-    }
-
-    fn matches(&self, name: &OsStr) -> bool {
-        match self {
-            Self::Literal(literal) => name == literal,
-            Self::Wildcard(pattern) => pattern.matches_path(Path::new(name)),
-            Self::AnyDirs => true,
-        }
-    }
-}
-
-/// Splits `pattern` into its literal prefix, where a walk starts, and its
-/// components below that. The last component always stays below the prefix,
-/// since it names the files to match.
-fn parse_glob(pattern: &str) -> Result<(PathBuf, Vec<GlobComponent>), FileSysErr> {
-    let components: Vec<_> = Path::new(pattern).components().collect();
-    let mut parsed = components
-        .iter()
-        .map(|c| GlobComponent::parse(c.as_os_str()))
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| {
+impl ParsedGlob {
+    fn new(pattern: &str) -> Result<Self, FileSysErr> {
+        let invalid = |e: glob::PatternError| {
             FileSysErr::InvalidGlobErr(InvalidGlobErr {
                 pattern: pattern.to_string(),
                 source: Box::new(e),
                 trace: trace!(),
             })
-        })?;
-    let literal = literal_prefix_len(&components);
-    let root = components[..literal].iter().collect();
-    Ok((root, parsed.split_off(literal)))
+        };
+        let components: Vec<_> = Path::new(pattern).components().collect();
+        let names: Vec<_> = components
+            .iter()
+            .map(|c| c.as_os_str().to_string_lossy())
+            .collect();
+        let literal = literal_prefix_len(&components);
+        let below: PathBuf = components[literal..].iter().collect();
+        let below = glob::Pattern::new(&below.to_string_lossy());
+        let dir_names = &names[literal..names.len().saturating_sub(1).max(literal)];
+        let is_recursive = names[literal..].iter().any(|name| name == "**");
+        // the raw last segment, since components drop a trailing separator or `.`
+        let last = pattern.rsplit(std::path::is_separator).next();
+        Ok(Self {
+            root: components[..literal].iter().collect(),
+            below: below.map_err(invalid)?,
+            level_patterns: dir_names
+                .iter()
+                .take_while(|name| *name != "**")
+                .map(|name| glob::Pattern::new(name).map_err(invalid))
+                .collect::<Result<_, _>>()?,
+            max_depth: (!is_recursive).then_some(dir_names.len() + 1),
+            names_only_dirs: matches!(last, Some("" | "." | "**")),
+        })
+    }
+
+    /// Whether the walk should keep `entry`: a directory is entered only if
+    /// its name matches its level's pattern.
+    fn may_hold_match(&self, entry: &walkdir::DirEntry) -> bool {
+        if !entry.file_type().is_dir() {
+            return true;
+        }
+        let level = entry.depth().checked_sub(1);
+        level
+            .and_then(|level| self.level_patterns.get(level))
+            .is_none_or(|dir| dir.matches(&entry.file_name().to_string_lossy()))
+    }
 }
 
 /// How many of a glob's `components` form its literal prefix: the leading ones
@@ -655,93 +713,27 @@ fn literal_prefix_len(components: &[Component]) -> usize {
     components
         .iter()
         .take(components.len().saturating_sub(1))
-        .take_while(|c| !c.as_os_str().to_string_lossy().contains(GLOB_META))
+        .take_while(|c| !c.as_os_str().to_string_lossy().contains(['*', '?', '[']))
         .count()
 }
 
-/// A glob walk's state. It keeps its own work list rather than recursing, so a
-/// deep tree can't overflow the stack.
-struct GlobWalk<'p> {
-    /// Directories still to read, each with the components left for its entries.
-    todo: Vec<(PathBuf, &'p [GlobComponent])>,
-    matches: Vec<PathBuf>,
-}
-
-impl<'p> GlobWalk<'p> {
-    /// Handles `path`, which matches the first of `components`: keeps it if
-    /// it's a regular file that matches them all, or queues it if it's a
-    /// directory with more to match.
-    fn visit(&mut self, path: PathBuf, file_type: FileType, components: &'p [GlobComponent]) {
-        let Some((first, rest)) = components.split_first() else {
-            return;
-        };
-        if matches!(first, GlobComponent::AnyDirs) {
-            // `**` matches zero directories, or this one and any below it
-            let name = path.file_name().unwrap_or_default();
-            if rest.first().is_some_and(|next| next.matches(name)) {
-                self.visit(path.clone(), file_type, rest);
-            }
-            if file_type.is_dir() {
-                self.todo.push((path, components));
-            }
-        } else if file_type.is_symlink() {
-            debug!("glob: skipping symlink {}", path.display());
-        } else if rest.is_empty() && file_type.is_file() {
-            self.matches.push(path);
-        } else if !rest.is_empty() && file_type.is_dir() {
-            self.todo.push((path, rest));
-        }
-    }
-}
-
-/// The entries of `dir` that `component` matches, with their own types: a
-/// symlink is reported as one, not as its target. A literal is looked up
-/// directly, so it needs only traverse permission on `dir`. On Windows, every
-/// reparse-point entry, file or directory, links included, is left out.
-fn glob_entries(dir: &Path, component: &GlobComponent) -> Vec<(PathBuf, FileType)> {
-    if let GlobComponent::Literal(name) = component {
-        // `..` would lead the walk back out of the prefix
-        if name == ".." {
-            return Vec::new();
-        }
-        let path = dir.join(name);
-        return match std::fs::symlink_metadata(&path) {
-            Ok(meta) if !is_skipped_reparse_point(&path, &meta) => vec![(path, meta.file_type())],
-            _ => Vec::new(),
-        };
-    }
-    // an empty `dir` is the current directory
-    let read_from = match dir.as_os_str().is_empty() {
-        true => Path::new("."),
-        false => dir,
-    };
-    let Ok(entries) = std::fs::read_dir(read_from) else {
-        return Vec::new();
-    };
-    let entries = entries
-        .flatten()
-        .filter(|entry| component.matches(&entry.file_name()));
-    // on Windows the listing already holds each entry's attributes, so this
-    // needs no extra system call
-    #[cfg(windows)]
-    let entries = entries.filter(|e| {
-        let path = dir.join(e.file_name());
-        !e.metadata()
-            .is_ok_and(|m| is_skipped_reparse_point(&path, &m))
-    });
-    entries
-        .filter_map(|entry| Some((dir.join(entry.file_name()), entry.file_type().ok()?)))
-        .collect()
-}
-
-/// Whether the glob leaves out `path` as a reparse point, logging it like a
-/// skipped symlink.
-fn is_skipped_reparse_point(path: &Path, meta: &std::fs::Metadata) -> bool {
-    let is_skipped = is_reparse_point(meta);
+/// Whether the glob leaves out `entry` as a reparse point below the prefix,
+/// logging it like a skipped symlink.
+#[cfg(windows)]
+fn is_skipped_reparse_point(entry: &walkdir::DirEntry) -> bool {
+    // the listing already holds each entry's attributes, so this needs no
+    // extra system call
+    let is_skipped =
+        entry.depth() > 0 && entry.metadata().is_ok_and(|meta| is_reparse_point(&meta));
     if is_skipped {
-        debug!("glob: skipping reparse point {}", path.display());
+        debug!("glob: skipping reparse point {}", entry.path().display());
     }
     is_skipped
+}
+
+#[cfg(unix)]
+fn is_skipped_reparse_point(_entry: &walkdir::DirEntry) -> bool {
+    false
 }
 
 pub async fn metadata(file: &File) -> Result<Metadata, FileSysErr> {

@@ -712,7 +712,7 @@ dependencies = [
 
 [[package]]
 name = "backend-api"
-version = "0.12.3"
+version = "0.12.4"
 dependencies = [
  "serde",
  "serde_json",
@@ -1252,7 +1252,7 @@ dependencies = [
 
 [[package]]
 name = "device-api"
-version = "0.12.3"
+version = "0.12.4"
 dependencies = [
  "serde",
  "serde_json",
@@ -2300,7 +2300,7 @@ dependencies = [
 
 [[package]]
 name = "miru-agent"
-version = "0.12.3"
+version = "0.12.4"
 dependencies = [
  "atomicwrites",
  "aws-lc-rs",
@@ -2346,6 +2346,7 @@ dependencies = [
  "tracing-appender",
  "tracing-subscriber",
  "uuid",
+ "walkdir",
  "windows-service",
  "windows-sys 0.61.2",
 ]

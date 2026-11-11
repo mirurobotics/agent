@@ -11,18 +11,14 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LatestCalibrationsResponse {
-    /// Whether the list includes the device's calibrations from Miru. Until it does, `calibrations` holds only calibrations reported to this agent.
-    #[serde(rename = "is_confirmed")]
-    pub is_confirmed: bool,
     /// The latest calibrations, one for each component, role and aspect.
     #[serde(rename = "calibrations")]
     pub calibrations: Vec<models::Calibration>,
 }
 
 impl LatestCalibrationsResponse {
-    pub fn new(is_confirmed: bool, calibrations: Vec<models::Calibration>) -> LatestCalibrationsResponse {
+    pub fn new(calibrations: Vec<models::Calibration>) -> LatestCalibrationsResponse {
         LatestCalibrationsResponse {
-            is_confirmed,
             calibrations,
         }
     }

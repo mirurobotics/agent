@@ -3,8 +3,8 @@ use std::sync::{Arc, Mutex};
 
 // internal crates
 use backend_api::models::{
-    BaseFileRule as BackendFileRule, Calibration, Deployment as BackendDeployment, DeploymentList,
-    Device, Error as ApiError, ErrorResponse, GitCommit as BackendGitCommit,
+    BaseFileRule as BackendFileRule, Calibration, CalibrationList, Deployment as BackendDeployment,
+    DeploymentList, Device, Error as ApiError, ErrorResponse, GitCommit as BackendGitCommit,
     Release as BackendRelease, TokenResponse, Upload, UploadCredentials, UploadWithCredentials,
 };
 use miru_agent::http::{self, request::Params, HTTPErr};
@@ -38,6 +38,8 @@ pub enum Call {
     VendUploadCredentials,
     ConfirmUpload,
     CreateCalibration,
+    ListLatestCalibrations,
+    GetCalibrationContent,
 }
 
 // ================================ CAPTURED REQUEST ================================ //
@@ -68,6 +70,9 @@ type VendUploadCredentialsFn =
     Mutex<Box<dyn Fn() -> Result<UploadCredentials, HTTPErr> + Send + Sync>>;
 type ConfirmUploadFn = Mutex<Box<dyn Fn() -> Result<Upload, HTTPErr> + Send + Sync>>;
 type CreateCalibrationFn = Mutex<Box<dyn Fn() -> Result<Calibration, HTTPErr> + Send + Sync>>;
+type ListLatestCalibrationsFn =
+    Mutex<Box<dyn Fn() -> Result<CalibrationList, HTTPErr> + Send + Sync>>;
+type GetCalibrationContentFn = Mutex<Box<dyn Fn(&str) -> Result<String, HTTPErr> + Send + Sync>>;
 
 pub struct MockClient {
     pub provision_device_fn: Box<dyn Fn() -> Result<Device, HTTPErr> + Send + Sync>,
@@ -86,6 +91,8 @@ pub struct MockClient {
     pub vend_upload_credentials_fn: VendUploadCredentialsFn,
     pub confirm_upload_fn: ConfirmUploadFn,
     pub create_calibration_fn: CreateCalibrationFn,
+    pub list_latest_calibrations_fn: ListLatestCalibrationsFn,
+    pub get_calibration_content_fn: GetCalibrationContentFn,
     pub requests: Arc<Mutex<Vec<CapturedRequest>>>,
 }
 
@@ -108,6 +115,8 @@ impl Default for MockClient {
             vend_upload_credentials_fn: Mutex::new(Box::new(|| Ok(UploadCredentials::default()))),
             confirm_upload_fn: Mutex::new(Box::new(|| Ok(Upload::default()))),
             create_calibration_fn: Mutex::new(Box::new(|| Ok(Calibration::default()))),
+            list_latest_calibrations_fn: Mutex::new(Box::new(|| Ok(CalibrationList::default()))),
+            get_calibration_content_fn: Mutex::new(Box::new(|_id| Ok("{}".to_string()))),
             requests: Arc::new(Mutex::new(Vec::new())),
         }
     }
@@ -219,6 +228,20 @@ impl MockClient {
         *self.create_calibration_fn.lock().unwrap() = Box::new(f);
     }
 
+    pub fn set_list_latest_calibrations<F>(&self, f: F)
+    where
+        F: Fn() -> Result<CalibrationList, HTTPErr> + Send + Sync + 'static,
+    {
+        *self.list_latest_calibrations_fn.lock().unwrap() = Box::new(f);
+    }
+
+    pub fn set_get_calibration_content<F>(&self, f: F)
+    where
+        F: Fn(&str) -> Result<String, HTTPErr> + Send + Sync + 'static,
+    {
+        *self.get_calibration_content_fn.lock().unwrap() = Box::new(f);
+    }
+
     pub fn call_count(&self, target: Call) -> usize {
         self.requests
             .lock()
@@ -276,6 +299,16 @@ impl MockClient {
             }
             (m, p) if *m == Method::POST && p == "/uploads" => Call::CreateUpload,
             (m, p) if *m == Method::POST && p == "/calibrations" => Call::CreateCalibration,
+            (m, p) if *m == Method::GET && p == "/calibrations/latest" => {
+                Call::ListLatestCalibrations
+            }
+            (m, p)
+                if *m == Method::GET
+                    && p.starts_with("/calibrations/")
+                    && p.ends_with("/content") =>
+            {
+                Call::GetCalibrationContent
+            }
             _ => panic!("MockClient: unhandled route: {method} {path}"),
         }
     }
@@ -309,6 +342,16 @@ impl MockClient {
                     .and_then(|s| s.strip_suffix("/content"))
                     .unwrap_or("");
                 (self.get_cfg_inst_content_fn.lock().unwrap())(id)
+            }
+            Call::ListLatestCalibrations => {
+                json(&(self.list_latest_calibrations_fn.lock().unwrap())()?)
+            }
+            Call::GetCalibrationContent => {
+                let id = path
+                    .strip_prefix("/calibrations/")
+                    .and_then(|s| s.strip_suffix("/content"))
+                    .unwrap_or("");
+                (self.get_calibration_content_fn.lock().unwrap())(id)
             }
         }
     }

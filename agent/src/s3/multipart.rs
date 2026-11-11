@@ -24,11 +24,11 @@ impl Store {
     /// in-progress upload is aborted (best-effort) so S3 does not retain orphaned
     /// parts, then the error propagates.
     ///
-    /// On GCS, object writes are create-only (see [`gcs`](crate::s3::gcs)). If
-    /// an earlier attempt already created the object, for example one whose
-    /// success response was lost, GCS refuses to complete this upload with 412.
-    /// The file counts as uploaded, but this upload was never completed and GCS
-    /// still holds its parts, so it is aborted too.
+    /// Object writes are create-only (see [`Self::finish_write`]). If an
+    /// earlier attempt already created the object, for example one whose
+    /// success response was lost, completing this upload fails with 412. The
+    /// file counts as uploaded, but this upload was never completed and the
+    /// bucket still holds its parts, so it is aborted too.
     pub async fn put_multipart(
         &self,
         src: Source,
@@ -63,7 +63,7 @@ impl Store {
         let written = self
             .complete_multipart_upload(dst, upload_id, &parts)
             .await?;
-        // GCS already had the object: abort this upload's leftover parts
+        // The object already existed: abort this upload's leftover parts
         if matches!(written, WriteOutcome::AlreadyExists) {
             let _ = self.abort_multipart_upload(dst, upload_id).await;
         }
@@ -298,12 +298,13 @@ impl Store {
             .key(&obj.key)
             .upload_id(upload_id)
             .multipart_upload(completed)
+            .if_none_match("*")
             .customize()
             .config_override(sdk::timeout(sdk::COMPLETE_TIMEOUT))
             .send()
             .await
             .map(|_| ());
-        self.finish_write("complete_multipart_upload", obj, result)
+        Self::finish_write("complete_multipart_upload", obj, result)
     }
 
     /// Aborts an in-progress multipart upload so S3 releases its parts. Returns a
@@ -331,8 +332,9 @@ mod tests {
     // internal crates
     use super::*;
     use crate::s3::store::tests::{
-        access_denied_resp, actual_shapes, obj, recorded_payload, req, resp, resp_xml, shape,
-        source_of, store_expecting, store_on, store_with, temp_file_with, uri,
+        access_denied_resp, actual_shapes, obj, precondition_failed_resp, recorded_payload, req,
+        resp, resp_xml, shape, source_of, store_expecting, store_on, store_with, temp_file_with,
+        uri,
     };
     use crate::test_utils::filesys::files as test_files;
     use miru_agent::errors::{Code, Error};
@@ -537,6 +539,64 @@ mod tests {
             assert_eq!(
                 actual_shapes(&replay),
                 vec![create_shape(), upload_part_shape(1), complete_shape()]
+            );
+        }
+
+        #[tokio::test]
+        async fn complete_is_create_only() {
+            let src = temp_file_with(b"multipart-body").await;
+            let (store, replay) = store_with(vec![
+                ReplayEvent::new(create_req(), create_resp()),
+                ReplayEvent::new(upload_part_req(1), upload_part_resp("\"etag-part-1\"")),
+                ReplayEvent::new(complete_req(), complete_resp()),
+            ]);
+
+            store
+                .put_multipart(
+                    source_of(&src, "big.bin").await,
+                    &obj("big.bin"),
+                    &HashMap::new(),
+                )
+                .await
+                .unwrap();
+
+            // Only the complete writes the object; create and the parts don't.
+            let precondition = replay
+                .actual_requests()
+                .map(|r| r.headers().get("if-none-match").map(str::to_string))
+                .collect::<Vec<_>>();
+            assert_eq!(precondition, vec![None, None, Some("*".to_string())]);
+        }
+
+        #[tokio::test]
+        async fn existing_object_counts_as_uploaded() {
+            // An earlier upload created the object, so completing this one gets
+            // 412 and its parts are aborted rather than left behind.
+            let src = temp_file_with(b"multipart-body").await;
+            let (store, replay) = store_with(vec![
+                ReplayEvent::new(create_req(), create_resp()),
+                ReplayEvent::new(upload_part_req(1), upload_part_resp("\"etag-part-1\"")),
+                ReplayEvent::new(complete_req(), precondition_failed_resp()),
+                ReplayEvent::new(abort_req(), resp(204, &[])),
+            ]);
+
+            store
+                .put_multipart(
+                    source_of(&src, "big.bin").await,
+                    &obj("big.bin"),
+                    &HashMap::new(),
+                )
+                .await
+                .unwrap();
+
+            assert_eq!(
+                actual_shapes(&replay),
+                vec![
+                    create_shape(),
+                    upload_part_shape(1),
+                    complete_shape(),
+                    abort_shape(),
+                ]
             );
         }
 
@@ -1119,6 +1179,39 @@ mod tests {
 
             // Both landed parts listed in ascending order.
             assert_complete_manifest(&replay, &[(1, "landed-1"), (2, "landed-2")]);
+        }
+
+        #[tokio::test]
+        async fn resume_of_an_existing_object_is_aborted() {
+            // An earlier attempt stored the object, so completing gets 412 and
+            // this upload is aborted.
+            let tf = two_part_file().await;
+            let src = source_of(&tf, "big.bin").await;
+
+            let (store, replay) = store_with(vec![
+                ReplayEvent::new(
+                    list_parts_req(),
+                    list_parts_resp(
+                        &[
+                            (1, "\"landed-1\"", 8 * 1024 * 1024),
+                            (2, "\"landed-2\"", 1024),
+                        ],
+                        None,
+                    ),
+                ),
+                ReplayEvent::new(complete_req(), precondition_failed_resp()),
+                ReplayEvent::new(abort_req(), resp(204, &[])),
+            ]);
+
+            store
+                .resume_multipart_upload(src, &obj("big.bin"), UPLOAD_ID)
+                .await
+                .unwrap();
+
+            assert_eq!(
+                actual_shapes(&replay),
+                vec![list_parts_shape(), complete_shape(), abort_shape()]
+            );
         }
     }
 

@@ -64,7 +64,7 @@ impl Layout {
         self.resources().subdir("config_instances")
     }
 
-    pub fn config_instance_meta(&self) -> filesys::File {
+    pub fn config_instance_index(&self) -> filesys::File {
         self.config_instances().file("metadata.json")
     }
 
@@ -151,6 +151,7 @@ impl AuthLayout {
 
 /// The calibration queue: a queue snapshot plus one report file per queued
 /// calibration, so a queue write never rewrites the (possibly large) content.
+/// The latest calibrations store sits beside it.
 pub struct CalibrationsLayout {
     pub root: filesys::Dir,
 }
@@ -166,5 +167,30 @@ impl CalibrationsLayout {
 
     pub fn reports(&self) -> filesys::Dir {
         self.root.subdir("reports")
+    }
+
+    pub fn latest(&self) -> LatestCalsLayout {
+        LatestCalsLayout::new(self.root.subdir("latest"))
+    }
+}
+
+/// The latest calibrations store. It sits beside the calibration queue, which
+/// `reset` keeps, so it survives upgrades and its format must stay readable by
+/// newer agents.
+pub struct LatestCalsLayout {
+    pub root: filesys::Dir,
+}
+
+impl LatestCalsLayout {
+    pub fn new(root: filesys::Dir) -> Self {
+        Self { root }
+    }
+
+    pub fn index(&self) -> filesys::File {
+        self.root.file("index.json")
+    }
+
+    pub fn contents(&self) -> filesys::Dir {
+        self.root.subdir("contents")
     }
 }

@@ -1,5 +1,4 @@
 // internal crates
-use crate::authn;
 use crate::crypt;
 use crate::disk::DiskErr;
 use crate::errors::Trace;
@@ -34,8 +33,6 @@ pub enum ProvisionErr {
     #[error(transparent)]
     AlreadyProvisionedErr(AlreadyProvisionedErr),
     #[error(transparent)]
-    AuthnErr(authn::AuthnErr),
-    #[error(transparent)]
     CryptErr(crypt::CryptErr),
     #[error(transparent)]
     FileSysErr(filesys::FileSysErr),
@@ -45,12 +42,6 @@ pub enum ProvisionErr {
     LogsErr(logs::LogsErr),
     #[error(transparent)]
     DiskErr(DiskErr),
-}
-
-impl From<authn::AuthnErr> for ProvisionErr {
-    fn from(e: authn::AuthnErr) -> Self {
-        Self::AuthnErr(e)
-    }
 }
 
 impl From<crypt::CryptErr> for ProvisionErr {
@@ -86,7 +77,6 @@ impl From<DiskErr> for ProvisionErr {
 crate::impl_error!(ProvisionErr {
     MissingEnvVarErr,
     AlreadyProvisionedErr,
-    AuthnErr,
     CryptErr,
     FileSysErr,
     HTTPErr,
@@ -100,18 +90,6 @@ mod tests {
 
     mod from_conversions {
         use super::*;
-
-        #[test]
-        fn from_authn_err() {
-            let err = authn::AuthnErr::TimestampConversionErr(
-                crate::authn::errors::TimestampConversionErr {
-                    msg: "test".to_string(),
-                    trace: crate::trace!(),
-                },
-            );
-            let install_err = ProvisionErr::from(err);
-            assert!(matches!(install_err, ProvisionErr::AuthnErr(_)));
-        }
 
         #[test]
         fn from_crypt_err() {

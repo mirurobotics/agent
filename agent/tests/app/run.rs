@@ -9,7 +9,10 @@ use miru_agent::app::run::run;
 use miru_agent::disk::Layout;
 use miru_agent::filesys::{self, files, PathExt, WriteOptions};
 use miru_agent::models::Device;
+use miru_agent::mqtt::options::{ConnectAddress, Protocol};
+use miru_agent::network::{BackendHost, MqttHost};
 use miru_agent::server::{tcp, Options, ServerErr};
+use miru_agent::workers::mqtt;
 
 // external crates
 use serde_json::Value;
@@ -51,7 +54,8 @@ async fn activated_layout() -> (test_dirs::TempDir, Layout) {
 }
 
 /// Options for `layout` with the socket under /tmp. `tcp_port` enables the
-/// TCP server on that port.
+/// TCP server on that port. The backend and MQTT broker addresses refuse
+/// connections, so nothing the agent sends leaves this machine.
 fn options(layout: &Layout, lifecycle: LifecycleOptions, tcp_port: Option<u16>) -> AppOptions {
     let mut server = Options {
         socket_file: filesys::File::new(PathBuf::from("/tmp").join("miru.sock")),
@@ -60,6 +64,7 @@ fn options(layout: &Layout, lifecycle: LifecycleOptions, tcp_port: Option<u16>) 
     if let Some(port) = tcp_port {
         server.tcp_port = port;
     }
+    let broker = MqttHost::new("127.0.0.1").unwrap();
     AppOptions {
         storage: StorageOptions {
             layout: layout.clone(),
@@ -68,6 +73,11 @@ fn options(layout: &Layout, lifecycle: LifecycleOptions, tcp_port: Option<u16>) 
         lifecycle,
         enable_tcp_server: tcp_port.is_some(),
         server,
+        backend_host: BackendHost::new("127.0.0.1:1").unwrap(),
+        mqtt_worker: mqtt::Options {
+            broker_address: ConnectAddress::new(broker, Protocol::TCP, 1).unwrap(),
+            ..Default::default()
+        },
         ..Default::default()
     }
 }
@@ -146,15 +156,10 @@ async fn invalid_app_state_initialization() {
     let dir = test_dirs::temp("testing").unwrap();
     let layout = Layout::new(dir.to_dir());
     write_stale_discovery_file(&layout).await;
-    let options = AppOptions {
-        storage: StorageOptions {
-            layout: layout.clone(),
-            ..Default::default()
-        },
-        ..Default::default()
-    };
 
-    run_to_exit(options).await.unwrap_err();
+    run_to_exit(options(&layout, lifecycle(), None))
+        .await
+        .unwrap_err();
 
     // the stale file goes before the failing init step
     assert!(!layout.device_api().exists());

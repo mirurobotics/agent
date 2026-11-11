@@ -23,7 +23,7 @@ pub async fn deploy(
     validate_deploy_target(deployment)?;
     validate_has_cfg_insts(deployment)?;
 
-    let cfg_insts = read_cfg_insts(storage.meta, &deployment.config_instance_ids).await?;
+    let cfg_insts = read_cfg_insts(storage.index, &deployment.config_instance_ids).await?;
     validate_cfg_insts(&cfg_insts)?;
 
     write_cfg_insts(&cfg_insts, storage.content).await
@@ -269,7 +269,7 @@ pub async fn remove(
     if deployment.config_instance_ids.is_empty() {
         return Ok(());
     }
-    let cfg_insts = read_cfg_insts(storage.meta, &deployment.config_instance_ids).await?;
+    let cfg_insts = read_cfg_insts(storage.index, &deployment.config_instance_ids).await?;
     validate_cfg_insts(&cfg_insts)?;
 
     remove_cfg_insts(&cfg_insts, keeps).await

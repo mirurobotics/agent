@@ -26,6 +26,12 @@ type DataUploadActors = (
     [tokio::task::JoinHandle<()>; 3],
 );
 
+type CalibrationActors = (
+    calibrations::LatestStore,
+    Arc<calibrations::Uploader>,
+    [tokio::task::JoinHandle<()>; 2],
+);
+
 #[derive(Clone, Debug)]
 pub struct AppState {
     pub storage: Arc<disk::Storage>,
@@ -36,7 +42,8 @@ pub struct AppState {
     pub uploader: Arc<upload::Uploader>,
     pub token_mngr: Arc<authn::TokenManager>,
     pub event_hub: events::EventHub,
-    pub cal_mngr: Arc<calibrations::CalibrationManager>,
+    pub cal_uploader: Arc<calibrations::Uploader>,
+    pub latest_cals: calibrations::LatestStore,
 }
 
 impl AppState {
@@ -80,9 +87,9 @@ impl AppState {
         let (deleter, uploader, scanner, [scanner_handle, deleter_handle, uploader_handle]) =
             Self::init_data_uploads(layout, http_client.clone(), token_mngr.clone()).await?;
 
-        // initialize the calibration manager
-        let (cal_mngr, cal_mngr_handle) =
-            Self::init_cal_mngr(layout, http_client.clone(), token_mngr.clone()).await;
+        // initialize the calibrations pipeline (latest store, uploader)
+        let (latest_cals, cal_uploader, [latest_cals_handle, cal_uploader_handle]) =
+            Self::init_calibrations(layout, http_client.clone(), token_mngr.clone()).await;
 
         let shutdown_handle = async move {
             let handles = [
@@ -92,7 +99,8 @@ impl AppState {
                 scanner_handle,
                 deleter_handle,
                 uploader_handle,
-                cal_mngr_handle,
+                cal_uploader_handle,
+                latest_cals_handle,
             ];
             futures::future::join(futures::future::join_all(handles), storage_handle).await;
         };
@@ -107,7 +115,8 @@ impl AppState {
                 uploader,
                 token_mngr,
                 event_hub,
-                cal_mngr,
+                cal_uploader,
+                latest_cals,
             },
             shutdown_handle,
         ))
@@ -258,18 +267,45 @@ impl AppState {
         Ok((Arc::new(uploader), handle))
     }
 
-    /// Spawn the calibration manager, which sends reports to Miru with the
-    /// token manager's token. A queue-file error degrades to a queue kept in
-    /// memory (fail-open); the report files a previous boot queued are kept
-    /// for the next boot that opens the queue file.
-    async fn init_cal_mngr(
+    /// The latest calibrations store is initialized before the calibration
+    /// uploader, whose worker writes it.
+    async fn init_calibrations(
         layout: &disk::Layout,
         http_client: Arc<http::Client>,
         token_mngr: Arc<authn::TokenManager>,
-    ) -> (
-        Arc<calibrations::CalibrationManager>,
-        tokio::task::JoinHandle<()>,
-    ) {
+    ) -> CalibrationActors {
+        let (latest_cals, latest_cals_handle) = Self::init_latest_cals(layout);
+        let (cal_uploader, cal_uploader_handle) =
+            Self::init_cal_uploader(layout, http_client, token_mngr, latest_cals.clone()).await;
+        (
+            latest_cals,
+            cal_uploader,
+            [latest_cals_handle, cal_uploader_handle],
+        )
+    }
+
+    /// Spawn the latest calibrations store's worker.
+    fn init_latest_cals(
+        layout: &disk::Layout,
+    ) -> (calibrations::LatestStore, tokio::task::JoinHandle<()>) {
+        calibrations::LatestStore::spawn(
+            64,
+            layout.calibrations().latest(),
+            calibrations::latest::DEFAULT_CAPACITY,
+        )
+    }
+
+    /// Spawn the calibration uploader, which sends reports to Miru with the
+    /// token manager's token and writes them to the `latest` store. A
+    /// queue-file error degrades to a queue kept in memory (fail-open); the
+    /// report files a previous boot queued are kept for the next boot that
+    /// opens the queue file.
+    async fn init_cal_uploader(
+        layout: &disk::Layout,
+        http_client: Arc<http::Client>,
+        token_mngr: Arc<authn::TokenManager>,
+        latest: calibrations::LatestStore,
+    ) -> (Arc<calibrations::Uploader>, tokio::task::JoinHandle<()>) {
         let layout = layout.calibrations();
         let snapshot_file = match calibrations::QueueSnapshotFile::new_with_default(
             layout.queue(),
@@ -286,25 +322,33 @@ impl AppState {
             }
         };
 
-        let args = calibrations::CalMngrArgs {
+        let args = calibrations::UploaderArgs {
             snapshot_file,
             reports: layout.reports(),
+            latest,
             sender: Arc::new(calibrations::HttpSender::new(http_client, token_mngr)),
             options: calibrations::UploaderOptions::default(),
             sleep_fn: tokio::time::sleep,
             now_fn: chrono::Utc::now,
         };
-        let (cal_mngr, handle) = calibrations::CalibrationManager::spawn(64, args);
-        (Arc::new(cal_mngr), handle)
+        let (cal_uploader, handle) = calibrations::Uploader::spawn(64, args);
+        (Arc::new(cal_uploader), handle)
     }
 
     pub async fn shutdown(&self) -> Result<(), server::ServerErr> {
         let mut first_err: Option<server::ServerErr> = None;
 
-        // shutdown the calibration manager first: nothing else in the app
+        // shutdown the calibration uploader first: nothing else in the app
         // depends on it
-        if let Err(e) = self.cal_mngr.shutdown().await {
-            tracing::error!("failed to shutdown calibration manager: {e}");
+        if let Err(e) = self.cal_uploader.shutdown().await {
+            tracing::error!("failed to shutdown calibration uploader: {e}");
+            first_err.get_or_insert(e.into());
+        }
+
+        // shutdown the latest calibrations store after the calibration uploader,
+        // whose worker writes it
+        if let Err(e) = self.latest_cals.shutdown().await {
+            tracing::error!("failed to shutdown latest calibrations store: {e}");
             first_err.get_or_insert(e.into());
         }
 

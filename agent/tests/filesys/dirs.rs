@@ -1,7 +1,7 @@
 // standard crates
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
-use std::{env, path::PathBuf};
+use std::{collections::HashSet, env, path::PathBuf};
 
 // internal crates
 use crate::test_utils::filesys::dirs as test_dirs;
@@ -65,6 +65,39 @@ pub mod delete {
         let dir = filesys::Dir::new(PathBuf::from("doesnt_exist"));
         assert!(!dir.exists());
         dirs::delete(&dir).await.unwrap();
+        assert!(!dir.exists());
+    }
+}
+
+pub mod delete_files_except {
+    use super::*;
+
+    #[tokio::test]
+    async fn deletes_only_the_files_not_kept() {
+        let tmp = test_dirs::temp("testing").unwrap();
+        let dir = tmp.to_dir();
+        let kept = dir.file("kept");
+        let other = dir.file("other");
+        for file in [&kept, &other] {
+            files::write_string(file, "x", WriteOptions::OVERWRITE_ATOMIC)
+                .await
+                .unwrap();
+        }
+
+        let kept_names = HashSet::from(["kept".to_string()]);
+        dirs::delete_files_except(&dir, &kept_names).await;
+
+        assert!(kept.exists());
+        assert!(!other.exists());
+    }
+
+    #[tokio::test]
+    async fn a_missing_dir_is_not_created() {
+        let tmp = test_dirs::temp("testing").unwrap();
+        let dir = tmp.to_dir().subdir("missing");
+
+        dirs::delete_files_except(&dir, &HashSet::new()).await;
+
         assert!(!dir.exists());
     }
 }
