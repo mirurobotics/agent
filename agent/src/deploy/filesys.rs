@@ -293,16 +293,14 @@ async fn remove_cfg_insts(
 mod tests {
     // standard crates
     use std::io;
-    #[cfg(unix)]
-    use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
 
     // internal crates
     use super::*;
     use crate::filesys;
-    use crate::test_utils::filesys::dirs as test_dirs;
-    #[cfg(unix)]
-    use crate::test_utils::filesys::files as test_files;
+    use crate::test_utils::filesys::{
+        access::make_read_only, dirs as test_dirs, files as test_files,
+    };
 
     /// RAII temp dir for absolute path fixtures; absolute on every platform.
     fn tmp_fixture() -> test_dirs::TempDir {
@@ -552,7 +550,6 @@ mod tests {
 
     // ============================= rollback ============================= //
 
-    #[cfg(unix)]
     #[tokio::test]
     async fn rollback_returns_errors_when_restores_fail_synthetic() {
         let tmp = test_dirs::temp("rollback_returns_errors_when_restores_fail_synthetic").unwrap();
@@ -574,11 +571,9 @@ mod tests {
         test_files::seed(&existed_parent.file("backup.json"), "backup content").await;
         test_files::seed(&dne_parent.file("dst.json"), "leftover").await;
 
-        // Only lock existed_parent so its rename-back fails with EACCES.
-        // Leave dne_parent at default 0o755 so its remove_file succeeds.
-        filesys::dirs::set_permissions(&existed_parent, std::fs::Permissions::from_mode(0o555))
-            .await
-            .unwrap();
+        // Only lock existed_parent so its rename-back fails with access
+        // denied. Leave dne_parent writable so its remove_file succeeds.
+        let _read_only = make_read_only(&existed_parent);
 
         // Vec order matters: rollback walks `.iter().rev()`, so index 1
         // (Existed, locked) is processed first and index 0 (DidNotExist,
@@ -595,15 +590,9 @@ mod tests {
 
         rollback(&snapshots).await;
 
-        // Restore permissions BEFORE assertions so tempdir Drop can recurse
-        // and clean up even if an assertion fails.
-        filesys::dirs::set_permissions(&existed_parent, std::fs::Permissions::from_mode(0o755))
-            .await
-            .unwrap();
-
         assert!(
             existed_parent.file("backup.json").exists(),
-            "Existed backup file should remain when rename-back into a chmod-555 parent fails"
+            "Existed backup file should remain when rename-back into a read-only parent fails"
         );
         assert!(
             !dne_parent.file("dst.json").exists(),
@@ -615,7 +604,6 @@ mod tests {
         );
     }
 
-    #[cfg(unix)]
     #[tokio::test]
     async fn remove_backups_continues_when_delete_fails() {
         let tmp = test_dirs::temp("remove_backups_continues_when_delete_fails").unwrap();
@@ -626,14 +614,12 @@ mod tests {
         test_files::seed(&writable_dir.file("dst.json"), "content").await;
         test_files::seed(&writable_dir.file("miru.backup.dst.json"), "backup").await;
 
-        // Locked dir: backup cannot be deleted (EACCES)
+        // Locked dir: backup cannot be deleted (access denied)
         let locked_dir = tmp.subdir("locked");
         filesys::dirs::create(&locked_dir).await.unwrap();
         test_files::seed(&locked_dir.file("dst.json"), "content").await;
         test_files::seed(&locked_dir.file("miru.backup.dst.json"), "backup").await;
-        filesys::dirs::set_permissions(&locked_dir, std::fs::Permissions::from_mode(0o555))
-            .await
-            .unwrap();
+        let _read_only = make_read_only(&locked_dir);
 
         // Vec order matters: remove_backups iterates forward, so index 0
         // (locked) is processed first and fails, index 1 (writable) is
@@ -651,11 +637,6 @@ mod tests {
         ];
 
         remove_backups(&snapshots).await;
-
-        // Restore permissions BEFORE assertions so tempdir Drop can recurse
-        filesys::dirs::set_permissions(&locked_dir, std::fs::Permissions::from_mode(0o755))
-            .await
-            .unwrap();
 
         // Writable backup was successfully deleted
         assert!(
