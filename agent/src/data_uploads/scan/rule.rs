@@ -1238,10 +1238,10 @@ mod tests {
         // it does NOT short-circuit to Unstable); `observe_file`/`metadata`
         // succeeds (directories have metadata); `is_metadata_stable` passes
         // because first_obs was observed from the same directory; then
-        // `differs_from_previous` calls `files::sha256`, which refuses to open
-        // anything but a regular file → OpenFileErr → eval_candidate returns
-        // Err. No permissions trickery, so it holds even when the suite runs as
-        // root.
+        // `differs_from_previous` calls `files::sha256`, which opens the path and
+        // reads it — reading a directory fails with EISDIR → ReadFileErr →
+        // eval_candidate returns Err. No permissions trickery, so it holds even
+        // when the suite runs as root.
         #[tokio::test]
         async fn erroring_candidate_is_skipped_without_aborting_siblings() {
             let dir = test_dirs::temp("testing").unwrap();

@@ -485,39 +485,6 @@ pub mod sha256 {
             FileSysErr::PathDoesNotExistErr { .. }
         ));
     }
-
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn refuses_symlink() {
-        let dir = test_dirs::temp("testing").unwrap();
-        let target = dir.file("target");
-        files::write_string(&target, "secret", WriteOptions::default())
-            .await
-            .unwrap();
-        let link = dir.file("link");
-        std::os::unix::fs::symlink(target.path(), link.path()).unwrap();
-        assert!(matches!(
-            files::sha256(&link).await.unwrap_err(),
-            FileSysErr::OpenFileErr { .. }
-        ));
-    }
-
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn refuses_fifo() {
-        // Without O_NONBLOCK the open would block until a writer appeared.
-        let dir = test_dirs::temp("testing").unwrap();
-        let fifo = dir.file("fifo");
-        let status = std::process::Command::new("mkfifo")
-            .arg(fifo.path())
-            .status()
-            .unwrap();
-        assert!(status.success());
-        assert!(matches!(
-            files::sha256(&fifo).await.unwrap_err(),
-            FileSysErr::OpenFileErr { .. }
-        ));
-    }
 }
 
 pub mod sha256_and_crc32c {
