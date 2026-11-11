@@ -465,7 +465,7 @@ pub fn glob(pattern: &str) -> Result<Vec<File>, FileSysErr> {
     };
     let mut walk = WalkDir::new(walk_from).min_depth(1).sort_by_file_name();
     if !parsed.is_recursive {
-        walk = walk.max_depth(parsed.dirs.len() + 1);
+        walk = walk.max_depth(parsed.level_patterns.len() + 1);
     }
     let options = glob::MatchOptions {
         require_literal_separator: true,
@@ -503,7 +503,7 @@ struct ParsedGlob {
     /// The pattern below `root`, matched against each file's relative path.
     below: glob::Pattern,
     /// One pattern per directory level below `root`, up to the first `**`.
-    dirs: Vec<glob::Pattern>,
+    level_patterns: Vec<glob::Pattern>,
     is_recursive: bool,
 }
 
@@ -533,7 +533,7 @@ impl ParsedGlob {
         Ok(Self {
             root: components[..literal].iter().collect(),
             below: below.map_err(invalid)?,
-            dirs: dir_names
+            level_patterns: dir_names
                 .iter()
                 .take_while(|name| *name != "**")
                 .map(|name| glob::Pattern::new(name).map_err(invalid))
@@ -550,7 +550,7 @@ impl ParsedGlob {
         }
         let level = entry.depth().checked_sub(1);
         level
-            .and_then(|level| self.dirs.get(level))
+            .and_then(|level| self.level_patterns.get(level))
             .is_none_or(|dir| dir.matches(&entry.file_name().to_string_lossy()))
     }
 }
