@@ -2,6 +2,8 @@
 use std::ffi::{OsStr, OsString};
 use std::fs::FileType;
 use std::io::Write;
+#[cfg(windows)]
+use std::os::windows::fs::MetadataExt;
 use std::path::{Component, Path, PathBuf};
 use std::time::SystemTime;
 
@@ -26,6 +28,10 @@ use tokio::fs::File as TokioFile;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 #[allow(unused_imports)]
 use tracing::{debug, error, info, warn};
+#[cfg(windows)]
+use windows_sys::Win32::Storage::FileSystem::{
+    FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_OPEN_REPARSE_POINT,
+};
 
 pub async fn read_bytes(file: &File) -> Result<Vec<u8>, FileSysErr> {
     // read file
@@ -100,14 +106,17 @@ async fn read_chunks(
     Ok(())
 }
 
-/// Opens `file` for reading and refuses anything but a regular file. On Unix it
-/// also refuses a symlink at `file` or at any directory between `root` and
-/// `file`, so a link planted in a watched directory, or swapped in for one of
-/// its directories, is never read through. `root` itself may be a symlink.
-/// Windows follows links.
+/// Opens `file` for reading and refuses anything but a regular file, including
+/// a symlink at `file` or, on Unix, at any directory between `root` and `file`.
+/// So a link planted in a watched directory, or swapped in for one of its
+/// directories, is never read through. `root` itself may be a symlink. On
+/// Windows it also refuses every other reparse point.
 pub async fn open_regular_file(root: &Dir, file: &File) -> std::io::Result<TokioFile> {
     let f = open_beneath(root, file).await?;
-    if !f.metadata().await?.is_file() {
+    let meta = f.metadata().await?;
+    // on Windows the no-follow flag also skips a placeholder's filter, so its
+    // stub would be read
+    if !meta.is_file() || is_reparse_point(&meta) {
         let kind = std::io::ErrorKind::InvalidInput;
         return Err(std::io::Error::new(kind, "not a regular file"));
     }
@@ -133,7 +142,11 @@ async fn open_beneath(root: &Dir, file: &File) -> std::io::Result<TokioFile> {
 
 #[cfg(windows)]
 async fn open_beneath(_root: &Dir, file: &File) -> std::io::Result<TokioFile> {
-    TokioFile::open(file.path()).await
+    let mut opts = tokio::fs::OpenOptions::new();
+    opts.read(true);
+    // opens a link itself rather than its target, so the caller refuses it
+    opts.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+    opts.open(file.path()).await
 }
 
 /// Opens the directory holding `file` and returns it with `file`'s name. It
@@ -171,6 +184,17 @@ fn open_parent_beneath<'f>(
         dir = openat(&dir, *parent, flags | OFlag::O_NOFOLLOW, Mode::empty())?;
     }
     Ok((dir, *name))
+}
+
+/// Whether `meta` is a reparse point, such as a link or a cloud placeholder.
+#[cfg(windows)]
+fn is_reparse_point(meta: &std::fs::Metadata) -> bool {
+    meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+}
+
+#[cfg(unix)]
+fn is_reparse_point(_meta: &std::fs::Metadata) -> bool {
+    false
 }
 
 pub async fn read_secret_bytes(file: &File) -> Result<SecretBox<Vec<u8>>, FileSysErr> {
@@ -532,8 +556,9 @@ pub async fn set_permissions(
 /// pattern component, so it only enters directories that can hold a match. It
 /// never follows a symlink below the prefix: symlinked files and directories
 /// are skipped, and a `..` below the prefix matches nothing, so a match can't
-/// resolve outside the prefix. Directories that error mid-walk (e.g.
-/// unreadable ones) are skipped rather than aborting the walk.
+/// resolve outside the prefix. On Windows, entries behind any other reparse
+/// point, such as cloud placeholders, are skipped too. Directories that error
+/// mid-walk (e.g. unreadable ones) are skipped rather than aborting the walk.
 pub fn glob(pattern: &str) -> Result<Vec<File>, FileSysErr> {
     let (root, components) = parse_glob(pattern)?;
     let mut walk = GlobWalk {
@@ -671,7 +696,8 @@ impl<'p> GlobWalk<'p> {
 
 /// The entries of `dir` that `component` matches, with their own types: a
 /// symlink is reported as one, not as its target. A literal is looked up
-/// directly, so it needs only traverse permission on `dir`.
+/// directly, so it needs only traverse permission on `dir`. On Windows, every
+/// reparse-point entry, file or directory, links included, is left out.
 fn glob_entries(dir: &Path, component: &GlobComponent) -> Vec<(PathBuf, FileType)> {
     if let GlobComponent::Literal(name) = component {
         // `..` would lead the walk back out of the prefix
@@ -680,8 +706,8 @@ fn glob_entries(dir: &Path, component: &GlobComponent) -> Vec<(PathBuf, FileType
         }
         let path = dir.join(name);
         return match std::fs::symlink_metadata(&path) {
-            Ok(metadata) => vec![(path, metadata.file_type())],
-            Err(_) => Vec::new(),
+            Ok(meta) if !is_skipped_reparse_point(&path, &meta) => vec![(path, meta.file_type())],
+            _ => Vec::new(),
         };
     }
     // an empty `dir` is the current directory
@@ -692,11 +718,30 @@ fn glob_entries(dir: &Path, component: &GlobComponent) -> Vec<(PathBuf, FileType
     let Ok(entries) = std::fs::read_dir(read_from) else {
         return Vec::new();
     };
-    entries
+    let entries = entries
         .flatten()
-        .filter(|entry| component.matches(&entry.file_name()))
+        .filter(|entry| component.matches(&entry.file_name()));
+    // on Windows the listing already holds each entry's attributes, so this
+    // needs no extra system call
+    #[cfg(windows)]
+    let entries = entries.filter(|e| {
+        let path = dir.join(e.file_name());
+        !e.metadata()
+            .is_ok_and(|m| is_skipped_reparse_point(&path, &m))
+    });
+    entries
         .filter_map(|entry| Some((dir.join(entry.file_name()), entry.file_type().ok()?)))
         .collect()
+}
+
+/// Whether the glob leaves out `path` as a reparse point, logging it like a
+/// skipped symlink.
+fn is_skipped_reparse_point(path: &Path, meta: &std::fs::Metadata) -> bool {
+    let is_skipped = is_reparse_point(meta);
+    if is_skipped {
+        debug!("glob: skipping reparse point {}", path.display());
+    }
+    is_skipped
 }
 
 pub async fn metadata(file: &File) -> Result<Metadata, FileSysErr> {
