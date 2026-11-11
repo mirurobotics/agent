@@ -501,8 +501,7 @@ pub async fn set_permissions(
 /// walk.
 pub fn glob(pattern: &str) -> Result<Vec<File>, FileSysErr> {
     let parsed = ParsedGlob::new(pattern)?;
-    // as with `glob::glob`, a trailing `**` or separator names only directories
-    if Path::new(pattern).ends_with("**") || pattern.ends_with(std::path::is_separator) {
+    if parsed.names_only_dirs {
         return Ok(Vec::new());
     }
     let walk_from = match parsed.root.as_os_str().is_empty() {
@@ -552,6 +551,8 @@ struct ParsedGlob {
     level_patterns: Vec<glob::Pattern>,
     /// How deep a match can lie below `root`; any depth once there's a `**`.
     max_depth: Option<usize>,
+    /// As with `glob::glob`, a trailing `**` or separator names only directories.
+    names_only_dirs: bool,
 }
 
 impl ParsedGlob {
@@ -587,6 +588,8 @@ impl ParsedGlob {
                 .map(|name| glob::Pattern::new(name).map_err(invalid))
                 .collect::<Result<_, _>>()?,
             max_depth: (!is_recursive).then_some(dir_names.len() + 1),
+            names_only_dirs: names.last().is_some_and(|name| name == "**")
+                || pattern.ends_with(std::path::is_separator),
         })
     }
 
