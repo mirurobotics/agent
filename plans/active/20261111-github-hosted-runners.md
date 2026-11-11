@@ -53,11 +53,11 @@ No source file is added. Each edited line mirrors docs#320, gotools#69 and setup
 - [ ] Push and open the draft PR; CI and a dispatched CodeQL run pass on the branch head.
 - [ ] Preflight reports `CLEAN`.
 - [ ] After merge: AI Review on the next PR, the nightly `ci.yml` and CodeQL runs on `main` pass on `ubuntu-latest`.
-- [ ] On the next release tag: `release.yml` passes.
+- [ ] On the next prerelease (`-beta.N`) tag: `release.yml` passes, so a stable release is never its first run on `ubuntu-latest`.
 
 ## Surprises & Discoveries
 
-(Add entries as work proceeds.)
+- 2026-11-11: First CI run on `ubuntu-latest` (run 43105140274) passed with a cold cache (`Cache Provider: github`, full rebuild): `test` 5:46 against its 20-minute timeout, `tools` 0:54, `lint` 3:02, `debian-package` 0:21; dispatched CodeQL 9:00. The GCS and AWS OIDC steps succeeded, so the real-bucket upload tests ran. rust-cache then saved 566 MB (`test`) and 123 MB (`tools`) to the GitHub cache.
 
 ## Decision Log
 
@@ -170,4 +170,4 @@ Verified only after merge, and recorded in Outcomes:
 
 ## Idempotence and Recovery
 
-Step 2 is safe to rerun; once the labels are gone the `sed` matches nothing, and it never touches `builder.yml` or the Windows labels. Before committing, `git checkout -- .github/workflows` restores the files. After merge, a failure that only `ubuntu-latest` causes (a timeout, or `release` running out of disk) is fixed forward in a new PR, for example by raising a timeout, or that job's label is reverted with `git revert <sha>` in a PR. Never force-push `main`.
+Step 2 is safe to rerun; once the labels are gone the `sed` matches nothing, and it never touches `builder.yml` or the Windows labels. Before committing, `git checkout -- .github/workflows` restores the files. After merge, a failure that only `ubuntu-latest` causes (a timeout, or `release` running out of disk) is fixed forward in a new PR, for example by raising a timeout, or that job's label is reverted with `git revert <sha>` in a PR. Re-running a failed `release.yml` replays the workflow at the tagged commit, so a runner-caused release failure needs the fix on `main` and a new tag, not a re-run. Never force-push `main`.
