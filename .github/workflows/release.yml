@@ -222,11 +222,9 @@ jobs:
   release:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 45
+    # GoReleaser only creates the release and uploads assets.
     permissions:
-      checks: write
       contents: write
-      packages: write
-      pull-requests: read
     needs: [ci, check-main, windows-sign]
     if: needs.check-main.outputs.on_main == 'true'
     steps:
