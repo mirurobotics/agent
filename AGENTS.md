@@ -130,7 +130,7 @@ parallel. When adding a test that uses a fixed path or other global state, add
 Gate a test with `#[cfg(unix)]` only when it asserts Unix-specific semantics
 (mode bits, a mode-locked directory, symlinks). Otherwise use a portable
 fixture so the test also runs in the `windows-check` CI job; for a file that
-cannot be read, use `test_utils::filesys::unreadable::make_unreadable`.
+cannot be read, use `test_utils::filesys::access::make_unreadable`.
 `File::new` and `Dir::new` normalize path components, so `/`-rooted literals are
 fine for them on every platform; build a raw `PathBuf` fixture that will be
 compared or displayed with `test_utils::filesys::abs_path`.

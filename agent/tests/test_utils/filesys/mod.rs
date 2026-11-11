@@ -1,6 +1,6 @@
+pub mod access;
 pub mod dirs;
 pub mod files;
-pub mod unreadable;
 
 // standard crates
 use std::path::PathBuf;
