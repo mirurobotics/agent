@@ -46,9 +46,10 @@ No source file is added. Each edited line mirrors docs#320, gotools#69 and setup
 
 ## Progress
 
-- [ ] Move this plan to `plans/active/`.
-- [ ] Replace the 11 Linux Blacksmith labels with `ubuntu-latest` plus the inline comment.
-- [ ] Commit the milestone (message in Concrete Steps).
+- [x] Move this plan to `plans/active/`.
+- [x] Replace the 11 Linux Blacksmith labels with `ubuntu-latest` plus the inline comment.
+- [x] Commit the milestone (message in Concrete Steps).
+- [x] Source written
 - [ ] Push and open the draft PR; CI and a dispatched CodeQL run pass on the branch head.
 - [ ] Preflight reports `CLEAN`.
 - [ ] After merge: AI Review on the next PR, the nightly `ci.yml` and CodeQL runs on `main` pass on `ubuntu-latest`.

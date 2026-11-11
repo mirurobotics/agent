@@ -25,7 +25,7 @@ env:
 
 jobs:
   lint:
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest # standard GitHub-hosted runners are free in public repos
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -105,7 +105,7 @@ jobs:
 
   windows_package_scope:
     name: windows-package-scope
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest # standard GitHub-hosted runners are free in public repos
     permissions:
       contents: read
       pull-requests: read
@@ -192,7 +192,7 @@ jobs:
           if-no-files-found: ignore
 
   test:
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest # standard GitHub-hosted runners are free in public repos
     timeout-minutes: 20
     permissions:
       contents: read
@@ -242,7 +242,7 @@ jobs:
         run: ./scripts/covgate.sh
 
   tools:
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest # standard GitHub-hosted runners are free in public repos
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -273,7 +273,7 @@ jobs:
         run: ./tools/lint/scripts/covgate.sh
 
   debian-package:
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest # standard GitHub-hosted runners are free in public repos
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

@@ -15,7 +15,7 @@ jobs:
 
   check-main:
     name: Verify tag is on main
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest # standard GitHub-hosted runners are free in public repos
     outputs:
       on_main: ${{ steps.check.outputs.on_main }}
     steps:
@@ -222,7 +222,7 @@ jobs:
           if-no-files-found: error
 
   release:
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest # standard GitHub-hosted runners are free in public repos
     needs: [ci, check-main, windows-sign]
     if: needs.check-main.outputs.on_main == 'true'
     steps:
@@ -256,7 +256,7 @@ jobs:
     if: >-
       ${{ always() && (needs.check-main.result == 'failure' ||
       needs.check-main.outputs.on_main == 'true') }}
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-latest # standard GitHub-hosted runners are free in public repos
     permissions: {}
     steps:
       - name: Post to Slack
