@@ -552,7 +552,11 @@ mod tests {
             ]);
 
             store
-                .put_multipart(source_of(&src).await, &obj("big.bin"), &HashMap::new())
+                .put_multipart(
+                    source_of(&src, "big.bin").await,
+                    &obj("big.bin"),
+                    &HashMap::new(),
+                )
                 .await
                 .unwrap();
 
@@ -577,7 +581,11 @@ mod tests {
             ]);
 
             store
-                .put_multipart(source_of(&src).await, &obj("big.bin"), &HashMap::new())
+                .put_multipart(
+                    source_of(&src, "big.bin").await,
+                    &obj("big.bin"),
+                    &HashMap::new(),
+                )
                 .await
                 .unwrap();
 
@@ -1178,7 +1186,7 @@ mod tests {
             // An earlier attempt stored the object, so completing gets 412 and
             // this upload is aborted.
             let tf = two_part_file().await;
-            let src = source_of(&tf).await;
+            let src = source_of(&tf, "big.bin").await;
 
             let (store, replay) = store_with(vec![
                 ReplayEvent::new(
