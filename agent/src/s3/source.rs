@@ -49,7 +49,9 @@ impl Source {
                 errors::map_body_io_err("open_source", dst, &file, e)
             }
         };
-        let handle = files::open_regular_file(root, &file).await.map_err(map_err)?;
+        let handle = files::open_regular_file(root, &file)
+            .await
+            .map_err(map_err)?;
         let size = handle.metadata().await.map_err(map_err)?.len();
         Ok(Self {
             file,

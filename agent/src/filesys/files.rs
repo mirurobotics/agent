@@ -163,7 +163,10 @@ fn open_parent_beneath<'f>(
     use nix::sys::stat::Mode;
 
     let outside = || std::io::Error::new(std::io::ErrorKind::InvalidInput, "not below its root");
-    let below = file.path().strip_prefix(root.path()).map_err(|_| outside())?;
+    let below = file
+        .path()
+        .strip_prefix(root.path())
+        .map_err(|_| outside())?;
     let names = below
         .components()
         .map(|c| match c {
