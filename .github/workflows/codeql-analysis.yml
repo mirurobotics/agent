@@ -34,6 +34,7 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.scan != 'false' }}
     runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
