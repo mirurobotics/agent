@@ -452,20 +452,20 @@ pub async fn set_permissions(
 ///
 /// A pattern-syntax error (an invalid glob) returns [`FileSysErr::InvalidGlobErr`].
 /// The walk starts at the pattern's literal prefix (the directories before the
-/// first wildcard) and never follows a symlink below it: symlinked files are
-/// skipped and symlinked directories aren't entered. A directory swapped for a
-/// link after it's listed isn't caught here. Entries that error mid-walk (e.g.
-/// an unreadable directory) are skipped rather than aborting the walk.
+/// first wildcard) and enters only directories that can hold a match. It never
+/// follows a symlink below the prefix: symlinked files are skipped and
+/// symlinked directories aren't entered. A directory swapped for a link after
+/// it's listed isn't caught here. Entries that error mid-walk (e.g. an
+/// unreadable directory) are skipped rather than aborting the walk.
 pub fn glob(pattern: &str) -> Result<Vec<File>, FileSysErr> {
-    let (root, below) = split_glob(pattern)?;
-    let walk_from = match root.as_os_str().is_empty() {
+    let parsed = ParsedGlob::new(pattern)?;
+    let walk_from = match parsed.root.as_os_str().is_empty() {
         true => Path::new("."),
-        false => root.as_path(),
+        false => parsed.root.as_path(),
     };
     let mut walk = WalkDir::new(walk_from).min_depth(1).sort_by_file_name();
-    // without `**`, a match is exactly as deep as the pattern
-    if !below.as_str().contains("**") {
-        walk = walk.max_depth(Path::new(below.as_str()).components().count());
+    if !parsed.is_recursive {
+        walk = walk.max_depth(parsed.dirs.len() + 1);
     }
     let options = glob::MatchOptions {
         require_literal_separator: true,
@@ -473,7 +473,10 @@ pub fn glob(pattern: &str) -> Result<Vec<File>, FileSysErr> {
     };
 
     let mut matches = Vec::new();
-    for entry in walk.into_iter().flatten() {
+    let entries = walk
+        .into_iter()
+        .filter_entry(|entry| parsed.may_hold_match(entry));
+    for entry in entries.flatten() {
         if entry.path_is_symlink() {
             debug!("glob: skipping symlink {}", entry.path().display());
             continue;
@@ -481,8 +484,8 @@ pub fn glob(pattern: &str) -> Result<Vec<File>, FileSysErr> {
         let Ok(relative) = entry.path().strip_prefix(walk_from) else {
             continue;
         };
-        if entry.file_type().is_file() && below.matches_path_with(relative, options) {
-            matches.push(File::new(root.join(relative)));
+        if entry.file_type().is_file() && parsed.below.matches_path_with(relative, options) {
+            matches.push(File::new(parsed.root.join(relative)));
         }
     }
     Ok(matches)
@@ -491,29 +494,65 @@ pub fn glob(pattern: &str) -> Result<Vec<File>, FileSysErr> {
 /// Checks that `pattern` is a glob [`glob`] accepts, without walking the
 /// filesystem. An invalid pattern returns [`FileSysErr::InvalidGlobErr`].
 pub fn validate_glob(pattern: &str) -> Result<(), FileSysErr> {
-    split_glob(pattern).map(drop)
+    ParsedGlob::new(pattern).map(drop)
 }
 
-/// Splits `pattern` into its literal prefix, where a walk starts, and the
-/// pattern below it. The last component always stays below the prefix, since
-/// it names the files to match.
-fn split_glob(pattern: &str) -> Result<(PathBuf, glob::Pattern), FileSysErr> {
-    let components: Vec<_> = Path::new(pattern).components().collect();
-    let literal = components
-        .iter()
-        .take(components.len().saturating_sub(1))
-        .take_while(|c| !c.as_os_str().to_string_lossy().contains(['*', '?', '[']))
-        .count();
-    let root: PathBuf = components[..literal].iter().collect();
-    let below: PathBuf = components[literal..].iter().collect();
-    let below = glob::Pattern::new(&below.to_string_lossy()).map_err(|e| {
-        FileSysErr::InvalidGlobErr(InvalidGlobErr {
-            pattern: pattern.to_string(),
-            source: Box::new(e),
-            trace: trace!(),
+/// A glob pattern split at its literal prefix, where a walk starts.
+struct ParsedGlob {
+    root: PathBuf,
+    /// The pattern below `root`, matched against each file's relative path.
+    below: glob::Pattern,
+    /// One pattern per directory level below `root`, up to the first `**`.
+    dirs: Vec<glob::Pattern>,
+    is_recursive: bool,
+}
+
+impl ParsedGlob {
+    fn new(pattern: &str) -> Result<Self, FileSysErr> {
+        let invalid = |e: glob::PatternError| {
+            FileSysErr::InvalidGlobErr(InvalidGlobErr {
+                pattern: pattern.to_string(),
+                source: Box::new(e),
+                trace: trace!(),
+            })
+        };
+        let components: Vec<_> = Path::new(pattern).components().collect();
+        let names: Vec<_> = components
+            .iter()
+            .map(|c| c.as_os_str().to_string_lossy())
+            .collect();
+        // the last component names the files, so it always stays below the prefix
+        let literal = names
+            .iter()
+            .take(names.len().saturating_sub(1))
+            .take_while(|name| !name.contains(['*', '?', '[']))
+            .count();
+        let below: PathBuf = components[literal..].iter().collect();
+        let below = glob::Pattern::new(&below.to_string_lossy());
+        let dir_names = &names[literal..names.len().saturating_sub(1).max(literal)];
+        Ok(Self {
+            root: components[..literal].iter().collect(),
+            below: below.map_err(invalid)?,
+            dirs: dir_names
+                .iter()
+                .take_while(|name| *name != "**")
+                .map(|name| glob::Pattern::new(name).map_err(invalid))
+                .collect::<Result<_, _>>()?,
+            is_recursive: names[literal..].iter().any(|name| name == "**"),
         })
-    })?;
-    Ok((root, below))
+    }
+
+    /// Whether the walk should keep `entry`: a directory is entered only if
+    /// its name matches its level's pattern.
+    fn may_hold_match(&self, entry: &walkdir::DirEntry) -> bool {
+        if !entry.file_type().is_dir() {
+            return true;
+        }
+        let level = entry.depth().checked_sub(1);
+        level
+            .and_then(|level| self.dirs.get(level))
+            .is_none_or(|dir| dir.matches(&entry.file_name().to_string_lossy()))
+    }
 }
 
 pub async fn metadata(file: &File) -> Result<Metadata, FileSysErr> {
