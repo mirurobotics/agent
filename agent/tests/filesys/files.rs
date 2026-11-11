@@ -1427,14 +1427,15 @@ pub mod glob {
     }
 
     #[test]
-    fn trailing_separator_matches_no_files() {
+    fn trailing_separator_or_dot_matches_no_files() {
         let tmp = test_dirs::temp("testing").unwrap();
         fs::write(tmp.path().join("1.log"), b"x").unwrap();
 
-        let pattern = format!("{}/*/", tmp.path().display());
-        let matches = files::glob(&pattern).unwrap();
-
-        assert!(matches.is_empty(), "{matches:?}");
+        for suffix in ["*/", "*/."] {
+            let pattern = format!("{}/{suffix}", tmp.path().display());
+            let matches = files::glob(&pattern).unwrap();
+            assert!(matches.is_empty(), "{pattern} matched {matches:?}");
+        }
     }
 
     #[test]
