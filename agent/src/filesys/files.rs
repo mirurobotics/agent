@@ -498,8 +498,8 @@ pub async fn set_permissions(
 /// symlinked directories aren't entered. On Windows, any other reparse point
 /// below the prefix, such as a cloud placeholder, is skipped too. A directory
 /// swapped for a link after it's listed isn't caught here. Entries that error
-/// mid-walk (e.g. an unreadable directory) are skipped rather than aborting the
-/// walk.
+/// mid-walk (e.g. an unreadable directory) are logged at debug and skipped
+/// rather than aborting the walk.
 pub fn glob(pattern: &str) -> Result<Vec<File>, FileSysErr> {
     let parsed = ParsedGlob::new(pattern)?;
     if names_only_dirs(pattern) {
@@ -571,7 +571,7 @@ impl ParsedGlob {
         }
         walk.into_iter()
             .filter_entry(|entry| !is_skipped_reparse_point(entry) && self.may_hold_match(entry))
-            .flatten()
+            .filter_map(skip_walk_error)
     }
 
     /// Whether the walk should keep `entry`: a directory is entered only if
@@ -604,6 +604,11 @@ impl ParsedGlob {
         let is_match = self.below.matches_path_with(relative, GLOB_MATCH_OPTIONS);
         is_match.then(|| File::new(self.root.join(relative)))
     }
+}
+
+/// The walked entry, or `None` after logging why it couldn't be read.
+fn skip_walk_error(entry: walkdir::Result<walkdir::DirEntry>) -> Option<walkdir::DirEntry> {
+    entry.map_err(|e| debug!("glob: skipping {e}")).ok()
 }
 
 /// How many leading `components` form a glob's literal prefix: those with no
