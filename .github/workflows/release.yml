@@ -6,16 +6,14 @@ on:
       - '*'
 
 permissions:
-  checks: write
-  contents: write
-  packages: write
-  pull-requests: read
+  contents: read
 
 jobs:
 
   check-main:
     name: Verify tag is on main
     runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 5
     outputs:
       on_main: ${{ steps.check.outputs.on_main }}
     steps:
@@ -223,6 +221,12 @@ jobs:
 
   release:
     runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 45
+    permissions:
+      checks: write
+      contents: write
+      packages: write
+      pull-requests: read
     needs: [ci, check-main, windows-sign]
     if: needs.check-main.outputs.on_main == 'true'
     steps:
@@ -257,6 +261,7 @@ jobs:
       ${{ always() && (needs.check-main.result == 'failure' ||
       needs.check-main.outputs.on_main == 'true') }}
     runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 5
     permissions: {}
     steps:
       - name: Post to Slack
