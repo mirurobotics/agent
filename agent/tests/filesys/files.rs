@@ -1543,11 +1543,13 @@ pub mod glob {
             .status()
             .unwrap();
         assert!(status.success());
+        let real = tmp.path().join("real.log");
+        fs::write(&real, b"x").unwrap();
 
         let pattern = tmp.path().join("**/*.log");
         let matches = files::glob(pattern.to_str().unwrap()).unwrap();
 
-        assert!(matches.is_empty(), "{matches:?}");
+        assert_eq!(matches, vec![filesys::File::new(real)]);
     }
 
     #[cfg(unix)]
