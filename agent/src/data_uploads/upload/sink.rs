@@ -8,6 +8,7 @@ use crate::data_uploads::{
     scan::{scanner::StableFile, sink::StableFileSink},
     upload::{Job, Uploader, UploaderExt},
 };
+use crate::filesys::files;
 use crate::models::FileRule;
 
 // external crates
@@ -50,6 +51,7 @@ impl StableFileSink for UploadStableFileSink {
                 last_observed_at: file.last_observed_at,
                 file_rule_id: file.file_rule_id,
                 deployment_id: file.deployment_id,
+                glob_root: Some(files::glob_root(&rule.source.glob)),
                 retention: rule.retention.clone(),
                 checkpoint: None,
             };

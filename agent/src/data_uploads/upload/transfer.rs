@@ -6,7 +6,7 @@ use crate::data_uploads::upload::{
     errors::{classified_executor_err, executor_err, TransferErr, UploadErr},
     job::{MultipartCheckpoint, UploadCheckpoint},
 };
-use crate::filesys::File;
+use crate::filesys::{Dir, File};
 use crate::s3;
 use backend_api::models::upload_credentials::Scheme;
 use backend_api::models::{S3UploadCredentials, UploadCredentials};
@@ -23,19 +23,22 @@ use tracing::info;
 pub trait ObjectTransfer: Send + Sync {
     /// The multipart upload [`Self::transfer`] resumes: the saved one if it
     /// still matches `file`, else a new one, or [`TransferMethod::SinglePart`]
-    /// for a single-part file.
+    /// for a single-part file. `file` is opened beneath `root`.
     fn reuse_or_create_multipart(
         &self,
         credentials: &UploadCredentials,
         checkpoint: &UploadCheckpoint,
+        root: &Dir,
         file: &File,
     ) -> impl Future<Output = Result<TransferMethod, UploadErr>> + Send;
 
-    /// Transfers the file, resuming `checkpoint.multipart` if it matches the file.
+    /// Transfers the file, opened beneath `root`, resuming
+    /// `checkpoint.multipart` if it matches the file.
     fn transfer(
         &self,
         credentials: &UploadCredentials,
         checkpoint: &UploadCheckpoint,
+        root: &Dir,
         file: &File,
     ) -> impl Future<Output = Result<(), UploadErr>> + Send;
 }
@@ -124,10 +127,11 @@ impl ObjectTransfer for SdkTransfer {
         &self,
         credentials: &UploadCredentials,
         checkpoint: &UploadCheckpoint,
+        root: &Dir,
         file: &File,
     ) -> Result<TransferMethod, UploadErr> {
         let store = self.store_for(credentials)?;
-        reuse_or_create_multipart(&store, checkpoint, file)
+        reuse_or_create_multipart(&store, checkpoint, root, file)
             .await
             .map_err(classified_executor_err)
     }
@@ -136,6 +140,7 @@ impl ObjectTransfer for SdkTransfer {
         &self,
         credentials: &UploadCredentials,
         checkpoint: &UploadCheckpoint,
+        root: &Dir,
         file: &File,
     ) -> Result<(), UploadErr> {
         info!(
@@ -143,7 +148,7 @@ impl ObjectTransfer for SdkTransfer {
             file, credentials.scheme, checkpoint.bucket_name, checkpoint.object_key
         );
         let store = self.store_for(credentials)?;
-        resume_or_put(&store, checkpoint, file)
+        resume_or_put(&store, checkpoint, root, file)
             .await
             .map_err(classified_executor_err)
     }
@@ -153,10 +158,11 @@ impl ObjectTransfer for SdkTransfer {
 async fn reuse_or_create_multipart(
     store: &s3::Store,
     checkpoint: &UploadCheckpoint,
+    root: &Dir,
     file: &File,
 ) -> Result<TransferMethod, s3::S3Err> {
     let object = checkpoint.object();
-    let src = s3::Source::open(file.clone(), &object).await?;
+    let src = s3::Source::open(root, file.clone(), &object).await?;
     if src.size <= s3::store::PART_SIZE {
         return Ok(TransferMethod::SinglePart);
     }
@@ -183,10 +189,11 @@ async fn reuse_or_create_multipart(
 async fn resume_or_put(
     store: &s3::Store,
     checkpoint: &UploadCheckpoint,
+    root: &Dir,
     file: &File,
 ) -> Result<(), s3::S3Err> {
     let object = checkpoint.object();
-    let src = s3::Source::open(file.clone(), &object).await?;
+    let src = s3::Source::open(root, file.clone(), &object).await?;
     match checkpoint.resumable_multipart(&src) {
         Some(multipart) => {
             let id = &multipart.multipart_upload_id;

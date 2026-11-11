@@ -6,7 +6,9 @@ use std::sync::Arc;
 use std::task::{ready, Context, Poll};
 
 // internal crates
-use crate::filesys::{errors::PathDoesNotExistErr, file::File, files, path::PathExt, FileSysErr};
+use crate::filesys::{
+    dir::Dir, errors::PathDoesNotExistErr, file::File, files, path::PathExt, FileSysErr,
+};
 use crate::s3::{errors, gcs, Object, S3Err};
 use crate::trace;
 
@@ -31,11 +33,11 @@ pub struct Source {
 }
 
 impl Source {
-    /// Opens and sizes `file` for upload with [`files::open_regular_file`],
-    /// which refuses a symlink. A missing file is
+    /// Opens and sizes `file` for upload with [`files::open_regular_file`]
+    /// beneath `root`, which refuses a symlink. A missing file is
     /// [`S3Err::FileSysErr`]; a symlink, anything else that isn't a regular
     /// file, or any other failure is [`S3Err::LocalIoErr`].
-    pub async fn open(file: File, dst: &Object) -> Result<Self, S3Err> {
+    pub async fn open(root: &Dir, file: File, dst: &Object) -> Result<Self, S3Err> {
         let map_err = |e: io::Error| -> S3Err {
             if e.kind() == io::ErrorKind::NotFound {
                 FileSysErr::PathDoesNotExistErr(PathDoesNotExistErr {
@@ -47,7 +49,9 @@ impl Source {
                 errors::map_body_io_err("open_source", dst, &file, e)
             }
         };
-        let handle = files::open_regular_file(&file).await.map_err(map_err)?;
+        let handle = files::open_regular_file(root, &file)
+            .await
+            .map_err(map_err)?;
         let size = handle.metadata().await.map_err(map_err)?.len();
         Ok(Self {
             file,

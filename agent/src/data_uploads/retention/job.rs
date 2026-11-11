@@ -1,5 +1,8 @@
+// standard crates
+use std::path::Path;
+
 // internal crates
-use crate::filesys::File;
+use crate::filesys::{Dir, File, PathExt};
 
 // external crates
 use chrono::{DateTime, Duration, Utc};
@@ -16,9 +19,20 @@ pub struct Job {
     pub ttl_secs: u64,
     pub file_rule_id: String,
     pub deployment_id: String,
+    /// The rule's glob root, the directory the file is opened beneath. Jobs
+    /// queued by an older agent have none.
+    #[serde(default)]
+    pub glob_root: Option<Dir>,
 }
 
 impl Job {
+    /// The directory every open and delete of the file starts from: the glob
+    /// root, or the file's own directory for a job without one.
+    pub fn root(&self) -> Dir {
+        let parent = || Dir::new(self.file.path().parent().unwrap_or(Path::new("")));
+        self.glob_root.clone().unwrap_or_else(parent)
+    }
+
     /// `last_observed_at` plus the TTL. A TTL too large to represent saturates
     /// to the far future — the job is simply never ready.
     pub fn ready_at(&self) -> DateTime<Utc> {

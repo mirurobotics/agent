@@ -1,8 +1,9 @@
 // standard crates
 use std::collections::HashMap;
+use std::path::Path;
 
 // internal crates
-use crate::filesys::File;
+use crate::filesys::{Dir, File, PathExt};
 use crate::models::FileRuleRetention;
 use crate::s3;
 
@@ -20,10 +21,23 @@ pub struct Job {
     pub last_observed_at: DateTime<Utc>,
     pub file_rule_id: String,
     pub deployment_id: String,
+    /// The rule's glob root, the directory the file is opened beneath. Jobs
+    /// queued by an older agent have none.
+    #[serde(default)]
+    pub glob_root: Option<Dir>,
     #[serde(default)]
     pub retention: Option<FileRuleRetention>,
     #[serde(default)]
     pub checkpoint: Option<UploadCheckpoint>,
+}
+
+impl Job {
+    /// The directory every open and delete of the file starts from: the glob
+    /// root, or the file's own directory for a job without one.
+    pub fn root(&self) -> Dir {
+        let parent = || Dir::new(self.file.path().parent().unwrap_or(Path::new("")));
+        self.glob_root.clone().unwrap_or_else(parent)
+    }
 }
 
 /// Holds the destination and metadata too, since
