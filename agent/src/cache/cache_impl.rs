@@ -12,10 +12,14 @@ use crate::filesys::Overwrite;
 use crate::trace;
 
 // external crates
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeDelta, Utc};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use tracing::info;
+
+/// How old an entry's last accessed time must be before a read saves a new one. The
+/// time only orders entries for pruning, so it doesn't need to be exact.
+pub const LAST_ACCESSED_REFRESH_INTERVAL: TimeDelta = TimeDelta::hours(1);
 
 pub trait CacheKeyImpl:
     Debug + Clone + ToString + Serialize + DeserializeOwned + Eq + Hash
@@ -63,12 +67,15 @@ where
     async fn value_map(&self) -> Result<HashMap<K, V>, CacheErr>;
 
     // -------------------------------- TRAIT METHODS ---------------------------------- //
-    async fn set_last_accessed(
+    async fn refresh_last_accessed(
         &mut self,
         entry: &mut CacheEntry<K, V>,
-        last_accessed: DateTime<Utc>,
+        now: DateTime<Utc>,
     ) -> Result<(), CacheErr> {
-        entry.last_accessed = last_accessed;
+        if now - entry.last_accessed < LAST_ACCESSED_REFRESH_INTERVAL {
+            return Ok(());
+        }
+        entry.last_accessed = now;
         self.write_entry_impl(entry, Overwrite::Allow).await?;
         Ok(())
     }
@@ -79,8 +86,7 @@ where
             None => return Ok(None),
         };
 
-        // update the last accessed time
-        self.set_last_accessed(&mut entry, Utc::now()).await?;
+        self.refresh_last_accessed(&mut entry, Utc::now()).await?;
 
         Ok(Some(entry))
     }
@@ -129,7 +135,7 @@ where
         F: Fn(Option<&CacheEntry<K, V>>, &V) -> bool + Send + Sync,
     {
         // if the entry already exists, keep the original created_at time
-        let (created_at, last_accessed, is_dirty) = match self.read_entry_optional(&key).await? {
+        let (created_at, last_accessed, is_dirty) = match self.read_entry_impl(&key).await? {
             Some(existing_entry) => (
                 existing_entry.created_at,
                 Utc::now(),
@@ -157,7 +163,7 @@ where
     where
         F: Fn(Option<&CacheEntry<K, V>>, &V) -> bool + Send + Sync,
     {
-        if self.read_entry_optional(&key).await?.is_some() {
+        if self.read_entry_impl(&key).await?.is_some() {
             return Ok(());
         }
         self.write(key, value, is_dirty, Overwrite::Allow).await
@@ -208,9 +214,9 @@ where
         let mut filtered_entries: Vec<CacheEntry<K, V>> =
             entries.into_iter().filter(|entry| filter(entry)).collect();
 
-        // update the last accessed time
+        let now = Utc::now();
         for entry in filtered_entries.iter_mut() {
-            self.set_last_accessed(entry, Utc::now()).await?;
+            self.refresh_last_accessed(entry, now).await?;
         }
 
         Ok(filtered_entries)

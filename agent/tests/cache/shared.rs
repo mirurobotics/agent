@@ -570,7 +570,6 @@ pub mod read_entry_optional {
             .unwrap();
 
         // read the entry
-        let before_read = Utc::now();
         let read_entry = cache
             .read_entry_optional(key.clone())
             .await
@@ -579,8 +578,8 @@ pub mod read_entry_optional {
 
         // check the timestamps
         assert!(read_entry.created_at > before_write);
-        assert!(read_entry.last_accessed > read_entry.created_at);
-        assert!(read_entry.last_accessed > before_read);
+        // a read soon after the write leaves the last accessed time alone
+        assert_eq!(read_entry.last_accessed, read_entry.created_at);
 
         // check the values
         let expected_entry = CacheEntry {
@@ -644,13 +643,12 @@ pub mod read_entry {
             .unwrap();
 
         // read the entry
-        let before_read = Utc::now();
         let read_entry = cache.read_entry(key.clone()).await.unwrap();
 
         // check the timestamps
         assert!(read_entry.created_at > before_write);
-        assert!(read_entry.last_accessed > read_entry.created_at);
-        assert!(read_entry.last_accessed > before_read);
+        // a read soon after the write leaves the last accessed time alone
+        assert_eq!(read_entry.last_accessed, read_entry.created_at);
 
         // check the values
         let expected_entry = CacheEntry {
@@ -704,16 +702,13 @@ pub mod read_optional {
             .write(key.clone(), value.clone(), |_, _| true, Overwrite::Deny)
             .await
             .unwrap();
-        let before_read = Utc::now();
         let read_value = cache.read(key.clone()).await.unwrap();
         assert_eq!(read_value, value);
 
-        // check the last accessed time was properly set
-        let after_read = Utc::now();
+        // a read soon after the write leaves the last accessed time alone
         let entries = cache.entries().await.unwrap();
         let entry = entries.iter().find(|e| e.key == key).unwrap();
-        assert!(entry.last_accessed > before_read);
-        assert!(entry.last_accessed < after_read);
+        assert_eq!(entry.last_accessed, entry.created_at);
     }
 }
 
@@ -760,16 +755,13 @@ pub mod read {
             .unwrap();
 
         // reading the digests should return the digests
-        let before_read = Utc::now();
         let read_value = cache.read(key.clone()).await.unwrap();
         assert_eq!(read_value, value);
 
-        // check the last accessed time was properly set
-        let after_read = Utc::now();
+        // a read soon after the write leaves the last accessed time alone
         let entries = cache.entries().await.unwrap();
         let entry = entries.iter().find(|e| e.key == key).unwrap();
-        assert!(entry.last_accessed > before_read);
-        assert!(entry.last_accessed < after_read);
+        assert_eq!(entry.last_accessed, entry.created_at);
     }
 }
 
@@ -1201,8 +1193,8 @@ pub mod find_entries_where {
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].key, "key5");
 
-        // check the last accessed time was properly set
-        assert!(found[0].last_accessed > after_write);
+        // a find soon after the write leaves the last accessed time alone
+        assert!(found[0].last_accessed < after_write);
 
         // multiple entries found
         let found = cache
@@ -1251,10 +1243,10 @@ pub mod find_where {
         assert_eq!(found.len(), 1);
         assert_eq!(found[0], "value5");
 
-        // check the last accessed time was properly set
+        // a find soon after the write leaves the last accessed time alone
         let entries = cache.entries().await.unwrap();
         let entry = entries.iter().find(|e| e.value == "value5").unwrap();
-        assert!(entry.last_accessed > after_write);
+        assert!(entry.last_accessed < after_write);
 
         // multiple entries found
         let found = cache.find_where(|value| value != "value5").await.unwrap();
@@ -1306,8 +1298,8 @@ pub mod find_one_entry_optional {
         assert!(found.is_some());
         assert_eq!(found.clone().unwrap().key, "key5");
 
-        // check the last accessed time was properly set
-        assert!(found.unwrap().last_accessed > after_write);
+        // a find soon after the write leaves the last accessed time alone
+        assert!(found.unwrap().last_accessed < after_write);
 
         // multiple entries found
         let err = cache
@@ -1362,10 +1354,10 @@ pub mod find_one_optional {
         assert!(found.is_some());
         assert_eq!(found.unwrap(), "value5");
 
-        // check the last accessed time was properly set
+        // a find soon after the write leaves the last accessed time alone
         let entries = cache.entries().await.unwrap();
         let entry = entries.iter().find(|e| e.value == "value5").unwrap();
-        assert!(entry.last_accessed > after_write);
+        assert!(entry.last_accessed < after_write);
 
         // multiple entries found
         let err = cache
@@ -1419,8 +1411,8 @@ pub mod find_one_entry {
             .unwrap();
         assert_eq!(found.key, "key5");
 
-        // check the last accessed time was properly set
-        assert!(found.last_accessed > after_write);
+        // a find soon after the write leaves the last accessed time alone
+        assert!(found.last_accessed < after_write);
 
         // multiple entries found
         let err = cache
@@ -1474,10 +1466,10 @@ pub mod find_one {
             .unwrap();
         assert_eq!(found, "value5");
 
-        // check the last accessed time was properly set
+        // a find soon after the write leaves the last accessed time alone
         let entries = cache.entries().await.unwrap();
         let entry = entries.iter().find(|e| e.value == "value5").unwrap();
-        assert!(entry.last_accessed > after_write);
+        assert!(entry.last_accessed < after_write);
 
         // multiple entries found
         let err = cache

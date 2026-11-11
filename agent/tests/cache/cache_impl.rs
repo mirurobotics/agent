@@ -1,9 +1,12 @@
 // internal crates
-use miru_agent::cache::{cache_impl::CacheImpl, CacheEntry, CacheErr};
+use miru_agent::cache::{
+    cache_impl::{CacheImpl, LAST_ACCESSED_REFRESH_INTERVAL},
+    CacheEntry, CacheErr,
+};
 use miru_agent::filesys::Overwrite;
 
 // external crates
-use chrono::Utc;
+use chrono::{TimeDelta, Utc};
 use futures::Future;
 
 #[macro_export]
@@ -269,6 +272,22 @@ macro_rules! cache_impl_tests {
                     .await;
             }
         }
+
+        pub mod refresh_last_accessed {
+            use super::*;
+
+            #[tokio::test]
+            async fn stale_read() {
+                $crate::cache::cache_impl::refresh_last_accessed::stale_read_impl($spawn_cache)
+                    .await;
+            }
+
+            #[tokio::test]
+            async fn stale_find() {
+                $crate::cache::cache_impl::refresh_last_accessed::stale_find_impl($spawn_cache)
+                    .await;
+            }
+        }
     };
 }
 
@@ -501,13 +520,12 @@ pub mod read_entry_optional {
             .unwrap();
 
         // read the entry
-        let before_read = Utc::now();
         let read_entry = cache.read_entry_optional(&key).await.unwrap().unwrap();
 
         // check the timestamps
         assert!(read_entry.created_at > before_write);
-        assert!(read_entry.last_accessed > read_entry.created_at);
-        assert!(read_entry.last_accessed > before_read);
+        // a read soon after the write leaves the last accessed time alone
+        assert_eq!(read_entry.last_accessed, read_entry.created_at);
 
         // check the values
         let expected_entry = CacheEntry {
@@ -559,13 +577,12 @@ pub mod read_entry {
             .unwrap();
 
         // read the entry
-        let before_read = Utc::now();
         let read_entry = cache.read_entry(&key).await.unwrap();
 
         // check the timestamps
         assert!(read_entry.created_at > before_write);
-        assert!(read_entry.last_accessed > read_entry.created_at);
-        assert!(read_entry.last_accessed > before_read);
+        // a read soon after the write leaves the last accessed time alone
+        assert_eq!(read_entry.last_accessed, read_entry.created_at);
 
         // check the values
         let expected_entry = CacheEntry {
@@ -607,16 +624,13 @@ pub mod read_optional {
             .write(key.clone(), value.clone(), |_, _| true, Overwrite::Deny)
             .await
             .unwrap();
-        let before_read = Utc::now();
         let read_value = cache.read_optional(&key).await.unwrap().unwrap();
         assert_eq!(read_value, value);
 
-        // check the last accessed time was properly set
-        let after_read = Utc::now();
+        // a read soon after the write leaves the last accessed time alone
         let entries = cache.entry_map().await.unwrap();
         let entry = entries.get(&key).unwrap();
-        assert!(entry.last_accessed > before_read);
-        assert!(entry.last_accessed < after_read);
+        assert_eq!(entry.last_accessed, entry.created_at);
     }
 }
 
@@ -651,15 +665,13 @@ pub mod read {
             .unwrap();
 
         // reading the digests should return the digests
-        let before_read = Utc::now();
         let read_value = cache.read(&key).await.unwrap();
         assert_eq!(read_value, value);
 
-        // check the last accessed time was properly set
-        let after_read = Utc::now();
+        // a read soon after the write leaves the last accessed time alone
         let entries = cache.entry_map().await.unwrap();
-        assert!(entries.get(&key).unwrap().last_accessed > before_read);
-        assert!(entries.get(&key).unwrap().last_accessed < after_read);
+        let entry = entries.get(&key).unwrap();
+        assert_eq!(entry.last_accessed, entry.created_at);
     }
 }
 
@@ -1017,8 +1029,8 @@ pub mod find_entries_where {
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].key, "key5");
 
-        // check the last accessed time was properly set
-        assert!(found[0].last_accessed > after_write);
+        // a find soon after the write leaves the last accessed time alone
+        assert!(found[0].last_accessed < after_write);
 
         // multiple entries found
         let found = cache
@@ -1061,9 +1073,9 @@ pub mod find_where {
         assert_eq!(found.len(), 1);
         assert_eq!(found[0], "value5");
 
-        // check the last accessed time was properly set
+        // a find soon after the write leaves the last accessed time alone
         let entries = cache.entry_map().await.unwrap();
-        assert!(entries.get("key5").unwrap().last_accessed > after_write);
+        assert!(entries.get("key5").unwrap().last_accessed < after_write);
 
         // multiple entries found
         let found = cache.find_where(|value| value != "value5").await.unwrap();
@@ -1109,8 +1121,8 @@ pub mod find_one_entry_optional {
         assert!(found.is_some());
         assert_eq!(found.clone().unwrap().key, "key5");
 
-        // check the last accessed time was properly set
-        assert!(found.unwrap().last_accessed > after_write);
+        // a find soon after the write leaves the last accessed time alone
+        assert!(found.unwrap().last_accessed < after_write);
 
         // multiple entries found
         let err = cache
@@ -1159,9 +1171,9 @@ pub mod find_one_optional {
         assert!(found.is_some());
         assert_eq!(found.unwrap(), "value5");
 
-        // check the last accessed time was properly set
+        // a find soon after the write leaves the last accessed time alone
         let entries = cache.entry_map().await.unwrap();
-        assert!(entries.get("key5").unwrap().last_accessed > after_write);
+        assert!(entries.get("key5").unwrap().last_accessed < after_write);
 
         // multiple entries found
         let err = cache
@@ -1209,8 +1221,8 @@ pub mod find_one_entry {
             .unwrap();
         assert_eq!(found.key, "key5");
 
-        // check the last accessed time was properly set
-        assert!(found.last_accessed > after_write);
+        // a find soon after the write leaves the last accessed time alone
+        assert!(found.last_accessed < after_write);
 
         // multiple entries found
         let err = cache
@@ -1258,9 +1270,9 @@ pub mod find_one {
             .unwrap();
         assert_eq!(found, "value5");
 
-        // check the last accessed time was properly set
+        // a find soon after the write leaves the last accessed time alone
         let entries = cache.entry_map().await.unwrap();
-        assert!(entries.get("key5").unwrap().last_accessed > after_write);
+        assert!(entries.get("key5").unwrap().last_accessed < after_write);
 
         // multiple entries found
         let err = cache
@@ -1309,5 +1321,65 @@ pub mod get_dirty_entries {
         // dirty entries should be the same as before
         let dirty_entries = cache.get_dirty_entries().await.unwrap();
         assert_eq!(dirty_entries.len(), 10);
+    }
+}
+
+pub mod refresh_last_accessed {
+    use super::*;
+
+    async fn write_stale_entry<ImplT>(cache: &mut ImplT, key: &str) -> CacheEntry<String, String>
+    where
+        ImplT: CacheImpl<String, String>,
+    {
+        let stale = Utc::now() - LAST_ACCESSED_REFRESH_INTERVAL - TimeDelta::minutes(1);
+        let entry = CacheEntry {
+            key: key.to_string(),
+            value: "value".to_string(),
+            created_at: stale,
+            last_accessed: stale,
+            is_dirty: false,
+        };
+        cache.write_entry(&entry, Overwrite::Deny).await.unwrap();
+        entry
+    }
+
+    pub async fn stale_read_impl<F, Fut, ImplT>(new_cache: F)
+    where
+        F: Fn() -> Fut + Clone,
+        Fut: Future<Output = (crate::test_utils::filesys::dirs::TempDir, ImplT)>,
+        ImplT: CacheImpl<String, String>,
+    {
+        let (_tmp, mut cache) = new_cache().await;
+        let stale_entry = write_stale_entry(&mut cache, "key").await;
+
+        let before_read = Utc::now();
+        let read_entry = cache.read_entry(&stale_entry.key).await.unwrap();
+        assert!(read_entry.last_accessed >= before_read);
+        assert_eq!(read_entry.created_at, stale_entry.created_at);
+
+        // the refreshed time is saved
+        let entries = cache.entry_map().await.unwrap();
+        assert_eq!(entries.get("key").unwrap(), &read_entry);
+    }
+
+    pub async fn stale_find_impl<F, Fut, ImplT>(new_cache: F)
+    where
+        F: Fn() -> Fut + Clone,
+        Fut: Future<Output = (crate::test_utils::filesys::dirs::TempDir, ImplT)>,
+        ImplT: CacheImpl<String, String>,
+    {
+        let (_tmp, mut cache) = new_cache().await;
+        let stale_entry = write_stale_entry(&mut cache, "key").await;
+
+        let before_find = Utc::now();
+        let found = cache
+            .find_one_entry("key", |entry| entry.key == stale_entry.key)
+            .await
+            .unwrap();
+        assert!(found.last_accessed >= before_find);
+
+        // the refreshed time is saved
+        let entries = cache.entry_map().await.unwrap();
+        assert_eq!(entries.get("key").unwrap(), &found);
     }
 }
