@@ -1464,11 +1464,24 @@ pub mod glob {
         let tmp = test_dirs::temp("testing").unwrap();
         fs::write(tmp.path().join("1.log"), b"x").unwrap();
 
-        for suffix in ["*/", "*/."] {
+        for suffix in ["*/", "*/.", "1.log/."] {
             let pattern = format!("{}/{suffix}", tmp.path().display());
             let matches = files::glob(&pattern).unwrap();
             assert!(matches.is_empty(), "{pattern} matched {matches:?}");
         }
+    }
+
+    // Windows strips a trailing dot from file names
+    #[cfg(unix)]
+    #[test]
+    fn name_ending_in_dot_matches() {
+        let tmp = test_dirs::temp("testing").unwrap();
+        let path = tmp.path().join("core.");
+        fs::write(&path, b"x").unwrap();
+
+        let matches = files::glob(&format!("{}/*.", tmp.path().display())).unwrap();
+
+        assert_eq!(matches, vec![filesys::File::new(path)]);
     }
 
     #[test]
