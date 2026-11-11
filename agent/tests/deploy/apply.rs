@@ -35,7 +35,7 @@ impl Fixture {
             disk::Deployments::spawn(16, resources_dir.file("deployments.json"), 1000)
                 .await
                 .unwrap();
-        let (cfg_insts, _) = disk::CfgInsts::spawn(16, resources_dir.file("ci_meta.json"), 1000)
+        let (cfg_insts, _) = disk::CfgInsts::spawn(16, resources_dir.file("ci_index.json"), 1000)
             .await
             .unwrap();
         let (cfg_inst_content, _) =
@@ -82,7 +82,7 @@ impl Fixture {
             .unwrap();
     }
 
-    async fn seed_cfg_inst_meta_only(&self, cfg_inst: &ConfigInstance) {
+    async fn seed_cfg_inst_index_only(&self, cfg_inst: &ConfigInstance) {
         self.cfg_insts
             .write(
                 cfg_inst.id.clone(),
@@ -151,7 +151,7 @@ impl Fixture {
         apply::Storage {
             deployments: &self.deployments,
             cfg_insts: disk::CfgInstRef {
-                meta: &self.cfg_insts,
+                index: &self.cfg_insts,
                 content: &self.cfg_inst_content,
             },
             releases: &self.releases,
@@ -627,12 +627,12 @@ mod deploy_errors {
     }
 
     #[tokio::test]
-    async fn missing_config_instance_metadata() {
+    async fn missing_config_instance_index_entry() {
         let f = Fixture::new().await;
 
         // reference a cfg_inst ID that was never seeded
         let dpl = make_deployment(
-            "dpl-missing-meta",
+            "dpl-missing-index-entry",
             DplTarget::Deployed,
             DplActivity::Queued,
             vec!["non-existent-ci-id".to_string()],
@@ -659,8 +659,8 @@ mod deploy_errors {
         let f = Fixture::new().await;
 
         let ci = make_cfg_inst(f.fixture_path("test/filepath.json"));
-        // seed metadata but NOT content
-        f.seed_cfg_inst_meta_only(&ci).await;
+        // seed the index but NOT content
+        f.seed_cfg_inst_index_only(&ci).await;
 
         let dpl = make_deployment(
             "dpl-no-content",
@@ -720,9 +720,9 @@ mod deploy_errors {
             "old file should exist after initial deploy"
         );
 
-        // Seed a new deployment that will fail: metadata only, no content -> CacheErr
+        // Seed a new deployment that will fail: index only, no content -> CacheErr
         let ci_new = make_cfg_inst(f.fixture_path("new-config.json"));
-        f.seed_cfg_inst_meta_only(&ci_new).await;
+        f.seed_cfg_inst_index_only(&ci_new).await;
 
         let dpl_new = make_deployment(
             "dpl-new",
@@ -1239,7 +1239,7 @@ mod remove_action {
             filepath: "relative/path.json".to_string(),
             ..Default::default()
         };
-        f.seed_cfg_inst_meta_only(&ci).await;
+        f.seed_cfg_inst_index_only(&ci).await;
 
         // target=Archived, activity=Deployed -> FSM: Remove
         let dpl = make_deployment(

@@ -16,6 +16,7 @@ pub struct MockTokenManager {
     pub token: Arc<Mutex<Token>>,
     pub calls: Arc<Mutex<Vec<TokenManagerCall>>>,
     pub refresh_token_fn: Arc<Mutex<RefreshTokenFn>>,
+    pub next_get_token_err: Arc<Mutex<Option<AuthnErr>>>,
 }
 
 impl MockTokenManager {
@@ -24,6 +25,7 @@ impl MockTokenManager {
             token: Arc::new(Mutex::new(token)),
             calls: Arc::new(Mutex::new(Vec::new())),
             refresh_token_fn: Arc::new(Mutex::new(Box::new(|| Ok(())))),
+            next_get_token_err: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -56,6 +58,11 @@ impl MockTokenManager {
     pub fn set_refresh_token(&self, refresh_token_fn: RefreshTokenFn) {
         *self.refresh_token_fn.lock().unwrap() = refresh_token_fn;
     }
+
+    /// The next `get_token` call returns `err`; later calls return the token.
+    pub fn fail_next_get_token(&self, err: AuthnErr) {
+        *self.next_get_token_err.lock().unwrap() = Some(err);
+    }
 }
 
 impl TokenManagerExt for MockTokenManager {
@@ -65,6 +72,9 @@ impl TokenManagerExt for MockTokenManager {
 
     async fn get_token(&self) -> Result<Arc<Token>, AuthnErr> {
         self.calls.lock().unwrap().push(TokenManagerCall::GetToken);
+        if let Some(err) = self.next_get_token_err.lock().unwrap().take() {
+            return Err(err);
+        }
         Ok(Arc::new(self.token.lock().unwrap().clone()))
     }
 

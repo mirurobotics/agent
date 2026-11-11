@@ -3,9 +3,10 @@ use std::ffi::{OsStr, OsString};
 use std::fs::FileType;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 // internal crates
+use crate::cooldown;
 use crate::filesys::{
     dirs,
     errors::*,
@@ -134,6 +135,32 @@ pub async fn read_json<T: DeserializeOwned>(file: &File) -> Result<T, FileSysErr
         })
     })?;
     Ok(obj)
+}
+
+/// Waits between retries of a read that failed for a reason other than
+/// "missing" or "unparseable" (e.g. a transient EIO).
+const READ_RETRY_DELAYS: [Duration; 3] = [
+    Duration::from_millis(50),
+    Duration::from_millis(250),
+    Duration::from_millis(1000),
+];
+
+/// [`read_json`], retrying errors other than "missing" and "unparseable",
+/// which a retry won't change, after each of [`READ_RETRY_DELAYS`].
+pub async fn read_json_with_retry<T: DeserializeOwned>(file: &File) -> Result<T, FileSysErr> {
+    let is_retryable = |err: &FileSysErr| {
+        !matches!(
+            err,
+            FileSysErr::PathDoesNotExistErr(_) | FileSysErr::ParseJSONErr(_)
+        )
+    };
+    cooldown::retry(
+        |n| READ_RETRY_DELAYS.get(n as usize).copied(),
+        is_retryable,
+        tokio::time::sleep,
+        move || read_json(file),
+    )
+    .await
 }
 
 pub async fn append_bytes(
@@ -301,6 +328,14 @@ pub async fn delete(file: &File) -> Result<(), FileSysErr> {
     }
 }
 
+/// Delete `file`, logging a failure instead of returning it. A file that is
+/// already gone is fine.
+pub async fn delete_or_warn(file: &File) {
+    if let Err(e) = delete(file).await {
+        warn!("failed to delete {file}: {e}");
+    }
+}
+
 /// Copy `file` to `dst`. Permissions follow `tokio::fs::copy` (Unix mode bits
 /// and Windows attributes).
 pub async fn copy_to(file: &File, dst: &File, overwrite: Overwrite) -> Result<(), FileSysErr> {
@@ -421,9 +456,10 @@ pub async fn set_permissions(
 /// first wildcard) and matches each level below it against that level's
 /// pattern component, so it only enters directories that can hold a match. It
 /// never follows a symlink below the prefix: symlinked files and directories
-/// are skipped, and a `..` below the prefix matches nothing, so a match can't
-/// resolve outside the prefix. Directories that error mid-walk (e.g.
-/// unreadable ones) are skipped rather than aborting the walk.
+/// are skipped as they're listed, and a `..` below the prefix matches nothing.
+/// A directory swapped for a link after it's listed isn't caught here.
+/// Directories that error mid-walk (e.g. unreadable ones) are skipped rather
+/// than aborting the walk.
 pub fn glob(pattern: &str) -> Result<Vec<File>, FileSysErr> {
     let (root, components) = parse_glob(pattern)?;
     let mut walk = GlobWalk {

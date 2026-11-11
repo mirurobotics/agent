@@ -1,3 +1,6 @@
+// standard crates
+use std::collections::HashSet;
+
 // internal crates
 use crate::filesys::{
     dir::Dir,
@@ -102,6 +105,28 @@ pub async fn files(dir: &Dir) -> Result<Vec<File>, FileSysErr> {
         }
     }
     Ok(files)
+}
+
+/// Delete the files in `dir` whose names `kept` doesn't hold, logging each
+/// deletion and failure. A missing `dir` is not created.
+pub async fn delete_files_except(dir: &Dir, kept: &HashSet<String>) {
+    if !dir.exists() {
+        return;
+    }
+    let listing = match files(dir).await {
+        Ok(listing) => listing,
+        Err(e) => {
+            warn!("failed to list {dir}: {e}");
+            return;
+        }
+    };
+    for file in listing {
+        if file.name().is_ok_and(|name| kept.contains(name)) {
+            continue;
+        }
+        warn!("deleting {file}, which is not kept");
+        crate::filesys::files::delete_or_warn(&file).await;
+    }
 }
 
 pub async fn is_empty(dir: &Dir) -> Result<bool, FileSysErr> {

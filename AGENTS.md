@@ -44,6 +44,12 @@ use tokio::sync::broadcast;
 
 Handlers in `agent/src/server/handlers.rs` don't convert wire types. Response conversions live in `server/response.rs` and request conversions in `server/request.rs` ([agent#383](https://github.com/mirurobotics/agent/pull/383#discussion_r4363970314)).
 
+Stores return the domain type, such as a calibration as a `Report`, not a type shaped for one route; the service or the response conversion picks what the route needs ([agent#421](https://github.com/mirurobotics/agent/pull/421#discussion_r4521100113), [agent#421](https://github.com/mirurobotics/agent/pull/421#discussion_r4521188885)).
+
+### Actor modules
+
+An actor's `*_impl` module is private to its parent module: callers import the actor's handle module and the names its parent re-exports, never a `*_impl` path ([agent#447](https://github.com/mirurobotics/agent/pull/447#discussion_r4520743816)).
+
 ### Error handling
 
 All error types derive `thiserror::Error` and implement the custom `crate::errors::Error` trait (defined in `agent/src/errors/`). The trait provides default implementations for `code()`, `http_status()`, `params()`, and `is_network_conn_err()`. Aggregating enum errors use the `impl_error!` macro (also in `agent/src/errors/`).
@@ -80,6 +86,10 @@ Pick the enum facility by what the enum needs to do:
 Each `impl_status_enum!` enum also gets a hand-written `StatusEnumFixture` table
 and `status_enum_tests!` in its integration test file
 (`agent/tests/models/harnesses.rs`), so a slip in the macro's mapping fails a test.
+
+### Terminology
+
+Call the backend the control plane in code, comments, logs and docs, not "Miru": Miru is the whole system ([agent#456](https://github.com/mirurobotics/agent/pull/456#discussion_r4522530489)).
 
 ## Testing
 
