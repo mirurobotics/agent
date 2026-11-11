@@ -193,7 +193,7 @@ async fn resume_or_put(
             info!("upload: resuming multipart upload {id} for {object}");
             store.resume_multipart_upload(src, &object, id).await
         }
-        None => store.put(file.clone(), &object, &checkpoint.metadata).await,
+        None => store.put(src, &object, &checkpoint.metadata).await,
     }
 }
 

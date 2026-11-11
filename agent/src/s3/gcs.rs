@@ -183,7 +183,7 @@ mod tests {
 
     // internal crates
     use super::*;
-    use crate::s3::store::tests::{recorded_payload, resp, resp_xml, temp_file_with};
+    use crate::s3::store::tests::{recorded_payload, resp, resp_xml, source_of, temp_file_with};
     use crate::s3::store::PART_SIZE;
     use crate::s3::{Object, Options, S3Err, Source, Store};
 
@@ -292,11 +292,15 @@ mod tests {
         let small = temp_file_with(b"hello world").await;
         let big = temp_file_with(&vec![3u8; PART_SIZE as usize + 1]).await;
         store
-            .put(small.file().clone(), &obj("small.bin"), metadata)
+            .put(
+                source_of(&small, "small.bin").await,
+                &obj("small.bin"),
+                metadata,
+            )
             .await
             .unwrap();
         store
-            .put(big.file().clone(), &obj("big.bin"), metadata)
+            .put(source_of(&big, "big.bin").await, &obj("big.bin"), metadata)
             .await
             .unwrap();
         replay
@@ -331,7 +335,11 @@ mod tests {
             let src = temp_file_with(&bytes).await;
 
             gcs_store(&replay)
-                .put(src.file().clone(), &obj("small.bin"), &HashMap::new())
+                .put(
+                    source_of(&src, "small.bin").await,
+                    &obj("small.bin"),
+                    &HashMap::new(),
+                )
                 .await
                 .unwrap();
 
@@ -373,7 +381,11 @@ mod tests {
             let src = temp_file_with(&bytes).await;
 
             gcs_store(&replay)
-                .put(src.file().clone(), &obj("small.bin"), &HashMap::new())
+                .put(
+                    source_of(&src, "small.bin").await,
+                    &obj("small.bin"),
+                    &HashMap::new(),
+                )
                 .await
                 .unwrap();
 
@@ -391,7 +403,11 @@ mod tests {
             let src = temp_file_with(&bytes).await;
 
             gcs_store(&replay)
-                .put(src.file().clone(), &obj("big.bin"), &HashMap::new())
+                .put(
+                    source_of(&src, "big.bin").await,
+                    &obj("big.bin"),
+                    &HashMap::new(),
+                )
                 .await
                 .unwrap();
 
@@ -475,7 +491,11 @@ mod tests {
             let src = temp_file_with(b"hello world").await;
 
             let err = store
-                .put(src.file().clone(), &obj("small.bin"), &HashMap::new())
+                .put(
+                    source_of(&src, "small.bin").await,
+                    &obj("small.bin"),
+                    &HashMap::new(),
+                )
                 .await
                 .unwrap_err();
 
@@ -505,7 +525,11 @@ mod tests {
             let src = temp_file_with(b"hello world").await;
 
             gcs_store(&replay)
-                .put(src.file().clone(), &obj("small.bin"), &HashMap::new())
+                .put(
+                    source_of(&src, "small.bin").await,
+                    &obj("small.bin"),
+                    &HashMap::new(),
+                )
                 .await
                 .unwrap();
 
@@ -537,10 +561,18 @@ mod tests {
             let big = temp_file_with(&vec![3u8; PART_SIZE as usize + 1]).await;
 
             let put = store
-                .put(small.file().clone(), &obj("small.bin"), &HashMap::new())
+                .put(
+                    source_of(&small, "small.bin").await,
+                    &obj("small.bin"),
+                    &HashMap::new(),
+                )
                 .await;
             let multipart = store
-                .put(big.file().clone(), &obj("big.bin"), &HashMap::new())
+                .put(
+                    source_of(&big, "big.bin").await,
+                    &obj("big.bin"),
+                    &HashMap::new(),
+                )
                 .await;
 
             assert!(put.is_ok(), "{put:?}");
@@ -601,7 +633,11 @@ mod tests {
             let src = temp_file_with(b"hello world").await;
 
             let err = gcs_store(&replay)
-                .put(src.file().clone(), &obj("small.bin"), &HashMap::new())
+                .put(
+                    source_of(&src, "small.bin").await,
+                    &obj("small.bin"),
+                    &HashMap::new(),
+                )
                 .await
                 .unwrap_err();
 
@@ -628,7 +664,11 @@ mod tests {
             let src = temp_file_with(&bytes).await;
 
             let err = gcs_store(&replay)
-                .put(src.file().clone(), &obj("big.bin"), &HashMap::new())
+                .put(
+                    source_of(&src, "big.bin").await,
+                    &obj("big.bin"),
+                    &HashMap::new(),
+                )
                 .await
                 .unwrap_err();
 

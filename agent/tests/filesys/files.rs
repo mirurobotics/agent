@@ -513,6 +513,39 @@ pub mod sha256 {
             FileSysErr::PathDoesNotExistErr { .. }
         ));
     }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn refuses_symlink() {
+        let dir = test_dirs::temp("testing").unwrap();
+        let target = dir.file("target");
+        files::write_string(&target, "secret", WriteOptions::default())
+            .await
+            .unwrap();
+        let link = dir.file("link");
+        std::os::unix::fs::symlink(target.path(), link.path()).unwrap();
+        assert!(matches!(
+            files::sha256(&link).await.unwrap_err(),
+            FileSysErr::OpenFileErr { .. }
+        ));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn refuses_fifo() {
+        // Without O_NONBLOCK the open would block until a writer appeared.
+        let dir = test_dirs::temp("testing").unwrap();
+        let fifo = dir.file("fifo");
+        let status = std::process::Command::new("mkfifo")
+            .arg(fifo.path())
+            .status()
+            .unwrap();
+        assert!(status.success());
+        assert!(matches!(
+            files::sha256(&fifo).await.unwrap_err(),
+            FileSysErr::OpenFileErr { .. }
+        ));
+    }
 }
 
 pub mod sha256_and_crc32c {
@@ -1519,6 +1552,29 @@ pub mod glob {
             let matches = files::glob(pattern.to_str().unwrap()).unwrap();
             assert!(matches.is_empty(), "{pattern:?} matched {matches:?}");
         }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn junction_not_walked() {
+        let tmp = test_dirs::temp("testing").unwrap();
+        let outside = test_dirs::temp("outside").unwrap();
+        fs::write(outside.path().join("x.log"), b"x").unwrap();
+        // unlike a symlink, a junction needs no privilege to create
+        let status = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(tmp.path().join("j"))
+            .arg(outside.path())
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let real = tmp.path().join("real.log");
+        fs::write(&real, b"x").unwrap();
+
+        let pattern = tmp.path().join("**/*.log");
+        let matches = files::glob(pattern.to_str().unwrap()).unwrap();
+
+        assert_eq!(matches, vec![filesys::File::new(real)]);
     }
 
     #[cfg(unix)]
