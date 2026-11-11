@@ -3,8 +3,9 @@ use miru_agent::filesys::File;
 pub use self::os::Unreadable;
 
 /// Denies this process read access to `file` until the returned guard drops,
-/// on every OS. The file can still be inspected but not read. Bind the guard
-/// to a named variable, since `let _ =` drops it at once.
+/// on every OS. Only reading is guaranteed to fail; the file can still be
+/// inspected. Bind the guard to a named variable, since `let _ =` drops it at
+/// once.
 pub fn make_unreadable(file: &File) -> Unreadable {
     Unreadable::new(file.path())
 }
@@ -46,7 +47,7 @@ mod os {
     // standard crates
     use std::io;
     use std::path::{Path, PathBuf};
-    use std::process::{Command, ExitStatus};
+    use std::process::{Command, Output};
 
     // Everyone, which includes this process's user.
     const EVERYONE: &str = "*S-1-1-0";
@@ -57,11 +58,14 @@ mod os {
 
     impl Unreadable {
         pub(super) fn new(path: &Path) -> Self {
-            let status = icacls(path, &["/deny", &format!("{EVERYONE}:(RD)")]).unwrap();
+            let out = icacls(path, &["/deny", &format!("{EVERYONE}:(RD)")]).unwrap();
             assert!(
-                status.success(),
-                "icacls /deny on {}: {status}",
-                path.display()
+                out.status.success(),
+                "icacls /deny on {}: {}\n{}{}",
+                path.display(),
+                out.status,
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr),
             );
             Self {
                 path: path.to_path_buf(),
@@ -75,7 +79,7 @@ mod os {
         }
     }
 
-    fn icacls(path: &Path, args: &[&str]) -> io::Result<ExitStatus> {
-        Ok(Command::new("icacls").arg(path).args(args).output()?.status)
+    fn icacls(path: &Path, args: &[&str]) -> io::Result<Output> {
+        Command::new("icacls").arg(path).args(args).output()
     }
 }
