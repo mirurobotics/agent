@@ -44,6 +44,7 @@ mod os {
 #[cfg(windows)]
 mod os {
     // standard crates
+    use std::io;
     use std::path::{Path, PathBuf};
     use std::process::{Command, ExitStatus};
 
@@ -56,7 +57,7 @@ mod os {
 
     impl Unreadable {
         pub(super) fn new(path: &Path) -> Self {
-            let status = icacls(path, &["/deny", &format!("{EVERYONE}:(RD)")]);
+            let status = icacls(path, &["/deny", &format!("{EVERYONE}:(RD)")]).unwrap();
             assert!(
                 status.success(),
                 "icacls /deny on {}: {status}",
@@ -74,12 +75,7 @@ mod os {
         }
     }
 
-    fn icacls(path: &Path, args: &[&str]) -> ExitStatus {
-        Command::new("icacls")
-            .arg(path)
-            .args(args)
-            .output()
-            .unwrap()
-            .status
+    fn icacls(path: &Path, args: &[&str]) -> io::Result<ExitStatus> {
+        Ok(Command::new("icacls").arg(path).args(args).output()?.status)
     }
 }
