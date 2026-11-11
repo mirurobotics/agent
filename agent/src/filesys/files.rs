@@ -2,8 +2,6 @@
 use std::ffi::{OsStr, OsString};
 use std::fs::FileType;
 use std::io::Write;
-#[cfg(windows)]
-use std::os::windows::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -27,10 +25,6 @@ use tokio::fs::File as TokioFile;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 #[allow(unused_imports)]
 use tracing::{debug, error, info, warn};
-#[cfg(windows)]
-use windows_sys::Win32::Storage::FileSystem::{
-    FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_OPEN_REPARSE_POINT,
-};
 
 pub async fn read_bytes(file: &File) -> Result<Vec<u8>, FileSysErr> {
     // read file
@@ -77,9 +71,8 @@ pub async fn sha256_and_crc32c(file: &File) -> Result<(String, u32), FileSysErr>
 }
 
 /// Reads `file` through a fixed 8 KiB buffer, passing each chunk to `on_chunk`.
-/// The file is opened with [`open_regular_file`].
 async fn read_chunks(file: &File, mut on_chunk: impl FnMut(&[u8])) -> Result<(), FileSysErr> {
-    let mut f = open_regular_file(file)
+    let mut f = TokioFile::open(file.path())
         .await
         .map_err(|e| map_io_err_for_open(e, file))?;
 
@@ -98,39 +91,6 @@ async fn read_chunks(file: &File, mut on_chunk: impl FnMut(&[u8])) -> Result<(),
         on_chunk(&buf[..n]);
     }
     Ok(())
-}
-
-/// Opens `file` for reading and refuses anything but a regular file, including
-/// a symlink, so a link planted in a watched directory is never read through.
-/// On Windows it also refuses every other reparse point.
-pub async fn open_regular_file(file: &File) -> std::io::Result<TokioFile> {
-    let mut opts = tokio::fs::OpenOptions::new();
-    opts.read(true);
-    // O_NONBLOCK keeps a FIFO from blocking the open until it's refused
-    #[cfg(unix)]
-    opts.custom_flags(nix::libc::O_NOFOLLOW | nix::libc::O_NONBLOCK);
-    // opens a link itself rather than its target, so the check below refuses it
-    #[cfg(windows)]
-    opts.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
-    let f = opts.open(file.path()).await?;
-    let meta = f.metadata().await?;
-    // on Windows the flag also skips a placeholder's filter, so its stub would be read
-    if !meta.is_file() || is_reparse_point(&meta) {
-        let kind = std::io::ErrorKind::InvalidInput;
-        return Err(std::io::Error::new(kind, "not a regular file"));
-    }
-    Ok(f)
-}
-
-/// Whether `meta` is a reparse point, such as a link or a cloud placeholder.
-#[cfg(windows)]
-fn is_reparse_point(meta: &std::fs::Metadata) -> bool {
-    meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
-}
-
-#[cfg(unix)]
-fn is_reparse_point(_meta: &std::fs::Metadata) -> bool {
-    false
 }
 
 pub async fn read_secret_bytes(file: &File) -> Result<SecretBox<Vec<u8>>, FileSysErr> {
@@ -462,9 +422,8 @@ pub async fn set_permissions(
 /// pattern component, so it only enters directories that can hold a match. It
 /// never follows a symlink below the prefix: symlinked files and directories
 /// are skipped, and a `..` below the prefix matches nothing, so a match can't
-/// resolve outside the prefix. On Windows, entries behind any other reparse
-/// point, such as cloud placeholders, are skipped too. Directories that error
-/// mid-walk (e.g. unreadable ones) are skipped rather than aborting the walk.
+/// resolve outside the prefix. Directories that error mid-walk (e.g.
+/// unreadable ones) are skipped rather than aborting the walk.
 pub fn glob(pattern: &str) -> Result<Vec<File>, FileSysErr> {
     let (root, components) = parse_glob(pattern)?;
     let mut walk = GlobWalk {
@@ -587,8 +546,7 @@ impl<'p> GlobWalk<'p> {
 
 /// The entries of `dir` that `component` matches, with their own types: a
 /// symlink is reported as one, not as its target. A literal is looked up
-/// directly, so it needs only traverse permission on `dir`. On Windows, every
-/// reparse-point entry, file or directory, links included, is left out.
+/// directly, so it needs only traverse permission on `dir`.
 fn glob_entries(dir: &Path, component: &GlobComponent) -> Vec<(PathBuf, FileType)> {
     if let GlobComponent::Literal(name) = component {
         // `..` would lead the walk back out of the prefix
@@ -597,8 +555,8 @@ fn glob_entries(dir: &Path, component: &GlobComponent) -> Vec<(PathBuf, FileType
         }
         let path = dir.join(name);
         return match std::fs::symlink_metadata(&path) {
-            Ok(meta) if !is_skipped_reparse_point(&path, &meta) => vec![(path, meta.file_type())],
-            _ => Vec::new(),
+            Ok(metadata) => vec![(path, metadata.file_type())],
+            Err(_) => Vec::new(),
         };
     }
     // an empty `dir` is the current directory
@@ -609,30 +567,11 @@ fn glob_entries(dir: &Path, component: &GlobComponent) -> Vec<(PathBuf, FileType
     let Ok(entries) = std::fs::read_dir(read_from) else {
         return Vec::new();
     };
-    let entries = entries
-        .flatten()
-        .filter(|entry| component.matches(&entry.file_name()));
-    // on Windows the listing already holds each entry's attributes, so this
-    // needs no extra system call
-    #[cfg(windows)]
-    let entries = entries.filter(|e| {
-        let path = dir.join(e.file_name());
-        !e.metadata()
-            .is_ok_and(|m| is_skipped_reparse_point(&path, &m))
-    });
     entries
+        .flatten()
+        .filter(|entry| component.matches(&entry.file_name()))
         .filter_map(|entry| Some((dir.join(entry.file_name()), entry.file_type().ok()?)))
         .collect()
-}
-
-/// Whether the glob leaves out `path` as a reparse point, logging it like a
-/// skipped symlink.
-fn is_skipped_reparse_point(path: &Path, meta: &std::fs::Metadata) -> bool {
-    let is_skipped = is_reparse_point(meta);
-    if is_skipped {
-        debug!("glob: skipping reparse point {}", path.display());
-    }
-    is_skipped
 }
 
 pub async fn metadata(file: &File) -> Result<Metadata, FileSysErr> {
