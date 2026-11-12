@@ -4,15 +4,28 @@
 # See Dockerfile.builder for the toolchain definition.
 #
 # Targets:
+#   check     - Validate the GoReleaser config
 #   build     - Full build with artifacts embedded
 #   artifacts - Just the build outputs (for --output)
 #
 # Examples:
+#   docker build -f build/Dockerfile --target check .
 #   docker build -f build/Dockerfile --target artifacts --output type=local,dest=./dist .
 
-FROM ghcr.io/mirurobotics/agent-builder:0d2ac7e AS build
+FROM ghcr.io/mirurobotics/agent-builder:0d2ac7e AS source
 
 COPY . .
+
+# =============================================================================
+# Stage: check - Validate the GoReleaser config
+# =============================================================================
+FROM source AS check
+RUN cd build && goreleaser check
+
+# =============================================================================
+# Stage: build - Build the release artifacts
+# =============================================================================
+FROM source AS build
 
 # Uses Docker secrets to avoid embedding keys in image layers
 # GORELEASER_ARGS defaults to snapshot for local builds; release.sh overrides it

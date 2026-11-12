@@ -1,0 +1,32 @@
+name: Release Check
+
+on:
+  pull_request:
+    branches: [main, "release/*"]
+    paths:
+      - 'build/**'
+      - '.github/workflows/release-check.yml'
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+
+  goreleaser-check:
+    timeout-minutes: 10
+    name: goreleaser-check
+    runs-on: ubuntu-latest # standard GitHub-hosted runners are free in public repos
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Log in to GHCR
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check Release Config
+        run: ./build/check.sh
