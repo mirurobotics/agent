@@ -50,7 +50,8 @@ No new source files. The helpers go into `agent/tests/test_utils/filesys/access.
 
 ## Progress
 
-- [ ] Milestone 1: helpers in `access.rs`, tests in `device_api.rs`, one commit.
+- [x] Milestone 1: helpers in `access.rs`, tests in `device_api.rs`, one commit.
+- [x] Source written
 - [ ] Push, open a draft PR, and run `$preflight` until it reports `CLEAN`.
 
 ## Surprises & Discoveries
@@ -71,6 +72,9 @@ No new source files. The helpers go into `agent/tests/test_utils/filesys/access.
 - Decision: Stand in for the service account with this process's user, whose SID comes from `whoami /user /fo csv /nh`.
   Rationale: A SID is exact and independent of locale and domain. Account names passed to `icacls` are neither.
   Date/Author: 2026-11-12, plan author.
+- Decision: `icacls_ok` returns nothing instead of `Output`, and its failure message names the arguments (`icacls [..] on <path>`) instead of the fixed `/deny`.
+  Rationale: No caller reads the output after the success check, and the helper now runs `/deny`, `/inheritance:r /grant:r` and `/save`, so a fixed `/deny` in the message would mislead.
+  Date/Author: 2026-11-12, implementer.
 
 ## Outcomes & Retrospective
 
