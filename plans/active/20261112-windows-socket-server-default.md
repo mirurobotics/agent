@@ -42,6 +42,7 @@ No new files. The constant mirrors `DEFAULT_ENABLE_TCP_SERVER` in `agent/src/ser
 
 ## Progress
 
+- [x] Source written
 - [ ] M1: source changes (constant, defaults, warning, unix-only `socket_file`, its test-fixture use).
 - [ ] M2: tests assert the platform default.
 - [ ] M3: docs (`ARCHITECTURE.md`, Windows support plan).
