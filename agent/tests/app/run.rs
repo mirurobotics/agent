@@ -1,6 +1,3 @@
-// standard crates
-use std::path::PathBuf;
-
 // internal crates
 use crate::test_utils::filesys::dirs as test_dirs;
 use device_api::models::ApiVersion;
@@ -58,7 +55,8 @@ async fn activated_layout() -> (test_dirs::TempDir, Layout) {
 /// connections, so nothing the agent sends leaves this machine.
 fn options(layout: &Layout, lifecycle: LifecycleOptions, tcp_port: Option<u16>) -> AppOptions {
     let mut server = Options {
-        socket_file: filesys::File::new(PathBuf::from("/tmp").join("miru.sock")),
+        #[cfg(unix)]
+        socket_file: filesys::File::new("/tmp/miru.sock"),
         ..Default::default()
     };
     if let Some(port) = tcp_port {

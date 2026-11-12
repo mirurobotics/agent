@@ -21,6 +21,7 @@ pub struct ShutdownMngrDuplicateArgErr {
 
 impl crate::errors::Error for ShutdownMngrDuplicateArgErr {}
 
+#[cfg(unix)]
 #[derive(Debug, thiserror::Error)]
 #[error("failed to bind unix socket '{socket_file}': {source}")]
 pub struct BindUnixSocketErr {
@@ -29,6 +30,7 @@ pub struct BindUnixSocketErr {
     pub trace: Box<Trace>,
 }
 
+#[cfg(unix)]
 impl crate::errors::Error for BindUnixSocketErr {}
 
 #[derive(Debug, thiserror::Error)]
@@ -163,6 +165,7 @@ pub enum ServerErr {
     UploadErr(Box<upload::UploadErr>),
 
     // external crate errors
+    #[cfg(unix)]
     #[error(transparent)]
     BindUnixSocketErr(BindUnixSocketErr),
     #[error(transparent)]
@@ -270,6 +273,7 @@ crate::impl_error!(ServerErr {
     ScanErr,
     SyncErr,
     UploadErr,
+    #[cfg(unix)]
     BindUnixSocketErr,
     BindTcpListenerErr,
     RunAxumServerErr,

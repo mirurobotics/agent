@@ -72,31 +72,31 @@ macro_rules! trace {
 
 #[macro_export]
 macro_rules! impl_error {
-    ($enum_name:ident { $($variant:ident),+ $(,)? }) => {
+    ($enum_name:ident { $($(#[$meta:meta])* $variant:ident),+ $(,)? }) => {
         impl $crate::errors::Error for $enum_name {
             fn code(&self) -> $crate::errors::Code {
                 match self {
-                    $(Self::$variant(e) => e.code(),)+
+                    $($(#[$meta])* Self::$variant(e) => e.code(),)+
                 }
             }
             fn http_status(&self) -> $crate::errors::HTTPCode {
                 match self {
-                    $(Self::$variant(e) => e.http_status(),)+
+                    $($(#[$meta])* Self::$variant(e) => e.http_status(),)+
                 }
             }
             fn is_network_conn_err(&self) -> bool {
                 match self {
-                    $(Self::$variant(e) => e.is_network_conn_err(),)+
+                    $($(#[$meta])* Self::$variant(e) => e.is_network_conn_err(),)+
                 }
             }
             fn is_terminal(&self) -> bool {
                 match self {
-                    $(Self::$variant(e) => e.is_terminal(),)+
+                    $($(#[$meta])* Self::$variant(e) => e.is_terminal(),)+
                 }
             }
             fn params(&self) -> Option<serde_json::Value> {
                 match self {
-                    $(Self::$variant(e) => e.params(),)+
+                    $($(#[$meta])* Self::$variant(e) => e.params(),)+
                 }
             }
         }

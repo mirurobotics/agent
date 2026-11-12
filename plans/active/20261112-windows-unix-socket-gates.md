@@ -31,8 +31,8 @@ No file is added. Each gate mirrors the existing `#[cfg(unix)]` gates on `pub mo
 
 ## Progress
 
-- [ ] Plan committed.
-- [ ] Source gated and committed.
+- [x] (2026-11-12) Plan committed.
+- [x] (2026-11-12) Source gated and committed.
 - [ ] Branch pushed; `windows-check` and `test` pass in CI.
 
 ## Surprises & Discoveries
@@ -41,7 +41,12 @@ No file is added. Each gate mirrors the existing `#[cfg(unix)]` gates on `pub mo
 
 ## Decision Log
 
-(Add entries as work proceeds.)
+- Decision: In `shutdown_impl` step 4, fold `self.socket_server_handle.take()` into the `shutdown_server` call so a single statement carries `#[cfg(unix)]`.
+  Rationale: one gated statement instead of a gated block; the call's arguments are no wider than the poller step's one-line call above it, so rustfmt keeps it on one line.
+  Date/Author: 2026-11-12, Claude.
+- Decision: Drop "(unix only)" from the `socket_file` doc comment.
+  Rationale: the `#[cfg(unix)]` attribute now states it.
+  Date/Author: 2026-11-12, Claude.
 
 ## Outcomes & Retrospective
 

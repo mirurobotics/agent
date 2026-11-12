@@ -490,6 +490,7 @@ struct ShutdownManager {
 
     // server components requiring shutdown
     app_state: Option<AppStateShutdownParams>,
+    #[cfg(unix)]
     socket_server_handle: Option<JoinHandle<Result<(), ServerErr>>>,
     tcp_server_handle: Option<JoinHandle<Result<(), ServerErr>>>,
     // removed once the tcp server stops, so clients see it is no longer served
@@ -509,6 +510,7 @@ impl ShutdownManager {
             shutdown_tx,
             lifecycle_options,
             app_state: None,
+            #[cfg(unix)]
             socket_server_handle: None,
             tcp_server_handle: None,
             tcp_discovery_file: None,
@@ -564,7 +566,7 @@ impl ShutdownManager {
         Ok(())
     }
 
-    #[cfg_attr(not(unix), allow(dead_code))]
+    #[cfg(unix)]
     pub fn with_socket_server_handle(
         &mut self,
         handle: JoinHandle<Result<(), ServerErr>>,
@@ -643,8 +645,8 @@ impl ShutdownManager {
         join_worker(self.mqtt_worker_handle.take(), "MQTT", &mut first_err).await;
 
         // 4. servers (each handle carries the server's own Result)
-        let socket_handle = self.socket_server_handle.take();
-        shutdown_server(socket_handle, "socket", &mut first_err).await;
+        #[cfg(unix)]
+        shutdown_server(self.socket_server_handle.take(), "socket", &mut first_err).await;
         let tcp_handle = self.tcp_server_handle.take();
         shutdown_server(tcp_handle, "tcp", &mut first_err).await;
         if let Some(file) = self.tcp_discovery_file.take() {
@@ -1009,6 +1011,7 @@ mod tests {
             spawn_immediate_handle(),
         )
         .unwrap();
+        #[cfg(unix)]
         mgr.with_socket_server_handle(tokio::spawn(async { Ok(()) }))
             .unwrap();
         let (_tmp, state, state_handle) = init_app_state().await;
@@ -1025,6 +1028,7 @@ mod tests {
         assert!(mgr.token_refresh_worker_handle.is_none());
         assert!(mgr.poller_worker_handle.is_none());
         assert!(mgr.mqtt_worker_handle.is_none());
+        #[cfg(unix)]
         assert!(mgr.socket_server_handle.is_none());
         assert!(mgr.app_state.is_none());
     }
@@ -1044,6 +1048,7 @@ mod tests {
             spawn_panicking_handle(),
         )
         .unwrap();
+        #[cfg(unix)]
         mgr.with_socket_server_handle(tokio::spawn(async { Err(sentinel_err()) }))
             .unwrap();
 
@@ -1055,9 +1060,11 @@ mod tests {
         // the poller's join error (step 2) wins over the mqtt join error
         // (step 3) and the socket server's sentinel error (step 4)
         assert!(matches!(err, ServerErr::JoinHandleErr(_)));
+        #[cfg(unix)]
         assert!(mgr.socket_server_handle.is_none());
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn shutdown_impl_returns_socket_server_inner_error() {
         let mut mgr = new_shutdown_manager();
@@ -1077,6 +1084,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn shutdown_impl_maps_socket_server_join_error() {
         let mut mgr = new_shutdown_manager();
@@ -1237,6 +1245,7 @@ mod tests {
             spawn_immediate_handle(),
         )
         .unwrap();
+        #[cfg(unix)]
         mgr.with_socket_server_handle(tokio::spawn(async { Ok(()) }))
             .unwrap();
         mgr.register_handle(
@@ -1257,6 +1266,7 @@ mod tests {
         assert!(mgr.token_refresh_worker_handle.is_none());
         assert!(mgr.poller_worker_handle.is_none());
         assert!(mgr.mqtt_worker_handle.is_none());
+        #[cfg(unix)]
         assert!(mgr.socket_server_handle.is_none());
         assert!(mgr.scan_worker_handle.is_none());
         assert!(mgr.sync_scan_bridge_worker_handle.is_none());
