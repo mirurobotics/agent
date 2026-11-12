@@ -394,6 +394,13 @@ async fn init_local_api_servers(
     shutdown_tx: &broadcast::Sender<()>,
 ) -> Result<(), ServerErr> {
     #[cfg(windows)]
+    if options.enable_socket_server {
+        tracing::warn!(
+            "unix socket isn't supported on windows; the local device API is served over tcp only"
+        );
+    }
+
+    #[cfg(windows)]
     if !options.enable_tcp_server {
         tracing::warn!("tcp server is disabled; the local device API has no transport on windows");
         return Ok(());
