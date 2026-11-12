@@ -396,7 +396,8 @@ async fn init_local_api_servers(
     #[cfg(windows)]
     if options.enable_socket_server {
         tracing::warn!(
-            "unix socket isn't supported on windows; the local device API is served over tcp only"
+            "enable_socket_server is ignored on windows, which has no unix socket; \
+             the local device API is served over tcp only"
         );
     }
 
