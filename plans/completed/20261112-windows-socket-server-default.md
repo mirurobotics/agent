@@ -43,9 +43,10 @@ No new files. The constant mirrors `DEFAULT_ENABLE_TCP_SERVER` in `agent/src/ser
 ## Progress
 
 - [x] Source written
-- [ ] M1: source changes (constant, defaults, warning, unix-only `socket_file`, its test-fixture use).
-- [ ] M2: tests assert the platform default.
-- [ ] M3: docs (`ARCHITECTURE.md`, Windows support plan).
+- [x] Tests written
+- [x] M1: source changes (constant, defaults, warning, unix-only `socket_file`, its test-fixture use).
+- [x] M2: tests assert the platform default.
+- [x] M3: docs (`ARCHITECTURE.md`, Windows support plan).
 - [ ] CI green on the pushed head (`$preflight` reports `CLEAN`).
 
 ## Surprises & Discoveries
@@ -59,7 +60,7 @@ No new files. The constant mirrors `DEFAULT_ENABLE_TCP_SERVER` in `agent/src/ser
 
 ## Outcomes & Retrospective
 
-(Summarize at completion.)
+Shipped as planned in agent#476. The warning text was shortened twice in review so it names the setting and does not claim a TCP transport that may be off.
 
 ## Context and Orientation
 
