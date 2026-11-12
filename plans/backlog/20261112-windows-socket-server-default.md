@@ -93,10 +93,12 @@ In `agent/src/app/options.rs`, set `enable_socket_server: server::DEFAULT_ENABLE
 
     #[cfg(windows)]
     if options.enable_socket_server {
-        tracing::warn!("unix socket isn't supported on windows; the local device API is served over tcp only");
+        tracing::warn!(
+            "unix socket isn't supported on windows; the local device API is served over tcp only"
+        );
     }
 
-In `agent/tests/app/run.rs` `options`, put `#[cfg(unix)]` on the `socket_file` line of the `Options { ... }` literal and write it as `filesys::File::new("/tmp/miru.sock")` (`File::new` normalizes `/`-rooted literals), then delete the now-unused `use std::path::PathBuf;` and its `// standard crates` header if the group is empty. This is a use of the gated field, so it lands with M1 to keep every commit compiling on Windows.
+In `agent/tests/app/run.rs` `options`, put `#[cfg(unix)]` on the `socket_file` line of the `Options { ... }` literal and write it as `filesys::File::new("/tmp/miru.sock")` (`File::new` normalizes `/`-rooted literals), then delete the now-unused `use std::path::PathBuf;` and its `// standard crates` header (it is the group's only import). This is a use of the gated field, so it lands with M1 to keep every commit compiling on Windows.
 
 M2 — tests. In `agent/tests/app/options.rs`, rename `socket_server_enabled` to `socket_server_enabled_only_on_unix` and assert `assert_eq!(AppOptions::default().enable_socket_server, cfg!(unix));`. In `agent/tests/disk/settings.rs`, add directly before `tcp_server_enabled_by_default_only_on_windows` (field order):
 
