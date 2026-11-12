@@ -23,6 +23,10 @@ pub use self::state::State;
 /// token the agent writes to the discovery file.
 pub const DEFAULT_ENABLE_TCP_SERVER: bool = cfg!(windows);
 
+/// Whether the Unix socket server is on when settings don't say. Windows
+/// has no Unix socket, so it is off there.
+pub const DEFAULT_ENABLE_SOCKET_SERVER: bool = cfg!(unix);
+
 /// Loopback port used when the TCP server is enabled and no other port is set.
 /// 6478 is "MIRU" on a phone keypad (M=6, I=4, R=7, U=8).
 pub const DEFAULT_TCP_PORT: u16 = 6478;

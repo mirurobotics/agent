@@ -394,6 +394,11 @@ async fn init_local_api_servers(
     shutdown_tx: &broadcast::Sender<()>,
 ) -> Result<(), ServerErr> {
     #[cfg(windows)]
+    if options.enable_socket_server {
+        tracing::warn!("enable_socket_server is ignored on windows, which has no unix socket");
+    }
+
+    #[cfg(windows)]
     if !options.enable_tcp_server {
         tracing::warn!("tcp server is disabled; the local device API has no transport on windows");
         return Ok(());
