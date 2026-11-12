@@ -28,19 +28,10 @@ jobs:
         id: check
         run: |
           git fetch origin main 'refs/heads/release/*:refs/remotes/origin/release/*'
-          ON_MAIN=false
-          if git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
-            ON_MAIN=true
+          if [ -n "$(git branch -r --contains "$GITHUB_SHA" --list origin/main 'origin/release/*')" ]; then
+            echo "on_main=true" >> "$GITHUB_OUTPUT"
           else
-            for ref in $(git for-each-ref --format='%(refname:short)' refs/remotes/origin/release/); do
-              if git merge-base --is-ancestor "$GITHUB_SHA" "$ref"; then
-                ON_MAIN=true
-                break
-              fi
-            done
-          fi
-          echo "on_main=$ON_MAIN" >> "$GITHUB_OUTPUT"
-          if [ "$ON_MAIN" = "false" ]; then
+            echo "on_main=false" >> "$GITHUB_OUTPUT"
             echo "::notice::Tag is not on main or release/* — skipping release."
           fi
 
@@ -63,8 +54,7 @@ jobs:
     permissions:
       contents: read
     env:
-      # Line/module-level debug info so the shipped PDB supports symbolized backtraces.
-      # On MSVC debug info is "packed" into the .pdb, so the .exe is unchanged.
+      # Limited debug info for symbolized backtraces; MSVC writes it to the .pdb only.
       CARGO_PROFILE_RELEASE_DEBUG: 1
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -110,9 +100,7 @@ jobs:
           path: build/prebuilt/windows_amd64/
           if-no-files-found: error
 
-  # Sign miru-agent.exe, build the MSI around it, and sign the MSI. Kept apart
-  # from windows-release-build so crate build scripts never run with the Azure
-  # OIDC token. Setup: build/windows/README.md, "Code signing".
+  # Separate from the build job so crate build scripts never see the Azure OIDC token.
   windows-sign:
     needs: [check-main, windows-release-build]
     if: needs.check-main.outputs.on_main == 'true'
@@ -134,7 +122,6 @@ jobs:
           path: build/prebuilt/windows_amd64
 
       # v0.10.4 -> 0.10.4; v0.10.4-beta.1 -> 0.10.4.201 (alpha 1NN, beta 2NN, rc 3NN).
-      # See build/windows/README.md, "Code signing", for why.
       - name: Resolve MSI version
         id: msi
         shell: pwsh
@@ -153,13 +140,11 @@ jobs:
           "version=$version" >> $env:GITHUB_OUTPUT
           "name=miru-agent-$release" >> $env:GITHUB_OUTPUT
 
-      # Before Azure login: WiX packages are fetched and hash-checked against the
-      # pins in restore-pinned.ps1, and are the only NuGet source afterwards.
+      # Restore before Azure login, so no NuGet fetch runs with the signing identity.
       - name: Restore pinned WiX SDK
         run: build\windows\restore-pinned.ps1 -ProjectPath build\windows\miru-agent.wixproj
 
-      # The identity holds only the signer role on one certificate profile, so
-      # it has no subscription to select.
+      # The identity has no subscription, only the signer role on one certificate profile.
       - name: Azure login
         uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
         with:
