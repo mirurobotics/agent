@@ -10,10 +10,7 @@ snapshot:
 builds:
   - id: "agent"
     builder: rust
-    # Build through cargo-auditable (wrapper baked into the builder image) so each
-    # binary embeds its dependency tree in a `.dep-v0` ELF section. With `command:
-    # zigbuild` below, GoReleaser runs `cargo-auditable-zigbuild zigbuild
-    # --target=... --release -p=miru-agent`, i.e. `cargo auditable zigbuild ...`.
+    # cargo auditable embeds the dependency tree in the binary for the SBOMs.
     tool: cargo-auditable-zigbuild
     binary: "miru-agent"
     targets:
@@ -26,17 +23,10 @@ builds:
       - -p=miru-agent
 
   - id: "agent-windows"
-    # Built natively on a Windows runner (aws-lc-sys cannot cross-compile
-    # from Linux) through `cargo auditable`, so the PE also carries a
-    # `.dep-v0` section. The release workflow's windows-sign job uploads the
-    # Authenticode-signed executable, which the release job downloads into
-    # build/prebuilt/windows_amd64/ before GoReleaser runs. GoReleaser's Pro
-    # prebuilt builder stats that path and fails the release if it is missing,
-    # then treats the binary as if it had built it. `prebuilt.path` is relative
-    # to GoReleaser's working directory, which is build/ (see build/Dockerfile).
+    # aws-lc-sys can't cross-compile to Windows, so the release workflow builds
+    # and signs this binary on a Windows runner.
     builder: prebuilt
-    # Only the release workflow stages that executable, so snapshot builds
-    # (build/build.sh) skip Windows instead of failing on the missing file.
+    # Snapshot builds have no Windows binary to package.
     skip: "{{ .IsSnapshot }}"
     goos:
       - windows
@@ -114,21 +104,15 @@ archives:
       - goos: windows
         formats: [zip]
 
-# Generate SPDX-JSON SBOMs via syft (GoReleaser's default SBOM cmd), uploaded
-# with the release via the release stanza. Scan the binary and the archive — not
-# the .deb: syft's cargo-auditable cataloger reads the `.dep-v0` section out of
-# the binary for ELF, PE and Mach-O alike (so the Windows `miru-agent.exe` is
-# covered too), and recurses into the tar.gz/zip to find it, so those SBOMs
-# list every linked crate. A .deb scan only reads DPKG control metadata and
-# never inspects the nested binary, so it can never enumerate dependencies.
+# Not the .deb: syft reads only its package metadata, never the dependency tree
+# embedded in the binary.
 sboms:
   - id: archive
     artifacts: archive
   - id: binary
     artifacts: binary
 
-# Archives and packages are checksummed by default; add the MSI, which is
-# attached through release.extra_files rather than built by GoReleaser.
+# GoReleaser checksums only what it builds, so add the MSI.
 checksum:
   extra_files:
     - glob: ./prebuilt/windows_amd64/*.msi
@@ -169,15 +153,8 @@ release:
     owner: mirurobotics
     name: agent
   extra_files:
-    # Debug symbols for the Windows executable, attached as their own asset
-    # so the zip stays a clean install artifact. The file keeps the name
-    # recorded in miru-agent.exe's debug directory (Cargo writes
-    # miru_agent.pdb) because debuggers look for exactly that name next
-    # to the executable.
+    # Kept out of the zip, and named as recorded in the .exe so debuggers find it.
     - glob: ./prebuilt/windows_amd64/miru_agent.pdb
-    # Signed Windows installer (miru-agent-<tag version>.msi, for example
-    # miru-agent-0.10.4-beta.1.msi), built by the release workflow's
-    # windows-sign job, which fails before GoReleaser runs if it is missing.
     - glob: ./prebuilt/windows_amd64/*.msi
   footer: >-
     ## Miru Agent {{.Tag}}
