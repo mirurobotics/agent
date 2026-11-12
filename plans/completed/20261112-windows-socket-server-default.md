@@ -57,6 +57,7 @@ No new files. The constant mirrors `DEFAULT_ENABLE_TCP_SERVER` in `agent/src/ser
 
 - 2026-11-12: The Windows warning names `enable_socket_server`, so an operator who sees it knows which setting to turn off.
 - 2026-11-12: The warning no longer says the API is served over TCP, because it runs before the TCP-off check and would contradict it when TCP is off too (design review).
+- 2026-11-12: Making `server::Options::socket_file` unix-only moved to a follow-up PR that gates all of the unix-socket plumbing on Windows (author's call after the design review). No setting feeds `socket_file`, so this PR's fix doesn't need it.
 
 ## Outcomes & Retrospective
 

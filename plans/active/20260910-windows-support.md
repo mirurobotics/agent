@@ -324,8 +324,8 @@ the workbench plan.
   settings file that still contains `is_persistent` loads; the key is
   ignored.
 - 2026-11-12: `enable_socket_server` defaults to off on Windows
-  (`DEFAULT_ENABLE_SOCKET_SERVER = cfg!(unix)`), startup warns when it is set
-  there, and `server::Options::socket_file` is unix-only. Rationale: the
+  (`DEFAULT_ENABLE_SOCKET_SERVER = cfg!(unix)`), and startup warns when it is
+  set there. Rationale: the
   setting had no effect on Windows but provisioning wrote `true`, so the file
   misstated what the agent serves; a warning alone would fire on every Windows
   start. Existing `settings.json` files are not rewritten.

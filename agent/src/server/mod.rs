@@ -1,5 +1,4 @@
 // internal crates
-#[cfg(unix)]
 use crate::filesys;
 
 pub mod auth;
@@ -33,8 +32,7 @@ pub const DEFAULT_TCP_PORT: u16 = 6478;
 
 #[derive(Debug)]
 pub struct Options {
-    /// Unix socket path.
-    #[cfg(unix)]
+    /// Unix socket path (unix only).
     pub socket_file: filesys::File,
     /// Loopback TCP port used when the TCP server is enabled. `0` lets the OS
     /// assign a free port.
@@ -44,7 +42,6 @@ pub struct Options {
 impl Default for Options {
     fn default() -> Self {
         Self {
-            #[cfg(unix)]
             socket_file: filesys::File::new("/run/miru/miru.sock"),
             tcp_port: DEFAULT_TCP_PORT,
         }
