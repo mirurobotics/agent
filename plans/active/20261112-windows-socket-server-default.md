@@ -55,6 +55,7 @@ No new files. The constant mirrors `DEFAULT_ENABLE_TCP_SERVER` in `agent/src/ser
 ## Decision Log
 
 - 2026-11-12: The Windows warning names `enable_socket_server`, so an operator who sees it knows which setting to turn off.
+- 2026-11-12: The warning no longer says the API is served over TCP, because it runs before the TCP-off check and would contradict it when TCP is off too (design review).
 
 ## Outcomes & Retrospective
 
@@ -95,8 +96,7 @@ In `agent/src/app/options.rs`, set `enable_socket_server: server::DEFAULT_ENABLE
     #[cfg(windows)]
     if options.enable_socket_server {
         tracing::warn!(
-            "enable_socket_server is ignored on windows, which has no unix socket; \
-             the local device API is served over tcp only"
+            "enable_socket_server is ignored on windows, which has no unix socket"
         );
     }
 
@@ -140,7 +140,7 @@ All commands run from the agent repo root on branch `fix/windows-socket-settings
 
 CI workflow `ci.yml` on the pushed head: job `windows-check` passes, which proves Windows compiles without `socket_file` and that `socket_server_enabled_only_on_unix` and `socket_server_enabled_by_default_only_on_unix` see `false`; jobs `test` (Linux, coverage gates) and `lint` (clippy `-D warnings`, fmt, import linter) pass, proving Linux behavior and defaults (`true`) are unchanged. The `agent/tests/app/run.rs` tests pass on both OSes with the gated fixture. Validation is complete when `$preflight` reports `CLEAN`.
 
-Observable behavior on a Windows device: provisioning writes `"enable_socket_server": false` to `C:\ProgramData\Miru\settings.json`. Setting it to `true` and restarting the service logs `enable_socket_server is ignored on windows, which has no unix socket; the local device API is served over tcp only` at warn level, and the agent keeps serving the device API on `127.0.0.1:6478`. On Linux, provisioning still writes `"enable_socket_server": true` and `/run/miru/miru.sock` is served as before.
+Observable behavior on a Windows device: provisioning writes `"enable_socket_server": false` to `C:\ProgramData\Miru\settings.json`. Setting it to `true` and restarting the service logs `enable_socket_server is ignored on windows, which has no unix socket` at warn level, and the agent keeps serving the device API on `127.0.0.1:6478`. On Linux, provisioning still writes `"enable_socket_server": true` and `/run/miru/miru.sock` is served as before.
 
 ## Idempotence and Recovery
 
