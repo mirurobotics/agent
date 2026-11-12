@@ -5,6 +5,8 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
 // internal crates
+#[cfg(windows)]
+use crate::test_utils::filesys::access::assert_dacl_matches_new_file;
 use crate::test_utils::filesys::{access::make_unreadable, dirs as test_dirs};
 use miru_agent::filesys::{self, files, Atomic, FileSysErr, Overwrite, PathExt, WriteOptions};
 
@@ -861,6 +863,40 @@ pub mod write_bytes {
         .unwrap();
         let perms = files::permissions(&file).await.unwrap();
         assert_eq!(perms.mode() & 0o777, 0o600);
+    }
+
+    // Windows drops the mode, so a private file is protected only by the ACL
+    // it inherits from its folder.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn inherits_folder_dacl_atomic() {
+        let dir = test_dirs::temp("testing").unwrap();
+        let file = dir.file("test-file");
+        let opts = WriteOptions {
+            overwrite: Overwrite::Allow,
+            atomic: Atomic::Yes,
+            mode: Some(0o600),
+        };
+        files::write_bytes(&file, b"secret", opts).await.unwrap();
+        assert_dacl_matches_new_file(&file);
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn replace_drops_old_dacl_atomic() {
+        let dir = test_dirs::temp("testing").unwrap();
+        let file = dir.file("test-file");
+        let opts = WriteOptions {
+            overwrite: Overwrite::Allow,
+            atomic: Atomic::Yes,
+            mode: Some(0o600),
+        };
+        files::write_bytes(&file, b"old", opts).await.unwrap();
+        // an explicit entry on the old file that the replacement must not keep
+        let _unreadable = make_unreadable(&file);
+
+        files::write_bytes(&file, b"secret", opts).await.unwrap();
+        assert_dacl_matches_new_file(&file);
     }
 }
 

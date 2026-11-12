@@ -17,22 +17,11 @@ pub fn make_read_only(dir: &Dir) -> Denied {
     Denied::new(dir.path(), Access::Write)
 }
 
-/// Replaces `dir`'s ACL with a protected one like the installer's private
-/// folders: full control for SYSTEM, Administrators and this process's user,
-/// passed on to new entries, with nothing inherited. Use it on a temp dir,
-/// since nothing restores the old ACL.
+/// Asserts `file` has the same ACL as a new file created directly in its
+/// folder, so whatever wrote it added, dropped or carried over no entry.
 #[cfg(windows)]
-pub fn make_private(dir: &Dir) {
-    os::make_private(dir.path())
-}
-
-/// Asserts `file` has exactly the ACL a file created directly in its folder
-/// gets, and that the ACL allows only SYSTEM, Administrators and this
-/// process's user, all through inherited entries. Pair it with
-/// [`make_private`].
-#[cfg(windows)]
-pub fn assert_inherits_private_dacl(file: &File) {
-    os::assert_inherits_private_dacl(file.path())
+pub fn assert_dacl_matches_new_file(file: &File) {
+    os::assert_dacl_matches_new_file(file.path())
 }
 
 /// The access a [`Denied`] guard takes away.
@@ -94,8 +83,6 @@ mod os {
 
     // Everyone, which includes this process's user.
     const EVERYONE: &str = "*S-1-1-0";
-    const SYSTEM: &str = "*S-1-5-18";
-    const ADMINISTRATORS: &str = "*S-1-5-32-544";
 
     pub struct Denied {
         path: PathBuf,
@@ -124,61 +111,22 @@ mod os {
         }
     }
 
-    pub(super) fn make_private(dir: &Path) {
-        let user = format!("*{}", current_user_sid());
-        let mut args = vec!["/inheritance:r".to_string(), "/grant:r".to_string()];
-        for sid in [SYSTEM, ADMINISTRATORS, user.as_str()] {
-            args.push(format!("{sid}:(OI)(CI)F"));
-        }
-        icacls_ok(dir, &args);
-    }
-
-    pub(super) fn assert_inherits_private_dacl(file: &Path) {
+    pub(super) fn assert_dacl_matches_new_file(file: &Path) {
         let control = file.with_file_name("dacl-control");
         std::fs::write(&control, b"").unwrap();
         let want = dacl(&control);
         std::fs::remove_file(&control).unwrap();
 
         let got = dacl(file);
+        assert!(
+            got.contains('('),
+            "DACL of {} has no entries: {got}",
+            file.display()
+        );
         assert_eq!(
             got,
             want,
             "DACL of {} differs from a new file's",
-            file.display()
-        );
-
-        let start = got.find('(').expect("DACL has no entries");
-        let aces: Vec<Vec<&str>> = got[start..]
-            .trim_start_matches('(')
-            .trim_end_matches(')')
-            .split(")(")
-            .map(|ace| ace.split(';').collect())
-            .collect();
-        for ace in &aces {
-            assert!(
-                ace[0] == "A" && ace[1].contains("ID"),
-                "{} has an entry that is not an inherited allow: {got}",
-                file.display()
-            );
-        }
-
-        // SDDL writes well-known SIDs as abbreviations, so SYSTEM shows as SY.
-        let user = current_user_sid();
-        let user = if user == "S-1-5-18" {
-            "SY"
-        } else {
-            user.as_str()
-        };
-        let mut want_sids = vec!["SY", "BA", user];
-        want_sids.sort_unstable();
-        want_sids.dedup();
-        let mut sids: Vec<&str> = aces.iter().map(|ace| ace[5]).collect();
-        sids.sort_unstable();
-        sids.dedup();
-        assert_eq!(
-            sids,
-            want_sids,
-            "{} grants other accounts: {got}",
             file.display()
         );
     }
@@ -195,22 +143,6 @@ mod os {
         let text = String::from_utf16(&units).unwrap();
         let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
         text.lines().nth(1).unwrap().trim().to_string()
-    }
-
-    fn current_user_sid() -> String {
-        let out = Command::new("whoami")
-            .args(["/user", "/fo", "csv", "/nh"])
-            .output()
-            .unwrap();
-        assert!(
-            out.status.success(),
-            "whoami /user: {}\n{}",
-            out.status,
-            String::from_utf8_lossy(&out.stderr),
-        );
-        let stdout = String::from_utf8_lossy(&out.stdout);
-        let sid = stdout.trim().rsplit(',').next().unwrap();
-        sid.trim_matches('"').to_string()
     }
 
     fn icacls_ok<S: AsRef<OsStr>>(path: &Path, args: &[S]) {

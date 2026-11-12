@@ -63,44 +63,6 @@ pub mod write {
         assert_eq!(mode & 0o777, 0o640);
     }
 
-    #[cfg(windows)]
-    #[tokio::test]
-    async fn inherits_private_dir_dacl() {
-        use crate::test_utils::filesys::access::{assert_inherits_private_dacl, make_private};
-
-        let dir = test_dirs::temp("discovery_inherits_private_dir_dacl").unwrap();
-        let file = discovery_file(&dir);
-        let api_dir = file.parent().unwrap();
-        std::fs::create_dir(api_dir.path()).unwrap();
-        make_private(&api_dir);
-
-        let token = SecretString::from("test-token");
-        device_api::write(&file, 6478, &token).await.unwrap();
-        assert_inherits_private_dacl(&file);
-    }
-
-    #[cfg(windows)]
-    #[tokio::test]
-    async fn replace_drops_old_dacl() {
-        use crate::test_utils::filesys::access::{
-            assert_inherits_private_dacl, make_private, make_unreadable,
-        };
-
-        let dir = test_dirs::temp("discovery_replace_drops_old_dacl").unwrap();
-        let file = discovery_file(&dir);
-        let api_dir = file.parent().unwrap();
-        std::fs::create_dir(api_dir.path()).unwrap();
-        make_private(&api_dir);
-        let old = SecretString::from("old-token");
-        device_api::write(&file, 1234, &old).await.unwrap();
-        // an explicit entry on the old file that the replacement must not keep
-        let _unreadable = make_unreadable(&file);
-
-        let token = SecretString::from("test-token");
-        device_api::write(&file, 6478, &token).await.unwrap();
-        assert_inherits_private_dacl(&file);
-    }
-
     #[tokio::test]
     async fn fails_when_parent_is_a_file() {
         let dir = test_dirs::temp("discovery_fails_when_parent_is_a_file").unwrap();

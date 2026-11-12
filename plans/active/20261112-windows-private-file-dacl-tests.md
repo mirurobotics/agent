@@ -2,6 +2,8 @@
 
 This ExecPlan is a living document. The sections Progress, Surprises & Discoveries, Decision Log, and Outcomes & Retrospective must be kept up to date as work proceeds.
 
+> **Design settled after review (2026-11-12).** The tests moved to `agent/tests/filesys/files.rs` as Windows siblings of `honors_mode_atomic` (`inherits_folder_dacl_atomic`, `replace_drops_old_dacl_atomic`), and the helpers shrank to one, `assert_dacl_matches_new_file`, which compares a file's DACL with a control file's in the default temp dir. `make_private`, `current_user_sid`, the SID checks and the `device_api.rs` tests are gone, and so are the per-resource follow-ups. See the last two Decision Log entries; sections below that describe the old design are superseded by them.
+
 ## Scope
 
 | Repository | Access | Description |
@@ -75,6 +77,13 @@ No new source files. The helpers go into `agent/tests/test_utils/filesys/access.
 - Decision: `icacls_ok` returns nothing instead of `Output`, and its failure message names the arguments (`icacls [..] on <path>`) instead of the fixed `/deny`.
   Rationale: No caller reads the output after the success check, and the helper now runs `/deny`, `/inheritance:r /grant:r` and `/save`, so a fixed `/deny` in the message would mislead.
   Date/Author: 2026-11-12, implementer.
+
+- Decision: Test the atomic write path in `filesys` instead of the discovery file, and drop the per-resource follow-ups (private key, public key, configs, auth files).
+  Rationale: Design review (AI review D10 on the PR, and `$design-review`): on Windows the mode is dropped, so the only behavior under test is `files::write_bytes` with `Atomic::Yes`, which every private-file writer (discovery file, keys) uses. One pair of tests next to `honors_mode_atomic` covers every caller. The non-atomic path keeps an existing file's DACL on truncate; no private file uses it, so it gets no test.
+  Date/Author: 2026-11-12, author settling the design review.
+- Decision: Drop `make_private`, `current_user_sid` and the SDDL/SID checks; keep one helper, `assert_dacl_matches_new_file`, run in the default temp dir.
+  Rationale: Design review (AI review D2, `$design-review` finding 2): the control-file comparison is the property the agent owns (its write adds, drops and carries over no ACL entry). The SID check only re-checked the fixture `make_private` had set, and whether a new file in the installer's folders is private is owned by the installer integration tests (`Assert-InheritedProtection` and the non-admin probe). A non-empty check stops the comparison passing on two empty DACLs.
+  Date/Author: 2026-11-12, author settling the design review.
 
 ## Outcomes & Retrospective
 
