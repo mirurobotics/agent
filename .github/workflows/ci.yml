@@ -103,14 +103,15 @@ jobs:
           AWS_IT_UPLOAD_ROLE: ${{ vars.AWS_IT_UPLOAD_ROLE }}
         run: cargo test --package miru-agent --locked ${{ steps.gcs.outcome == 'skipped' && env.REAL_BUCKET_SKIP || '' }}
 
-  windows_package_scope:
-    name: windows-package-scope
+  change_scope:
+    name: change-scope
     runs-on: ubuntu-latest # standard GitHub-hosted runners are free in public repos
     permissions:
       contents: read
       pull-requests: read
     outputs:
       windows_package: ${{ github.event_name != 'pull_request' || steps.filter.outputs.package == 'true' }}
+      release_config: ${{ github.event_name != 'pull_request' || steps.filter.outputs.release_config == 'true' }}
     steps:
       - name: Classify changes
         id: filter
@@ -122,13 +123,16 @@ jobs:
               - 'build/windows/**'
               - '.github/workflows/ci.yml'
               - '.github/workflows/release.yml'
+            release_config:
+              - 'build/**'
+              - '.github/workflows/ci.yml'
 
   # Build the exe the package tests install on a Blacksmith runner, where the
   # compile is several times faster than on windows-latest. Release profile: a
   # dev exe is much larger, which roughly doubled every MSI build in CI.
   windows-agent-build:
-    needs: windows_package_scope
-    if: needs.windows_package_scope.outputs.windows_package == 'true'
+    needs: change_scope
+    if: needs.change_scope.outputs.windows_package == 'true'
     runs-on: blacksmith-4vcpu-windows-2025
     timeout-minutes: 30
     # Toolchain and NASM: see windows-check.
@@ -159,8 +163,8 @@ jobs:
   # The integration tests stay on windows-latest: their non-admin probe uses
   # Start-Process -Credential, which fails in Blacksmith's session 0.
   windows-package:
-    needs: [windows_package_scope, windows-agent-build]
-    if: needs.windows_package_scope.outputs.windows_package == 'true'
+    needs: [change_scope, windows-agent-build]
+    if: needs.change_scope.outputs.windows_package == 'true'
     runs-on: windows-latest
     timeout-minutes: 60
     steps:
@@ -289,29 +293,10 @@ jobs:
       - name: Run postinst container test
         run: build/debian/tests/postinst-test.sh
 
-  release_check_scope:
-    name: release-check-scope
-    runs-on: ubuntu-latest # standard GitHub-hosted runners are free in public repos
-    permissions:
-      contents: read
-      pull-requests: read
-    outputs:
-      release_config: ${{ github.event_name != 'pull_request' || steps.filter.outputs.release_config == 'true' }}
-    steps:
-      - name: Classify changes
-        id: filter
-        if: github.event_name == 'pull_request'
-        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
-        with:
-          filters: |
-            release_config:
-              - 'build/**'
-              - '.github/workflows/ci.yml'
-
   # Skipped, not missing, when the scope is false, so it can be a required check.
   goreleaser-check:
-    needs: release_check_scope
-    if: needs.release_check_scope.outputs.release_config == 'true'
+    needs: change_scope
+    if: needs.change_scope.outputs.release_config == 'true'
     runs-on: ubuntu-latest # standard GitHub-hosted runners are free in public repos
     timeout-minutes: 10
     steps:
