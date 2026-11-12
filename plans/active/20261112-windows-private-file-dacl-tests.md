@@ -84,6 +84,9 @@ No new source files. The helpers go into `agent/tests/test_utils/filesys/access.
 - Decision: Drop `make_private`, `current_user_sid` and the SDDL/SID checks; keep one helper, `assert_dacl_matches_new_file`, run in the default temp dir.
   Rationale: Design review (AI review D2, `$design-review` finding 2): the control-file comparison is the property the agent owns (its write adds, drops and carries over no ACL entry). The SID check only re-checked the fixture `make_private` had set, and whether a new file in the installer's folders is private is owned by the installer integration tests (`Assert-InheritedProtection` and the non-admin probe). A non-empty check stops the comparison passing on two empty DACLs.
   Date/Author: 2026-11-12, author settling the design review.
+- Decision: Give the test folder an explicit inheritable read entry for Users (`add_inheritable_entry`) before writing.
+  Rationale: AI review on the PR: a plain temp dir passes on the same DACL as `%TEMP%`, so without a distinct entry the test would still pass if the write staged its temp file in another folder and moved it in.
+  Date/Author: 2026-11-12, author.
 
 ## Outcomes & Retrospective
 
