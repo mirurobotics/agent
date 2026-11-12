@@ -1,6 +1,7 @@
 # Dockerfile - Build miru-agent using the pinned builder image
 #
-# The builder image is pinned here — update it when Dockerfile.builder changes.
+# The builder image is pinned here by digest, because its tag can be re-pushed.
+# When Dockerfile.builder changes, update both the tag and the digest.
 # See Dockerfile.builder for the toolchain definition.
 #
 # Targets:
@@ -12,7 +13,7 @@
 #   docker build -f build/Dockerfile --target check .
 #   docker build -f build/Dockerfile --target artifacts --output type=local,dest=./dist .
 
-FROM ghcr.io/mirurobotics/agent-builder:0d2ac7e AS source
+FROM ghcr.io/mirurobotics/agent-builder:0d2ac7e@sha256:79e78a13ba40bbabeffac2fb7d92d8031f24ebc779e1043ef05cf6114699b915 AS source
 
 COPY . .
 
