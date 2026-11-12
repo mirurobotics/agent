@@ -45,7 +45,8 @@ jobs:
     uses: ./.github/workflows/ci.yml
 
   # Build the Windows release binary natively and hand it, unsigned, to windows-sign.
-  # Crate build scripts run here, so the token is read-only.
+  # Crate build scripts run here, so the token is read-only. No Rust cache: a tag
+  # run can restore caches written on main, and this binary gets signed.
   windows-release-build:
     needs: check-main
     if: needs.check-main.outputs.on_main == 'true'
@@ -63,12 +64,6 @@ jobs:
         uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
         with:
           targets: x86_64-pc-windows-msvc
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-        with:
-          key: release-msvc
-          cache-on-failure: true
 
       - name: Install NASM (aws-lc-sys)
         run: |
