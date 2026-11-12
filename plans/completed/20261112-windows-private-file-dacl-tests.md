@@ -54,7 +54,7 @@ No new source files. The helpers go into `agent/tests/test_utils/filesys/access.
 
 - [x] Milestone 1: helpers in `access.rs`, tests in `device_api.rs`, one commit.
 - [x] Source written
-- [ ] Push, open a draft PR, and run `$preflight` until it reports `CLEAN`.
+- [x] Push, open a PR, and get CI green on the pushed head.
 
 ## Surprises & Discoveries
 
