@@ -24,7 +24,8 @@ builds:
 
   - id: "agent-windows"
     # aws-lc-sys can't cross-compile to Windows, so the release workflow builds
-    # and signs this binary on a Windows runner.
+    # and signs this binary on a Windows runner. It must build with cargo
+    # auditable too, or the Windows SBOM lists no dependencies.
     builder: prebuilt
     # Snapshot builds have no Windows binary to package.
     skip: "{{ .IsSnapshot }}"
@@ -34,6 +35,7 @@ builds:
       - amd64
     binary: "miru-agent"
     prebuilt:
+      # Relative to build/, GoReleaser's working directory.
       path: prebuilt/windows_amd64/miru-agent.exe
 
 nfpms:
@@ -112,7 +114,7 @@ sboms:
   - id: binary
     artifacts: binary
 
-# GoReleaser checksums only what it builds, so add the MSI.
+# release.extra_files aren't checksummed by default, so add the MSI.
 checksum:
   extra_files:
     - glob: ./prebuilt/windows_amd64/*.msi
