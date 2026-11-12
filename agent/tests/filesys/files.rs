@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 // internal crates
 #[cfg(windows)]
-use crate::test_utils::filesys::access::assert_dacl_matches_new_file;
+use crate::test_utils::filesys::access::{add_inheritable_entry, assert_dacl_matches_new_file};
 use crate::test_utils::filesys::{access::make_unreadable, dirs as test_dirs};
 use miru_agent::filesys::{self, files, Atomic, FileSysErr, Overwrite, PathExt, WriteOptions};
 
@@ -871,6 +871,7 @@ pub mod write_bytes {
     #[tokio::test]
     async fn inherits_folder_dacl_atomic() {
         let dir = test_dirs::temp("testing").unwrap();
+        add_inheritable_entry(&dir);
         let file = dir.file("test-file");
         let opts = WriteOptions {
             overwrite: Overwrite::Allow,
@@ -885,6 +886,7 @@ pub mod write_bytes {
     #[tokio::test]
     async fn replace_drops_old_dacl_atomic() {
         let dir = test_dirs::temp("testing").unwrap();
+        add_inheritable_entry(&dir);
         let file = dir.file("test-file");
         let opts = WriteOptions {
             overwrite: Overwrite::Allow,

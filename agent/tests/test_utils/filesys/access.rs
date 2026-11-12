@@ -17,6 +17,14 @@ pub fn make_read_only(dir: &Dir) -> Denied {
     Denied::new(dir.path(), Access::Write)
 }
 
+/// Gives `dir` an explicit inheritable read entry for Users, so a file's ACL
+/// shows whether the file took it from `dir` rather than from another folder.
+/// Use it on a temp dir, since nothing removes the entry.
+#[cfg(windows)]
+pub fn add_inheritable_entry(dir: &Dir) {
+    os::add_inheritable_entry(dir.path())
+}
+
 /// Asserts `file` has the same ACL as a new file created directly in its
 /// folder, so whatever wrote it added, dropped or carried over no entry.
 #[cfg(windows)]
@@ -83,6 +91,7 @@ mod os {
 
     // Everyone, which includes this process's user.
     const EVERYONE: &str = "*S-1-1-0";
+    const USERS: &str = "*S-1-5-32-545";
 
     pub struct Denied {
         path: PathBuf,
@@ -109,6 +118,11 @@ mod os {
         fn drop(&mut self) {
             let _ = icacls(&self.path, &["/remove:d", EVERYONE]);
         }
+    }
+
+    pub(super) fn add_inheritable_entry(dir: &Path) {
+        let grant = format!("{USERS}:(OI)(CI)R");
+        icacls_ok(dir, &["/grant", grant.as_str()]);
     }
 
     pub(super) fn assert_dacl_matches_new_file(file: &Path) {
