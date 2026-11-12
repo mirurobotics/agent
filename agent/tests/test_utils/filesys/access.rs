@@ -164,7 +164,11 @@ mod os {
 
         // SDDL writes well-known SIDs as abbreviations, so SYSTEM shows as SY.
         let user = current_user_sid();
-        let user = if user == "S-1-5-18" { "SY" } else { user.as_str() };
+        let user = if user == "S-1-5-18" {
+            "SY"
+        } else {
+            user.as_str()
+        };
         let mut want_sids = vec!["SY", "BA", user];
         want_sids.sort_unstable();
         want_sids.dedup();
