@@ -28,8 +28,8 @@ pub mod app_options_default {
     }
 
     #[test]
-    fn socket_server_enabled() {
-        assert!(AppOptions::default().enable_socket_server);
+    fn socket_server_enabled_only_on_unix() {
+        assert_eq!(AppOptions::default().enable_socket_server, cfg!(unix));
     }
 
     #[test]

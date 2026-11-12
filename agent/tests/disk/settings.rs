@@ -78,6 +78,11 @@ fn deserialize_ignores_legacy_is_persistent() {
 }
 
 #[test]
+fn socket_server_enabled_by_default_only_on_unix() {
+    assert_eq!(Settings::default().enable_socket_server, cfg!(unix));
+}
+
+#[test]
 fn tcp_server_enabled_by_default_only_on_windows() {
     let settings = Settings::default();
     assert_eq!(settings.enable_tcp_server, cfg!(windows));

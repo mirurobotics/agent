@@ -2,7 +2,7 @@
 use crate::deserialize_warn;
 use crate::logs::LogLevel;
 use crate::network::{BackendHost, MqttHost};
-use crate::server::{DEFAULT_ENABLE_TCP_SERVER, DEFAULT_TCP_PORT};
+use crate::server::{DEFAULT_ENABLE_SOCKET_SERVER, DEFAULT_ENABLE_TCP_SERVER, DEFAULT_TCP_PORT};
 
 // external crates
 use serde::{Deserialize, Serialize};
@@ -13,6 +13,8 @@ pub struct Settings {
     pub log_level: LogLevel,
     pub backend: Backend,
     pub mqtt_broker: MQTTBroker,
+    /// Unix socket listener for the local device API. On by default except on
+    /// Windows, which has no Unix socket (see `DEFAULT_ENABLE_SOCKET_SERVER`).
     pub enable_socket_server: bool,
     /// Loopback TCP listener for the local device API. Independent of the Unix
     /// socket. On by default only on Windows (see `DEFAULT_ENABLE_TCP_SERVER`).
@@ -28,7 +30,7 @@ impl Default for Settings {
             log_level: LogLevel::Info,
             backend: Backend::default(),
             mqtt_broker: MQTTBroker::default(),
-            enable_socket_server: true,
+            enable_socket_server: DEFAULT_ENABLE_SOCKET_SERVER,
             enable_tcp_server: DEFAULT_ENABLE_TCP_SERVER,
             tcp_server: TCPServer::default(),
             enable_mqtt_worker: true,

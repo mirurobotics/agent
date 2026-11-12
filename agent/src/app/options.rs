@@ -62,7 +62,7 @@ impl Default for AppOptions {
 
             backend_host: BackendHost::default(),
 
-            enable_socket_server: true,
+            enable_socket_server: server::DEFAULT_ENABLE_SOCKET_SERVER,
             enable_tcp_server: server::DEFAULT_ENABLE_TCP_SERVER,
             server: server::Options::default(),
 
