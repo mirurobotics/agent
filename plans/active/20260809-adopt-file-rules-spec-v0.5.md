@@ -191,5 +191,5 @@ Blocked on backend serving v0.5. Follow `plans/completed/20260713-revendor-backe
 - **Wedged uploads with `require_upload: true` hold files forever** — spec'd behavior
   (the expiry backstop was dropped in #234); worth a log/metric so fleets can see it.
 - **No CI drift gate between spec and generated models** — PR 4 review must eyeball the
-  regen diff; consider adding a drift check as follow-up tech debt.
+  regen diff; consider adding a drift check as a follow-up.
 - **Backend timing** — PR 4 is externally blocked; track backend #583–#585.
