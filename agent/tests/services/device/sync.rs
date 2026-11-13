@@ -29,14 +29,14 @@ pub mod errors {
             }))
         });
 
-        let resp = dvc_svc::sync(&syncer).await.unwrap();
+        let outcome = dvc_svc::sync(&syncer).await.unwrap();
         let expected = SyncOutcome {
             code: SyncCode::InCooldown,
-            message: resp.message.clone(),
+            message: outcome.message.clone(),
             state: sync_state,
         };
 
-        assert_eq!(resp, expected);
+        assert_eq!(outcome, expected);
     }
 
     #[tokio::test]
@@ -51,14 +51,14 @@ pub mod errors {
             }))
         });
 
-        let resp = dvc_svc::sync(&syncer).await.unwrap();
+        let outcome = dvc_svc::sync(&syncer).await.unwrap();
         let expected = SyncOutcome {
             code: SyncCode::NetworkConnectionError,
-            message: resp.message.clone(),
+            message: outcome.message.clone(),
             state: sync_state,
         };
 
-        assert_eq!(resp, expected);
+        assert_eq!(outcome, expected);
     }
 
     #[tokio::test]
@@ -80,7 +80,7 @@ pub mod errors {
 pub mod success {
     use super::*;
 
-    fn expected_response(sync_state: &State) -> SyncOutcome {
+    fn expected_outcome(sync_state: &State) -> SyncOutcome {
         SyncOutcome {
             code: SyncCode::Success,
             message: "successfully synced".to_string(),
@@ -94,9 +94,9 @@ pub mod success {
         let sync_state = State::default();
         syncer.set_state(sync_state.clone());
 
-        let resp = dvc_svc::sync(&syncer).await.unwrap();
+        let outcome = dvc_svc::sync(&syncer).await.unwrap();
 
-        assert_eq!(resp, expected_response(&sync_state));
+        assert_eq!(outcome, expected_outcome(&sync_state));
     }
 
     #[tokio::test]
@@ -111,8 +111,8 @@ pub mod success {
         };
         syncer.set_state(sync_state.clone());
 
-        let resp = dvc_svc::sync(&syncer).await.unwrap();
+        let outcome = dvc_svc::sync(&syncer).await.unwrap();
 
-        assert_eq!(resp, expected_response(&sync_state));
+        assert_eq!(outcome, expected_outcome(&sync_state));
     }
 }
