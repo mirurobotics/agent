@@ -12,11 +12,11 @@ This plan lives in `agent/plans/` because every change is in the agent repo. Pat
 
 ## Purpose / Big Picture
 
-The agent serves a local HTTP API, the Device API, to programs on the same device, over a Unix socket and loopback TCP. Today it serves one version, `/v0.2/...`, and every version-specific piece (route table, handlers, wire conversions, SSE events) sits directly in `agent/src/server/`, built on one generated crate, `libs/device-api`. A follow-up PR will add `/v0.3`, whose only contract change is that calibrations drop `role` and `aspect`.
+The agent serves a local HTTP API, the Device API, to programs on the same device, over a Unix socket and loopback TCP. Today it serves one version, `/v0.2/...`, and every version-specific piece (route table, handlers, wire conversions, the server-sent events (SSE) stream at `/v0.2/events`) sits directly in `agent/src/server/`, built on one generated crate, `libs/device-api`. A follow-up PR will add `/v0.3`, whose only contract change is that calibrations drop `role` and `aspect`.
 
 This PR is a structural move only. After it, each Device API version is one generated crate (`libs/device-api-v02`) plus one module (`agent/src/server/v02/`), and `agent/src/server/routes.rs` composes the versions and applies the shared middleware once. Adding `/v0.3` then means a new crate `libs/device-api-v03`, a new module `agent/src/server/v03/`, and one `.merge(...)` line in `routes.rs`.
 
-Nothing a client sees changes: every `/v0.2` route keeps its path, status codes, bodies, headers, bearer auth on TCP, middleware and 2 MiB body limit, and `/v0.3` is not served (404, as today).
+Nothing a client sees changes: every `/v0.2` route keeps its path, status codes, bodies, headers, bearer auth on TCP, middleware and request body limit, and `/v0.3` is not served (404, as today).
 
 ## Decisions
 
