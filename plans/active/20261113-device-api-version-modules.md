@@ -65,10 +65,11 @@ Nothing a client sees changes: every `/v0.2` route keeps its path, status codes,
 - [x] M1: generated crate renamed to `device-api-v02`; all imports updated.
 - [x] M2: `services::device::sync` returns `SyncOutcome`; v0.2 conversion added.
 - [x] M3: `server/v02/` version module; `routes::router` composes it; tests moved.
-- [ ] M4: new tests (router composition, `SyncOutcome` conversion).
+- [x] M4: new tests (router composition, `SyncOutcome` conversion).
 - [x] M5: docs (`CLAUDE.md`, `AGENTS.md`, `ARCHITECTURE.md`, `README.md`).
 - [ ] CI green on the pushed head (`$preflight` reports `CLEAN`).
 - [x] Source written
+- [x] Tests written
 
 ## Surprises & Discoveries
 
@@ -87,7 +88,11 @@ Nothing a client sees changes: every `/v0.2` route keeps its path, status codes,
 
 ## Outcomes & Retrospective
 
-(Summarize at completion.)
+Source and tests are written; CI on the pushed head has not run on the tests yet.
+
+- `agent/tests/server/routes.rs` checks that `routes::router` answers `GET /v0.3/health` with 404 and an empty body and `POST /v0.2/health` with 405. The planned `serves_v02_routes` (`GET /v0.2/health` → 200) was left out: `redaction::authorization_header_is_redacted_in_trace_spans` in `agent/tests/server/tcp.rs` already sends that request through `routes::router` and asserts 200, and every route test in `agent/tests/server/v02/handlers.rs` goes through it too.
+- `agent/tests/server/v02/response.rs` gets a `sync_device_response` module, named like its sibling modules (`device_response`, `deployment_response`) after the wire type rather than `sync_outcome`: one test maps each `SyncCode` with `cooldown_ends_at` at `UNIX_EPOCH` (`in_cooldown` false), one with `cooldown_ends_at` a day ahead (`in_cooldown` true). Both compare whole `SyncDeviceResponse` values.
+- Coverage fix for `services/device`: `MockSyncer` gets `set_get_sync_state_fail`, like `set_subscribe_fail`, and `agent/tests/services/device/sync.rs` adds `sync_state_unavailable_after_sync` and `sync_state_unavailable_after_cooldown`, each asserting `ServiceErr::SyncErr(SyncErr::MockErr(_))`. The cooldown case is used for the error branch because its sync error differs from the mock's state-read error, so the assertion shows which call failed.
 
 ## Context and Orientation
 
