@@ -80,6 +80,9 @@ Nothing a client sees changes: every `/v0.2` route keeps its path, status codes,
 - M2: `services/device/sync.rs` imports `sync::syncer::State` and types the field `pub state: State`; `syncer::State` would put the module `syncer` beside the parameter `syncer` in `sync`.
 - M5: `CLAUDE.md` is a symlink to `AGENTS.md`, so one edit keeps them identical.
 - M1: `tools/lint/src/classifier/mod.rs` keeps `"device_api"` in its unit test: it is the linter's own fixture list, not the repo's `.lint-imports.toml`. `api/regen.sh` keeps its `device_*` variable names; only the two paths change.
+- Design review: the author chose that each version module is a full copy of the API, so `/v0.3` mirrors `server/v02/` whole (handlers, SSE, conversions, and `From` impls for its own status enums) rather than reusing v0.2's unchanged handlers. The Follow-up stands as written.
+- Design review: `InstanceFormat::from_device_api` moves out of `models/instance_format.rs` into `server/v02/request.rs` as a private conversion used by the `TryFrom` there, with its tests moved to `agent/tests/server/v02/request.rs`. Request conversions belong in the version's `request.rs`, and with a full copy per version `/v0.3` writes its own beside it instead of editing `models`.
+- CI on the source stage: `services/device` coverage fell to 94.28% (gate 96.07%) because `sync` got shorter while its two `get_sync_state()?` error paths stayed uncovered (`MockSyncer::get_sync_state` can't fail). The tests stage adds a way for the mock to fail `get_sync_state` and covers both paths; the gate is not lowered.
 
 ## Outcomes & Retrospective
 
