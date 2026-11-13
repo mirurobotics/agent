@@ -1318,6 +1318,221 @@ pub mod glob {
     }
 
     #[test]
+    fn wildcard_directory_component() {
+        let tmp = test_dirs::temp("testing").unwrap();
+        fs::create_dir_all(tmp.path().join("a/logs")).unwrap();
+        fs::create_dir_all(tmp.path().join("b/logs/deeper")).unwrap();
+        let a = tmp.path().join("a/logs/1.log");
+        let b = tmp.path().join("b/logs/2.log");
+        fs::write(&a, b"x").unwrap();
+        fs::write(&b, b"x").unwrap();
+        fs::write(tmp.path().join("b/logs/deeper/3.log"), b"x").unwrap();
+
+        let pattern = tmp.path().join("*/logs/*.log");
+        let matches = files::glob(pattern.to_str().unwrap()).unwrap();
+
+        assert_eq!(matches, vec![filesys::File::new(a), filesys::File::new(b)]);
+    }
+
+    #[test]
+    fn parent_dir_below_prefix_matches_nothing() {
+        let tmp = test_dirs::temp("testing").unwrap();
+        fs::create_dir_all(tmp.path().join("data/x")).unwrap();
+        fs::create_dir_all(tmp.path().join("home")).unwrap();
+        fs::write(tmp.path().join("home/op.log"), b"x").unwrap();
+
+        let pattern = tmp.path().join("data/*/../../home/*.log");
+        let matches = files::glob(pattern.to_str().unwrap()).unwrap();
+
+        assert!(matches.is_empty());
+    }
+
+    #[test]
+    fn recursive_wildcard_matches_any_depth() {
+        let tmp = test_dirs::temp("testing").unwrap();
+        fs::create_dir_all(tmp.path().join("x/y")).unwrap();
+        let top = tmp.path().join("0.log");
+        let mid = tmp.path().join("x/1.log");
+        let deep = tmp.path().join("x/y/2.log");
+        for path in [&top, &mid, &deep] {
+            fs::write(path, b"x").unwrap();
+        }
+        fs::write(tmp.path().join("x/y/2.txt"), b"x").unwrap();
+
+        let pattern = tmp.path().join("**/*.log");
+        let matches = files::glob(pattern.to_str().unwrap()).unwrap();
+
+        let expected: Vec<_> = [top, mid, deep]
+            .into_iter()
+            .map(filesys::File::new)
+            .collect();
+        assert_eq!(matches, expected);
+    }
+
+    #[test]
+    fn wildcard_does_not_cross_directories() {
+        let tmp = test_dirs::temp("testing").unwrap();
+        fs::create_dir_all(tmp.path().join("x/logs/sub")).unwrap();
+        let direct = tmp.path().join("x/logs/1.log");
+        fs::write(&direct, b"x").unwrap();
+        fs::write(tmp.path().join("x/logs/sub/2.log"), b"x").unwrap();
+
+        let pattern = tmp.path().join("**/logs/*.log");
+        let matches = files::glob(pattern.to_str().unwrap()).unwrap();
+
+        assert_eq!(matches, vec![filesys::File::new(direct)]);
+    }
+
+    #[test]
+    fn recursive_wildcard_spans_directories_before_literal() {
+        let tmp = test_dirs::temp("testing").unwrap();
+        fs::create_dir_all(tmp.path().join("a/b/logs")).unwrap();
+        let deep = tmp.path().join("a/b/logs/1.log");
+        fs::write(&deep, b"x").unwrap();
+
+        let pattern = tmp.path().join("**/logs/*.log");
+        let matches = files::glob(pattern.to_str().unwrap()).unwrap();
+
+        assert_eq!(matches, vec![filesys::File::new(deep)]);
+    }
+
+    #[test]
+    fn recursive_wildcard_after_constrained_levels_reaches_deep_files() {
+        let tmp = test_dirs::temp("testing").unwrap();
+        fs::create_dir_all(tmp.path().join("p/x/q/r")).unwrap();
+        fs::create_dir_all(tmp.path().join("p/y/q")).unwrap();
+        let wanted = tmp.path().join("p/x/q/r/1.log");
+        fs::write(&wanted, b"x").unwrap();
+        fs::write(tmp.path().join("p/y/q/2.log"), b"x").unwrap();
+
+        let pattern = tmp.path().join("*/x/**/*.log");
+        let matches = files::glob(pattern.to_str().unwrap()).unwrap();
+
+        assert_eq!(matches, vec![filesys::File::new(wanted)]);
+    }
+
+    #[test]
+    fn trailing_recursive_wildcard_matches_no_files() {
+        let tmp = test_dirs::temp("testing").unwrap();
+        fs::create_dir(tmp.path().join("x")).unwrap();
+        fs::write(tmp.path().join("x/1.log"), b"x").unwrap();
+
+        let pattern = tmp.path().join("**");
+        let matches = files::glob(pattern.to_str().unwrap()).unwrap();
+
+        assert!(matches.is_empty(), "{matches:?}");
+    }
+
+    #[test]
+    fn trailing_separator_or_dot_matches_no_files() {
+        let tmp = test_dirs::temp("testing").unwrap();
+        fs::write(tmp.path().join("1.log"), b"x").unwrap();
+
+        for suffix in ["*/", "*/.", "1.log/."] {
+            let pattern = format!("{}/{suffix}", tmp.path().display());
+            let matches = files::glob(&pattern).unwrap();
+            assert!(matches.is_empty(), "{pattern} matched {matches:?}");
+        }
+    }
+
+    // Windows strips a trailing dot from file names
+    #[cfg(unix)]
+    #[test]
+    fn name_ending_in_dot_matches() {
+        let tmp = test_dirs::temp("testing").unwrap();
+        let path = tmp.path().join("core.");
+        fs::write(&path, b"x").unwrap();
+
+        let matches = files::glob(&format!("{}/*.", tmp.path().display())).unwrap();
+
+        assert_eq!(matches, vec![filesys::File::new(path)]);
+    }
+
+    #[test]
+    fn literal_path_matches_itself() {
+        let tmp = test_dirs::temp("testing").unwrap();
+        let path = tmp.path().join("data.txt");
+        fs::write(&path, b"x").unwrap();
+
+        let matches = files::glob(path.to_str().unwrap()).unwrap();
+
+        assert_eq!(matches, vec![filesys::File::new(path)]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_file_skipped() {
+        let tmp = test_dirs::temp("testing").unwrap();
+        let outside = test_dirs::temp("outside").unwrap();
+        let secret = outside.path().join("key.pem");
+        fs::write(&secret, b"secret").unwrap();
+        std::os::unix::fs::symlink(&secret, tmp.path().join("x.log")).unwrap();
+        let real = tmp.path().join("real.log");
+        fs::write(&real, b"x").unwrap();
+
+        let pattern = tmp.path().join("*.log");
+        let matches = files::glob(pattern.to_str().unwrap()).unwrap();
+
+        assert_eq!(matches, vec![filesys::File::new(real)]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_literal_prefix_followed() {
+        let tmp = test_dirs::temp("testing").unwrap();
+        let real = test_dirs::temp("real").unwrap();
+        fs::write(real.path().join("1.log"), b"x").unwrap();
+        std::os::unix::fs::symlink(real.path(), tmp.path().join("logs")).unwrap();
+
+        let pattern = tmp.path().join("logs/*.log");
+        let matches = files::glob(pattern.to_str().unwrap()).unwrap();
+
+        let expected = tmp.path().join("logs/1.log");
+        assert_eq!(matches, vec![filesys::File::new(expected)]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_directory_not_walked() {
+        let tmp = test_dirs::temp("testing").unwrap();
+        let outside = test_dirs::temp("outside").unwrap();
+        fs::write(outside.path().join("op.log"), b"x").unwrap();
+        std::os::unix::fs::symlink(outside.path(), tmp.path().join("x")).unwrap();
+        // links a literal component lands on, as a directory and as the file
+        let y = tmp.path().join("y");
+        fs::create_dir(&y).unwrap();
+        std::os::unix::fs::symlink(outside.path(), y.join("logs")).unwrap();
+        std::os::unix::fs::symlink(outside.path().join("op.log"), y.join("op.log")).unwrap();
+
+        for pattern in [
+            "**/*.log",
+            "*/*.log",
+            "*/logs/*.log",
+            "*/op.log",
+            "**/logs/*.log",
+            "**/op.log",
+        ] {
+            let pattern = tmp.path().join(pattern);
+            let matches = files::glob(pattern.to_str().unwrap()).unwrap();
+            assert!(matches.is_empty(), "{pattern:?} matched {matches:?}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlink_loop_terminates() {
+        let tmp = test_dirs::temp("testing").unwrap();
+        std::os::unix::fs::symlink(tmp.path(), tmp.path().join("loop")).unwrap();
+        let real = tmp.path().join("real.log");
+        fs::write(&real, b"x").unwrap();
+
+        let pattern = tmp.path().join("**/*.log");
+        let matches = files::glob(pattern.to_str().unwrap()).unwrap();
+
+        assert_eq!(matches, vec![filesys::File::new(real)]);
+    }
+
+    #[test]
     fn invalid_glob_returns_error() {
         assert!(matches!(
             files::glob("[unclosed").unwrap_err(),
