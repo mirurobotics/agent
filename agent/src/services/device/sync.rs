@@ -1,7 +1,10 @@
 // internal crates
 use crate::errors::Error;
 use crate::services::errors::*;
-use crate::sync::{errors::*, syncer::{State, SyncerExt}};
+use crate::sync::{
+    errors::*,
+    syncer::{State, SyncerExt},
+};
 
 /// How a requested sync ended, when it didn't fail outright.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

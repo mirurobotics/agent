@@ -4,8 +4,12 @@ use std::sync::Arc;
 
 // internal crates
 use crate::errors::Error;
-use crate::server::v02::{request, response};
-use crate::server::{errors::*, routes, state::State};
+use crate::server::{
+    errors::*,
+    routes,
+    state::State,
+    v02::{request, response},
+};
 use crate::services::{
     calibration as calibration_svc, deployment as dpl_svc, device as dvc_svc,
     file_rule as file_rule_svc, git_commit as git_cmt_svc, release as rls_svc, HttpBackend,

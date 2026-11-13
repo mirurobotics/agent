@@ -2,8 +2,10 @@
 use std::sync::Arc;
 
 // internal crates
-use crate::server::state::State;
-use crate::server::v02::{handlers, sse};
+use crate::server::{
+    state::State,
+    v02::{handlers, sse},
+};
 
 // external crates
 use axum::{

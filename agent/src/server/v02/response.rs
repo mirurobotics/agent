@@ -2,8 +2,10 @@
 use crate::calibrations::ReportMetadata;
 use crate::events;
 use crate::models;
-use crate::services::calibration;
-use crate::services::device::{SyncCode, SyncOutcome};
+use crate::services::{
+    calibration,
+    device::{SyncCode, SyncOutcome},
+};
 use device_api_v02::models as device_server;
 
 // external crates
