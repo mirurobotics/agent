@@ -2,6 +2,7 @@
 use std::fmt::Write;
 
 // internal crates
+use crate::blocking;
 use crate::crypt::errors::*;
 use crate::filesys::{self, files, Atomic, Overwrite, WriteOptions};
 use crate::trace;
@@ -40,16 +41,10 @@ pub async fn gen_key_pair(
     public_key_file: &filesys::File,
     overwrite: Overwrite,
 ) -> Result<(), CryptErr> {
-    // Generate the RSA key pair on a blocking thread so the 4096-bit keygen
-    // (hundreds of ms of pure CPU) does not pin an async worker thread and stall
-    // concurrent tasks (MQTT loop, poller, local socket server). Only the raw
-    // `RsaKeyPair::generate` moves into the closure; the error mapping stays in
-    // the async body so its `trace!()`/`?` machinery runs in the async context. A
-    // JoinError only occurs if the blocking task panics, which would have
-    // propagated inline before this change too, so we let it propagate.
-    let key_pair = tokio::task::spawn_blocking(move || RsaKeyPair::generate(size))
-        .await
-        .expect("rsa keygen task panicked");
+    // 4096-bit keygen is hundreds of ms of pure CPU, so it runs on the blocking
+    // pool. Only `RsaKeyPair::generate` moves into the closure; the error
+    // mapping stays here so `trace!()` runs in the async context.
+    let key_pair = blocking::run(move || RsaKeyPair::generate(size)).await;
     let key_pair = key_pair.map_err(|e| {
         CryptErr::GenerateRSAKeyPairErr(GenerateRSAKeyPairErr {
             source: e,

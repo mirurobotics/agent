@@ -1,8 +1,9 @@
 // standard crates
-use std::io::Write;
+use std::io::{Read, Write};
 use std::time::{Duration, SystemTime};
 
 // internal crates
+use crate::blocking;
 use crate::cooldown;
 use crate::filesys::{
     dirs,
@@ -42,41 +43,46 @@ pub async fn read_bytes(file: &File) -> Result<Vec<u8>, FileSysErr> {
 
 /// Computes the SHA-256 content digest of `file`, returned as `sha256:<lowercase-hex>`.
 ///
-/// Streams the file through a fixed 8 KiB buffer, so memory use is constant
-/// regardless of file size (the whole file is never materialized). Hashing is
-/// CPU-heavy, so callers may wrap this in `tokio::task::spawn_blocking` for very
-/// large files to avoid stalling the async runtime.
+/// Streams the file through a fixed buffer, so memory use is constant
+/// regardless of file size. Runs on the blocking pool, since hashing a large
+/// file is CPU-heavy.
 pub async fn sha256(file: &File) -> Result<String, FileSysErr> {
-    let mut hasher = Sha256::new();
-    read_chunks(file, |chunk| hasher.update(chunk)).await?;
-    let digest = hasher.finalize();
-    Ok(format!("sha256:{digest:x}"))
+    let file = file.clone();
+    blocking::run(move || {
+        let mut hasher = Sha256::new();
+        read_chunks(&file, |chunk| hasher.update(chunk))?;
+        let digest = hasher.finalize();
+        Ok(format!("sha256:{digest:x}"))
+    })
+    .await
 }
 
 /// Computes `file`'s [`sha256`] digest and its CRC32C (Castagnoli) checksum in
 /// one read.
 pub async fn sha256_and_crc32c(file: &File) -> Result<(String, u32), FileSysErr> {
-    let mut hasher = Sha256::new();
-    let mut crc32c = crc_fast::Digest::new(CrcAlgorithm::Crc32Iscsi);
-    read_chunks(file, |chunk| {
-        hasher.update(chunk);
-        crc32c.update(chunk);
+    let file = file.clone();
+    blocking::run(move || {
+        let mut hasher = Sha256::new();
+        let mut crc32c = crc_fast::Digest::new(CrcAlgorithm::Crc32Iscsi);
+        read_chunks(&file, |chunk| {
+            hasher.update(chunk);
+            crc32c.update(chunk);
+        })?;
+        let digest = hasher.finalize();
+        // CRC-32 values fit in the low 32 bits of crc-fast's u64
+        Ok((format!("sha256:{digest:x}"), crc32c.finalize() as u32))
     })
-    .await?;
-    let digest = hasher.finalize();
-    // CRC-32 values fit in the low 32 bits of crc-fast's u64
-    Ok((format!("sha256:{digest:x}"), crc32c.finalize() as u32))
+    .await
 }
 
-/// Reads `file` through a fixed 8 KiB buffer, passing each chunk to `on_chunk`.
-async fn read_chunks(file: &File, mut on_chunk: impl FnMut(&[u8])) -> Result<(), FileSysErr> {
-    let mut f = TokioFile::open(file.path())
-        .await
-        .map_err(|e| map_io_err_for_open(e, file))?;
+/// Reads `file` through a fixed 8 KiB buffer, passing each chunk to
+/// `on_chunk`. Blocking: call it inside [`blocking::run`].
+fn read_chunks(file: &File, mut on_chunk: impl FnMut(&[u8])) -> Result<(), FileSysErr> {
+    let mut f = std::fs::File::open(file.path()).map_err(|e| map_io_err_for_open(e, file))?;
 
     let mut buf = [0u8; 8 * 1024];
     loop {
-        let n = f.read(&mut buf).await.map_err(|e| {
+        let n = f.read(&mut buf).map_err(|e| {
             FileSysErr::ReadFileErr(ReadFileErr {
                 source: Box::new(e),
                 file: file.clone(),
@@ -233,7 +239,10 @@ pub async fn write_bytes(file: &File, buf: &[u8], opts: WriteOptions) -> Result<
     dirs::create_if_absent(&file.parent()?).await?;
 
     if opts.atomic == Atomic::Yes {
-        write_bytes_atomic(file, buf, opts)
+        // the atomic write syncs to disk, so keep it off the async threads
+        let file = file.clone();
+        let buf = buf.to_vec();
+        blocking::run(move || write_bytes_atomic(&file, &buf, opts)).await
     } else {
         write_bytes_direct(file, buf, opts).await
     }
