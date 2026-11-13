@@ -1,7 +1,7 @@
 // internal crates
 use crate::models::status::impl_status_enum;
 use backend_api::models as backend_client;
-use device_api::models as agent_server;
+use device_api_v02::models as agent_server;
 
 // external crates
 use serde::Serialize;

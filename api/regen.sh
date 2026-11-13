@@ -24,8 +24,8 @@ cp -r "$codegen_backend_models_dir"/* "$backend_models_target_dir"
 
 
 # device
-codegen_device_models_dir=$codegen_dir/device/src/models
-device_models_target_dir=$git_repo_root_dir/libs/device-api/src/models
+codegen_device_models_dir=$codegen_dir/device-v02/src/models
+device_models_target_dir=$git_repo_root_dir/libs/device-api-v02/src/models
 
 # replace the target model directories with the generated ones
 rm -rf "${device_models_target_dir:?}"/*

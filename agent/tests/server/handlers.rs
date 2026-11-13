@@ -1,5 +1,5 @@
 // internal crates
-use device_api::models::{HealthResponse, VersionResponse};
+use device_api_v02::models::{HealthResponse, VersionResponse};
 use miru_agent::server::handlers;
 use miru_agent::version::{self, COMMIT, VERSION};
 
@@ -59,7 +59,7 @@ pub mod routes {
     use axum::Router;
     use tower::ServiceExt;
 
-    use device_api::models as openapi;
+    use device_api_v02::models as openapi;
     use miru_agent::calibrations::{latest, UploaderOptions};
     use miru_agent::events::hub::{EventHub, SpawnOptions};
     use miru_agent::filesys::Overwrite;

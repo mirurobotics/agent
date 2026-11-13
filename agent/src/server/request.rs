@@ -4,7 +4,7 @@ use crate::models::InstanceFormat;
 use crate::server::errors::InvalidRequestErr;
 use crate::services::calibration;
 use crate::trace;
-use device_api::models as device_server;
+use device_api_v02::models as device_server;
 
 // external crates
 use serde::Deserialize;

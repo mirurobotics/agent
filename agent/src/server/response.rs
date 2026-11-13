@@ -3,7 +3,7 @@ use crate::calibrations::ReportMetadata;
 use crate::events;
 use crate::models;
 use crate::services::calibration;
-use device_api::models as device_server;
+use device_api_v02::models as device_server;
 
 // external crates
 use axum::{

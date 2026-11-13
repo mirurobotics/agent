@@ -11,7 +11,7 @@ use crate::test_utils::{
     filesys::dirs as test_dirs,
     sync::{create_storage, create_token_manager},
 };
-use device_api::models::ApiVersion;
+use device_api_v02::models::ApiVersion;
 use miru_agent::calibrations::{latest, UploaderOptions};
 use miru_agent::events::hub::{EventHub, SpawnOptions};
 use miru_agent::server::{auth::BearerToken, routes, tcp, ServerErr, State};

@@ -1251,7 +1251,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "device-api"
+name = "device-api-v02"
 version = "0.12.4"
 dependencies = [
  "serde",
@@ -2314,7 +2314,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "crc-fast",
- "device-api",
+ "device-api-v02",
  "futures",
  "glob",
  "http 1.5.0",

@@ -4,7 +4,7 @@ use std::collections::HashSet;
 // internal crates
 use crate::events::errors::EventsErr;
 use crate::models;
-use device_api::models as device_server;
+use device_api_v02::models as device_server;
 
 // external crates
 use chrono::{DateTime, Utc};

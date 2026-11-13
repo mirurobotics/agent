@@ -1,5 +1,5 @@
 // internal crates
-use device_api::models as openapi;
+use device_api_v02::models as openapi;
 use miru_agent::models::{
     Deployment, Device, DeviceStatus, DplActivity, DplErrStatus, DplTarget, FileRule,
     FileRuleRetention, FileRuleSource, FileRuleUpload, GitCommit, Release, UploadTimezone,

@@ -11,7 +11,7 @@ use crate::services::{
 };
 use crate::trace;
 use crate::version;
-use device_api::models as device_server;
+use device_api_v02::models as device_server;
 
 // external crates
 use axum::{
