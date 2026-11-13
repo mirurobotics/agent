@@ -852,6 +852,60 @@ mod deploy_errors {
     }
 
     #[tokio::test]
+    async fn failed_removal_does_not_hold_other_removals() {
+        let f = Fixture::new().await;
+
+        let ci = make_cfg_inst(f.fixture_path("stale-config.json"));
+        f.seed_cfg_inst(&ci, r#"{"stale": true}"#.into()).await;
+        f.seed_deployment(&make_deployment(
+            "dpl-stale",
+            DplTarget::Deployed,
+            DplActivity::Queued,
+            vec![ci.id.clone()],
+        ))
+        .await;
+        f.apply().await.unwrap();
+        let stale_file = File::new(&ci.filepath);
+        assert!(stale_file.exists());
+
+        // a removal that exhausted its retries isn't a target, so it must not
+        // hold the other removal
+        let mut failed_removal = make_deployment(
+            "dpl-failed-removal",
+            DplTarget::Archived,
+            DplActivity::Removing,
+            vec![],
+        );
+        failed_removal.error_status = DplErrStatus::Failed;
+        f.seed_deployment(&failed_removal).await;
+        f.seed_deployment(&make_deployment(
+            "dpl-stale",
+            DplTarget::Archived,
+            DplActivity::Deployed,
+            vec![ci.id.clone()],
+        ))
+        .await;
+
+        let outcomes = f.apply().await.unwrap();
+
+        assert_eq!(outcomes.len(), 1);
+        assert_eq!(
+            ComparableOutcome::from(&outcomes[0]),
+            ComparableOutcome {
+                id: "dpl-stale".into(),
+                activity: DplActivity::Archived,
+                error_status: DplErrStatus::None,
+                attempts: 0,
+                has_error: false,
+                has_wait: false,
+                in_cooldown: false,
+                transitioned: true,
+            }
+        );
+        assert!(!stale_file.exists(), "stale file should be removed");
+    }
+
+    #[tokio::test]
     async fn config_instance_write_permission_denied() {
         let f = Fixture::new().await;
 

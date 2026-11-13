@@ -36,7 +36,7 @@ pub struct Outcome {
 }
 
 pub async fn apply(args: &Args<'_>) -> Result<Vec<Outcome>, DeployErr> {
-    let mut categorized = read_deployments(args.storage.deployments).await?;
+    let categorized = read_deployments(args.storage.deployments).await?;
 
     let mut outcomes = Vec::new();
     let mut tgt_dpld_files: Vec<filesys::File> = Vec::new();
@@ -59,17 +59,39 @@ pub async fn apply(args: &Args<'_>) -> Result<Vec<Outcome>, DeployErr> {
         None => categorized.target_failed,
     };
 
-    // keep the old deployment's files until its replacement is deployed, so a
-    // replacement that is retrying, cooling down or failed doesn't leave the
-    // device with a partial config
-    let rest = if hold_removals {
-        categorized.without_target_deployed_or_removing()
-    } else {
-        categorized.remove = mark_removing(args.storage.deployments, categorized.remove).await?;
-        categorized.without_target_deployed()
-    };
+    let rest = rest_to_apply(args.storage.deployments, categorized, hold_removals).await;
     outcomes.extend(apply_all(args, rest, &tgt_dpld_files).await?);
     Ok(outcomes)
+}
+
+/// Returns the deployments to apply after the target. While `hold_removals`,
+/// removals are skipped so the old deployment's files stay until its replacement
+/// is deployed; a replacement that is retrying, cooling down or failed would
+/// otherwise leave the device with a partial config.
+async fn rest_to_apply(
+    storage: &disk::Deployments,
+    mut categorized: Categorized,
+    hold_removals: bool,
+) -> Vec<models::Deployment> {
+    if hold_removals {
+        if !categorized.remove.is_empty() {
+            let ids: Vec<&str> = categorized.remove.iter().map(|d| d.id.as_str()).collect();
+            info!("holding removal of {ids:?} until the target deployment is deployed");
+        }
+        return categorized.without_target_deployed_or_removing();
+    }
+    let remove = std::mem::take(&mut categorized.remove);
+    match mark_removing(storage, remove).await {
+        Ok(marked) => {
+            categorized.remove = marked;
+            categorized.without_target_deployed()
+        }
+        Err(e) => {
+            // keep the target's outcome; the next sync retries the removals
+            error!("failed to mark deployments as removing: {e}");
+            categorized.without_target_deployed_or_removing()
+        }
+    }
 }
 
 async fn read_deployments(storage: &disk::Deployments) -> Result<Categorized, DeployErr> {
