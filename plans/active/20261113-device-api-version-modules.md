@@ -62,12 +62,13 @@ Nothing a client sees changes: every `/v0.2` route keeps its path, status codes,
 
 ## Progress
 
-- [ ] M1: generated crate renamed to `device-api-v02`; all imports updated.
-- [ ] M2: `services::device::sync` returns `SyncOutcome`; v0.2 conversion added.
-- [ ] M3: `server/v02/` version module; `routes::router` composes it; tests moved.
+- [x] M1: generated crate renamed to `device-api-v02`; all imports updated.
+- [x] M2: `services::device::sync` returns `SyncOutcome`; v0.2 conversion added.
+- [x] M3: `server/v02/` version module; `routes::router` composes it; tests moved.
 - [ ] M4: new tests (router composition, `SyncOutcome` conversion).
-- [ ] M5: docs (`CLAUDE.md`, `AGENTS.md`, `ARCHITECTURE.md`, `README.md`).
+- [x] M5: docs (`CLAUDE.md`, `AGENTS.md`, `ARCHITECTURE.md`, `README.md`).
 - [ ] CI green on the pushed head (`$preflight` reports `CLEAN`).
+- [x] Source written
 
 ## Surprises & Discoveries
 
@@ -75,7 +76,10 @@ Nothing a client sees changes: every `/v0.2` route keeps its path, status codes,
 
 ## Decision Log
 
-(Add entries as you go.)
+- M2: the `SyncCode` to `SyncDeviceResult` mapping is its own `impl From<SyncCode> for device_server::SyncDeviceResult` in `server/v02/response.rs`, which `From<&SyncOutcome> for SyncDeviceResponse` calls with `outcome.code.into()`. It is the "`From` impl" the Left-out section names for `SyncCode`, and `Self::` keeps each match arm within rustfmt's line width.
+- M2: `services/device/sync.rs` imports `sync::syncer::State` and types the field `pub state: State`; `syncer::State` would put the module `syncer` beside the parameter `syncer` in `sync`.
+- M5: `CLAUDE.md` is a symlink to `AGENTS.md`, so one edit keeps them identical.
+- M1: `tools/lint/src/classifier/mod.rs` keeps `"device_api"` in its unit test: it is the linter's own fixture list, not the repo's `.lint-imports.toml`. `api/regen.sh` keeps its `device_*` variable names; only the two paths change.
 
 ## Outcomes & Retrospective
 
