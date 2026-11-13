@@ -1,7 +1,6 @@
 // internal crates
 use crate::mocks::syncer::MockSyncer;
-use device_api_v02::models::{SyncDeviceResponse, SyncDeviceResult};
-use miru_agent::services::device as dvc_svc;
+use miru_agent::services::device::{self as dvc_svc, SyncCode, SyncOutcome};
 use miru_agent::sync::errors::{MockErr, SyncerInCooldownErr};
 use miru_agent::sync::syncer::State;
 use miru_agent::sync::SyncErr;
@@ -31,13 +30,10 @@ pub mod errors {
         });
 
         let resp = dvc_svc::sync(&syncer).await.unwrap();
-        let expected = SyncDeviceResponse {
-            code: SyncDeviceResult::SYNC_DEVICE_RESULT_IN_COOLDOWN,
+        let expected = SyncOutcome {
+            code: SyncCode::InCooldown,
             message: resp.message.clone(),
-            last_synced_at: sync_state.last_synced_at.to_rfc3339(),
-            last_attempted_sync_at: sync_state.last_attempted_sync_at.to_rfc3339(),
-            in_cooldown: true,
-            cooldown_ends_at: sync_state.cooldown_ends_at.to_rfc3339(),
+            state: sync_state,
         };
 
         assert_eq!(resp, expected);
@@ -56,13 +52,10 @@ pub mod errors {
         });
 
         let resp = dvc_svc::sync(&syncer).await.unwrap();
-        let expected = SyncDeviceResponse {
-            code: SyncDeviceResult::SYNC_DEVICE_RESULT_NETWORK_CONNECTION_ERROR,
+        let expected = SyncOutcome {
+            code: SyncCode::NetworkConnectionError,
             message: resp.message.clone(),
-            last_synced_at: sync_state.last_synced_at.to_rfc3339(),
-            last_attempted_sync_at: sync_state.last_attempted_sync_at.to_rfc3339(),
-            in_cooldown: sync_state.is_in_cooldown(),
-            cooldown_ends_at: sync_state.cooldown_ends_at.to_rfc3339(),
+            state: sync_state,
         };
 
         assert_eq!(resp, expected);
@@ -87,14 +80,11 @@ pub mod errors {
 pub mod success {
     use super::*;
 
-    fn expected_response(sync_state: &State) -> SyncDeviceResponse {
-        SyncDeviceResponse {
-            code: SyncDeviceResult::SYNC_DEVICE_RESULT_SUCCESS,
+    fn expected_response(sync_state: &State) -> SyncOutcome {
+        SyncOutcome {
+            code: SyncCode::Success,
             message: "successfully synced".to_string(),
-            last_synced_at: sync_state.last_synced_at.to_rfc3339(),
-            last_attempted_sync_at: sync_state.last_attempted_sync_at.to_rfc3339(),
-            in_cooldown: sync_state.is_in_cooldown(),
-            cooldown_ends_at: sync_state.cooldown_ends_at.to_rfc3339(),
+            state: sync_state.clone(),
         }
     }
 

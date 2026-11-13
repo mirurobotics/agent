@@ -69,7 +69,10 @@ pub async fn get_device(AxumState(state): AxumState<Arc<State>>) -> impl IntoRes
 
 pub async fn sync_device(AxumState(state): AxumState<Arc<State>>) -> impl IntoResponse {
     handle(
-        async move { dvc_svc::sync(state.syncer.as_ref()).await },
+        async move {
+            let outcome = dvc_svc::sync(state.syncer.as_ref()).await?;
+            Ok::<_, ServerErr>(device_server::SyncDeviceResponse::from(&outcome))
+        },
         "Error syncing device",
     )
     .await
