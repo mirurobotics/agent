@@ -19,6 +19,7 @@ pub struct MockSyncer {
     pub last_attempted_sync_at: Arc<Mutex<DateTime<Utc>>>,
     pub num_sync_calls: AtomicUsize,
     pub get_sync_state_fn: Arc<Mutex<GetSyncStateFn>>,
+    pub fail_get_sync_state: AtomicBool,
     pub sync_fn: Arc<Mutex<SyncFn>>,
 
     // subscriptions
@@ -46,6 +47,7 @@ impl MockSyncer {
                 cooldown_ends_at: DateTime::<Utc>::UNIX_EPOCH,
                 err_streak: 0,
             }))),
+            fail_get_sync_state: AtomicBool::new(false),
             sync_fn: Arc::new(Mutex::new(Box::new(|| Ok(())))),
 
             // subscriptions
@@ -57,6 +59,11 @@ impl MockSyncer {
 
     pub fn set_state(&self, state: State) {
         *self.get_sync_state_fn.lock().unwrap() = Box::new(move || state.clone());
+    }
+
+    /// Make subsequent `get_sync_state` calls fail with a mock error.
+    pub fn set_get_sync_state_fail(&self, fail: bool) {
+        self.fail_get_sync_state.store(fail, Ordering::Relaxed);
     }
 
     pub fn get_transmitter(&self) -> watch::Sender<SyncEvent> {
@@ -97,6 +104,11 @@ impl SyncerExt for MockSyncer {
     }
 
     async fn get_sync_state(&self) -> Result<State, SyncErr> {
+        if self.fail_get_sync_state.load(Ordering::Relaxed) {
+            return Err(SyncErr::MockErr(MockErr {
+                is_network_conn_err: false,
+            }));
+        }
         Ok((*self.get_sync_state_fn.lock().unwrap())())
     }
 

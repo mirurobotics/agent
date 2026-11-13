@@ -1,6 +1,7 @@
 // internal crates
 use crate::mocks::syncer::MockSyncer;
 use miru_agent::services::device::{self as dvc_svc, SyncCode, SyncOutcome};
+use miru_agent::services::ServiceErr;
 use miru_agent::sync::errors::{MockErr, SyncerInCooldownErr};
 use miru_agent::sync::syncer::State;
 use miru_agent::sync::SyncErr;
@@ -74,6 +75,33 @@ pub mod errors {
         });
 
         dvc_svc::sync(&syncer).await.unwrap_err();
+    }
+
+    #[tokio::test]
+    async fn sync_state_unavailable_after_sync() {
+        let syncer = MockSyncer::default();
+        syncer.set_get_sync_state_fail(true);
+
+        let err = dvc_svc::sync(&syncer).await.unwrap_err();
+
+        assert!(matches!(err, ServiceErr::SyncErr(SyncErr::MockErr(_))));
+    }
+
+    #[tokio::test]
+    async fn sync_state_unavailable_after_cooldown() {
+        let syncer = MockSyncer::default();
+        syncer.set_get_sync_state_fail(true);
+        syncer.set_sync(|| {
+            Err(SyncErr::InCooldownErr(SyncerInCooldownErr {
+                cooldown_ends_at: Utc::now() + Duration::days(1),
+                err_streak: 0,
+                trace: trace!(),
+            }))
+        });
+
+        let err = dvc_svc::sync(&syncer).await.unwrap_err();
+
+        assert!(matches!(err, ServiceErr::SyncErr(SyncErr::MockErr(_))));
     }
 }
 
