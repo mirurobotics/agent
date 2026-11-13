@@ -59,16 +59,18 @@ pub async fn apply(args: &Args<'_>) -> Result<Vec<Outcome>, DeployErr> {
         None => categorized.target_failed,
     };
 
-    let rest = rest_to_apply(args.storage.deployments, categorized, hold_removals).await;
+    let rest = hold_or_mark_removals(args.storage.deployments, categorized, hold_removals).await;
     outcomes.extend(apply_all(args, rest, &tgt_dpld_files).await?);
     Ok(outcomes)
 }
 
-/// Returns the deployments to apply after the target. While `hold_removals`,
-/// removals are skipped so the old deployment's files stay until its replacement
-/// is deployed; a replacement that is retrying, cooling down or failed would
-/// otherwise leave the device with a partial config.
-async fn rest_to_apply(
+/// Holds pending removals, or marks them `Removing` in storage, and returns the
+/// deployments to apply after the target. Removals are held while
+/// `hold_removals`, so the old deployment's files stay until its replacement is
+/// deployed; a replacement that is retrying, cooling down or failed would
+/// otherwise leave the device with a partial config. If marking fails, removals
+/// are held for this sync and the next sync retries them.
+async fn hold_or_mark_removals(
     storage: &disk::Deployments,
     mut categorized: Categorized,
     hold_removals: bool,
