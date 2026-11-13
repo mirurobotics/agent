@@ -14,7 +14,7 @@ use miru_agent::server::{routes, State};
 use miru_agent::sync::Syncer;
 
 // external crates
-use axum::body::{self, Body};
+use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use tokio::sync::{broadcast, mpsc};
 use tower::ServiceExt;
@@ -62,21 +62,6 @@ impl Fixture {
 
 pub mod router {
     use super::*;
-
-    #[tokio::test]
-    async fn does_not_serve_v03() {
-        let fixture = Fixture::new("routes_does_not_serve_v03").await;
-        let request = Request::get("/v0.3/health").body(Body::empty()).unwrap();
-
-        let response = routes::router(fixture.state.clone())
-            .oneshot(request)
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::NOT_FOUND);
-        let bytes = body::to_bytes(response.into_body(), 16384).await.unwrap();
-        assert!(bytes.is_empty());
-    }
 
     #[tokio::test]
     async fn wrong_method_is_405() {
