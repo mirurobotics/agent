@@ -763,6 +763,146 @@ mod deploy_errors {
             old_file.exists(),
             "old deployment file should survive when the new deploy fails"
         );
+
+        // The next sync lands in the new deployment's cooldown. The old
+        // deployment must still be held.
+        let outcomes = f.apply().await.unwrap();
+        assert_eq!(outcomes.len(), 1);
+        assert_eq!(
+            ComparableOutcome::from(&outcomes[0]),
+            ComparableOutcome {
+                id: "dpl-new".into(),
+                activity: DplActivity::Queued,
+                error_status: DplErrStatus::Retrying,
+                attempts: 1,
+                has_error: false,
+                has_wait: true,
+                in_cooldown: true,
+                transitioned: false,
+            }
+        );
+        assert!(
+            old_file.exists(),
+            "old deployment file should survive the new deployment's cooldown"
+        );
+        let old = f.deployments.read("dpl-old".to_string()).await.unwrap();
+        assert_eq!(old.activity_status, DplActivity::Deployed);
+
+        // Once the new deployment deploys, the old one is removed
+        f.seed_cfg_inst_content(&ci_new, r#"{"new": true}"#.into())
+            .await;
+        let mut dpl_new = f.deployments.read("dpl-new".to_string()).await.unwrap();
+        dpl_new.reset_retry_state();
+        f.seed_deployment(&dpl_new).await;
+
+        let outcomes = f.apply().await.unwrap();
+        let activities: Vec<_> = outcomes
+            .iter()
+            .map(|o| (o.deployment.id.as_str(), o.deployment.activity_status))
+            .collect();
+        assert_eq!(
+            activities,
+            vec![
+                ("dpl-new", DplActivity::Deployed),
+                ("dpl-old", DplActivity::Archived),
+            ]
+        );
+        assert!(!old_file.exists(), "old deployment file should be removed");
+    }
+
+    #[tokio::test]
+    async fn failed_replacement_preserves_old_deployment_files() {
+        let f = Fixture::new().await;
+
+        let ci_old = make_cfg_inst(f.fixture_path("old-config.json"));
+        f.seed_cfg_inst(&ci_old, r#"{"old": true}"#.into()).await;
+        f.seed_deployment(&make_deployment(
+            "dpl-old",
+            DplTarget::Deployed,
+            DplActivity::Queued,
+            vec![ci_old.id.clone()],
+        ))
+        .await;
+        f.apply().await.unwrap();
+        let old_file = File::new(&ci_old.filepath);
+        assert!(old_file.exists());
+
+        // The replacement has exhausted its retries
+        let mut dpl_new =
+            make_deployment("dpl-new", DplTarget::Deployed, DplActivity::Queued, vec![]);
+        dpl_new.error_status = DplErrStatus::Failed;
+        f.seed_deployment(&dpl_new).await;
+        f.seed_deployment(&make_deployment(
+            "dpl-old",
+            DplTarget::Archived,
+            DplActivity::Deployed,
+            vec![ci_old.id.clone()],
+        ))
+        .await;
+
+        let outcomes = f.apply().await.unwrap();
+
+        assert!(outcomes.is_empty());
+        assert!(
+            old_file.exists(),
+            "old deployment file should survive a failed replacement"
+        );
+        let old = f.deployments.read("dpl-old".to_string()).await.unwrap();
+        assert_eq!(old.activity_status, DplActivity::Deployed);
+    }
+
+    #[tokio::test]
+    async fn failed_removal_does_not_hold_other_removals() {
+        let f = Fixture::new().await;
+
+        let ci = make_cfg_inst(f.fixture_path("stale-config.json"));
+        f.seed_cfg_inst(&ci, r#"{"stale": true}"#.into()).await;
+        f.seed_deployment(&make_deployment(
+            "dpl-stale",
+            DplTarget::Deployed,
+            DplActivity::Queued,
+            vec![ci.id.clone()],
+        ))
+        .await;
+        f.apply().await.unwrap();
+        let stale_file = File::new(&ci.filepath);
+        assert!(stale_file.exists());
+
+        // a removal that exhausted its retries isn't a target, so it must not
+        // hold the other removal
+        let mut failed_removal = make_deployment(
+            "dpl-failed-removal",
+            DplTarget::Archived,
+            DplActivity::Removing,
+            vec![],
+        );
+        failed_removal.error_status = DplErrStatus::Failed;
+        f.seed_deployment(&failed_removal).await;
+        f.seed_deployment(&make_deployment(
+            "dpl-stale",
+            DplTarget::Archived,
+            DplActivity::Deployed,
+            vec![ci.id.clone()],
+        ))
+        .await;
+
+        let outcomes = f.apply().await.unwrap();
+
+        assert_eq!(outcomes.len(), 1);
+        assert_eq!(
+            ComparableOutcome::from(&outcomes[0]),
+            ComparableOutcome {
+                id: "dpl-stale".into(),
+                activity: DplActivity::Archived,
+                error_status: DplErrStatus::None,
+                attempts: 0,
+                has_error: false,
+                has_wait: false,
+                in_cooldown: false,
+                transitioned: true,
+            }
+        );
+        assert!(!stale_file.exists(), "stale file should be removed");
     }
 
     #[tokio::test]

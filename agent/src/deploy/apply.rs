@@ -36,13 +36,13 @@ pub struct Outcome {
 }
 
 pub async fn apply(args: &Args<'_>) -> Result<Vec<Outcome>, DeployErr> {
-    let mut categorized = read_deployments(args.storage.deployments).await?;
+    let categorized = read_deployments(args.storage.deployments).await?;
 
-    categorized.remove = mark_removing(args.storage.deployments, categorized.remove).await?;
-
-    match &categorized.target_deployed {
+    let mut outcomes = Vec::new();
+    let mut tgt_dpld_files: Vec<filesys::File> = Vec::new();
+    let hold_removals = match &categorized.target_deployed {
         Some(target_deployed) => {
-            let tgt_dpld_files: Vec<filesys::File> = read_cfg_insts(
+            tgt_dpld_files = read_cfg_insts(
                 args.storage.cfg_insts.index,
                 &target_deployed.config_instance_ids,
             )
@@ -52,34 +52,59 @@ pub async fn apply(args: &Args<'_>) -> Result<Vec<Outcome>, DeployErr> {
             .collect();
 
             let outcome = apply_one(args, target_deployed.clone(), &[]).await;
-            let outcomes = if outcome.error.is_some() {
-                // the target deployment failed — skip removals (which could
-                // delete files the retrying deployment still needs)
-                let mut outcomes = vec![outcome];
-                let safe = categorized.without_target_deployed_or_removing();
-                outcomes.extend(apply_all(args, safe, &tgt_dpld_files).await?);
-                outcomes
-            } else {
-                let mut outcomes = vec![outcome];
-                outcomes.extend(
-                    apply_all(args, categorized.without_target_deployed(), &tgt_dpld_files).await?,
-                );
-                outcomes
-            };
-            Ok(outcomes)
+            let held = outcome.deployment.activity_status != models::DplActivity::Deployed;
+            outcomes.push(outcome);
+            held
         }
-        None => apply_all(args, categorized.without_target_deployed(), &[]).await,
+        None => categorized.target_failed,
+    };
+
+    let rest = hold_or_mark_removals(args.storage.deployments, categorized, hold_removals).await;
+    outcomes.extend(apply_all(args, rest, &tgt_dpld_files).await?);
+    Ok(outcomes)
+}
+
+/// Holds pending removals, or marks them `Removing` in storage, and returns the
+/// deployments to apply after the target. Removals are held while
+/// `hold_removals`, so the old deployment's files stay until its replacement is
+/// deployed; a replacement that is retrying, cooling down or failed would
+/// otherwise leave the device with a partial config. If marking fails, removals
+/// are held for this sync and the next sync retries them.
+async fn hold_or_mark_removals(
+    storage: &disk::Deployments,
+    mut categorized: Categorized,
+    hold_removals: bool,
+) -> Vec<models::Deployment> {
+    if hold_removals {
+        if !categorized.remove.is_empty() {
+            let ids: Vec<&str> = categorized.remove.iter().map(|d| d.id.as_str()).collect();
+            info!("holding removal of {ids:?} until the target deployment is deployed");
+        }
+        return categorized.without_target_deployed_or_removing();
+    }
+    let remove = std::mem::take(&mut categorized.remove);
+    match mark_removing(storage, remove).await {
+        Ok(marked) => {
+            categorized.remove = marked;
+            categorized.without_target_deployed()
+        }
+        Err(e) => {
+            // keep the target's outcome; the next sync retries the removals
+            error!("failed to mark deployments as removing: {e}");
+            categorized.without_target_deployed_or_removing()
+        }
     }
 }
 
 async fn read_deployments(storage: &disk::Deployments) -> Result<Categorized, DeployErr> {
-    let target_deployed = find_target_deployed(storage).await?;
+    let (target_deployed, target_failed) = find_target_deployed(storage).await?;
     let tgt_dpl_id = target_deployed.as_ref().map(|d| d.id.clone());
 
     let mut categorized = Categorized {
         none: Vec::new(),
         wait: Vec::new(),
         target_deployed,
+        target_failed,
         remove: Vec::new(),
         archive: Vec::new(),
     };
@@ -126,15 +151,16 @@ async fn read_deployments(storage: &disk::Deployments) -> Result<Categorized, De
     Ok(categorized)
 }
 
+/// Returns the deployment to deploy, and whether a deployment meant to be
+/// deployed has exhausted its retries.
 async fn find_target_deployed(
     storage: &disk::Deployments,
-) -> Result<Option<models::Deployment>, DeployErr> {
-    let target_deployed = storage
-        .find_where(|d| {
-            d.target_status == models::DplTarget::Deployed
-                && d.error_status != models::DplErrStatus::Failed
-        })
-        .await?;
+) -> Result<(Option<models::Deployment>, bool), DeployErr> {
+    let (failed, target_deployed): (Vec<_>, Vec<_>) = storage
+        .find_where(|d| d.target_status == models::DplTarget::Deployed)
+        .await?
+        .into_iter()
+        .partition(|d| d.error_status == models::DplErrStatus::Failed);
     if target_deployed.len() > 1 {
         return Err(ConflictingDeploymentsErr {
             ids: target_deployed.iter().map(|d| d.id.clone()).collect(),
@@ -142,7 +168,7 @@ async fn find_target_deployed(
         }
         .into());
     }
-    Ok(target_deployed.into_iter().next())
+    Ok((target_deployed.into_iter().next(), !failed.is_empty()))
 }
 
 async fn read_cfg_insts(
@@ -161,6 +187,8 @@ struct Categorized {
     none: Vec<models::Deployment>,
     wait: Vec<models::Deployment>,
     target_deployed: Option<models::Deployment>,
+    /// a deployment meant to be deployed has exhausted its retries
+    target_failed: bool,
     remove: Vec<models::Deployment>,
     archive: Vec<models::Deployment>,
 }
