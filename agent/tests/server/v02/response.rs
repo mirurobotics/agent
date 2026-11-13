@@ -499,7 +499,7 @@ pub mod latest_calibrations_response {
     use super::*;
     use miru_agent::calibrations::ReportMetadata;
     use miru_agent::models::InstanceFormat;
-    use miru_agent::server::response::latest_calibrations;
+    use miru_agent::server::v02::response::latest_calibrations;
 
     fn metadata(report_id: Uuid) -> ReportMetadata {
         ReportMetadata {
@@ -551,7 +551,7 @@ pub mod calibration_content_response {
     use axum::body;
     use axum::http::{header, StatusCode};
     use miru_agent::models::InstanceFormat;
-    use miru_agent::server::response::calibration_content;
+    use miru_agent::server::v02::response::calibration_content;
     use miru_agent::services::calibration::Content;
     use uuid::Uuid;
 

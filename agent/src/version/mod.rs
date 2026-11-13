@@ -11,18 +11,6 @@ pub const BUILD_DATE: &str = match option_env!("MIRU_AGENT_BUILD_DATE") {
 pub const OS: &str = std::env::consts::OS;
 pub const ARCH: &str = std::env::consts::ARCH;
 
-pub fn api_version() -> String {
-    device_api_v02::models::ApiVersion::API_VERSION.to_string()
-}
-
-pub fn api_git_commit() -> String {
-    device_api_v02::models::ApiGitCommit::API_GIT_COMMIT.to_string()
-}
-
-pub fn api_release_version() -> String {
-    device_api_v02::models::ReleaseVersion::RELEASE_VERSION.to_string()
-}
-
 pub fn format() -> String {
     format!("Version: {}\nCommit: {}", VERSION, COMMIT)
 }

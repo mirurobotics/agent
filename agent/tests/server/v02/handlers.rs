@@ -1,6 +1,8 @@
 // internal crates
-use device_api_v02::models::{HealthResponse, VersionResponse};
-use miru_agent::server::handlers;
+use device_api_v02::models::{
+    ApiGitCommit, ApiVersion, HealthResponse, ReleaseVersion, VersionResponse,
+};
+use miru_agent::server::v02::handlers;
 use miru_agent::version::{self, COMMIT, VERSION};
 
 // external crates
@@ -38,15 +40,25 @@ pub mod version_tests {
         let expected = VersionResponse {
             version: VERSION.to_string(),
             git_commit: COMMIT.to_string(),
-            api_version: version::api_version(),
-            api_git_commit: version::api_git_commit(),
-            api_release_version: version::api_release_version(),
+            api_version: ApiVersion::API_VERSION.to_string(),
+            api_git_commit: ApiGitCommit::API_GIT_COMMIT.to_string(),
+            api_release_version: ReleaseVersion::RELEASE_VERSION.to_string(),
             rust_version: version::RUST_VERSION.to_string(),
             build_date: version::BUILD_DATE.to_string(),
             os: version::OS.to_string(),
             arch: version::ARCH.to_string(),
         };
         assert_eq!(actual, expected);
+    }
+
+    #[tokio::test]
+    async fn api_release_version_extends_api_version() {
+        let response = handlers::version().await.into_response();
+
+        let bytes = body::to_bytes(response.into_body(), 4096).await.unwrap();
+        let actual: VersionResponse = serde_json::from_slice(&bytes).unwrap();
+        let prefix = format!("{}.", actual.api_version);
+        assert!(actual.api_release_version.starts_with(&prefix));
     }
 }
 

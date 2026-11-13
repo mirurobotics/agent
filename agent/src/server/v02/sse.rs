@@ -9,7 +9,8 @@ use crate::events::{
     errors::{EventsErr, MalformedCursorErr},
     model::EventTypeFilter,
 };
-use crate::server::{request, state::State};
+use crate::server::state::State;
+use crate::server::v02::request;
 use crate::services::{events as events_svc, ServiceErr};
 use crate::trace;
 use device_api_v02::models as device_server;

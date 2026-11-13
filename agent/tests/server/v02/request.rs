@@ -2,7 +2,7 @@
 use device_api_v02::models as openapi;
 use miru_agent::calibrations::Filter;
 use miru_agent::models::InstanceFormat;
-use miru_agent::server::request::LatestCalibrationsQuery;
+use miru_agent::server::v02::request::LatestCalibrationsQuery;
 use miru_agent::services::calibration::CreateParams;
 
 fn calibration_request(format: openapi::InstanceFormat) -> openapi::CreateCalibrationRequest {
