@@ -46,6 +46,40 @@ pub mod create_calibration_request {
     }
 
     #[test]
+    fn maps_each_known_format() {
+        let cases = [
+            (
+                openapi::InstanceFormat::INSTANCE_FORMAT_JSON,
+                InstanceFormat::Json,
+            ),
+            (
+                openapi::InstanceFormat::INSTANCE_FORMAT_YAML,
+                InstanceFormat::Yaml,
+            ),
+            (
+                openapi::InstanceFormat::INSTANCE_FORMAT_JSONC,
+                InstanceFormat::Jsonc,
+            ),
+            (
+                openapi::InstanceFormat::INSTANCE_FORMAT_XML,
+                InstanceFormat::Xml,
+            ),
+            (
+                openapi::InstanceFormat::INSTANCE_FORMAT_CSV,
+                InstanceFormat::Csv,
+            ),
+            (
+                openapi::InstanceFormat::INSTANCE_FORMAT_TEXT,
+                InstanceFormat::Text,
+            ),
+        ];
+        for (format, want) in cases {
+            let params = CreateParams::try_from(calibration_request(format)).unwrap();
+            assert_eq!(params.format, want, "{format:?}");
+        }
+    }
+
+    #[test]
     fn rejects_an_unknown_format() {
         let request = calibration_request(openapi::InstanceFormat::InstanceFormatUnknown);
 
