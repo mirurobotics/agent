@@ -42,7 +42,7 @@ use tokio::sync::broadcast;
 
 ### Device API conversions
 
-Handlers in `agent/src/server/handlers.rs` don't convert wire types. Response conversions live in `server/response.rs` and request conversions in `server/request.rs` ([agent#383](https://github.com/mirurobotics/agent/pull/383#discussion_r4363970314)).
+Handlers in `agent/src/server/v02/handlers.rs` (one module per Device API version) don't convert wire types. Response conversions live in `server/v02/response.rs` and request conversions in `server/v02/request.rs` ([agent#383](https://github.com/mirurobotics/agent/pull/383#discussion_r4363970314)).
 
 Stores return the domain type, such as a calibration as a `Report`, not a type shaped for one route; the service or the response conversion picks what the route needs ([agent#421](https://github.com/mirurobotics/agent/pull/421#discussion_r4521100113), [agent#421](https://github.com/mirurobotics/agent/pull/421#discussion_r4521188885)).
 
@@ -67,7 +67,7 @@ use the same code in normal and test builds; tests control dependencies and time
 
 Pick the enum facility by what the enum needs to do:
 
-- **Backend-mirrored status enum** (has a `backend_api` and/or `device_api` twin) →
+- **Backend-mirrored status enum** (has a `backend_api` and/or `device_api_v02` twin) →
   `impl_status_enum!` (`agent/src/models/status.rs`) with `agent_type` +
   `backend_type` + `unknown_backend`. Generates the wire `Deserialize`
   (unknown→default), `variants()`, `as_str()`, all layer conversions, and inline
@@ -137,7 +137,7 @@ compared or displayed with `test_utils::filesys::abs_path`.
 
 Integration test files in `agent/tests/` mirror the `agent/src/` module structure.
 
-Route tests in `agent/tests/server/handlers.rs` check the API contract only: status codes and response or error bodies. What a service does with a request, such as how a report is stored, belongs in the service tests ([agent#383](https://github.com/mirurobotics/agent/pull/383#discussion_r4364316671)).
+Route tests in `agent/tests/server/v02/handlers.rs` check the API contract only: status codes and response or error bodies. What a service does with a request, such as how a report is stored, belongs in the service tests ([agent#383](https://github.com/mirurobotics/agent/pull/383#discussion_r4364316671)).
 
 ### Coverage gates
 
@@ -158,7 +158,7 @@ In CI, the Lint workflow runs:
 
 ## Generated code
 
-`libs/backend-api/` and `libs/device-api/` are auto-generated from OpenAPI specs. Do not edit by hand. Regenerate via `make -C api` or `api/regen.sh`. Clippy warnings in generated code are expected and unrelated to agent source quality.
+`libs/backend-api/` and `libs/device-api-v02/` are auto-generated from OpenAPI specs. Do not edit by hand. Regenerate via `make -C api` or `api/regen.sh`. Clippy warnings in generated code are expected and unrelated to agent source quality.
 
 ## Common tasks
 
