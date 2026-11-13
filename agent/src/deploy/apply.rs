@@ -56,7 +56,7 @@ pub async fn apply(args: &Args<'_>) -> Result<Vec<Outcome>, DeployErr> {
             outcomes.push(outcome);
             held
         }
-        None => has_failed_target(args.storage.deployments).await?,
+        None => categorized.target_failed,
     };
 
     // keep the old deployment's files until its replacement is deployed, so a
@@ -73,13 +73,14 @@ pub async fn apply(args: &Args<'_>) -> Result<Vec<Outcome>, DeployErr> {
 }
 
 async fn read_deployments(storage: &disk::Deployments) -> Result<Categorized, DeployErr> {
-    let target_deployed = find_target_deployed(storage).await?;
+    let (target_deployed, target_failed) = find_target_deployed(storage).await?;
     let tgt_dpl_id = target_deployed.as_ref().map(|d| d.id.clone());
 
     let mut categorized = Categorized {
         none: Vec::new(),
         wait: Vec::new(),
         target_deployed,
+        target_failed,
         remove: Vec::new(),
         archive: Vec::new(),
     };
@@ -126,15 +127,16 @@ async fn read_deployments(storage: &disk::Deployments) -> Result<Categorized, De
     Ok(categorized)
 }
 
+/// Returns the deployment to deploy, and whether a deployment meant to be
+/// deployed has exhausted its retries.
 async fn find_target_deployed(
     storage: &disk::Deployments,
-) -> Result<Option<models::Deployment>, DeployErr> {
-    let target_deployed = storage
-        .find_where(|d| {
-            d.target_status == models::DplTarget::Deployed
-                && d.error_status != models::DplErrStatus::Failed
-        })
-        .await?;
+) -> Result<(Option<models::Deployment>, bool), DeployErr> {
+    let (failed, target_deployed): (Vec<_>, Vec<_>) = storage
+        .find_where(|d| d.target_status == models::DplTarget::Deployed)
+        .await?
+        .into_iter()
+        .partition(|d| d.error_status == models::DplErrStatus::Failed);
     if target_deployed.len() > 1 {
         return Err(ConflictingDeploymentsErr {
             ids: target_deployed.iter().map(|d| d.id.clone()).collect(),
@@ -142,19 +144,7 @@ async fn find_target_deployed(
         }
         .into());
     }
-    Ok(target_deployed.into_iter().next())
-}
-
-/// Whether the deployment meant to be deployed has exhausted its retries.
-/// `find_target_deployed` skips it, so `apply` checks for it separately.
-async fn has_failed_target(storage: &disk::Deployments) -> Result<bool, DeployErr> {
-    let failed = storage
-        .find_where(|d| {
-            d.target_status == models::DplTarget::Deployed
-                && d.error_status == models::DplErrStatus::Failed
-        })
-        .await?;
-    Ok(!failed.is_empty())
+    Ok((target_deployed.into_iter().next(), !failed.is_empty()))
 }
 
 async fn read_cfg_insts(
@@ -173,6 +163,8 @@ struct Categorized {
     none: Vec<models::Deployment>,
     wait: Vec<models::Deployment>,
     target_deployed: Option<models::Deployment>,
+    /// a deployment meant to be deployed has exhausted its retries
+    target_failed: bool,
     remove: Vec<models::Deployment>,
     archive: Vec<models::Deployment>,
 }
