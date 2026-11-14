@@ -2,7 +2,7 @@
 use std::collections::HashSet;
 
 // internal crates
-use crate::events::errors::EventsErr;
+use crate::events::errors::{EventsErr, UnknownEventTypeErr};
 use crate::models;
 
 // external crates
@@ -42,6 +42,13 @@ pub struct DeploymentRemovedEvent {
     pub archived_at: Option<String>,
 }
 
+/// A stored event's data, parsed by its type.
+#[derive(Debug, PartialEq)]
+pub enum EventPayload {
+    Deployed(DeploymentDeployedEvent),
+    Removed(DeploymentRemovedEvent),
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Event {
     pub id: i64,
@@ -58,6 +65,18 @@ impl Event {
             event_type: args.event_type,
             occurred_at: args.occurred_at,
             data: args.data,
+        }
+    }
+
+    pub fn payload(&self) -> Result<EventPayload, EventsErr> {
+        let data = self.data.clone();
+        match self.event_type.as_str() {
+            DEPLOYMENT_DEPLOYED => Ok(EventPayload::Deployed(serde_json::from_value(data)?)),
+            DEPLOYMENT_REMOVED => Ok(EventPayload::Removed(serde_json::from_value(data)?)),
+            other => {
+                let err = UnknownEventTypeErr(other.to_string());
+                Err(EventsErr::UnknownEventTypeErr(err))
+            }
         }
     }
 }
