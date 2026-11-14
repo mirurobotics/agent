@@ -3,76 +3,22 @@
 // `impl_status_enum!` is the single source of truth for a status enum's
 // variant↔wire mapping. From one mapping table it generates a custom
 // `Deserialize` (unknown→default with a log), `variants()`, `as_str()`, the
-// agent-server and/or backend `From` conversions, and inline serde
-// forward-compat tests. Optional clauses (`display`, `case_insensitive`,
-// `on_non_string`, `aliases`) default to off so existing call sites are
-// unchanged.
+// backend `From` conversions, and inline serde forward-compat tests. Optional
+// clauses (`display`, `case_insensitive`, `on_non_string`, `aliases`) default
+// to off so existing call sites are unchanged.
 //
-// The macro has four public forms, distinguished by the conversions a call site
-// needs:
-//   - local        : neither `agent_type` nor `backend_type` (e.g. `LogLevel`)
-//   - agent         : `agent_type` only (e.g. `DeviceStatus`)
-//   - backend+agent : `agent_type` + `backend_type` (e.g. the `Dpl*` enums, `Os`)
-//   - backend-only  : `backend_type` only (no current users)
+// The macro has two public forms:
+//   - local   : no `backend_type` (e.g. `LogLevel`, `DeviceStatus`)
+//   - backend : `backend_type` + `unknown_backend` (e.g. the `Dpl*` enums, `Os`,
+//               `UploadTimezone`, `InstanceFormat`)
+//
+// Device API conversions are written by hand in each version's
+// `server/vNN/response.rs`.
 //
 // See the "Enum conventions" section of `AGENTS.md` for the canonical decision
 // tree describing which facility to reach for.
 macro_rules! impl_status_enum {
-    // ───────────────────────────── public: backend + agent ──────────────────
-    (
-        enum $name:ident,
-        default: $default:ident,
-        label: $label:expr,
-        log: $log:ident,
-        $(display: $d:tt,)?
-        $(case_insensitive: $ci:tt,)?
-        $(on_non_string: $ons:tt,)?
-        $(aliases: [ $($alias:literal => $avariant:ident),* $(,)? ],)?
-        agent_type: $at:ty,
-        backend_type: $bt:ty,
-        unknown_backend: $ub:path,
-        mappings: [
-            $( $variant:ident => $wire:literal => $av:expr => $bv:path ),+ $(,)?
-        ]
-    ) => {
-        impl_status_enum!(@base_impls enum $name, $(display: $d,)? wires [ $($variant => $wire),+ ]);
-        impl_status_enum!(@deser enum $name, default $default, label $label, log $log,
-            $(case_insensitive: $ci,)? aliases [ $($($alias => $avariant),*)? ],
-            wires [ $($variant => $wire),+ ] $(, on_non_string: $ons)?);
-        impl_status_enum!(@tests enum $name, default $default,
-            $(display: $d,)? $(case_insensitive: $ci,)? $(on_non_string: $ons,)?
-            aliases [ $($($alias => $avariant),*)? ], wires [ $($variant => $wire),+ ]);
-        impl_status_enum!(@agent enum $name, agent_type: $at, [ $($variant => $av),+ ]);
-        impl_status_enum!(@backend enum $name, default $default, label $label, log $log,
-            backend_type: $bt, unknown_backend: $ub, [ $($variant => $bv),+ ]);
-    };
-
-    // ───────────────────────────── public: agent only ───────────────────────
-    (
-        enum $name:ident,
-        default: $default:ident,
-        label: $label:expr,
-        log: $log:ident,
-        $(display: $d:tt,)?
-        $(case_insensitive: $ci:tt,)?
-        $(on_non_string: $ons:tt,)?
-        $(aliases: [ $($alias:literal => $avariant:ident),* $(,)? ],)?
-        agent_type: $at:ty,
-        mappings: [
-            $( $variant:ident => $wire:literal => $av:expr ),+ $(,)?
-        ]
-    ) => {
-        impl_status_enum!(@base_impls enum $name, $(display: $d,)? wires [ $($variant => $wire),+ ]);
-        impl_status_enum!(@deser enum $name, default $default, label $label, log $log,
-            $(case_insensitive: $ci,)? aliases [ $($($alias => $avariant),*)? ],
-            wires [ $($variant => $wire),+ ] $(, on_non_string: $ons)?);
-        impl_status_enum!(@tests enum $name, default $default,
-            $(display: $d,)? $(case_insensitive: $ci,)? $(on_non_string: $ons,)?
-            aliases [ $($($alias => $avariant),*)? ], wires [ $($variant => $wire),+ ]);
-        impl_status_enum!(@agent enum $name, agent_type: $at, [ $($variant => $av),+ ]);
-    };
-
-    // ───────────────────────────── public: backend only ─────────────────────
+    // ───────────────────────────── public: backend ──────────────────────────
     (
         enum $name:ident,
         default: $default:ident,
@@ -210,17 +156,6 @@ macro_rules! impl_status_enum {
                         $log!("{} '{}' is not valid, defaulting to {:?}", $label, other, default);
                         Ok(default)
                     }
-                }
-            }
-        }
-    };
-
-    // ───────────────────────────── @agent ───────────────────────────────────
-    (@agent enum $name:ident, agent_type: $at:ty, [ $($variant:ident => $av:expr),+ $(,)? ]) => {
-        impl From<&$name> for $at {
-            fn from(status: &$name) -> Self {
-                match status {
-                    $($name::$variant => $av,)+
                 }
             }
         }

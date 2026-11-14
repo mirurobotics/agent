@@ -2,7 +2,6 @@
 use crate::deserialize_error;
 use crate::models::{config_instance::CfgInstID, status::impl_status_enum, Patch};
 use backend_api::models as backend_client;
-use device_api_v02::models as agent_server;
 
 // external crates
 use chrono::{DateTime, TimeDelta, Utc};
@@ -26,18 +25,14 @@ impl_status_enum!(
     default: Staged,
     label: "deployment target status",
     log: warn,
-    agent_type: agent_server::DeploymentTargetStatus,
     backend_type: backend_client::DeploymentTargetStatus,
     unknown_backend: backend_client::DeploymentTargetStatus::DeploymentTargetStatusUnknown,
     mappings: [
         Staged => "staged" =>
-            agent_server::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_STAGED =>
             backend_client::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_STAGED,
         Deployed => "deployed" =>
-            agent_server::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_DEPLOYED =>
             backend_client::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_DEPLOYED,
         Archived => "archived" =>
-            agent_server::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_ARCHIVED =>
             backend_client::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_ARCHIVED,
     ]
 );
@@ -60,27 +55,20 @@ impl_status_enum!(
     default: Drifted,
     label: "deployment activity status",
     log: warn,
-    agent_type: agent_server::DeploymentActivityStatus,
     backend_type: backend_client::DeploymentActivityStatus,
     unknown_backend: backend_client::DeploymentActivityStatus::DeploymentActivityStatusUnknown,
     mappings: [
         Drifted => "drifted" =>
-            agent_server::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DRIFTED =>
             backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DRIFTED,
         Staged => "staged" =>
-            agent_server::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_STAGED =>
             backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_STAGED,
         Queued => "queued" =>
-            agent_server::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_QUEUED =>
             backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_QUEUED,
         Deployed => "deployed" =>
-            agent_server::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED =>
             backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED,
         Removing => "removing" =>
-            agent_server::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_REMOVING =>
             backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_REMOVING,
         Archived => "archived" =>
-            agent_server::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_ARCHIVED =>
             backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_ARCHIVED,
     ]
 );
@@ -100,18 +88,14 @@ impl_status_enum!(
     default: None,
     label: "deployment error status",
     log: warn,
-    agent_type: agent_server::DeploymentErrorStatus,
     backend_type: backend_client::DeploymentErrorStatus,
     unknown_backend: backend_client::DeploymentErrorStatus::DeploymentErrorStatusUnknown,
     mappings: [
         None => "none" =>
-            agent_server::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_NONE =>
             backend_client::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_NONE,
         Failed => "failed" =>
-            agent_server::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_FAILED =>
             backend_client::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_FAILED,
         Retrying => "retrying" =>
-            agent_server::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_RETRYING =>
             backend_client::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_RETRYING,
     ]
 );
@@ -156,33 +140,24 @@ impl_status_enum!(
     default: Drifted,
     label: "deployment status",
     log: warn,
-    agent_type: agent_server::DeploymentStatus,
     backend_type: backend_client::DeploymentStatus,
     unknown_backend: backend_client::DeploymentStatus::DeploymentStatusUnknown,
     mappings: [
         Drifted => "drifted" =>
-            agent_server::DeploymentStatus::DEPLOYMENT_STATUS_DRIFTED =>
             backend_client::DeploymentStatus::DEPLOYMENT_STATUS_DRIFTED,
         Staged => "staged" =>
-            agent_server::DeploymentStatus::DEPLOYMENT_STATUS_STAGED =>
             backend_client::DeploymentStatus::DEPLOYMENT_STATUS_STAGED,
         Queued => "queued" =>
-            agent_server::DeploymentStatus::DEPLOYMENT_STATUS_QUEUED =>
             backend_client::DeploymentStatus::DEPLOYMENT_STATUS_QUEUED,
         Deployed => "deployed" =>
-            agent_server::DeploymentStatus::DEPLOYMENT_STATUS_DEPLOYED =>
             backend_client::DeploymentStatus::DEPLOYMENT_STATUS_DEPLOYED,
         Removing => "removing" =>
-            agent_server::DeploymentStatus::DEPLOYMENT_STATUS_REMOVING =>
             backend_client::DeploymentStatus::DEPLOYMENT_STATUS_REMOVING,
         Archived => "archived" =>
-            agent_server::DeploymentStatus::DEPLOYMENT_STATUS_ARCHIVED =>
             backend_client::DeploymentStatus::DEPLOYMENT_STATUS_ARCHIVED,
         Failed => "failed" =>
-            agent_server::DeploymentStatus::DEPLOYMENT_STATUS_FAILED =>
             backend_client::DeploymentStatus::DEPLOYMENT_STATUS_FAILED,
         Retrying => "retrying" =>
-            agent_server::DeploymentStatus::DEPLOYMENT_STATUS_RETRYING =>
             backend_client::DeploymentStatus::DEPLOYMENT_STATUS_RETRYING,
     ]
 );
