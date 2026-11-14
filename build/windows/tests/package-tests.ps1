@@ -295,7 +295,7 @@ function Assert-ServiceInstallRow {
     $row = $rows[0]
     Assert-Equal "miru-agent" $row[1] "service name"
     Assert-Equal "Miru Agent" $row[2] "service display name"
-    Assert-Equal "Miru Config Agent" $row[9] "service description"
+    Assert-Equal "Miru Daemon" $row[9] "service description"
     Assert-Equal "MiruAgentExe" $row[8] "service owning component"
     Assert-Equal $MsiServiceAccount $row[6] "service runs as NT SERVICE\miru-agent"
     Assert-True ([string]::IsNullOrEmpty($row[7])) "service takes no arguments"

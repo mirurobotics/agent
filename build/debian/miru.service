@@ -1,5 +1,5 @@
 [Unit]
-Description=Miru Config Agent
+Description=Miru Daemon
 After=network.target
 Requires=miru.socket
 

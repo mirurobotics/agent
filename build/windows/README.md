@@ -5,7 +5,7 @@ MSI. Native Windows compile CI was established in PR #234; PR #236 adds the
 package contract and direct Windows Installer lifecycle validation.
 
 The MSI installs `miru-agent.exe` as a Windows service named `miru-agent`
-(display name "Miru Agent", description "Miru Config Agent"). The service runs
+(display name "Miru Agent", description "Miru Daemon"). The service runs
 as the virtual account **`NT SERVICE\miru-agent`** with start type
 **Automatic**; it is started on install and stopped and removed on uninstall.
 Major upgrades stop and delete the old service before file replacement, then

@@ -76,7 +76,7 @@
         <ServiceInstall Id="MiruAgentService"
                         Name="miru-agent"
                         DisplayName="Miru Agent"
-                        Description="Miru Config Agent"
+                        Description="Miru Daemon"
                         Type="ownProcess"
                         Start="auto"
                         ErrorControl="normal"
