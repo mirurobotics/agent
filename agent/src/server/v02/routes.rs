@@ -51,7 +51,6 @@ fn device(api_version: &str) -> Router<Arc<State>> {
 }
 
 fn deployments(api_version: &str) -> Router<Arc<State>> {
-    // /current before /{id} so "current" isn't captured as a deployment_id
     Router::new()
         .route(
             format!("/{api_version}/deployments/current").as_str(),
@@ -64,7 +63,6 @@ fn deployments(api_version: &str) -> Router<Arc<State>> {
 }
 
 fn releases(api_version: &str) -> Router<Arc<State>> {
-    // /current before /{id} so "current" isn't captured as a release_id
     Router::new()
         .route(
             format!("/{api_version}/releases/current").as_str(),
