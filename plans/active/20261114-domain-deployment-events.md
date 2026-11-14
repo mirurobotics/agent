@@ -44,7 +44,7 @@ No new files. The two structs mirror the generated `libs/device-api-v02/src/mode
 - [x] M0: commit the stale route-order comment removal in `agent/src/server/v02/routes.rs`.
 - [x] M1: source: event structs in `agent/src/events/model.rs`.
 - [x] Source written
-- [ ] M2: tests: `agent/tests/events/model.rs` pins the JSON with `json!` literals, and `agent/tests/server/v02/response.rs` checks the served payload against the v0.2 structs.
+- [ ] M2: tests: `agent/tests/events/model.rs` uses the domain structs, and `agent/tests/server/v02/response.rs` covers the v0.2 event conversion, including its error paths.
 - [ ] CI green on the pushed head (`$preflight` reports `CLEAN`).
 
 ## Surprises & Discoveries
@@ -53,8 +53,7 @@ No new files. The two structs mirror the generated `libs/device-api-v02/src/mode
 
 ## Decision Log
 
-- Design review: the v0.2 payload check moves to the v0.2 test layer (`agent/tests/server/v02/response.rs`, new `event_response` module), and `agent/tests/events/model.rs` asserts with `json!` literals and no longer imports `device_api_v02`. The src comment no longer names a version: the JSON is the persisted event-log format that clients receive unchanged. `/v0.3` keeps the v0.2 event payload (its only contract change is calibrations dropping `role` and `aspect`), so pass-through stays.
-- Design review: the two event structs and their fields are private. Only `EventArgs::deployed` and `EventArgs::removed` build them, and a public type would invite treating the persisted shape as a typed API.
+- Review (agent#487, ben-miru): the payload must be compiler-checked against the v0.2 contract, not only tested. The author chose per-version conversion at serve time: the event structs are `pub` and derive `Deserialize`, and `server/v02/response.rs` replaces `From<&Event> for device_server::Event` with a `TryFrom` that parses `data` into the domain struct for its `event_type` and builds the generated v0.2 struct (`From<&events::model::DeploymentDeployedEvent>` and `...RemovedEvent`), so every field and enum mapping is checked by the compiler in the version that owns the contract. An unknown event type or unparseable data is an error, and the SSE stream skips that event with a warning, as it already did for a serialization failure. `/v0.3` writes its own conversion. The src comment no longer names a version.
 - Design review: the stale route-order comments in `server/v02/routes.rs` ship here because they were raised in agent#485's review after its last push, and this is the next PR on top of it.
 
 (Add entries as you go.)
@@ -98,7 +97,7 @@ M1, source. In `agent/src/events/model.rs`, delete the `device_api_v02` import a
 
 and `DeploymentRemovedEvent` with `archived_at` in place of `deployed_at`. In `EventArgs::deployed`/`removed`, use `deployment.status()` and `deployment.activity_status`, `deployment.error_status`, `deployment.target_status` directly instead of `.into()`; keep the `to_rfc3339()` mapping.
 
-M2, tests. In `agent/tests/events/model.rs`, drop the `device_api_v02` import and the uses of the event structs (now private): the `serializes_all_fields` tests compare `event.data` with a `serde_json::json!({...})` literal holding every field, and `deployed_at_none_when_absent` / `archived_at_none_when_absent` compare the whole `event.data` with a literal that has no timestamp key, which proves the key is omitted. The `does_not_validate_activity_status` tests stay as they are. In `agent/tests/server/v02/response.rs`, add an `event_response` module beside the other conversion modules: it builds `Event`s from `EventArgs::deployed` and `EventArgs::removed` (with the timestamp set and unset), converts them with `device_server::Event::from(&event)`, and checks that `data` equals `serde_json::json!(device_server::DeploymentDeployedEvent { .. })` (resp. `DeploymentRemovedEvent`). That pins the stored payload to the v0.2 schema in the v0.2 layer, so `/v0.3` copies the check with `tests/server/v02/` and nothing in `events/` names a version.
+M2, tests. In `agent/tests/events/model.rs`, build expected data from the domain event structs (`miru_agent::events::model::DeploymentDeployedEvent` and `DeploymentRemovedEvent`, now `pub` and `Deserialize`) with domain enums, and drop the `device_api_v02` import; `deployed_at_none_when_absent` / `archived_at_none_when_absent` compare the whole `event.data` with a `json!` literal that has no timestamp key, which proves the key is omitted. In `agent/tests/server/v02/response.rs`, add an `event_response` module: `device_server::Event::try_from(&event)` for events from `EventArgs::deployed` and `EventArgs::removed` (timestamp set and unset) gives `data` equal to `serde_json::json!(device_server::DeploymentDeployedEvent { .. })` (resp. removed); an unknown `event_type` and a `data` that doesn't parse each return `Err`. In `agent/tests/server/v02/sse.rs`, if a fixture can append such an event, check the stream skips it.
 
 ## Concrete Steps
 

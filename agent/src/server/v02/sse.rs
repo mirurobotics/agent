@@ -63,8 +63,9 @@ async fn events_impl(
     let stream = events_svc::subscribe(&state.event_hub, cursor, filter).await?;
 
     let sse_stream = stream.filter_map(|event| {
-        let api_event = device_server::Event::from(&event);
-        match serde_json::to_string(&api_event) {
+        let json = device_server::Event::try_from(&event)
+            .and_then(|api_event| serde_json::to_string(&api_event));
+        match json {
             Ok(json) => Some(Ok::<_, Infallible>(
                 SseEvent::default()
                     .id(event.id.to_string())
@@ -72,7 +73,7 @@ async fn events_impl(
                     .data(json),
             )),
             Err(e) => {
-                warn!("failed to serialize event {}: {e}", event.id);
+                warn!("failed to convert event {}: {e}", event.id);
                 None
             }
         }

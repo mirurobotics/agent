@@ -14,30 +14,32 @@ pub type EventTypeFilter = HashSet<String>;
 pub const DEPLOYMENT_DEPLOYED: &str = "deployment.deployed";
 pub const DEPLOYMENT_REMOVED: &str = "deployment.removed";
 
-// The persisted event-log format. Clients receive it unchanged, so it must not change.
-#[derive(Debug, Serialize)]
-struct DeploymentDeployedEvent {
-    deployment_id: String,
-    release_id: String,
-    status: models::DplStatus,
-    activity_status: models::DplActivity,
-    error_status: models::DplErrStatus,
-    target_status: models::DplTarget,
+// The persisted event-log format. Each Device API version converts it to its
+// own wire type, so a change here must keep old stored events readable.
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub struct DeploymentDeployedEvent {
+    pub deployment_id: String,
+    pub release_id: String,
+    pub status: models::DplStatus,
+    pub activity_status: models::DplActivity,
+    pub error_status: models::DplErrStatus,
+    pub target_status: models::DplTarget,
     #[serde(skip_serializing_if = "Option::is_none")]
-    deployed_at: Option<String>,
+    pub deployed_at: Option<String>,
 }
 
-// The persisted event-log format. Clients receive it unchanged, so it must not change.
-#[derive(Debug, Serialize)]
-struct DeploymentRemovedEvent {
-    deployment_id: String,
-    release_id: String,
-    status: models::DplStatus,
-    activity_status: models::DplActivity,
-    error_status: models::DplErrStatus,
-    target_status: models::DplTarget,
+// The persisted event-log format. Each Device API version converts it to its
+// own wire type, so a change here must keep old stored events readable.
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub struct DeploymentRemovedEvent {
+    pub deployment_id: String,
+    pub release_id: String,
+    pub status: models::DplStatus,
+    pub activity_status: models::DplActivity,
+    pub error_status: models::DplErrStatus,
+    pub target_status: models::DplTarget,
     #[serde(skip_serializing_if = "Option::is_none")]
-    archived_at: Option<String>,
+    pub archived_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
