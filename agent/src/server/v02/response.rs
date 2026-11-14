@@ -171,7 +171,9 @@ fn to_event_data(event: &events::model::Event) -> Result<serde_json::Value, serd
                 serde_json::from_value(event.data.clone())?;
             serde_json::to_value(device_server::DeploymentRemovedEvent::from(&stored))
         }
-        other => Err(serde::de::Error::custom(format!("unknown event type '{other}'"))),
+        other => Err(serde::de::Error::custom(format!(
+            "unknown event type '{other}'"
+        ))),
     }
 }
 
