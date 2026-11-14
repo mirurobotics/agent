@@ -207,7 +207,7 @@ if [ "$MAJOR" -gt 0 ] || { [ "$MAJOR" -eq 0 ] && [ "$MINOR" -ge 9 ]; }; then
 fi
 
 # DOWNLOAD THE DAEMON #
-# ------------------ #
+# ------------------- #
 INSTALLED_VERSION=$(dpkg-query -W -f='${Version}' "$DAEMON_DEB_PKG_NAME" 2>/dev/null || echo "")
 # replace '~' with '-' 
 if [ -n "$INSTALLED_VERSION" ]; then
@@ -253,7 +253,7 @@ else
 fi
 
 # ACTIVATE THE DAEMON #
-# ------------------ #
+# ------------------- #
 cleanup() {
     exit_code=$?
 
