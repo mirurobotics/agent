@@ -51,10 +51,11 @@ No new files. New code in existing files mirrors these siblings:
 
 ## Progress
 
-- [ ] M1: source (macro, call sites, v0.2 conversions).
+- [x] M1: source (macro, call sites, v0.2 conversions).
 - [ ] M2: tests (harness, fixtures, v0.2 conversion tests).
-- [ ] M3: docs (`AGENTS.md`, `ARCHITECTURE.md`).
+- [x] M3: docs (`AGENTS.md`, `ARCHITECTURE.md`).
 - [ ] CI green on the pushed head (`$preflight` reports `CLEAN`).
+- [x] Source written
 
 ## Surprises & Discoveries
 
@@ -62,7 +63,10 @@ No new files. New code in existing files mirrors these siblings:
 
 ## Decision Log
 
-(Add entries as you go.)
+- Open question taken at its default: `ARCHITECTURE.md`'s `server` paragraph now says nothing outside a version module imports its generated crate.
+- M3 (docs) ran in the source stage with M1, so the design review sees the documented rule; M2 (tests) is left for the tests stage.
+- The four deployment conversions in `server/v02/response.rs` follow the order `From<&models::Deployment>` calls them (status, activity, error, target), per "order functions by control flow".
+- In `deployment.rs` and `file_rule.rs` each mapping keeps `Variant => "wire" =>` and the `backend_client::` path on two lines, as before, since one line would pass 100 columns; `os.rs` and `device.rs` fit on one line.
 
 ## Outcomes & Retrospective
 
