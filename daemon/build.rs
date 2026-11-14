@@ -1,8 +1,8 @@
 // build.rs
 use std::process::Command;
 
-const GIT_COMMIT_HASH_KEY: &str = "MIRU_AGENT_GIT_COMMIT_HASH";
-const BUILD_DATE_KEY: &str = "MIRU_AGENT_BUILD_DATE";
+const GIT_COMMIT_HASH_KEY: &str = "MIRU_DAEMON_GIT_COMMIT_HASH";
+const BUILD_DATE_KEY: &str = "MIRU_DAEMON_BUILD_DATE";
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");

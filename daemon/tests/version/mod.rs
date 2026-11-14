@@ -16,7 +16,7 @@ fn test_commit_set_by_build_script() {
 
 #[test]
 fn test_build_date_set_by_build_script() {
-    // build.rs sets MIRU_AGENT_BUILD_DATE to YYYY-MM-DDTHH:MM:SSZ
+    // build.rs sets MIRU_DAEMON_BUILD_DATE to YYYY-MM-DDTHH:MM:SSZ
     assert_ne!(version::BUILD_DATE, "unknown");
     assert_eq!(version::BUILD_DATE.len(), 20);
     assert!(version::BUILD_DATE.starts_with("20"));
