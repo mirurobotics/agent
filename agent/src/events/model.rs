@@ -4,7 +4,6 @@ use std::collections::HashSet;
 // internal crates
 use crate::events::errors::EventsErr;
 use crate::models;
-use device_api_v02::models as device_server;
 
 // external crates
 use chrono::{DateTime, Utc};
@@ -15,8 +14,31 @@ pub type EventTypeFilter = HashSet<String>;
 pub const DEPLOYMENT_DEPLOYED: &str = "deployment.deployed";
 pub const DEPLOYMENT_REMOVED: &str = "deployment.removed";
 
-pub type DeploymentDeployedEvent = device_server::DeploymentDeployedEvent;
-pub type DeploymentRemovedEvent = device_server::DeploymentRemovedEvent;
+// Stored as is and served by /v0.2/events, so this JSON must not change.
+#[derive(Debug, Serialize)]
+pub struct DeploymentDeployedEvent {
+    pub deployment_id: String,
+    pub release_id: String,
+    pub status: models::DplStatus,
+    pub activity_status: models::DplActivity,
+    pub error_status: models::DplErrStatus,
+    pub target_status: models::DplTarget,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deployed_at: Option<String>,
+}
+
+// Stored as is and served by /v0.2/events, so this JSON must not change.
+#[derive(Debug, Serialize)]
+pub struct DeploymentRemovedEvent {
+    pub deployment_id: String,
+    pub release_id: String,
+    pub status: models::DplStatus,
+    pub activity_status: models::DplActivity,
+    pub error_status: models::DplErrStatus,
+    pub target_status: models::DplTarget,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub archived_at: Option<String>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Event {
@@ -61,10 +83,10 @@ impl EventArgs {
             DeploymentDeployedEvent {
                 deployment_id: deployment.id.clone(),
                 release_id: deployment.release_id.clone(),
-                status: (&deployment.status()).into(),
-                activity_status: (&deployment.activity_status).into(),
-                error_status: (&deployment.error_status).into(),
-                target_status: (&deployment.target_status).into(),
+                status: deployment.status(),
+                activity_status: deployment.activity_status,
+                error_status: deployment.error_status,
+                target_status: deployment.target_status,
                 deployed_at: deployment.deployed_at.map(|dt| dt.to_rfc3339()),
             },
         )
@@ -76,10 +98,10 @@ impl EventArgs {
             DeploymentRemovedEvent {
                 deployment_id: deployment.id.clone(),
                 release_id: deployment.release_id.clone(),
-                status: (&deployment.status()).into(),
-                activity_status: (&deployment.activity_status).into(),
-                error_status: (&deployment.error_status).into(),
-                target_status: (&deployment.target_status).into(),
+                status: deployment.status(),
+                activity_status: deployment.activity_status,
+                error_status: deployment.error_status,
+                target_status: deployment.target_status,
                 archived_at: deployment.archived_at.map(|dt| dt.to_rfc3339()),
             },
         )
