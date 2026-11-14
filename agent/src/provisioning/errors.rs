@@ -17,7 +17,7 @@ impl crate::errors::Error for MissingEnvVarErr {}
 
 #[derive(Debug, thiserror::Error)]
 #[error(
-    "this machine is already provisioned as device '{device_name}'\n\nTo attach it to a different device, run `miru-agent reprovision`. To provision it as a new device, uninstall the agent and delete its data first."
+    "this machine is already provisioned as device '{device_name}'\n\nTo attach it to a different device, run `miru-agent reprovision`. To provision it as a new device, uninstall the daemon and delete its data first."
 )]
 pub struct AlreadyProvisionedErr {
     pub device_name: String,

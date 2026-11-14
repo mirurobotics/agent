@@ -296,7 +296,7 @@ async fn reconcile_agent_version(layout: &disk::Layout, latch: &Latch) -> AfterR
         Ok(upgrade::Reconcile::Ready(_)) => AfterReconcile::Continue,
         Ok(upgrade::Reconcile::Stopped) => AfterReconcile::Exit(RunOutcome::Completed),
         Err(e) => {
-            error!("upgrade: failed to reconcile agent package version: {e}");
+            error!("upgrade: failed to reconcile daemon package version: {e}");
             AfterReconcile::Exit(RunOutcome::Failed)
         }
     }
