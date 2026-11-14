@@ -218,14 +218,62 @@ impl From<&models::GitCommit> for device_server::GitCommit {
     }
 }
 
-impl From<&events::model::Event> for device_server::Event {
-    fn from(event: &events::model::Event) -> Self {
-        device_server::Event {
+impl TryFrom<&events::model::Event> for device_server::Event {
+    type Error = serde_json::Error;
+
+    fn try_from(event: &events::model::Event) -> Result<Self, Self::Error> {
+        Ok(device_server::Event {
             object: device_server::event::Object::Event,
             id: event.id,
             r#type: event.event_type.clone(),
             occurred_at: event.occurred_at.to_rfc3339(),
-            data: event.data.clone(),
+            data: to_event_data(event)?,
+        })
+    }
+}
+
+// Builds the v0.2 payload from the stored one, so the compiler checks it
+// against the v0.2 contract.
+fn to_event_data(event: &events::model::Event) -> Result<serde_json::Value, serde_json::Error> {
+    match event.event_type.as_str() {
+        events::model::DEPLOYMENT_DEPLOYED => {
+            let stored: events::model::DeploymentDeployedEvent =
+                serde_json::from_value(event.data.clone())?;
+            serde_json::to_value(device_server::DeploymentDeployedEvent::from(&stored))
+        }
+        events::model::DEPLOYMENT_REMOVED => {
+            let stored: events::model::DeploymentRemovedEvent =
+                serde_json::from_value(event.data.clone())?;
+            serde_json::to_value(device_server::DeploymentRemovedEvent::from(&stored))
+        }
+        other => Err(serde::de::Error::custom(format!("unknown event type '{other}'"))),
+    }
+}
+
+impl From<&events::model::DeploymentDeployedEvent> for device_server::DeploymentDeployedEvent {
+    fn from(event: &events::model::DeploymentDeployedEvent) -> Self {
+        device_server::DeploymentDeployedEvent {
+            deployment_id: event.deployment_id.clone(),
+            release_id: event.release_id.clone(),
+            status: (&event.status).into(),
+            activity_status: (&event.activity_status).into(),
+            error_status: (&event.error_status).into(),
+            target_status: (&event.target_status).into(),
+            deployed_at: event.deployed_at.clone(),
+        }
+    }
+}
+
+impl From<&events::model::DeploymentRemovedEvent> for device_server::DeploymentRemovedEvent {
+    fn from(event: &events::model::DeploymentRemovedEvent) -> Self {
+        device_server::DeploymentRemovedEvent {
+            deployment_id: event.deployment_id.clone(),
+            release_id: event.release_id.clone(),
+            status: (&event.status).into(),
+            activity_status: (&event.activity_status).into(),
+            error_status: (&event.error_status).into(),
+            target_status: (&event.target_status).into(),
+            archived_at: event.archived_at.clone(),
         }
     }
 }
