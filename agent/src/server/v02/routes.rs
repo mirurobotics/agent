@@ -13,11 +13,21 @@ use axum::{
     Router,
 };
 
-// lint:allow(funclen) — route table; one entry per Device API route
 pub fn table() -> Router<Arc<State>> {
     let api_version = device_api_v02::models::ApiVersion::API_VERSION.to_string();
     Router::new()
-        // =============================== AGENT INFO ============================== //
+        .merge(agent_info(&api_version))
+        .merge(device(&api_version))
+        .merge(deployments(&api_version))
+        .merge(releases(&api_version))
+        .merge(git_commits(&api_version))
+        .merge(file_rules(&api_version))
+        .merge(calibrations(&api_version))
+        .merge(events(&api_version))
+}
+
+fn agent_info(api_version: &str) -> Router<Arc<State>> {
+    Router::new()
         .route(
             format!("/{api_version}/health").as_str(),
             get(handlers::health),
@@ -26,7 +36,10 @@ pub fn table() -> Router<Arc<State>> {
             format!("/{api_version}/version").as_str(),
             get(handlers::version),
         )
-        // ============================= DEVICE ==================================== //
+}
+
+fn device(api_version: &str) -> Router<Arc<State>> {
+    Router::new()
         .route(
             format!("/{api_version}/device").as_str(),
             get(handlers::get_device),
@@ -35,8 +48,11 @@ pub fn table() -> Router<Arc<State>> {
             format!("/{api_version}/device/sync").as_str(),
             post(handlers::sync_device),
         )
-        // ============================= DEPLOYMENTS =============================== //
-        // /current before /{id} so "current" isn't captured as a deployment_id
+}
+
+fn deployments(api_version: &str) -> Router<Arc<State>> {
+    // /current before /{id} so "current" isn't captured as a deployment_id
+    Router::new()
         .route(
             format!("/{api_version}/deployments/current").as_str(),
             get(handlers::get_current_deployment),
@@ -45,8 +61,11 @@ pub fn table() -> Router<Arc<State>> {
             format!("/{api_version}/deployments/{{deployment_id}}").as_str(),
             get(handlers::get_deployment),
         )
-        // ============================= RELEASES ================================== //
-        // /current before /{id} so "current" isn't captured as a release_id
+}
+
+fn releases(api_version: &str) -> Router<Arc<State>> {
+    // /current before /{id} so "current" isn't captured as a release_id
+    Router::new()
         .route(
             format!("/{api_version}/releases/current").as_str(),
             get(handlers::get_current_release),
@@ -55,17 +74,24 @@ pub fn table() -> Router<Arc<State>> {
             format!("/{api_version}/releases/{{release_id}}").as_str(),
             get(handlers::get_release),
         )
-        // ============================= GIT COMMITS =============================== //
-        .route(
-            format!("/{api_version}/git_commits/{{git_commit_id}}").as_str(),
-            get(handlers::get_git_commit),
-        )
-        // ============================= FILE RULES ================================ //
-        .route(
-            format!("/{api_version}/file_rules/{{file_rule_id}}").as_str(),
-            get(handlers::get_file_rule),
-        )
-        // ============================= CALIBRATIONS ============================== //
+}
+
+fn git_commits(api_version: &str) -> Router<Arc<State>> {
+    Router::new().route(
+        format!("/{api_version}/git_commits/{{git_commit_id}}").as_str(),
+        get(handlers::get_git_commit),
+    )
+}
+
+fn file_rules(api_version: &str) -> Router<Arc<State>> {
+    Router::new().route(
+        format!("/{api_version}/file_rules/{{file_rule_id}}").as_str(),
+        get(handlers::get_file_rule),
+    )
+}
+
+fn calibrations(api_version: &str) -> Router<Arc<State>> {
+    Router::new()
         .route(
             format!("/{api_version}/calibrations").as_str(),
             post(handlers::create_calibration),
@@ -78,6 +104,8 @@ pub fn table() -> Router<Arc<State>> {
             format!("/{api_version}/calibrations/latest/{{report_id}}/content").as_str(),
             get(handlers::get_latest_calibration_content),
         )
-        // ============================== EVENTS =================================== //
-        .route(format!("/{api_version}/events").as_str(), get(sse::events))
+}
+
+fn events(api_version: &str) -> Router<Arc<State>> {
+    Router::new().route(format!("/{api_version}/events").as_str(), get(sse::events))
 }
