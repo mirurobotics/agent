@@ -5,7 +5,7 @@
 #   CRATE_DIR          — absolute path to the crate root
 #
 # Optional env:
-#   CARGO_PKG          — e.g. "--package miru-agent"
+#   CARGO_PKG          — e.g. "--package miru-daemon"
 #   CARGO_FEATURES     — optional Cargo feature flags
 #   CARGO_TEST_ARGS    — e.g. "-- --test-threads=1"
 #   RUST_LOG_OVERRIDE  — e.g. "off"

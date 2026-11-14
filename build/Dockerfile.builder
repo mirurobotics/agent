@@ -46,7 +46,7 @@ RUN cargo install cargo-auditable --locked
 # if it isn't "auditable" — so GoReleaser's `tool:`/`command:` cannot point at the
 # cargo-auditable binary directly. This wrapper restores the `cargo auditable`
 # invocation while passing through whatever GoReleaser appends (e.g.
-# `zigbuild --target=... --release -p=miru-agent`).
+# `zigbuild --target=... --release -p=miru-daemon`).
 RUN printf '#!/usr/bin/env bash\nexec cargo auditable "$@"\n' \
         > /usr/local/bin/cargo-auditable-zigbuild \
     && chmod +x /usr/local/bin/cargo-auditable-zigbuild

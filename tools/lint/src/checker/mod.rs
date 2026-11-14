@@ -316,7 +316,7 @@ fn main() {}
         let block = parse(content);
 
         let diags = check(
-            Path::new("agent/src/http/deployments.rs"),
+            Path::new("daemon/src/http/deployments.rs"),
             &block,
             &classifier,
             &config,
@@ -343,7 +343,7 @@ fn main() {}
         let block = parse(content);
 
         let diags = check(
-            Path::new("agent/src/filesys/file.rs"),
+            Path::new("daemon/src/filesys/file.rs"),
             &block,
             &classifier,
             &config,

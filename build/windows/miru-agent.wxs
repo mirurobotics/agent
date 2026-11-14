@@ -72,7 +72,7 @@
               KeyPath="yes" />
         <!-- The SCM launches the bare exe (no subcommand, no console flag) as
              the service; Name must equal SERVICE_NAME in
-             agent/src/windows/scm.rs. -->
+             daemon/src/windows/scm.rs. -->
         <ServiceInstall Id="MiruAgentService"
                         Name="miru-agent"
                         DisplayName="Miru Agent"

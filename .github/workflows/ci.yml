@@ -101,7 +101,7 @@ jobs:
           GCS_IT_BUCKET: ${{ vars.GCS_IT_BUCKET }}
           AWS_IT_BUCKET: ${{ vars.AWS_IT_BUCKET }}
           AWS_IT_UPLOAD_ROLE: ${{ vars.AWS_IT_UPLOAD_ROLE }}
-        run: cargo test --package miru-agent --locked ${{ steps.gcs.outcome == 'skipped' && env.REAL_BUCKET_SKIP || '' }}
+        run: cargo test --package miru-daemon --locked ${{ steps.gcs.outcome == 'skipped' && env.REAL_BUCKET_SKIP || '' }}
 
   change_scope:
     name: change-scope
@@ -150,7 +150,7 @@ jobs:
           env-vars: AWS_LC_SYS
 
       - name: Build Windows Target
-        run: cargo build --target x86_64-pc-windows-msvc --package miru-agent --bin miru-agent --locked --release
+        run: cargo build --target x86_64-pc-windows-msvc --package miru-daemon --bin miru-agent --locked --release
 
       - name: Upload agent executable
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

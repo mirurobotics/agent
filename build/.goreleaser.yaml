@@ -20,7 +20,7 @@ builds:
     command: zigbuild
     flags:
       - --release
-      - -p=miru-agent
+      - -p=miru-daemon
 
   - id: "agent-windows"
     # aws-lc-sys can't cross-compile to Windows, so the release workflow builds

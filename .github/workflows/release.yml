@@ -76,7 +76,7 @@ jobs:
           tool: cargo-auditable@0.7.6
 
       - name: Build Windows Release (cargo auditable)
-        run: cargo auditable build --release --target x86_64-pc-windows-msvc -p miru-agent --locked
+        run: cargo auditable build --release --target x86_64-pc-windows-msvc -p miru-daemon --locked
 
       - name: Stage prebuilt artifacts
         shell: pwsh

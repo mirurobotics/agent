@@ -138,7 +138,7 @@ mod tests {
         ];
         let refs = uses.iter().collect::<Vec<_>>();
 
-        let diagnostics = diagnostics(Path::new("agent/src/http/deployments.rs"), &refs);
+        let diagnostics = diagnostics(Path::new("daemon/src/http/deployments.rs"), &refs);
         assert_eq!(diagnostics.len(), 3);
         assert_eq!(diagnostics[0].kind, "relative-super-import");
         assert!(diagnostics
@@ -155,7 +155,7 @@ mod tests {
         )];
         let refs = uses.iter().collect::<Vec<_>>();
 
-        let diagnostics = diagnostics(Path::new("agent/tests/cache/dir.rs"), &refs);
+        let diagnostics = diagnostics(Path::new("daemon/tests/cache/dir.rs"), &refs);
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(diagnostics[0].kind, "multi-anchor-internal-import");
     }
@@ -169,7 +169,7 @@ mod tests {
         ];
         let refs = uses.iter().collect::<Vec<_>>();
 
-        let normalized = normalize(Path::new("agent/src/filesys/file.rs"), &refs);
+        let normalized = normalize(Path::new("daemon/src/filesys/file.rs"), &refs);
         assert_eq!(normalized.len(), 1);
         assert_eq!(
             normalized[0].text,
@@ -185,7 +185,7 @@ mod tests {
         ];
         let refs = uses.iter().collect::<Vec<_>>();
 
-        let normalized = normalize(Path::new("agent/src/http/deployments.rs"), &refs);
+        let normalized = normalize(Path::new("daemon/src/http/deployments.rs"), &refs);
         assert_eq!(normalized.len(), 1);
         assert_eq!(
             normalized[0].text,
@@ -203,7 +203,7 @@ mod tests {
         ];
         let refs = uses.iter().collect::<Vec<_>>();
 
-        let normalized = normalize(Path::new("agent/src/server/handlers.rs"), &refs);
+        let normalized = normalize(Path::new("daemon/src/server/handlers.rs"), &refs);
         assert_eq!(normalized.len(), 2);
         assert_eq!(
             normalized[0].text,
@@ -220,8 +220,8 @@ mod tests {
         let uses = [stmt(1, "use super::mock::Helper;", "super")];
         let refs = uses.iter().collect::<Vec<_>>();
 
-        let diagnostics = diagnostics(Path::new("agent/tests/server/handlers.rs"), &refs);
-        let normalized = normalize(Path::new("agent/tests/server/handlers.rs"), &refs);
+        let diagnostics = diagnostics(Path::new("daemon/tests/server/handlers.rs"), &refs);
+        let normalized = normalize(Path::new("daemon/tests/server/handlers.rs"), &refs);
 
         assert!(diagnostics.is_empty());
         assert_eq!(normalized[0].text, "use super::mock::Helper;\n");
@@ -247,8 +247,8 @@ mod tests {
         }];
         let refs = uses.iter().collect::<Vec<_>>();
 
-        let diagnostics = diagnostics(Path::new("agent/src/http/deployments.rs"), &refs);
-        let normalized = normalize(Path::new("agent/src/http/deployments.rs"), &refs);
+        let diagnostics = diagnostics(Path::new("daemon/src/http/deployments.rs"), &refs);
+        let normalized = normalize(Path::new("daemon/src/http/deployments.rs"), &refs);
 
         assert!(diagnostics.is_empty());
         assert_eq!(
@@ -268,7 +268,7 @@ mod tests {
         }];
         let refs = uses.iter().collect::<Vec<_>>();
 
-        let normalized = normalize(Path::new("agent/src/lib.rs"), &refs);
+        let normalized = normalize(Path::new("daemon/src/lib.rs"), &refs);
         assert_eq!(normalized.len(), 1);
         assert_eq!(normalized[0].text, "pub use crate::filesys::PathExt;\n");
     }
@@ -284,7 +284,7 @@ mod tests {
         }];
         let refs = uses.iter().collect::<Vec<_>>();
 
-        let normalized = normalize(Path::new("agent/src/lib.rs"), &refs);
+        let normalized = normalize(Path::new("daemon/src/lib.rs"), &refs);
         assert_eq!(normalized.len(), 1);
         assert_eq!(
             normalized[0].text,
