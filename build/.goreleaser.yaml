@@ -48,7 +48,7 @@ nfpms:
     maintainer: "Benjamin Smidt <ben@mirurobotics.com>"
     description: |
       Miru Daemon.
-      Miru provides the infrastructure to version, manage, and deploy application configurations at scale. This debian package is the Miru Daemon, which handles configuration deployment to your robots in production.
+      Miru builds DevOps infrastructure for robotics. This Debian package installs the Miru Daemon, which runs on your robots and connects them to Miru.
     
     formats:
       - deb
