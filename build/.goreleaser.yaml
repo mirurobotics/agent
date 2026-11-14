@@ -159,7 +159,7 @@ release:
     - glob: ./prebuilt/windows_amd64/miru_agent.pdb
     - glob: ./prebuilt/windows_amd64/*.msi
   footer: >-
-    ## Miru Agent {{.Tag}}
+    ## Miru Daemon {{.Tag}}
 
     **Full Changelog**: https://github.com/mirurobotics/agent/compare/{{ .PreviousTag }}...{{ .Tag }}
     
