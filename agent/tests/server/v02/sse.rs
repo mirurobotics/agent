@@ -190,7 +190,7 @@ mod cursor {
         let f = Fixture::with_hub_opts("sse_expired_cursor", opts).await;
 
         // Publish enough events to trigger compaction
-        for i in 0..6 {
+        for _ in 0..6 {
             f.event_hub().publish(deployed()).await.unwrap();
         }
 
@@ -511,7 +511,7 @@ mod stream {
 
         // Flood the broadcast channel while nothing is consuming frames.
         // With broadcast_capacity=2, publishing 10 events guarantees lag.
-        for i in 0..10 {
+        for _ in 0..10 {
             f.event_hub().publish(deployed()).await.unwrap();
         }
 
