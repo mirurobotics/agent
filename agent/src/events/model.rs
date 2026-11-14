@@ -14,30 +14,30 @@ pub type EventTypeFilter = HashSet<String>;
 pub const DEPLOYMENT_DEPLOYED: &str = "deployment.deployed";
 pub const DEPLOYMENT_REMOVED: &str = "deployment.removed";
 
-// Stored as is and served by /v0.2/events, so this JSON must not change.
+// The persisted event-log format. Clients receive it unchanged, so it must not change.
 #[derive(Debug, Serialize)]
-pub struct DeploymentDeployedEvent {
-    pub deployment_id: String,
-    pub release_id: String,
-    pub status: models::DplStatus,
-    pub activity_status: models::DplActivity,
-    pub error_status: models::DplErrStatus,
-    pub target_status: models::DplTarget,
+struct DeploymentDeployedEvent {
+    deployment_id: String,
+    release_id: String,
+    status: models::DplStatus,
+    activity_status: models::DplActivity,
+    error_status: models::DplErrStatus,
+    target_status: models::DplTarget,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub deployed_at: Option<String>,
+    deployed_at: Option<String>,
 }
 
-// Stored as is and served by /v0.2/events, so this JSON must not change.
+// The persisted event-log format. Clients receive it unchanged, so it must not change.
 #[derive(Debug, Serialize)]
-pub struct DeploymentRemovedEvent {
-    pub deployment_id: String,
-    pub release_id: String,
-    pub status: models::DplStatus,
-    pub activity_status: models::DplActivity,
-    pub error_status: models::DplErrStatus,
-    pub target_status: models::DplTarget,
+struct DeploymentRemovedEvent {
+    deployment_id: String,
+    release_id: String,
+    status: models::DplStatus,
+    activity_status: models::DplActivity,
+    error_status: models::DplErrStatus,
+    target_status: models::DplTarget,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub archived_at: Option<String>,
+    archived_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
