@@ -1,4 +1,4 @@
-internal_crates = ["backend_api", "device_api_v02", "miru_agent"]
+internal_crates = ["backend_api", "device_api_v02", "miru_daemon"]
 
 [labels]
 standard = "// standard crates"

@@ -14,7 +14,7 @@ For detailed documentation and usage instructions, please visit the [official do
 
 ```text
 agent/
-├── agent/                  # Main binary (miru-agent)
+├── daemon/                 # Main binary (miru-agent)
 │   ├── src/                #   Application source
 │   ├── tests/              #   Integration tests (mirrors src/ structure)
 │   └── build.rs            #   Build script (embeds git hash, validates version)
@@ -38,24 +38,24 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for a deeper explanation of how things fi
 ## Building
 
 ```bash
-cargo build -p miru-agent            # debug
-cargo build -p miru-agent --release  # release
+cargo build -p miru-daemon            # debug
+cargo build -p miru-daemon --release  # release
 ```
 
 ## Testing
 
 ```bash
 cargo test
-cargo test --package miru-agent
+cargo test --package miru-daemon
 ./scripts/test.sh
 ```
 
 Ordinary Cargo tests require no custom features or logging environment. The
-wrapper runs `RUST_LOG=off cargo test --package miru-agent` to suppress log output.
+wrapper runs `RUST_LOG=off cargo test --package miru-daemon` to suppress log output.
 
-The main suite in `agent/tests/mod.rs` is an external integration target that
+The main suite in `daemon/tests/mod.rs` is an external integration target that
 exercises the ordinary library's public APIs; cases needing private access live
-in inline `#[cfg(test)]` modules under `agent/src/`. See `AGENTS.md` § Testing
+in inline `#[cfg(test)]` modules under `daemon/src/`. See `AGENTS.md` § Testing
 for target layout, fixture rules, and `#[serial]` conventions.
 
 ### Coverage gates
@@ -84,7 +84,7 @@ The **Release** workflow (`release.yml`) triggers on git tags, runs CI, then bui
 
 ## Releasing
 
-Releases are tag-triggered. GoReleaser cross-compiles for x86_64 and aarch64 Linux and produces `.deb` packages. The build script (`agent/build.rs`) validates that the git tag matches the version in `Cargo.toml`.
+Releases are tag-triggered. GoReleaser cross-compiles for x86_64 and aarch64 Linux and produces `.deb` packages. The build script (`daemon/build.rs`) validates that the git tag matches the version in `Cargo.toml`.
 
 ## Further reading
 

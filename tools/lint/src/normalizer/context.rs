@@ -128,7 +128,7 @@ mod tests {
 
     #[test]
     fn source_file_context_uses_module_path() {
-        let ctx = FileContext::from_path(Path::new("agent/src/http/deployments.rs"));
+        let ctx = FileContext::from_path(Path::new("daemon/src/http/deployments.rs"));
         assert_eq!(ctx.module_path, vec!["http", "deployments"]);
         assert!(!ctx.is_test_path);
     }
@@ -151,7 +151,7 @@ mod tests {
 
     #[test]
     fn mod_file_context_uses_parent_module_path() {
-        let ctx = FileContext::from_path(Path::new("agent/src/storage/mod.rs"));
+        let ctx = FileContext::from_path(Path::new("daemon/src/storage/mod.rs"));
         assert_eq!(ctx.module_path, vec!["storage"]);
         assert!(!ctx.is_test_path);
     }
@@ -171,14 +171,14 @@ mod tests {
 
     #[test]
     fn tests_directory_is_marked_test_path() {
-        let ctx = FileContext::from_path(Path::new("agent/tests/server/handlers.rs"));
+        let ctx = FileContext::from_path(Path::new("daemon/tests/server/handlers.rs"));
         assert_eq!(ctx.module_path, vec!["server", "handlers"]);
         assert!(ctx.is_test_path);
     }
 
     #[test]
     fn main_file_context_clears_module_path() {
-        let ctx = FileContext::from_path(Path::new("agent/src/main.rs"));
+        let ctx = FileContext::from_path(Path::new("daemon/src/main.rs"));
         assert!(ctx.module_path.is_empty());
         assert!(!ctx.is_test_path);
     }
