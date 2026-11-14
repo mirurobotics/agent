@@ -543,6 +543,115 @@ pub mod git_commit_response {
     }
 }
 
+pub mod event_response {
+    use super::*;
+    use miru_agent::events::errors::EventsErr;
+    use miru_agent::events::model::{Event, EventArgs};
+
+    fn stored(id: i64, args: EventArgs) -> Event {
+        Event {
+            id,
+            event_type: args.event_type,
+            occurred_at: fixed_time(),
+            data: args.data,
+        }
+    }
+
+    fn deployment() -> Deployment {
+        Deployment {
+            id: "dpl-1".into(),
+            release_id: "rls-1".into(),
+            activity_status: DplActivity::Deployed,
+            error_status: DplErrStatus::None,
+            target_status: DplTarget::Deployed,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn converts_deployed_event() {
+        let t = fixed_time();
+        let dpl = Deployment {
+            deployed_at: Some(t),
+            ..deployment()
+        };
+        let event = stored(7, EventArgs::deployed(&dpl).unwrap());
+
+        let data = openapi::DeploymentDeployedEvent {
+            deployment_id: "dpl-1".into(),
+            release_id: "rls-1".into(),
+            status: openapi::DeploymentStatus::DEPLOYMENT_STATUS_DEPLOYED,
+            activity_status: openapi::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED,
+            error_status: openapi::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_NONE,
+            target_status: openapi::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_DEPLOYED,
+            deployed_at: Some(t.to_rfc3339()),
+        };
+        let expected = openapi::Event {
+            object: openapi::event::Object::Event,
+            id: 7,
+            r#type: "deployment.deployed".into(),
+            occurred_at: t.to_rfc3339(),
+            data: serde_json::to_value(data).unwrap(),
+        };
+
+        let sdk = openapi::Event::try_from(&event).unwrap();
+        assert_eq!(sdk, expected);
+    }
+
+    #[test]
+    fn omits_absent_deployed_at() {
+        let event = stored(7, EventArgs::deployed(&deployment()).unwrap());
+
+        let sdk = openapi::Event::try_from(&event).unwrap();
+        assert!(sdk.data.get("deployed_at").is_none());
+    }
+
+    #[test]
+    fn converts_removed_event() {
+        let t = fixed_time();
+        let dpl = Deployment {
+            activity_status: DplActivity::Archived,
+            target_status: DplTarget::Archived,
+            archived_at: Some(t),
+            ..deployment()
+        };
+        let event = stored(8, EventArgs::removed(&dpl).unwrap());
+
+        let data = openapi::DeploymentRemovedEvent {
+            deployment_id: "dpl-1".into(),
+            release_id: "rls-1".into(),
+            status: openapi::DeploymentStatus::DEPLOYMENT_STATUS_ARCHIVED,
+            activity_status: openapi::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_ARCHIVED,
+            error_status: openapi::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_NONE,
+            target_status: openapi::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_ARCHIVED,
+            archived_at: Some(t.to_rfc3339()),
+        };
+        let expected = openapi::Event {
+            object: openapi::event::Object::Event,
+            id: 8,
+            r#type: "deployment.removed".into(),
+            occurred_at: t.to_rfc3339(),
+            data: serde_json::to_value(data).unwrap(),
+        };
+
+        let sdk = openapi::Event::try_from(&event).unwrap();
+        assert_eq!(sdk, expected);
+    }
+
+    #[test]
+    fn rejects_unknown_event_type() {
+        let event = Event {
+            id: 9,
+            event_type: "deployment.unknown".into(),
+            occurred_at: fixed_time(),
+            data: serde_json::json!({}),
+        };
+
+        let result = openapi::Event::try_from(&event);
+        assert!(matches!(result, Err(EventsErr::UnknownEventTypeErr(_))));
+    }
+}
+
 pub mod create_calibration_response {
     use super::*;
 
