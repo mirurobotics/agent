@@ -32,7 +32,7 @@ pub async fn run(
     options: AppOptions,
     shutdown_signal: impl Future<Output = ()> + Send + 'static,
 ) -> Result<(), ServerErr> {
-    info!("Initializing miru agent...");
+    info!("Initializing miru daemon...");
 
     // Create a single shutdown channel that all components will listen to
     let (shutdown_tx, _shutdown_rx): (tokio::sync::broadcast::Sender<()>, _) =
@@ -629,7 +629,7 @@ impl ShutdownManager {
         // the shutdown order is important here. The refresh and server threads rely on
         // the state so the state must be shutdown last. Shutdown is best-effort: every
         // step is attempted and the first error encountered is returned at the end.
-        info!("Shutting down miru agent...");
+        info!("Shutting down miru daemon...");
 
         let mut first_err: Option<ServerErr> = None;
 

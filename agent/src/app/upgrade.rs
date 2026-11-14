@@ -65,7 +65,7 @@ where
                 attempts,
             }));
         }
-        info!("resetting miru agent state to use version '{}'", version);
+        info!("resetting miru daemon state to use version '{}'", version);
 
         let result = reconcile_impl(http_client, layout, version).await;
         if latch.is_triggered() {
@@ -83,7 +83,7 @@ where
                 }));
             }
             Err(e) => {
-                warn!("updating agent version storage failed: {e}");
+                warn!("updating daemon version storage failed: {e}");
                 attempts = attempts.saturating_add(1);
                 let wait = cooldown::calc(&backoff, attempts);
                 warn!("retrying in {wait} seconds (attempts: {attempts})");
@@ -101,7 +101,7 @@ pub async fn needs_upgrade(layout: &Layout, cur_version: &str) -> bool {
     let marker_file = layout.agent_version();
     match disk::agent_version::read(&marker_file).await {
         Ok(None) => {
-            info!("unable to determine previous miru agent package version");
+            info!("unable to determine previous miru daemon package version");
             true
         }
         Ok(Some(prev_version)) => {
@@ -109,14 +109,14 @@ pub async fn needs_upgrade(layout: &Layout, cur_version: &str) -> bool {
                 return false;
             }
             info!(
-                "detected miru agent package updated from version '{}' to version '{}'",
+                "detected miru daemon package updated from version '{}' to version '{}'",
                 prev_version, cur_version
             );
             true
         }
         Err(e) => {
-            error!("unable to read agent version marker file: {e}");
-            info!("unable to determine previous miru agent package version");
+            error!("unable to read daemon version marker file: {e}");
+            info!("unable to determine previous miru daemon package version");
             true
         }
     }
