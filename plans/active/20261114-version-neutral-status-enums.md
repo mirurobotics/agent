@@ -8,7 +8,7 @@ This ExecPlan is a living document. The sections Progress, Surprises & Discoveri
 |-----------|--------|-------------|
 | `agent/` | read-write | Drop the Device API twin from `impl_status_enum!`, write the v0.2 enum conversions in `server/v02/response.rs`, move the twin tests to the v0.2 test layer, docs |
 
-This plan lives in `agent/plans/` because every change is in the agent repo. Paths are relative to the agent repo root (the directory holding the workspace `Cargo.toml` and `ARCHITECTURE.md`); the crate is in `agent/`. Branch: `refactor/version-neutral-status-enums`, stacked on `refactor/domain-deployment-events` (PR 1, plan `plans/backlog/20261114-domain-deployment-events.md`), which is based on `main` at `4ca00ca2`. Open the PR against PR 1's branch; retarget it to `main` once PR 1 merges.
+This plan lives in `agent/plans/` because every change is in the agent repo. Paths are relative to the agent repo root (the directory holding the workspace `Cargo.toml` and `ARCHITECTURE.md`); the crate is in `agent/`. Branch: `refactor/version-neutral-status-enums`, stacked on `refactor/domain-deployment-events` (PR 1, plan `plans/active/20261114-domain-deployment-events.md`), which is based on `main` at `4ca00ca2`. Open the PR against PR 1's branch; retarget it to `main` once PR 1 merges.
 
 ## Purpose / Big Picture
 
@@ -41,7 +41,7 @@ No new files. New code in existing files mirrors these siblings:
 
 - A macro clause that takes one Device API type per version (e.g. `device_types: [v02 => ..., v03 => ...]`): each version module is a full copy that writes its own `From` impls, and the tables are 2 to 8 arms.
 - Request-direction conversions (v0.2 enum to domain): none exist today; the agent only sends these enums.
-- Removing `device_api_v02::models::ApiVersion` from `agent/tests/server/tcp.rs` and `agent/tests/app/run.rs`: transport tests need a served path, and v0.2 is the only version. `agent/tests/events/model.rs` keeps the v0.2 structs on purpose (PR 1).
+- Removing `device_api_v02::models::ApiVersion` from `agent/tests/server/tcp.rs` and `agent/tests/app/run.rs`: transport tests need a served path, and v0.2 is the only version.
 - `/v0.3` itself: the follow-up PR.
 - Pattern First, Then Fan Out: the seven enums are one mechanical change to an existing pattern (the `SyncCode` conversion), not a new pattern across resources, and the macro's agent arms can only go once all seven drop `agent_type`. All seven are done here.
 
@@ -151,7 +151,7 @@ M2: edit the test files named in Plan of Work, then check what still imports the
 
     grep -rln device_api_v02 agent/tests | grep -v '^agent/tests/server/v02/'
 
-Expected exactly `agent/tests/server/tcp.rs`, `agent/tests/app/run.rs`, `agent/tests/events/model.rs` (reasons in Decisions, Left out).
+Expected exactly `agent/tests/server/tcp.rs` and `agent/tests/app/run.rs` (reasons in Decisions, Left out). PR 1's design review moved the v0.2 payload check out of `agent/tests/events/model.rs`.
 
     git add agent/tests/models/harnesses.rs agent/tests/models/deployment.rs agent/tests/models/os.rs agent/tests/models/file_rule.rs agent/tests/models/device.rs agent/tests/models/instance_format.rs agent/tests/logs/mod.rs agent/tests/server/v02/response.rs
     git commit -m "test(server): check status enum conversions in the v0.2 layer"
@@ -171,7 +171,7 @@ Validation runs in CI (`.github/workflows/ci.yml`) on the pushed branch head and
 - `test` passes with every coverage gate at or above its current value (`models` 100, `server` 87, `server/v02` 87); the seven new `From` impls are fully covered by `status_enums`.
 - `windows-check` and `windows-agent-build` pass.
 
-What the green run demonstrates: `status_enums::converts_each_*` in `agent/tests/server/v02/response.rs` (seven new tests) cover every domain variant's v0.2 value and wire string, so a wrong or missing arm fails. The existing `deployment_response`, `device_response`, `release_response` and `file_rule_response` tests pass unchanged, so `/v0.2` response bodies are unchanged. `status_enum_tests!` still covers each enum's wire strings and backend twin in `agent/tests/models/`, and the macro's inline tests still run. `agent/tests/events/model.rs` passes unchanged from PR 1.
+What the green run demonstrates: `status_enums::converts_each_*` in `agent/tests/server/v02/response.rs` (seven new tests) cover every domain variant's v0.2 value and wire string, so a wrong or missing arm fails. The existing `deployment_response`, `device_response`, `release_response` and `file_rule_response` tests pass unchanged, so `/v0.2` response bodies are unchanged. `status_enum_tests!` still covers each enum's wire strings and backend twin in `agent/tests/models/`, and the macro's inline tests still run. `agent/tests/events/model.rs` and PR 1's `event_response` tests pass unchanged.
 
 Static acceptance, run from the repo root: `grep -rn device_api_v02 agent/src | grep -v '^agent/src/server/v02/'` prints nothing.
 
