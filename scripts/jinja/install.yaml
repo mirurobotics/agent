@@ -44,7 +44,7 @@ from_pkg: &from_pkg
   all_caps: "FROM_PKG"
   cabob_case: "from-pkg"
   default: "''"
-  hint: "should be the path to the agent package on this machine"
+  hint: "should be the path to the daemon package on this machine"
 
 # backend hosts
 prod_backend_host: &prod_backend_host
@@ -91,8 +91,8 @@ download_dir: &download_dir
   key: "DOWNLOAD_DIR"
   value: "$HOME/.miru/downloads"
 
-agent_deb_pkg_name: &agent_deb_pkg_name
-  key: "AGENT_DEB_PKG_NAME"
+daemon_deb_pkg_name: &daemon_deb_pkg_name
+  key: "DAEMON_DEB_PKG_NAME"
   value: "miru-agent"
 
 github_repo: &github_repo
@@ -125,7 +125,7 @@ base_install_args: &base_install_args
 base_install_vars: &base_install_vars
   arch: *arch
   download_dir: *download_dir
-  agent_deb_pkg_name: *agent_deb_pkg_name
+  daemon_deb_pkg_name: *daemon_deb_pkg_name
   github_repo: *github_repo
   checksums_file: *checksums_file
   debian_pkg_mime_type: *debian_pkg_mime_type
@@ -169,7 +169,7 @@ base_provision_args: &base_provision_args
 base_provision_vars: &base_provision_vars
   arch: *arch
   download_dir: *download_dir
-  agent_deb_pkg_name: *agent_deb_pkg_name
+  daemon_deb_pkg_name: *daemon_deb_pkg_name
   github_repo: *github_repo
   checksums_file: *checksums_file
   debian_pkg_mime_type: *debian_pkg_mime_type
@@ -207,30 +207,30 @@ scripts:
   # installs
   - name: "install.sh"
     template: "install.j2" 
-    description: "Install the Miru Agent"
+    description: "Install the Miru Daemon"
     variables: *prod_install
   - name: "staging-install.sh"
     template: "install.j2" 
-    description: "Install the Miru Agent in the staging environment"
+    description: "Install the Miru Daemon in the staging environment"
     variables: *staging_install
   - name: "uat-install.sh"
     template: "install.j2" 
-    description: "Install the Miru Agent in the UAT environment"
+    description: "Install the Miru Daemon in the UAT environment"
     variables: *uat_install
 
   # provisions
   - name: "provision.sh"
     template: "provision.j2" 
-    description: "Provision a device & install the Miru Agent"
+    description: "Provision a device & install the Miru Daemon"
     variables:
       <<: *prod_provision
   - name: "staging-provision.sh"
     template: "provision.j2" 
-    description: "Provision a device & install the Miru Agent in the staging environment"
+    description: "Provision a device & install the Miru Daemon in the staging environment"
     variables:
       <<: *staging_provision
   - name: "uat-provision.sh"
     template: "provision.j2" 
-    description: "Provision a device & install the Miru Agent in the UAT environment"
+    description: "Provision a device & install the Miru Daemon in the UAT environment"
     variables:
       <<: *uat_provision

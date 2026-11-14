@@ -28,5 +28,5 @@ log "Version to install: ${VERSION}"
 # REJECT v0.9.0+ — INSTALL VIA APT INSTEAD #
 # ---------------------------------------- #
 if [ "$MAJOR" -gt 0 ] || { [ "$MAJOR" -eq 0 ] && [ "$MINOR" -ge 9 ]; }; then
-    fatal "Version v$VERSION cannot be installed with this script. Miru Agent v0.9.0 and later use a new apt-based provisioning workflow. See https://docs.mirurobotics.com/docs/learn/devices/provision for instructions."
+    fatal "Version v$VERSION cannot be installed with this script. Miru Daemon v0.9.0 and later use a new apt-based provisioning workflow. See https://docs.mirurobotics.com/docs/learn/devices/provision for instructions."
 fi
