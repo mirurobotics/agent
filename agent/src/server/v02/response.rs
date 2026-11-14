@@ -1,6 +1,6 @@
 // internal crates
 use crate::calibrations::ReportMetadata;
-use crate::events;
+use crate::events::{self, errors::EventsErr, model::EventPayload};
 use crate::models;
 use crate::services::{
     calibration,
@@ -144,7 +144,7 @@ impl From<&models::GitCommit> for device_server::GitCommit {
 }
 
 impl TryFrom<&events::model::Event> for device_server::Event {
-    type Error = serde_json::Error;
+    type Error = EventsErr;
 
     fn try_from(event: &events::model::Event) -> Result<Self, Self::Error> {
         Ok(device_server::Event {
@@ -152,28 +152,21 @@ impl TryFrom<&events::model::Event> for device_server::Event {
             id: event.id,
             r#type: event.event_type.clone(),
             occurred_at: event.occurred_at.to_rfc3339(),
-            data: to_event_data(event)?,
+            data: to_event_data(&event.payload()?)?,
         })
     }
 }
 
 // Builds the v0.2 payload from the stored one, so the compiler checks it
 // against the v0.2 contract.
-fn to_event_data(event: &events::model::Event) -> Result<serde_json::Value, serde_json::Error> {
-    match event.event_type.as_str() {
-        events::model::DEPLOYMENT_DEPLOYED => {
-            let stored: events::model::DeploymentDeployedEvent =
-                serde_json::from_value(event.data.clone())?;
-            serde_json::to_value(device_server::DeploymentDeployedEvent::from(&stored))
+fn to_event_data(payload: &EventPayload) -> Result<serde_json::Value, serde_json::Error> {
+    match payload {
+        EventPayload::Deployed(event) => {
+            serde_json::to_value(device_server::DeploymentDeployedEvent::from(event))
         }
-        events::model::DEPLOYMENT_REMOVED => {
-            let stored: events::model::DeploymentRemovedEvent =
-                serde_json::from_value(event.data.clone())?;
-            serde_json::to_value(device_server::DeploymentRemovedEvent::from(&stored))
+        EventPayload::Removed(event) => {
+            serde_json::to_value(device_server::DeploymentRemovedEvent::from(event))
         }
-        other => Err(serde::de::Error::custom(format!(
-            "unknown event type '{other}'"
-        ))),
     }
 }
 
