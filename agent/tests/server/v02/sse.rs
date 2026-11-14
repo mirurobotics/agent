@@ -12,6 +12,7 @@ use crate::test_utils::{
 use miru_agent::calibrations::{latest, UploaderOptions};
 use miru_agent::events::hub::{EventHub, SpawnOptions};
 use miru_agent::events::model::EventArgs;
+use miru_agent::models::{Deployment, DplActivity, DplTarget};
 use miru_agent::server::{routes, State};
 use miru_agent::sync::Syncer;
 
@@ -124,12 +125,22 @@ impl Fixture {
     }
 }
 
-fn make_event(event_type: &str) -> EventArgs {
-    EventArgs {
-        event_type: event_type.to_string(),
-        occurred_at: Utc::now(),
-        data: serde_json::json!({"test": true}),
+fn deployment() -> Deployment {
+    Deployment {
+        id: "dpl-1".into(),
+        release_id: "rls-1".into(),
+        activity_status: DplActivity::Deployed,
+        target_status: DplTarget::Deployed,
+        ..Default::default()
     }
+}
+
+fn deployed() -> EventArgs {
+    EventArgs::deployed(&deployment()).unwrap()
+}
+
+fn removed() -> EventArgs {
+    EventArgs::removed(&deployment()).unwrap()
 }
 
 // ========================= CURSOR HANDLING ========================= //
@@ -179,11 +190,8 @@ mod cursor {
         let f = Fixture::with_hub_opts("sse_expired_cursor", opts).await;
 
         // Publish enough events to trigger compaction
-        for i in 0..6 {
-            f.event_hub()
-                .publish(make_event(&format!("evt-{i}")))
-                .await
-                .unwrap();
+        for _ in 0..6 {
+            f.event_hub().publish(deployed()).await.unwrap();
         }
 
         // Cursor 1 should now be expired
@@ -204,9 +212,9 @@ mod cursor {
         let f = Fixture::new("sse_after_precedence").await;
 
         // Publish 3 events
-        f.event_hub().publish(make_event("a")).await.unwrap();
-        f.event_hub().publish(make_event("b")).await.unwrap();
-        f.event_hub().publish(make_event("c")).await.unwrap();
+        f.event_hub().publish(deployed()).await.unwrap();
+        f.event_hub().publish(deployed()).await.unwrap();
+        f.event_hub().publish(deployed()).await.unwrap();
 
         // after=2 should return event 3, ignoring Last-Event-ID: 0
         let req = Request::builder()
@@ -249,15 +257,13 @@ mod cursor {
 
 mod stream {
     use super::*;
+    use device_api_v02::models as openapi;
 
     #[tokio::test]
     async fn returns_200_with_sse_content() {
         let f = Fixture::new("sse_stream_200").await;
 
-        f.event_hub()
-            .publish(make_event("test.event"))
-            .await
-            .unwrap();
+        f.event_hub().publish(deployed()).await.unwrap();
 
         let req = Request::builder()
             .uri("/v0.2/events?after=0")
@@ -273,7 +279,7 @@ mod stream {
             "expected event id in SSE output, body: {body}"
         );
         assert!(
-            body.contains("event: test.event"),
+            body.contains("event: deployment.deployed"),
             "expected event type in SSE output, body: {body}"
         );
 
@@ -284,28 +290,64 @@ mod stream {
             .expect("expected data: line in SSE output")
             .strip_prefix("data: ")
             .unwrap();
-        let actual: device_api_v02::models::Event =
-            serde_json::from_str(data_json).unwrap_or_else(|e| {
-                panic!("data payload must deserialize as device API Event: {e}\nraw: {data_json}")
-            });
+        let actual: openapi::Event = serde_json::from_str(data_json).unwrap_or_else(|e| {
+            panic!("data payload must deserialize as device API Event: {e}\nraw: {data_json}")
+        });
 
-        let expected = device_api_v02::models::Event {
-            object: device_api_v02::models::event::Object::Event,
+        let data = openapi::DeploymentDeployedEvent {
+            deployment_id: "dpl-1".into(),
+            release_id: "rls-1".into(),
+            status: openapi::DeploymentStatus::DEPLOYMENT_STATUS_DEPLOYED,
+            activity_status: openapi::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED,
+            error_status: openapi::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_NONE,
+            target_status: openapi::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_DEPLOYED,
+            deployed_at: None,
+        };
+        let expected = openapi::Event {
+            object: openapi::event::Object::Event,
             id: 1,
-            r#type: "test.event".to_string(),
+            r#type: "deployment.deployed".to_string(),
             occurred_at: actual.occurred_at.clone(),
-            data: serde_json::json!({"test": true}),
+            data: serde_json::to_value(data).unwrap(),
         };
         assert_eq!(actual, expected);
+    }
+
+    #[tokio::test]
+    async fn skips_events_that_fail_to_convert() {
+        let f = Fixture::new("sse_skip_unconvertible").await;
+
+        let unknown = EventArgs {
+            event_type: "deployment.unknown".to_string(),
+            occurred_at: Utc::now(),
+            data: serde_json::json!({}),
+        };
+        f.event_hub().publish(unknown).await.unwrap();
+        f.event_hub().publish(deployed()).await.unwrap();
+
+        let req = Request::builder()
+            .uri("/v0.2/events?after=0")
+            .header("Accept", "text/event-stream")
+            .body(Body::empty())
+            .unwrap();
+
+        let (status, body) = f.request_sse(req, Duration::from_millis(200)).await;
+        assert_eq!(status, StatusCode::OK);
+
+        assert!(
+            !body.contains("event: deployment.unknown"),
+            "expected the unknown event to be skipped, body: {body}"
+        );
+        assert!(body.contains("id: 2"), "expected event 2, body: {body}");
     }
 
     #[tokio::test]
     async fn replays_from_last_event_id_header() {
         let f = Fixture::new("sse_last_event_id").await;
 
-        f.event_hub().publish(make_event("first")).await.unwrap();
-        f.event_hub().publish(make_event("second")).await.unwrap();
-        f.event_hub().publish(make_event("third")).await.unwrap();
+        f.event_hub().publish(deployed()).await.unwrap();
+        f.event_hub().publish(deployed()).await.unwrap();
+        f.event_hub().publish(deployed()).await.unwrap();
 
         let req = Request::builder()
             .uri("/v0.2/events")
@@ -329,8 +371,8 @@ mod stream {
         let f = Fixture::new("sse_no_cursor_no_replay").await;
 
         // publish events before connecting
-        f.event_hub().publish(make_event("old")).await.unwrap();
-        f.event_hub().publish(make_event("old")).await.unwrap();
+        f.event_hub().publish(deployed()).await.unwrap();
+        f.event_hub().publish(deployed()).await.unwrap();
 
         // connect without cursor — should NOT replay historical events
         let req = Request::builder()
@@ -386,9 +428,9 @@ mod stream {
     async fn cursor_zero_replays_all() {
         let f = Fixture::new("sse_cursor_zero_all").await;
 
-        f.event_hub().publish(make_event("a")).await.unwrap();
-        f.event_hub().publish(make_event("b")).await.unwrap();
-        f.event_hub().publish(make_event("c")).await.unwrap();
+        f.event_hub().publish(deployed()).await.unwrap();
+        f.event_hub().publish(deployed()).await.unwrap();
+        f.event_hub().publish(deployed()).await.unwrap();
 
         let req = Request::builder()
             .uri("/v0.2/events?after=0")
@@ -409,8 +451,8 @@ mod stream {
         let f = Fixture::new("sse_replay_then_live").await;
 
         // Publish 2 events before connecting
-        f.event_hub().publish(make_event("replay")).await.unwrap();
-        f.event_hub().publish(make_event("replay")).await.unwrap();
+        f.event_hub().publish(deployed()).await.unwrap();
+        f.event_hub().publish(deployed()).await.unwrap();
 
         // Clone the hub for the spawned task
         let hub = f.event_hub().clone();
@@ -418,7 +460,7 @@ mod stream {
         // Spawn a task that publishes a live event after a short delay
         tokio::spawn(async move {
             tokio::time::sleep(Duration::from_millis(50)).await;
-            hub.publish(make_event("live")).await.unwrap();
+            hub.publish(removed()).await.unwrap();
         });
 
         let req = Request::builder()
@@ -444,7 +486,7 @@ mod stream {
             "expected live event 3, body: {body}"
         );
         assert!(
-            body.contains("event: live"),
+            body.contains("event: deployment.removed"),
             "expected live event type, body: {body}"
         );
     }
@@ -469,11 +511,8 @@ mod stream {
 
         // Flood the broadcast channel while nothing is consuming frames.
         // With broadcast_capacity=2, publishing 10 events guarantees lag.
-        for i in 0..10 {
-            f.event_hub()
-                .publish(make_event(&format!("flood-{i}")))
-                .await
-                .unwrap();
+        for _ in 0..10 {
+            f.event_hub().publish(deployed()).await.unwrap();
         }
 
         // Now read the body — the stream should close without delivering all events
@@ -535,12 +574,12 @@ mod filter {
     async fn filters_events_by_type() {
         let f = Fixture::new("sse_filter").await;
 
-        f.event_hub().publish(make_event("type.a")).await.unwrap();
-        f.event_hub().publish(make_event("type.b")).await.unwrap();
-        f.event_hub().publish(make_event("type.a")).await.unwrap();
+        f.event_hub().publish(deployed()).await.unwrap();
+        f.event_hub().publish(removed()).await.unwrap();
+        f.event_hub().publish(deployed()).await.unwrap();
 
         let req = Request::builder()
-            .uri("/v0.2/events?after=0&types=type.a")
+            .uri("/v0.2/events?after=0&types=deployment.deployed")
             .header("Accept", "text/event-stream")
             .body(Body::empty())
             .unwrap();
@@ -549,12 +588,12 @@ mod filter {
         assert_eq!(status, StatusCode::OK);
 
         assert!(
-            body.contains("event: type.a"),
-            "expected type.a events, body: {body}"
+            body.contains("event: deployment.deployed"),
+            "expected deployed events, body: {body}"
         );
         assert!(
-            !body.contains("event: type.b"),
-            "should not contain type.b, body: {body}"
+            !body.contains("event: deployment.removed"),
+            "should not contain removed events, body: {body}"
         );
     }
 
@@ -562,12 +601,11 @@ mod filter {
     async fn multiple_filter() {
         let f = Fixture::new("sse_multi_type").await;
 
-        f.event_hub().publish(make_event("type.a")).await.unwrap();
-        f.event_hub().publish(make_event("type.b")).await.unwrap();
-        f.event_hub().publish(make_event("type.c")).await.unwrap();
+        f.event_hub().publish(deployed()).await.unwrap();
+        f.event_hub().publish(removed()).await.unwrap();
 
         let req = Request::builder()
-            .uri("/v0.2/events?after=0&types=type.a,type.c")
+            .uri("/v0.2/events?after=0&types=deployment.deployed,deployment.removed")
             .header("Accept", "text/event-stream")
             .body(Body::empty())
             .unwrap();
@@ -575,16 +613,21 @@ mod filter {
         let (status, body) = f.request_sse(req, Duration::from_millis(200)).await;
         assert_eq!(status, StatusCode::OK);
 
-        assert!(body.contains("event: type.a"), "expected type.a");
-        assert!(body.contains("event: type.c"), "expected type.c");
-        assert!(!body.contains("event: type.b"), "should not contain type.b");
+        assert!(
+            body.contains("event: deployment.deployed"),
+            "expected deployed, body: {body}"
+        );
+        assert!(
+            body.contains("event: deployment.removed"),
+            "expected removed, body: {body}"
+        );
     }
 
     #[tokio::test]
     async fn empty_types_param_returns_all_events() {
         let f = Fixture::new("sse_empty_types").await;
 
-        f.event_hub().publish(make_event("type.a")).await.unwrap();
+        f.event_hub().publish(deployed()).await.unwrap();
 
         let req = Request::builder()
             .uri("/v0.2/events?after=0&types=")
@@ -597,7 +640,7 @@ mod filter {
 
         // empty types= is treated as no filter (returns all events)
         assert!(
-            body.contains("event: type.a"),
+            body.contains("event: deployment.deployed"),
             "empty types param should return all events, body: {body}"
         );
     }
@@ -606,7 +649,7 @@ mod filter {
     async fn only_commas_types_param_returns_all_events() {
         let f = Fixture::new("sse_commas_types").await;
 
-        f.event_hub().publish(make_event("type.a")).await.unwrap();
+        f.event_hub().publish(deployed()).await.unwrap();
 
         let req = Request::builder()
             .uri("/v0.2/events?after=0&types=,,,")
@@ -618,7 +661,7 @@ mod filter {
         assert_eq!(status, StatusCode::OK);
 
         assert!(
-            body.contains("event: type.a"),
+            body.contains("event: deployment.deployed"),
             "types=,,, should return all events, body: {body}"
         );
     }
@@ -627,11 +670,11 @@ mod filter {
     async fn types_with_whitespace_are_trimmed() {
         let f = Fixture::new("sse_types_ws").await;
 
-        f.event_hub().publish(make_event("type.a")).await.unwrap();
-        f.event_hub().publish(make_event("type.b")).await.unwrap();
+        f.event_hub().publish(deployed()).await.unwrap();
+        f.event_hub().publish(removed()).await.unwrap();
 
         let req = Request::builder()
-            .uri("/v0.2/events?after=0&types=%20type.a%20,%20type.b%20")
+            .uri("/v0.2/events?after=0&types=%20deployment.deployed%20,%20deployment.removed%20")
             .header("Accept", "text/event-stream")
             .body(Body::empty())
             .unwrap();
@@ -640,12 +683,12 @@ mod filter {
         assert_eq!(status, StatusCode::OK);
 
         assert!(
-            body.contains("event: type.a"),
-            "type.a should match after trim, body: {body}"
+            body.contains("event: deployment.deployed"),
+            "deployed should match after trim, body: {body}"
         );
         assert!(
-            body.contains("event: type.b"),
-            "type.b should match after trim, body: {body}"
+            body.contains("event: deployment.removed"),
+            "removed should match after trim, body: {body}"
         );
     }
 }

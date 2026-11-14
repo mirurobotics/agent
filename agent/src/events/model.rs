@@ -2,9 +2,8 @@
 use std::collections::HashSet;
 
 // internal crates
-use crate::events::errors::EventsErr;
+use crate::events::errors::{EventsErr, UnknownEventTypeErr};
 use crate::models;
-use device_api_v02::models as device_server;
 
 // external crates
 use chrono::{DateTime, Utc};
@@ -15,8 +14,40 @@ pub type EventTypeFilter = HashSet<String>;
 pub const DEPLOYMENT_DEPLOYED: &str = "deployment.deployed";
 pub const DEPLOYMENT_REMOVED: &str = "deployment.removed";
 
-pub type DeploymentDeployedEvent = device_server::DeploymentDeployedEvent;
-pub type DeploymentRemovedEvent = device_server::DeploymentRemovedEvent;
+// The persisted event-log format. Each Device API version converts it to its
+// own wire type, so a change here must keep old stored events readable.
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub struct DeploymentDeployedEvent {
+    pub deployment_id: String,
+    pub release_id: String,
+    pub status: models::DplStatus,
+    pub activity_status: models::DplActivity,
+    pub error_status: models::DplErrStatus,
+    pub target_status: models::DplTarget,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deployed_at: Option<String>,
+}
+
+// The persisted event-log format. Each Device API version converts it to its
+// own wire type, so a change here must keep old stored events readable.
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub struct DeploymentRemovedEvent {
+    pub deployment_id: String,
+    pub release_id: String,
+    pub status: models::DplStatus,
+    pub activity_status: models::DplActivity,
+    pub error_status: models::DplErrStatus,
+    pub target_status: models::DplTarget,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub archived_at: Option<String>,
+}
+
+/// A stored event's data, parsed by its type.
+#[derive(Debug, PartialEq)]
+pub enum EventPayload {
+    Deployed(DeploymentDeployedEvent),
+    Removed(DeploymentRemovedEvent),
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Event {
@@ -34,6 +65,18 @@ impl Event {
             event_type: args.event_type,
             occurred_at: args.occurred_at,
             data: args.data,
+        }
+    }
+
+    pub fn payload(&self) -> Result<EventPayload, EventsErr> {
+        let data = self.data.clone();
+        match self.event_type.as_str() {
+            DEPLOYMENT_DEPLOYED => Ok(EventPayload::Deployed(serde_json::from_value(data)?)),
+            DEPLOYMENT_REMOVED => Ok(EventPayload::Removed(serde_json::from_value(data)?)),
+            other => {
+                let err = UnknownEventTypeErr(other.to_string());
+                Err(EventsErr::UnknownEventTypeErr(err))
+            }
         }
     }
 }
@@ -61,10 +104,10 @@ impl EventArgs {
             DeploymentDeployedEvent {
                 deployment_id: deployment.id.clone(),
                 release_id: deployment.release_id.clone(),
-                status: (&deployment.status()).into(),
-                activity_status: (&deployment.activity_status).into(),
-                error_status: (&deployment.error_status).into(),
-                target_status: (&deployment.target_status).into(),
+                status: deployment.status(),
+                activity_status: deployment.activity_status,
+                error_status: deployment.error_status,
+                target_status: deployment.target_status,
                 deployed_at: deployment.deployed_at.map(|dt| dt.to_rfc3339()),
             },
         )
@@ -76,10 +119,10 @@ impl EventArgs {
             DeploymentRemovedEvent {
                 deployment_id: deployment.id.clone(),
                 release_id: deployment.release_id.clone(),
-                status: (&deployment.status()).into(),
-                activity_status: (&deployment.activity_status).into(),
-                error_status: (&deployment.error_status).into(),
-                target_status: (&deployment.target_status).into(),
+                status: deployment.status(),
+                activity_status: deployment.activity_status,
+                error_status: deployment.error_status,
+                target_status: deployment.target_status,
                 archived_at: deployment.archived_at.map(|dt| dt.to_rfc3339()),
             },
         )
