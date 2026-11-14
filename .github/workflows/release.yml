@@ -155,7 +155,7 @@ jobs:
           signing-account-name: ${{ vars.AZURE_ARTIFACT_SIGNING_ACCOUNT }}
           certificate-profile-name: ${{ vars.AZURE_ARTIFACT_SIGNING_PROFILE }}
           files: ${{ github.workspace }}\build\prebuilt\windows_amd64\miru-agent.exe
-          description: Miru Agent
+          description: Miru Daemon
 
       - name: Build MSI
         env:
@@ -176,7 +176,7 @@ jobs:
           signing-account-name: ${{ vars.AZURE_ARTIFACT_SIGNING_ACCOUNT }}
           certificate-profile-name: ${{ vars.AZURE_ARTIFACT_SIGNING_PROFILE }}
           files: ${{ github.workspace }}\build\prebuilt\windows_amd64\${{ steps.msi.outputs.name }}.msi
-          description: Miru Agent
+          description: Miru Daemon
 
       # Artifact Signing certificates expire within days, so require a timestamp too.
       - name: Verify signatures
