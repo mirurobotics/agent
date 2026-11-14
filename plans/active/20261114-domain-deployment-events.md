@@ -8,7 +8,7 @@ This ExecPlan is a living document. The sections Progress, Surprises & Discoveri
 |-----------|--------|-------------|
 | `agent/` | read-write | Define the two deployment event structs in `agent/src/events/model.rs` over the domain status enums; pin their JSON against the v0.2 generated structs in tests; drop two stale route comments |
 
-This plan lives in `agent/plans/` because every change is in the agent repo. Paths are relative to the agent repo root (the directory holding the workspace `Cargo.toml` and `ARCHITECTURE.md`); the crate is in `agent/`. Branch: `refactor/domain-deployment-events`, based on `main` at `4ca00ca2` (agent#485, "host Device API versions side by side"). It is PR 1 of two; PR 2 (`refactor/version-neutral-status-enums`, plan `plans/backlog/20261114-version-neutral-status-enums.md`) stacks on it and removes the v0.2 twins from the status enums.
+This plan lives in `agent/plans/` because every change is in the agent repo. Paths are relative to the agent repo root (the directory holding the workspace `Cargo.toml` and `ARCHITECTURE.md`); the crate is in `agent/`. Branch: `refactor/domain-deployment-events`, based on `main` at `4ca00ca2` (agent#485, "host Device API versions side by side"). It is PR 1 of two; PR 2 (`refactor/version-neutral-status-enums`, plan `plans/active/20261114-version-neutral-status-enums.md`) stacks on it and removes the v0.2 twins from the status enums.
 
 ## Purpose / Big Picture
 
@@ -44,7 +44,7 @@ No new files. The two structs mirror the generated `libs/device-api-v02/src/mode
 - [x] M0: commit the stale route-order comment removal in `agent/src/server/v02/routes.rs`.
 - [x] M1: source: event structs in `agent/src/events/model.rs`.
 - [x] Source written
-- [ ] M2: tests: `agent/tests/events/model.rs` pins the JSON against the v0.2 structs.
+- [ ] M2: tests: `agent/tests/events/model.rs` pins the JSON with `json!` literals, and `agent/tests/server/v02/response.rs` checks the served payload against the v0.2 structs.
 - [ ] CI green on the pushed head (`$preflight` reports `CLEAN`).
 
 ## Surprises & Discoveries
@@ -52,6 +52,10 @@ No new files. The two structs mirror the generated `libs/device-api-v02/src/mode
 - Until M2 lands, `agent/tests/events/model.rs` does not compile: it builds `miru_agent::events::model::DeploymentDeployedEvent` from v0.2 enums and reads data back into it, and the new structs hold domain enums and do not derive `Deserialize`. M2's import change fixes both, so a CI run on the source-only head fails the `test` job.
 
 ## Decision Log
+
+- Design review: the v0.2 payload check moves to the v0.2 test layer (`agent/tests/server/v02/response.rs`, new `event_response` module), and `agent/tests/events/model.rs` asserts with `json!` literals and no longer imports `device_api_v02`. The src comment no longer names a version: the JSON is the persisted event-log format that clients receive unchanged. `/v0.3` keeps the v0.2 event payload (its only contract change is calibrations dropping `role` and `aspect`), so pass-through stays.
+- Design review: the two event structs and their fields are private. Only `EventArgs::deployed` and `EventArgs::removed` build them, and a public type would invite treating the persisted shape as a typed API.
+- Design review: the stale route-order comments in `server/v02/routes.rs` ship here because they were raised in agent#485's review after its last push, and this is the next PR on top of it.
 
 (Add entries as you go.)
 
@@ -94,7 +98,7 @@ M1, source. In `agent/src/events/model.rs`, delete the `device_api_v02` import a
 
 and `DeploymentRemovedEvent` with `archived_at` in place of `deployed_at`. In `EventArgs::deployed`/`removed`, use `deployment.status()` and `deployment.activity_status`, `deployment.error_status`, `deployment.target_status` directly instead of `.into()`; keep the `to_rfc3339()` mapping.
 
-M2, tests. In `agent/tests/events/model.rs`, import `DeploymentDeployedEvent` and `DeploymentRemovedEvent` from `device_api_v02::models` (beside the v0.2 enums already imported) instead of `miru_agent::events::model`. The two `serializes_all_fields` tests then compare stored data with the v0.2 struct's serialization and are otherwise unchanged. Change `deployed_at_none_when_absent` and `archived_at_none_when_absent` to compare the whole `event.data` with `serde_json::json!(<v0.2 struct> { ..., deployed_at: None })` (resp. `archived_at`), which proves the key is omitted. The `does_not_validate_activity_status` tests stay as they are.
+M2, tests. In `agent/tests/events/model.rs`, drop the `device_api_v02` import and the uses of the event structs (now private): the `serializes_all_fields` tests compare `event.data` with a `serde_json::json!({...})` literal holding every field, and `deployed_at_none_when_absent` / `archived_at_none_when_absent` compare the whole `event.data` with a literal that has no timestamp key, which proves the key is omitted. The `does_not_validate_activity_status` tests stay as they are. In `agent/tests/server/v02/response.rs`, add an `event_response` module beside the other conversion modules: it builds `Event`s from `EventArgs::deployed` and `EventArgs::removed` (with the timestamp set and unset), converts them with `device_server::Event::from(&event)`, and checks that `data` equals `serde_json::json!(device_server::DeploymentDeployedEvent { .. })` (resp. `DeploymentRemovedEvent`). That pins the stored payload to the v0.2 schema in the v0.2 layer, so `/v0.3` copies the check with `tests/server/v02/` and nothing in `events/` names a version.
 
 ## Concrete Steps
 
