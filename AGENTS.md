@@ -67,14 +67,13 @@ use the same code in normal and test builds; tests control dependencies and time
 
 Pick the enum facility by what the enum needs to do:
 
-- **Backend-mirrored status enum** (has a `backend_api` and/or `device_api_v02` twin) →
-  `impl_status_enum!` (`agent/src/models/status.rs`) with `agent_type` +
-  `backend_type` + `unknown_backend`. Generates the wire `Deserialize`
-  (unknown→default), `variants()`, `as_str()`, all layer conversions, and inline
-  serde + backend forward-compat tests.
-- **Local wire/config enum with no backend twin** → `impl_status_enum!` local or
-  agent-only form (omit `backend_type`; omit `agent_type` too when there is no
-  agent-server twin). Add `display: true`, `aliases: [...]`,
+- **Backend-mirrored status enum** (has a `backend_api` twin) →
+  `impl_status_enum!` (`agent/src/models/status.rs`) with `backend_type` +
+  `unknown_backend`. Generates the wire `Deserialize` (unknown→default),
+  `variants()`, `as_str()`, the backend conversions, and inline serde + backend
+  forward-compat tests.
+- **Local wire/config enum with no backend twin** → `impl_status_enum!` local
+  form (omit `backend_type`). Add `display: true`, `aliases: [...]`,
   `case_insensitive: true`, and/or `on_non_string: default` only as needed (e.g.
   `LogLevel`). These clauses default off, so the wire-strict, case-sensitive,
   non-string-rejecting behavior is the baseline.
@@ -86,6 +85,9 @@ Pick the enum facility by what the enum needs to do:
 Each `impl_status_enum!` enum also gets a hand-written `StatusEnumFixture` table
 and `status_enum_tests!` in its integration test file
 (`agent/tests/models/harnesses.rs`), so a slip in the macro's mapping fails a test.
+
+Device API conversions are hand-written `From` impls in each version's
+`server/vNN/response.rs`, tested there.
 
 ### Terminology
 
