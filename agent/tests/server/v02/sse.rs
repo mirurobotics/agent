@@ -136,7 +136,7 @@ fn make_event(event_type: &str) -> EventArgs {
 
 mod cursor {
     use super::*;
-    use device_api::models as openapi;
+    use device_api_v02::models as openapi;
 
     #[tokio::test]
     async fn malformed_after_param_returns_400() {
@@ -284,13 +284,13 @@ mod stream {
             .expect("expected data: line in SSE output")
             .strip_prefix("data: ")
             .unwrap();
-        let actual: device_api::models::Event =
+        let actual: device_api_v02::models::Event =
             serde_json::from_str(data_json).unwrap_or_else(|e| {
                 panic!("data payload must deserialize as device API Event: {e}\nraw: {data_json}")
             });
 
-        let expected = device_api::models::Event {
-            object: device_api::models::event::Object::Event,
+        let expected = device_api_v02::models::Event {
+            object: device_api_v02::models::event::Object::Event,
             id: 1,
             r#type: "test.event".to_string(),
             occurred_at: actual.occurred_at.clone(),

@@ -2,7 +2,7 @@
 use crate::deserialize_error;
 use crate::models::{status::impl_status_enum, Os};
 use backend_api::models as backend_client;
-use device_api::models as agent_server;
+use device_api_v02::models as agent_server;
 
 // external crates
 use chrono::{DateTime, Utc};

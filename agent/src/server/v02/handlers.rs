@@ -4,14 +4,19 @@ use std::sync::Arc;
 
 // internal crates
 use crate::errors::Error;
-use crate::server::{errors::*, request, response, routes, state::State};
+use crate::server::{
+    errors::*,
+    routes,
+    state::State,
+    v02::{request, response},
+};
 use crate::services::{
     calibration as calibration_svc, deployment as dpl_svc, device as dvc_svc,
     file_rule as file_rule_svc, git_commit as git_cmt_svc, release as rls_svc, HttpBackend,
 };
 use crate::trace;
 use crate::version;
-use device_api::models as device_server;
+use device_api_v02::models as device_server;
 
 // external crates
 use axum::{
@@ -44,9 +49,9 @@ pub async fn version() -> impl IntoResponse {
         Json(device_server::VersionResponse {
             version: version::VERSION.to_string(),
             git_commit: version::COMMIT.to_string(),
-            api_version: version::api_version(),
-            api_git_commit: version::api_git_commit(),
-            api_release_version: version::api_release_version(),
+            api_version: device_server::ApiVersion::API_VERSION.to_string(),
+            api_git_commit: device_server::ApiGitCommit::API_GIT_COMMIT.to_string(),
+            api_release_version: device_server::ReleaseVersion::RELEASE_VERSION.to_string(),
             rust_version: version::RUST_VERSION.to_string(),
             build_date: version::BUILD_DATE.to_string(),
             os: version::OS.to_string(),
@@ -69,7 +74,10 @@ pub async fn get_device(AxumState(state): AxumState<Arc<State>>) -> impl IntoRes
 
 pub async fn sync_device(AxumState(state): AxumState<Arc<State>>) -> impl IntoResponse {
     handle(
-        async move { dvc_svc::sync(state.syncer.as_ref()).await },
+        async move {
+            let outcome = dvc_svc::sync(state.syncer.as_ref()).await?;
+            Ok::<_, ServerErr>(device_server::SyncDeviceResponse::from(&outcome))
+        },
         "Error syncing device",
     )
     .await

@@ -4,7 +4,7 @@ use crate::models::InstanceFormat;
 use crate::server::errors::InvalidRequestErr;
 use crate::services::calibration;
 use crate::trace;
-use device_api::models as device_server;
+use device_api_v02::models as device_server;
 
 // external crates
 use serde::Deserialize;
@@ -28,7 +28,7 @@ impl TryFrom<device_server::CreateCalibrationRequest> for calibration::CreatePar
             }
         }
         let content = *request.content;
-        let Some(format) = InstanceFormat::from_device_api(content.format) else {
+        let Some(format) = to_instance_format(content.format) else {
             return Err(InvalidRequestErr {
                 msg: "content.format is not a known format".to_string(),
                 trace: trace!(),
@@ -43,6 +43,20 @@ impl TryFrom<device_server::CreateCalibrationRequest> for calibration::CreatePar
             format,
             data: content.data,
         })
+    }
+}
+
+/// The format a request names, or `None` for one this agent doesn't know: a
+/// request with it is rejected, not defaulted to text.
+fn to_instance_format(format: device_server::InstanceFormat) -> Option<InstanceFormat> {
+    match format {
+        device_server::InstanceFormat::INSTANCE_FORMAT_JSON => Some(InstanceFormat::Json),
+        device_server::InstanceFormat::INSTANCE_FORMAT_YAML => Some(InstanceFormat::Yaml),
+        device_server::InstanceFormat::INSTANCE_FORMAT_JSONC => Some(InstanceFormat::Jsonc),
+        device_server::InstanceFormat::INSTANCE_FORMAT_XML => Some(InstanceFormat::Xml),
+        device_server::InstanceFormat::INSTANCE_FORMAT_CSV => Some(InstanceFormat::Csv),
+        device_server::InstanceFormat::INSTANCE_FORMAT_TEXT => Some(InstanceFormat::Text),
+        device_server::InstanceFormat::InstanceFormatUnknown => None,
     }
 }
 

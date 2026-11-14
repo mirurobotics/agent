@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 // internal crates
 use crate::test_utils::filesys::dirs as test_dirs;
-use device_api::models::ApiVersion;
+use device_api_v02::models::ApiVersion;
 use miru_agent::app::options::{AppOptions, LifecycleOptions, StorageOptions};
 use miru_agent::app::run::run;
 use miru_agent::disk::Layout;

@@ -1,6 +1,6 @@
 // internal crates
 use backend_api::models as backend_client;
-use device_api::models as agent_server;
+use device_api_v02::models as agent_server;
 use miru_agent::models::deployment::Updates;
 use miru_agent::models::Patch;
 use miru_agent::models::{Deployment, DplActivity, DplErrStatus, DplStatus, DplTarget};

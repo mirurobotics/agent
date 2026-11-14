@@ -1,5 +1,5 @@
 // internal crates
-use device_api::models as agent_server;
+use device_api_v02::models as agent_server;
 use miru_agent::models::device::Updates;
 use miru_agent::models::Patch;
 use miru_agent::models::{Device, DeviceStatus};

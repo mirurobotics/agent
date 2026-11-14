@@ -1,13 +1,15 @@
 // internal crates
-use device_api::models as openapi;
+use device_api_v02::models as openapi;
 use miru_agent::models::{
     Deployment, Device, DeviceStatus, DplActivity, DplErrStatus, DplTarget, FileRule,
     FileRuleRetention, FileRuleSource, FileRuleUpload, GitCommit, Release, UploadTimezone,
 };
 use miru_agent::services::calibration::Created;
+use miru_agent::services::device::{SyncCode, SyncOutcome};
+use miru_agent::sync::syncer::State;
 
 // external crates
-use chrono::{DateTime, TimeZone, Utc};
+use chrono::{DateTime, Duration, TimeZone, Utc};
 use uuid::Uuid;
 
 fn fixed_time() -> DateTime<Utc> {
@@ -71,6 +73,74 @@ pub mod device_response {
 
         let sdk: openapi::Device = (&device).into();
         assert_eq!(sdk, expected);
+    }
+}
+
+pub mod sync_device_response {
+    use super::*;
+
+    fn outcome(code: SyncCode, cooldown_ends_at: DateTime<Utc>) -> SyncOutcome {
+        let t = fixed_time();
+        SyncOutcome {
+            code,
+            message: "sync message".into(),
+            state: State {
+                last_attempted_sync_at: t,
+                last_synced_at: t - Duration::minutes(5),
+                cooldown_ends_at,
+                err_streak: 0,
+            },
+        }
+    }
+
+    fn expected(
+        code: openapi::SyncDeviceResult,
+        cooldown_ends_at: DateTime<Utc>,
+        in_cooldown: bool,
+    ) -> openapi::SyncDeviceResponse {
+        let t = fixed_time();
+        openapi::SyncDeviceResponse {
+            code,
+            message: "sync message".into(),
+            last_synced_at: (t - Duration::minutes(5)).to_rfc3339(),
+            last_attempted_sync_at: t.to_rfc3339(),
+            in_cooldown,
+            cooldown_ends_at: cooldown_ends_at.to_rfc3339(),
+        }
+    }
+
+    #[test]
+    fn converts_each_code() {
+        let cases = [
+            (
+                SyncCode::Success,
+                openapi::SyncDeviceResult::SYNC_DEVICE_RESULT_SUCCESS,
+            ),
+            (
+                SyncCode::InCooldown,
+                openapi::SyncDeviceResult::SYNC_DEVICE_RESULT_IN_COOLDOWN,
+            ),
+            (
+                SyncCode::NetworkConnectionError,
+                openapi::SyncDeviceResult::SYNC_DEVICE_RESULT_NETWORK_CONNECTION_ERROR,
+            ),
+        ];
+        let epoch = DateTime::<Utc>::UNIX_EPOCH;
+
+        for (code, wire_code) in cases {
+            let sdk: openapi::SyncDeviceResponse = (&outcome(code, epoch)).into();
+            assert_eq!(sdk, expected(wire_code, epoch, false), "{code:?}");
+        }
+    }
+
+    #[test]
+    fn converts_state_in_cooldown() {
+        let cooldown_ends_at = Utc::now() + Duration::days(1);
+        let wire_code = openapi::SyncDeviceResult::SYNC_DEVICE_RESULT_IN_COOLDOWN;
+
+        let sdk: openapi::SyncDeviceResponse =
+            (&outcome(SyncCode::InCooldown, cooldown_ends_at)).into();
+        assert_eq!(sdk, expected(wire_code, cooldown_ends_at, true));
     }
 }
 
@@ -499,7 +569,7 @@ pub mod latest_calibrations_response {
     use super::*;
     use miru_agent::calibrations::ReportMetadata;
     use miru_agent::models::InstanceFormat;
-    use miru_agent::server::response::latest_calibrations;
+    use miru_agent::server::v02::response::latest_calibrations;
 
     fn metadata(report_id: Uuid) -> ReportMetadata {
         ReportMetadata {
@@ -551,7 +621,7 @@ pub mod calibration_content_response {
     use axum::body;
     use axum::http::{header, StatusCode};
     use miru_agent::models::InstanceFormat;
-    use miru_agent::server::response::calibration_content;
+    use miru_agent::server::v02::response::calibration_content;
     use miru_agent::services::calibration::Content;
     use uuid::Uuid;
 

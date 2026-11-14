@@ -1,5 +1,5 @@
 // internal crates
-use device_api::models::{
+use device_api_v02::models::{
     DeploymentActivityStatus, DeploymentErrorStatus, DeploymentStatus, DeploymentTargetStatus,
 };
 use miru_agent::events::model::{

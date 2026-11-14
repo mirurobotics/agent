@@ -1,8 +1,8 @@
 // internal crates
-use device_api::models as openapi;
+use device_api_v02::models as openapi;
 use miru_agent::calibrations::Filter;
 use miru_agent::models::InstanceFormat;
-use miru_agent::server::request::LatestCalibrationsQuery;
+use miru_agent::server::v02::request::LatestCalibrationsQuery;
 use miru_agent::services::calibration::CreateParams;
 
 fn calibration_request(format: openapi::InstanceFormat) -> openapi::CreateCalibrationRequest {
@@ -43,6 +43,40 @@ pub mod create_calibration_request {
 
         let params = CreateParams::try_from(request).unwrap();
         assert_eq!((params.role, params.aspect), (None, None));
+    }
+
+    #[test]
+    fn maps_each_known_format() {
+        let cases = [
+            (
+                openapi::InstanceFormat::INSTANCE_FORMAT_JSON,
+                InstanceFormat::Json,
+            ),
+            (
+                openapi::InstanceFormat::INSTANCE_FORMAT_YAML,
+                InstanceFormat::Yaml,
+            ),
+            (
+                openapi::InstanceFormat::INSTANCE_FORMAT_JSONC,
+                InstanceFormat::Jsonc,
+            ),
+            (
+                openapi::InstanceFormat::INSTANCE_FORMAT_XML,
+                InstanceFormat::Xml,
+            ),
+            (
+                openapi::InstanceFormat::INSTANCE_FORMAT_CSV,
+                InstanceFormat::Csv,
+            ),
+            (
+                openapi::InstanceFormat::INSTANCE_FORMAT_TEXT,
+                InstanceFormat::Text,
+            ),
+        ];
+        for (format, want) in cases {
+            let params = CreateParams::try_from(calibration_request(format)).unwrap();
+            assert_eq!(params.format, want, "{format:?}");
+        }
     }
 
     #[test]
