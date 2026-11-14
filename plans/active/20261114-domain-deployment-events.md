@@ -41,14 +41,15 @@ No new files. The two structs mirror the generated `libs/device-api-v02/src/mode
 
 ## Progress
 
-- [ ] M0: commit the stale route-order comment removal in `agent/src/server/v02/routes.rs`.
-- [ ] M1: source: event structs in `agent/src/events/model.rs`.
+- [x] M0: commit the stale route-order comment removal in `agent/src/server/v02/routes.rs`.
+- [x] M1: source: event structs in `agent/src/events/model.rs`.
+- [x] Source written
 - [ ] M2: tests: `agent/tests/events/model.rs` pins the JSON against the v0.2 structs.
 - [ ] CI green on the pushed head (`$preflight` reports `CLEAN`).
 
 ## Surprises & Discoveries
 
-(Add entries as you go.)
+- Until M2 lands, `agent/tests/events/model.rs` does not compile: it builds `miru_agent::events::model::DeploymentDeployedEvent` from v0.2 enums and reads data back into it, and the new structs hold domain enums and do not derive `Deserialize`. M2's import change fixes both, so a CI run on the source-only head fails the `test` job.
 
 ## Decision Log
 
