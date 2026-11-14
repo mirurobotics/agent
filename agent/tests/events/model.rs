@@ -1,12 +1,10 @@
 // internal crates
-use device_api_v02::models::{
-    DeploymentActivityStatus, DeploymentErrorStatus, DeploymentStatus, DeploymentTargetStatus,
-};
+use miru_agent::events::errors::EventsErr;
 use miru_agent::events::model::{
-    DeploymentDeployedEvent, DeploymentRemovedEvent, Event, EventArgs, DEPLOYMENT_DEPLOYED,
-    DEPLOYMENT_REMOVED,
+    DeploymentDeployedEvent, DeploymentRemovedEvent, Event, EventArgs, EventPayload,
+    DEPLOYMENT_DEPLOYED, DEPLOYMENT_REMOVED,
 };
-use miru_agent::models::{Deployment, DplActivity, DplErrStatus, DplTarget};
+use miru_agent::models::{Deployment, DplActivity, DplErrStatus, DplStatus, DplTarget};
 
 // external crates
 use chrono::{TimeZone, Utc};
@@ -90,22 +88,23 @@ mod deployment_deployed {
         assert_eq!(actual.event_type, DEPLOYMENT_DEPLOYED);
         assert_eq!(
             actual.data,
-            serde_json::json!(DeploymentDeployedEvent {
-                deployment_id: "dpl-1".into(),
-                release_id: "rls-1".into(),
-                status: DeploymentStatus::DEPLOYMENT_STATUS_DEPLOYED,
-                activity_status: DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED,
-                error_status: DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_NONE,
-                target_status: DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_DEPLOYED,
-                deployed_at: Some(t.to_rfc3339()),
+            serde_json::json!({
+                "deployment_id": "dpl-1",
+                "release_id": "rls-1",
+                "status": "deployed",
+                "activity_status": "deployed",
+                "error_status": "none",
+                "target_status": "deployed",
+                "deployed_at": t.to_rfc3339(),
             })
         );
     }
 
     #[test]
-    fn deployed_at_none_when_absent() {
+    fn omits_deployed_at_when_absent() {
         let dpl = Deployment {
             id: "dpl-1".into(),
+            release_id: "rls-1".into(),
             activity_status: DplActivity::Deployed,
             target_status: DplTarget::Deployed,
             deployed_at: None,
@@ -113,8 +112,17 @@ mod deployment_deployed {
         };
 
         let event = EventArgs::deployed(&dpl).unwrap();
-        let actual: DeploymentDeployedEvent = serde_json::from_value(event.data).unwrap();
-        assert_eq!(actual.deployed_at, None);
+        assert_eq!(
+            event.data,
+            serde_json::json!({
+                "deployment_id": "dpl-1",
+                "release_id": "rls-1",
+                "status": "deployed",
+                "activity_status": "deployed",
+                "error_status": "none",
+                "target_status": "deployed",
+            })
+        );
     }
 
     #[test]
@@ -129,10 +137,7 @@ mod deployment_deployed {
         let event = EventArgs::deployed(&dpl).unwrap();
         assert_eq!(event.event_type, DEPLOYMENT_DEPLOYED);
         let actual: DeploymentDeployedEvent = serde_json::from_value(event.data).unwrap();
-        assert_eq!(
-            actual.activity_status,
-            DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_QUEUED
-        );
+        assert_eq!(actual.activity_status, DplActivity::Queued);
     }
 }
 
@@ -157,22 +162,23 @@ mod deployment_removed {
         assert_eq!(actual.event_type, DEPLOYMENT_REMOVED);
         assert_eq!(
             actual.data,
-            serde_json::json!(DeploymentRemovedEvent {
-                deployment_id: "dpl-1".into(),
-                release_id: "rls-1".into(),
-                status: DeploymentStatus::DEPLOYMENT_STATUS_ARCHIVED,
-                activity_status: DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_ARCHIVED,
-                error_status: DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_NONE,
-                target_status: DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_ARCHIVED,
-                archived_at: Some(t.to_rfc3339()),
+            serde_json::json!({
+                "deployment_id": "dpl-1",
+                "release_id": "rls-1",
+                "status": "archived",
+                "activity_status": "archived",
+                "error_status": "none",
+                "target_status": "archived",
+                "archived_at": t.to_rfc3339(),
             })
         );
     }
 
     #[test]
-    fn archived_at_none_when_absent() {
+    fn omits_archived_at_when_absent() {
         let dpl = Deployment {
             id: "dpl-1".into(),
+            release_id: "rls-1".into(),
             activity_status: DplActivity::Archived,
             target_status: DplTarget::Archived,
             archived_at: None,
@@ -180,8 +186,17 @@ mod deployment_removed {
         };
 
         let event = EventArgs::removed(&dpl).unwrap();
-        let actual: DeploymentRemovedEvent = serde_json::from_value(event.data).unwrap();
-        assert_eq!(actual.archived_at, None);
+        assert_eq!(
+            event.data,
+            serde_json::json!({
+                "deployment_id": "dpl-1",
+                "release_id": "rls-1",
+                "status": "archived",
+                "activity_status": "archived",
+                "error_status": "none",
+                "target_status": "archived",
+            })
+        );
     }
 
     #[test]
@@ -196,9 +211,92 @@ mod deployment_removed {
         let event = EventArgs::removed(&dpl).unwrap();
         assert_eq!(event.event_type, DEPLOYMENT_REMOVED);
         let actual: DeploymentRemovedEvent = serde_json::from_value(event.data).unwrap();
-        assert_eq!(
-            actual.activity_status,
-            DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED
+        assert_eq!(actual.activity_status, DplActivity::Deployed);
+    }
+}
+
+// ========================= PAYLOAD ========================= //
+
+mod payload {
+    use super::*;
+
+    fn stored(event_type: &str, data: serde_json::Value) -> Event {
+        Event {
+            id: 1,
+            event_type: event_type.to_string(),
+            occurred_at: fixed_time(),
+            data,
+        }
+    }
+
+    #[test]
+    fn parses_deployed_event() {
+        let t = fixed_time().to_rfc3339();
+        let event = stored(
+            DEPLOYMENT_DEPLOYED,
+            serde_json::json!({
+                "deployment_id": "dpl-1",
+                "release_id": "rls-1",
+                "status": "failed",
+                "activity_status": "queued",
+                "error_status": "failed",
+                "target_status": "deployed",
+                "deployed_at": t,
+            }),
         );
+
+        let expected = EventPayload::Deployed(DeploymentDeployedEvent {
+            deployment_id: "dpl-1".into(),
+            release_id: "rls-1".into(),
+            status: DplStatus::Failed,
+            activity_status: DplActivity::Queued,
+            error_status: DplErrStatus::Failed,
+            target_status: DplTarget::Deployed,
+            deployed_at: Some(t),
+        });
+        assert_eq!(event.payload().unwrap(), expected);
+    }
+
+    #[test]
+    fn parses_removed_event_without_archived_at() {
+        let event = stored(
+            DEPLOYMENT_REMOVED,
+            serde_json::json!({
+                "deployment_id": "dpl-1",
+                "release_id": "rls-1",
+                "status": "archived",
+                "activity_status": "archived",
+                "error_status": "none",
+                "target_status": "archived",
+            }),
+        );
+
+        let expected = EventPayload::Removed(DeploymentRemovedEvent {
+            deployment_id: "dpl-1".into(),
+            release_id: "rls-1".into(),
+            status: DplStatus::Archived,
+            activity_status: DplActivity::Archived,
+            error_status: DplErrStatus::None,
+            target_status: DplTarget::Archived,
+            archived_at: None,
+        });
+        assert_eq!(event.payload().unwrap(), expected);
+    }
+
+    #[test]
+    fn rejects_unknown_event_type() {
+        let event = stored("deployment.unknown", serde_json::json!({}));
+
+        let result = event.payload();
+        assert!(matches!(result, Err(EventsErr::UnknownEventTypeErr(_))));
+    }
+
+    #[test]
+    fn rejects_data_that_does_not_match_its_type() {
+        let data = serde_json::json!({"deployment_id": 1});
+        let event = stored(DEPLOYMENT_DEPLOYED, data);
+
+        let result = event.payload();
+        assert!(matches!(result, Err(EventsErr::SerializationErr(_))));
     }
 }
