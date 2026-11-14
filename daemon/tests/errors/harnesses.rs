@@ -1,6 +1,6 @@
 //! Reusable error-testing harness for the agent's `errors::Error` trait surface.
 //!
-//! Mirrors `agent/tests/models/harnesses.rs`: the actual assertions live in a
+//! Mirrors `daemon/tests/models/harnesses.rs`: the actual assertions live in a
 //! plain (non-`#[test]`) function, `assert_error`. Because that function carries
 //! no `#[test]` / `#[tokio::test]` attribute, the repo's field-by-field-assert
 //! lint (`tools/lint/src/asserts/detect.rs`, which only scans functions marked

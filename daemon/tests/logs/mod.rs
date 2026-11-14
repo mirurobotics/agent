@@ -121,7 +121,7 @@ status_enum_tests!(LogLevel);
 // that actually need `set_global_default` to fire (or that need a non-`RUST_LOG=off`
 // environment, which the shared integration binary inherits from
 // `scripts/test.sh`) live in dedicated integration-test binaries under
-// `agent/tests/logs_init_*.rs`.
+// `daemon/tests/logs_init_*.rs`.
 
 // ========================= reload =============================== //
 
@@ -177,7 +177,7 @@ fn test_reload_level_changes_filter() {
 }
 
 // `test_reload_level_no_op_when_env_filter_locked` lives in
-// `agent/tests/logs_init_locked.rs` because it calls `logs::init`, which
+// `daemon/tests/logs_init_locked.rs` because it calls `logs::init`, which
 // installs a process-global subscriber and depends on the `RUST_LOG=off`
 // environment that `scripts/test.sh` exports.
 

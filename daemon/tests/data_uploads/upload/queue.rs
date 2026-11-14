@@ -1,7 +1,7 @@
 //! The upload queue: the generic suite instantiated for `upload::Job`, plus
 //! the on-disk wire pin for `upload_queue.json`.
 //!
-//! Queue *behavior* is written once in `agent/tests/queue/file.rs` and
+//! Queue *behavior* is written once in `daemon/tests/queue/file.rs` and
 //! run here via `queue_suite!` against this worker's job type. What cannot live
 //! there is the wire pin below: the generic suite is parameterized over the job
 //! type and so cannot spell a concrete payload, but the bytes on disk are a
