@@ -303,10 +303,10 @@ mod display {
 
 mod poll_error_classification {
     use super::*;
+    use crate::test_utils::mqtt as test_mqtt;
     use miru_daemon::mqtt::client::poll;
-    use miru_daemon::mqtt::options::{ConnectAddress, Credentials, Options, Protocol};
+    use miru_daemon::mqtt::options::{ConnectAddress, Protocol};
     use miru_daemon::network::MqttHost;
-    use secrecy::SecretString;
 
     // poll() classifies ConnectionError variants into MQTTError types.
     // We can't inject errors into an EventLoop directly, but we can
@@ -316,11 +316,7 @@ mod poll_error_classification {
     async fn unreachable_host_is_network_conn_err() {
         // Connect to a port that refuses connections
         // unlikely to have anything listening on port 1
-        let opts = Options::new(Credentials {
-            username: "test".to_string(),
-            password: SecretString::from("test"),
-        })
-        .with_connect_address(
+        let opts = test_mqtt::options().with_connect_address(
             ConnectAddress::new(MqttHost::new("127.0.0.1").unwrap(), Protocol::TCP, 1).unwrap(),
         );
 
@@ -332,17 +328,13 @@ mod poll_error_classification {
 }
 
 mod mqtt_client_new {
-    use miru_daemon::mqtt::options::{Credentials, Options};
+    use crate::test_utils::mqtt as test_mqtt;
     use miru_daemon::mqtt::Client;
-    use secrecy::SecretString;
 
     #[tokio::test]
     async fn created_at_is_recent() {
         let before = chrono::Utc::now();
-        let opts = Options::new(Credentials {
-            username: "test".to_string(),
-            password: SecretString::from("test"),
-        });
+        let opts = test_mqtt::options();
         let (client, _eventloop) = Client::new(&opts);
         let after = chrono::Utc::now();
 
