@@ -156,8 +156,8 @@ mod credentials {
     #[test]
     fn default() {
         let creds = Credentials::default();
-        assert_eq!(creds.username, "miru-agent");
-        assert_eq!(creds.password.expose_secret(), "miru-agent-password");
+        assert_eq!(creds.username, "miru-daemon");
+        assert_eq!(creds.password.expose_secret(), "miru-daemon-password");
     }
 
     #[test]
@@ -220,7 +220,7 @@ mod opts {
         let actual = Options::default();
         let expected = Options {
             credentials: Credentials::default(),
-            client_id: "miru-agent".to_string(),
+            client_id: "miru-daemon".to_string(),
             connect_address: ConnectAddress::default(),
             keep_alive: Duration::from_secs(20),
             timeouts: Timeouts::default(),

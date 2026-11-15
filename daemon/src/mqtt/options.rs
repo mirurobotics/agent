@@ -125,8 +125,8 @@ impl Eq for Credentials {}
 impl Default for Credentials {
     fn default() -> Self {
         Self {
-            username: "miru-agent".to_string(),
-            password: SecretString::from("miru-agent-password"),
+            username: "miru-daemon".to_string(),
+            password: SecretString::from("miru-daemon-password"),
         }
     }
 }
