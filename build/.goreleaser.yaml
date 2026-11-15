@@ -8,7 +8,7 @@ snapshot:
   version_template: "{{ incpatch .Version }}-next"
 
 builds:
-  - id: "agent"
+  - id: "daemon"
     builder: rust
     # cargo auditable embeds the dependency tree in the binary for the SBOMs.
     tool: cargo-auditable-zigbuild
@@ -22,7 +22,7 @@ builds:
       - --release
       - -p=miru-daemon
 
-  - id: "agent-windows"
+  - id: "daemon-windows"
     # aws-lc-sys can't cross-compile to Windows, so the release workflow builds
     # and signs this binary on a Windows runner. It must build with cargo
     # auditable too, or the Windows SBOM lists no dependencies.
@@ -39,8 +39,8 @@ builds:
       path: prebuilt/windows_amd64/miru-agent.exe
 
 nfpms:
-  - id: agent
-    ids: ["agent"]
+  - id: daemon
+    ids: ["daemon"]
     package_name: miru-agent
     file_name_template: "{{ .PackageName }}_{{ .Version }}_{{ .Arch }}"
     vendor: "Miru"
@@ -92,8 +92,8 @@ nfpms:
       postremove: "debian/postrm"
 
 archives:
-  - id: agent
-    ids: ["agent", "agent-windows"]
+  - id: daemon
+    ids: ["daemon", "daemon-windows"]
     formats: [tar.gz]
     name_template: >-
       agent_
