@@ -12,8 +12,7 @@
 //   - backend : `backend_type` + `unknown_backend` (e.g. the `Dpl*` enums, `Os`,
 //               `UploadTimezone`, `InstanceFormat`)
 //
-// Device API conversions are written by hand in each version's
-// `server/vNN/response.rs`.
+// Device API conversions are written by hand in each version's server module.
 //
 // See the "Enum conventions" section of `AGENTS.md` for the canonical decision
 // tree describing which facility to reach for.

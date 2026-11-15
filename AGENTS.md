@@ -86,8 +86,8 @@ Each `impl_status_enum!` enum also gets a hand-written `StatusEnumFixture` table
 and `status_enum_tests!` in its integration test file
 (`daemon/tests/models/harnesses.rs`), so a slip in the macro's mapping fails a test.
 
-Device API conversions are hand-written `From` impls in each version's
-`server/vNN/response.rs`, tested there.
+Device API enum conversions are hand-written `From` impls in each version's
+`server/vNN/enums.rs`, tested in `tests/server/vNN/enums.rs` ([agent#489](https://github.com/mirurobotics/agent/pull/489#discussion_r4579822780)).
 
 ### Terminology
 
