@@ -185,17 +185,31 @@ impl Headers {
     pub fn to_map(&self) -> Result<HeaderMap, HTTPErr> {
         let mut headers = HeaderMap::new();
         insert_header(&mut headers, "Miru-Version", &self.api_version)?;
-        insert_header(&mut headers, "Miru-Daemon-Version", &self.daemon_version)?;
-        insert_header(&mut headers, "Miru-Daemon-Host-Name", &self.host_name)?;
-        insert_header(&mut headers, "Miru-Daemon-Arch", &self.arch)?;
-        insert_header(&mut headers, "Miru-Daemon-Language", &self.language)?;
-        insert_header(&mut headers, "Miru-Daemon-OS", &self.os)?;
-        // Legacy names, kept until the control plane reads only Miru-Daemon-*.
-        insert_header(&mut headers, "Miru-Agent-Version", &self.daemon_version)?;
-        insert_header(&mut headers, "Miru-Agent-Host-Name", &self.host_name)?;
-        insert_header(&mut headers, "Miru-Agent-Arch", &self.arch)?;
-        insert_header(&mut headers, "Miru-Agent-Language", &self.language)?;
-        insert_header(&mut headers, "Miru-Agent-OS", &self.os)?;
+        // (name, legacy name, value): the legacy Miru-Agent-* names stay until
+        // nothing reads them.
+        let rows = [
+            (
+                "Miru-Daemon-Version",
+                "Miru-Agent-Version",
+                &self.daemon_version,
+            ),
+            (
+                "Miru-Daemon-Host-Name",
+                "Miru-Agent-Host-Name",
+                &self.host_name,
+            ),
+            ("Miru-Daemon-Arch", "Miru-Agent-Arch", &self.arch),
+            (
+                "Miru-Daemon-Language",
+                "Miru-Agent-Language",
+                &self.language,
+            ),
+            ("Miru-Daemon-OS", "Miru-Agent-OS", &self.os),
+        ];
+        for (name, legacy, value) in rows {
+            insert_header(&mut headers, name, value)?;
+            insert_header(&mut headers, legacy, value)?;
+        }
         Ok(headers)
     }
 }

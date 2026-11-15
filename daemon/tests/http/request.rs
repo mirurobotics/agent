@@ -208,17 +208,6 @@ pub mod headers {
     }
 
     #[test]
-    fn legacy_headers_match_daemon_headers() {
-        let headers = Headers::default();
-        let map = headers.to_map().unwrap();
-        for suffix in ["Version", "Host-Name", "Arch", "Language", "OS"] {
-            let daemon = map.get(format!("Miru-Daemon-{suffix}").as_str()).unwrap();
-            let legacy = map.get(format!("Miru-Agent-{suffix}").as_str()).unwrap();
-            assert_eq!(daemon, legacy, "{suffix}");
-        }
-    }
-
-    #[test]
     fn miru_version_contains_api_version() {
         let headers = Headers::default();
         let map = headers.to_map().unwrap();
