@@ -28,7 +28,7 @@ impl From<&models::Device> for device_server::Device {
 impl From<&SyncOutcome> for device_server::SyncDeviceResponse {
     fn from(outcome: &SyncOutcome) -> Self {
         device_server::SyncDeviceResponse {
-            code: outcome.code.into(),
+            code: (&outcome.code).into(),
             message: outcome.message.clone(),
             last_synced_at: outcome.state.last_synced_at.to_rfc3339(),
             last_attempted_sync_at: outcome.state.last_attempted_sync_at.to_rfc3339(),

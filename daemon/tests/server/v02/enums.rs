@@ -25,24 +25,23 @@ fn converts_each_device_status() {
 
 #[test]
 fn converts_each_sync_code() {
-    let cases = [
-        (
-            SyncCode::Success,
-            openapi::SyncDeviceResult::SYNC_DEVICE_RESULT_SUCCESS,
-        ),
-        (
-            SyncCode::InCooldown,
-            openapi::SyncDeviceResult::SYNC_DEVICE_RESULT_IN_COOLDOWN,
-        ),
-        (
-            SyncCode::NetworkConnectionError,
-            openapi::SyncDeviceResult::SYNC_DEVICE_RESULT_NETWORK_CONNECTION_ERROR,
-        ),
-    ];
-
-    for (code, wire) in cases {
-        assert_eq!(openapi::SyncDeviceResult::from(code), wire, "{code:?}");
-    }
+    assert_converts_each(
+        SyncCode::variants(),
+        &[
+            (
+                SyncCode::Success,
+                openapi::SyncDeviceResult::SYNC_DEVICE_RESULT_SUCCESS,
+            ),
+            (
+                SyncCode::InCooldown,
+                openapi::SyncDeviceResult::SYNC_DEVICE_RESULT_IN_COOLDOWN,
+            ),
+            (
+                SyncCode::NetworkConnectionError,
+                openapi::SyncDeviceResult::SYNC_DEVICE_RESULT_NETWORK_CONNECTION_ERROR,
+            ),
+        ],
+    );
 }
 
 #[test]

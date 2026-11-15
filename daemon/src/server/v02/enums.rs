@@ -12,8 +12,8 @@ impl From<&models::DeviceStatus> for device_server::DeviceStatus {
     }
 }
 
-impl From<SyncCode> for device_server::SyncDeviceResult {
-    fn from(code: SyncCode) -> Self {
+impl From<&SyncCode> for device_server::SyncDeviceResult {
+    fn from(code: &SyncCode) -> Self {
         match code {
             SyncCode::Success => Self::SYNC_DEVICE_RESULT_SUCCESS,
             SyncCode::InCooldown => Self::SYNC_DEVICE_RESULT_IN_COOLDOWN,
