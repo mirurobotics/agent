@@ -1,4 +1,4 @@
-# Dockerfile - Build miru-agent using the pinned builder image
+# Dockerfile - Build the Miru Daemon using the pinned builder image
 #
 # The builder image is pinned here by digest, because its tag can be re-pushed.
 # When Dockerfile.builder changes, update both the tag and the digest.
