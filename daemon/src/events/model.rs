@@ -43,10 +43,20 @@ pub struct DeploymentRemovedEvent {
 }
 
 /// A stored event's data, parsed by its type.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Serialize)]
+#[serde(untagged)]
 pub enum EventPayload {
     Deployed(DeploymentDeployedEvent),
     Removed(DeploymentRemovedEvent),
+}
+
+impl EventPayload {
+    pub fn event_type(&self) -> &'static str {
+        match self {
+            EventPayload::Deployed(_) => DEPLOYMENT_DEPLOYED,
+            EventPayload::Removed(_) => DEPLOYMENT_REMOVED,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -90,41 +100,35 @@ pub struct EventArgs {
 }
 
 impl EventArgs {
-    fn new(event_type: &str, data: impl Serialize) -> Result<Self, EventsErr> {
+    fn new(payload: EventPayload) -> Result<Self, EventsErr> {
         Ok(Self {
-            event_type: event_type.to_string(),
+            event_type: payload.event_type().to_string(),
             occurred_at: Utc::now(),
-            data: serde_json::to_value(data)?,
+            data: serde_json::to_value(&payload)?,
         })
     }
 
     pub fn deployed(deployment: &models::Deployment) -> Result<Self, EventsErr> {
-        Self::new(
-            DEPLOYMENT_DEPLOYED,
-            DeploymentDeployedEvent {
-                deployment_id: deployment.id.clone(),
-                release_id: deployment.release_id.clone(),
-                status: deployment.status(),
-                activity_status: deployment.activity_status,
-                error_status: deployment.error_status,
-                target_status: deployment.target_status,
-                deployed_at: deployment.deployed_at.map(|dt| dt.to_rfc3339()),
-            },
-        )
+        Self::new(EventPayload::Deployed(DeploymentDeployedEvent {
+            deployment_id: deployment.id.clone(),
+            release_id: deployment.release_id.clone(),
+            status: deployment.status(),
+            activity_status: deployment.activity_status,
+            error_status: deployment.error_status,
+            target_status: deployment.target_status,
+            deployed_at: deployment.deployed_at.map(|dt| dt.to_rfc3339()),
+        }))
     }
 
     pub fn removed(deployment: &models::Deployment) -> Result<Self, EventsErr> {
-        Self::new(
-            DEPLOYMENT_REMOVED,
-            DeploymentRemovedEvent {
-                deployment_id: deployment.id.clone(),
-                release_id: deployment.release_id.clone(),
-                status: deployment.status(),
-                activity_status: deployment.activity_status,
-                error_status: deployment.error_status,
-                target_status: deployment.target_status,
-                archived_at: deployment.archived_at.map(|dt| dt.to_rfc3339()),
-            },
-        )
+        Self::new(EventPayload::Removed(DeploymentRemovedEvent {
+            deployment_id: deployment.id.clone(),
+            release_id: deployment.release_id.clone(),
+            status: deployment.status(),
+            activity_status: deployment.activity_status,
+            error_status: deployment.error_status,
+            target_status: deployment.target_status,
+            archived_at: deployment.archived_at.map(|dt| dt.to_rfc3339()),
+        }))
     }
 }

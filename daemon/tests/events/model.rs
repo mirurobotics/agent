@@ -284,6 +284,32 @@ mod payload {
     }
 
     #[test]
+    fn reads_unknown_status_as_default() {
+        let event = stored(
+            DEPLOYMENT_REMOVED,
+            serde_json::json!({
+                "deployment_id": "dpl-1",
+                "release_id": "rls-1",
+                "status": "paused",
+                "activity_status": "paused",
+                "error_status": "paused",
+                "target_status": "paused",
+            }),
+        );
+
+        let expected = EventPayload::Removed(DeploymentRemovedEvent {
+            deployment_id: "dpl-1".into(),
+            release_id: "rls-1".into(),
+            status: DplStatus::Drifted,
+            activity_status: DplActivity::Drifted,
+            error_status: DplErrStatus::None,
+            target_status: DplTarget::Staged,
+            archived_at: None,
+        });
+        assert_eq!(event.payload().unwrap(), expected);
+    }
+
+    #[test]
     fn rejects_unknown_event_type() {
         let event = stored("deployment.unknown", serde_json::json!({}));
 

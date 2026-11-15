@@ -607,6 +607,14 @@ pub mod event_response {
     }
 
     #[test]
+    fn omits_absent_archived_at() {
+        let event = stored(8, EventArgs::removed(&deployment()).unwrap());
+
+        let sdk = openapi::Event::try_from(&event).unwrap();
+        assert!(sdk.data.get("archived_at").is_none());
+    }
+
+    #[test]
     fn converts_removed_event() {
         let t = fixed_time();
         let dpl = Deployment {
