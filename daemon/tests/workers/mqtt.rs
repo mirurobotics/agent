@@ -1,7 +1,6 @@
 // internal crates
 use crate::mocks::{mqtt_client::MockClient, syncer::MockSyncer, token_manager::MockTokenManager};
-use crate::test_utils::filesys::dirs as test_dirs;
-use crate::test_utils::mqtt as test_mqtt;
+use crate::test_utils::{filesys::dirs as test_dirs, mqtt as test_mqtt};
 use miru_daemon::authn::Token;
 use miru_daemon::disk::{self, Layout};
 use miru_daemon::models::{Device, DeviceStatus};
