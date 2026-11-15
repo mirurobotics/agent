@@ -676,8 +676,8 @@ pub mod status_enums {
         assert_eq!(tested, variants.iter().collect::<Vec<_>>());
         for (domain, wire) in cases {
             assert_eq!(&W::from(domain), wire);
-            let domain_json = serde_json::to_value(domain).unwrap();
-            assert_eq!(serde_json::to_value(wire).unwrap(), domain_json, "{domain:?}");
+            let wire_json = serde_json::to_value(wire).unwrap();
+            assert_eq!(wire_json, serde_json::to_value(domain).unwrap());
         }
     }
 
