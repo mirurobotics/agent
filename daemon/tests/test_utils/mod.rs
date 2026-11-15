@@ -1,4 +1,5 @@
 pub mod calibrations;
+pub mod enums;
 pub mod filesys;
 pub mod retention;
 pub mod sync;

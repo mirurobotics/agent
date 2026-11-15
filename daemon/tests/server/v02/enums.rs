@@ -1,26 +1,10 @@
 // internal crates
+use crate::test_utils::enums::assert_converts_each;
 use device_api_v02::models as openapi;
 use miru_daemon::models::{
     DeviceStatus, DplActivity, DplErrStatus, DplStatus, DplTarget, Os, UploadTimezone,
 };
 use miru_daemon::services::device::SyncCode;
-
-// Checks every variant's v0.2 value and that both sides serialize to the
-// same wire string.
-fn assert_converts_each<D, W>(variants: Vec<D>, cases: &[(D, W)])
-where
-    D: PartialEq + std::fmt::Debug + serde::Serialize,
-    W: PartialEq + std::fmt::Debug + serde::Serialize,
-    for<'a> W: From<&'a D>,
-{
-    let tested: Vec<&D> = cases.iter().map(|(domain, _)| domain).collect();
-    assert_eq!(tested, variants.iter().collect::<Vec<_>>());
-    for (domain, wire) in cases {
-        assert_eq!(&W::from(domain), wire);
-        let wire_json = serde_json::to_value(wire).unwrap();
-        assert_eq!(wire_json, serde_json::to_value(domain).unwrap());
-    }
-}
 
 #[test]
 fn converts_each_device_status() {
