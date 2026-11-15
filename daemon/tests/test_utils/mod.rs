@@ -1,5 +1,6 @@
 pub mod calibrations;
 pub mod filesys;
+pub mod mqtt;
 pub mod retention;
 pub mod sync;
 pub mod testdata;

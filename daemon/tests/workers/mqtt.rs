@@ -1,13 +1,13 @@
 // internal crates
 use crate::mocks::{mqtt_client::MockClient, syncer::MockSyncer, token_manager::MockTokenManager};
 use crate::test_utils::filesys::dirs as test_dirs;
+use crate::test_utils::mqtt as test_mqtt;
 use miru_daemon::authn::Token;
 use miru_daemon::disk::{self, Layout};
 use miru_daemon::models::{Device, DeviceStatus};
 use miru_daemon::mqtt::client::Client;
 use miru_daemon::mqtt::device::{Ping, SyncDevice};
 use miru_daemon::mqtt::errors::MockErr;
-use miru_daemon::mqtt::options::Options;
 use miru_daemon::mqtt::{topics, MQTTError};
 use miru_daemon::sync::errors::MockErr as SyncMockErr;
 use miru_daemon::sync::syncer::{CooldownEnd, SyncEvent, SyncFailure};
@@ -439,7 +439,7 @@ pub mod handle_mqtt_error {
             is_network_conn_err: false,
         });
 
-        let options = Options::default();
+        let options = test_mqtt::options();
         let (client, eventloop) = Client::new(&options);
         let created_at = client.created_at;
 
@@ -498,7 +498,7 @@ pub mod handle_mqtt_error {
             is_network_conn_err: false,
         });
 
-        let options = Options::default();
+        let options = test_mqtt::options();
         let (client, eventloop) = Client::new(&options);
         let created_at = client.created_at;
 
@@ -560,7 +560,7 @@ pub mod handle_mqtt_error {
             is_network_conn_err: true,
         });
 
-        let options = Options::default();
+        let options = test_mqtt::options();
         let (client, eventloop) = Client::new(&options);
         let created_at = client.created_at;
 

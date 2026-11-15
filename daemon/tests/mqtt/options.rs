@@ -2,6 +2,7 @@
 use std::time::Duration;
 
 // internal crates
+use crate::test_utils::mqtt as test_mqtt;
 use miru_daemon::mqtt::options::{ConnectAddress, Credentials, Options, Protocol, Timeouts};
 use miru_daemon::network::MqttHost;
 
@@ -154,13 +155,6 @@ mod credentials {
     use super::*;
 
     #[test]
-    fn default() {
-        let creds = Credentials::default();
-        assert_eq!(creds.username, "miru-daemon");
-        assert_eq!(creds.password.expose_secret(), "miru-daemon-password");
-    }
-
-    #[test]
     fn debug_redacts_password() {
         let creds = Credentials {
             username: "user".to_string(),
@@ -216,23 +210,8 @@ mod opts {
     }
 
     #[test]
-    fn default() {
-        let actual = Options::default();
-        let expected = Options {
-            credentials: Credentials::default(),
-            client_id: "miru-daemon".to_string(),
-            connect_address: ConnectAddress::default(),
-            keep_alive: Duration::from_secs(20),
-            timeouts: Timeouts::default(),
-            capacity: 64,
-        };
-        assert!(matches!(actual.connect_address.protocol(), Protocol::SSL));
-        assert_eq!(actual, expected);
-    }
-
-    #[test]
     fn set_password() {
-        let mut opts = Options::default();
+        let mut opts = test_mqtt::options();
         opts.set_password(SecretString::from("new-password"));
         assert_eq!(opts.credentials.password.expose_secret(), "new-password");
     }
@@ -241,7 +220,7 @@ mod opts {
     fn with_connect_address() {
         let addr =
             ConnectAddress::new(MqttHost::new("localhost").unwrap(), Protocol::TCP, 1883).unwrap();
-        let opts = Options::default().with_connect_address(addr);
+        let opts = test_mqtt::options().with_connect_address(addr);
         assert!(matches!(opts.connect_address.protocol(), Protocol::TCP));
         assert_eq!(opts.connect_address.broker().as_str(), "localhost");
         assert_eq!(opts.connect_address.port(), 1883);
@@ -253,7 +232,7 @@ mod opts {
             username: "other".to_string(),
             password: SecretString::from("secret"),
         };
-        let opts = Options::default().with_credentials(new_creds);
+        let opts = test_mqtt::options().with_credentials(new_creds);
         assert_eq!(opts.credentials.username, "other");
         assert_eq!(opts.credentials.password.expose_secret(), "secret");
     }
@@ -277,7 +256,7 @@ mod opts {
 
     #[test]
     fn with_client_id() {
-        let opts = Options::default().with_client_id("custom-id".to_string());
+        let opts = test_mqtt::options().with_client_id("custom-id".to_string());
         assert_eq!(opts.client_id, "custom-id");
     }
 
@@ -289,7 +268,7 @@ mod opts {
             unsubscribe: Duration::from_secs(10),
             disconnect: Duration::from_secs(10),
         };
-        let opts = Options::default().with_timeouts(timeouts);
+        let opts = test_mqtt::options().with_timeouts(timeouts);
         assert_eq!(opts.timeouts.publish, Duration::from_secs(10));
     }
 }
