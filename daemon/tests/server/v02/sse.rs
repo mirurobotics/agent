@@ -605,7 +605,7 @@ mod filter {
         f.event_hub().publish(removed()).await.unwrap();
 
         let req = Request::builder()
-            .uri("/v0.2/events?after=0&types=deployment.deployed,deployment.removed")
+            .uri("/v0.2/events?after=0&types=deployment.deployed,other.type")
             .header("Accept", "text/event-stream")
             .body(Body::empty())
             .unwrap();
@@ -618,8 +618,8 @@ mod filter {
             "expected deployed, body: {body}"
         );
         assert!(
-            body.contains("event: deployment.removed"),
-            "expected removed, body: {body}"
+            !body.contains("event: deployment.removed"),
+            "should not contain removed events, body: {body}"
         );
     }
 
