@@ -1,5 +1,4 @@
 // internal crates
-use device_api_v02::models as agent_server;
 use miru_daemon::models::device::Updates;
 use miru_daemon::models::Patch;
 use miru_daemon::models::{Device, DeviceStatus};
@@ -95,7 +94,6 @@ fn status_default() {
 
 impl StatusEnumFixture for DeviceStatus {
     type Backend = ();
-    type Agent = agent_server::DeviceStatus;
 
     fn cases() -> Vec<StatusCase<Self>> {
         vec![
@@ -103,19 +101,17 @@ impl StatusEnumFixture for DeviceStatus {
                 variant: DeviceStatus::Online,
                 wire: "online",
                 backend: (),
-                agent: agent_server::DeviceStatus::DEVICE_STATUS_ONLINE,
             },
             StatusCase {
                 variant: DeviceStatus::Offline,
                 wire: "offline",
                 backend: (),
-                agent: agent_server::DeviceStatus::DEVICE_STATUS_OFFLINE,
             },
         ]
     }
 }
 
-status_enum_tests!(DeviceStatus, agent);
+status_enum_tests!(DeviceStatus);
 
 // ─── merge tests ──────────────────────────────────────────────────────────────
 

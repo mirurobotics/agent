@@ -2,10 +2,7 @@
 use crate::calibrations::ReportMetadata;
 use crate::events::{self, errors::EventsErr, model::EventPayload};
 use crate::models;
-use crate::services::{
-    calibration,
-    device::{SyncCode, SyncOutcome},
-};
+use crate::services::{calibration, device::SyncOutcome};
 use device_api_v02::models as device_server;
 
 // external crates
@@ -31,22 +28,12 @@ impl From<&models::Device> for device_server::Device {
 impl From<&SyncOutcome> for device_server::SyncDeviceResponse {
     fn from(outcome: &SyncOutcome) -> Self {
         device_server::SyncDeviceResponse {
-            code: outcome.code.into(),
+            code: (&outcome.code).into(),
             message: outcome.message.clone(),
             last_synced_at: outcome.state.last_synced_at.to_rfc3339(),
             last_attempted_sync_at: outcome.state.last_attempted_sync_at.to_rfc3339(),
             in_cooldown: outcome.state.is_in_cooldown(),
             cooldown_ends_at: outcome.state.cooldown_ends_at.to_rfc3339(),
-        }
-    }
-}
-
-impl From<SyncCode> for device_server::SyncDeviceResult {
-    fn from(code: SyncCode) -> Self {
-        match code {
-            SyncCode::Success => Self::SYNC_DEVICE_RESULT_SUCCESS,
-            SyncCode::InCooldown => Self::SYNC_DEVICE_RESULT_IN_COOLDOWN,
-            SyncCode::NetworkConnectionError => Self::SYNC_DEVICE_RESULT_NETWORK_CONNECTION_ERROR,
         }
     }
 }

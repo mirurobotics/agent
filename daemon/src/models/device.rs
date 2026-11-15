@@ -1,7 +1,6 @@
 // internal crates
 use crate::deserialize_error;
 use crate::models::{status::impl_status_enum, Patch};
-use device_api_v02::models as agent_server;
 
 // external crates
 use chrono::{DateTime, Utc};
@@ -22,12 +21,9 @@ impl_status_enum!(
     default: Offline,
     label: "device status",
     log: error,
-    agent_type: agent_server::DeviceStatus,
     mappings: [
-        Online => "online" =>
-            agent_server::DeviceStatus::DEVICE_STATUS_ONLINE,
-        Offline => "offline" =>
-            agent_server::DeviceStatus::DEVICE_STATUS_OFFLINE,
+        Online => "online",
+        Offline => "offline",
     ]
 );
 

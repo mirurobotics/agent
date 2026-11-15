@@ -213,12 +213,11 @@ pub(crate) use serde_tests;
 
 // ─── status enums ────────────────────────────────────────────────────────────
 
-/// One row of a status enum's table: a variant, its wire string, and its twins.
+/// One row of a status enum's table: a variant, its wire string, and its backend twin.
 pub struct StatusCase<T: StatusEnumFixture> {
     pub variant: T,
     pub wire: &'static str,
     pub backend: T::Backend,
-    pub agent: T::Agent,
 }
 
 /// Implement for each `impl_status_enum!` enum to get a standard test suite via
@@ -229,8 +228,6 @@ pub struct StatusCase<T: StatusEnumFixture> {
 pub trait StatusEnumFixture: Serialize + DeserializeOwned + PartialEq + Debug + Sized {
     /// The `backend_api` twin, or `()` if there is none.
     type Backend;
-    /// The `device_api` twin, or `()` if there is none.
-    type Agent;
 
     /// One case per variant, in declaration order.
     fn cases() -> Vec<StatusCase<Self>>;
@@ -280,28 +277,20 @@ where
     }
 }
 
-/// Each variant converts to its agent-server twin. The agent only sends these,
-/// so there is no reverse conversion.
-pub fn assert_agent_conversions<T>()
+/// Checks that `cases` lists every variant in order, that each one converts to
+/// its expected value, and that both sides serialize to the same wire string.
+pub fn assert_converts_each<D, W>(variants: Vec<D>, cases: &[(D, W)])
 where
-    T: StatusEnumFixture,
-    T::Agent: PartialEq + Debug,
-    for<'a> T::Agent: From<&'a T>,
+    D: PartialEq + Debug + Serialize,
+    W: PartialEq + Debug + Serialize,
+    for<'a> W: From<&'a D>,
 {
-    for case in T::cases() {
-        assert_eq!(T::Agent::from(&case.variant), case.agent);
-    }
-}
-
-/// Each agent-server twin serializes to the variant's wire string.
-pub fn assert_agent_wire_strings<T>()
-where
-    T: StatusEnumFixture,
-    T::Agent: Serialize,
-{
-    for case in T::cases() {
-        let agent = serde_json::to_value(&case.agent).unwrap();
-        assert_eq!(agent, serde_json::json!(case.wire), "{:?}", case.variant);
+    let tested: Vec<&D> = cases.iter().map(|(domain, _)| domain).collect();
+    assert_eq!(tested, variants.iter().collect::<Vec<_>>());
+    for (domain, wire) in cases {
+        assert_eq!(&W::from(domain), wire);
+        let wire_json = serde_json::to_value(wire).unwrap();
+        assert_eq!(wire_json, serde_json::to_value(domain).unwrap());
     }
 }
 
@@ -310,8 +299,7 @@ where
 ///
 /// Usage:
 /// ```ignore
-/// status_enum_tests!(DplTarget, backend, agent);
-/// status_enum_tests!(DeviceStatus, agent);
+/// status_enum_tests!(DplTarget, backend);
 /// status_enum_tests!(LogLevel);
 /// ```
 macro_rules! status_enum_tests {
@@ -345,18 +333,6 @@ macro_rules! status_enum_tests {
         #[test]
         fn backend_wire_strings_match() {
             assert_backend_wire_strings::<$type>();
-        }
-    };
-
-    (@agent $type:ident) => {
-        #[test]
-        fn agent_conversions() {
-            assert_agent_conversions::<$type>();
-        }
-
-        #[test]
-        fn agent_wire_strings_match() {
-            assert_agent_wire_strings::<$type>();
         }
     };
 }

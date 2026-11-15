@@ -1,6 +1,5 @@
 // internal crates
 use backend_api::models as backend_client;
-use device_api_v02::models as agent_server;
 use miru_daemon::models::deployment::Updates;
 use miru_daemon::models::Patch;
 use miru_daemon::models::{Deployment, DplActivity, DplErrStatus, DplStatus, DplTarget};
@@ -176,7 +175,6 @@ fn defaults() {
 
 impl StatusEnumFixture for DplTarget {
     type Backend = backend_client::DeploymentTargetStatus;
-    type Agent = agent_server::DeploymentTargetStatus;
 
     fn cases() -> Vec<StatusCase<Self>> {
         vec![
@@ -184,31 +182,27 @@ impl StatusEnumFixture for DplTarget {
                 variant: DplTarget::Staged,
                 wire: "staged",
                 backend: backend_client::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_STAGED,
-                agent: agent_server::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_STAGED,
             },
             StatusCase {
                 variant: DplTarget::Deployed,
                 wire: "deployed",
                 backend: backend_client::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_DEPLOYED,
-                agent: agent_server::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_DEPLOYED,
             },
             StatusCase {
                 variant: DplTarget::Archived,
                 wire: "archived",
                 backend: backend_client::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_ARCHIVED,
-                agent: agent_server::DeploymentTargetStatus::DEPLOYMENT_TARGET_STATUS_ARCHIVED,
             },
         ]
     }
 }
 
-status_enum_tests!(DplTarget, backend, agent);
+status_enum_tests!(DplTarget, backend);
 
 // ─── activity status enum tests ──────────────────────────────────────────────
 
 impl StatusEnumFixture for DplActivity {
     type Backend = backend_client::DeploymentActivityStatus;
-    type Agent = agent_server::DeploymentActivityStatus;
 
     fn cases() -> Vec<StatusCase<Self>> {
         vec![
@@ -217,54 +211,47 @@ impl StatusEnumFixture for DplActivity {
                 wire: "drifted",
                 backend:
                     backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DRIFTED,
-                agent: agent_server::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DRIFTED,
             },
             StatusCase {
                 variant: DplActivity::Staged,
                 wire: "staged",
                 backend:
                     backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_STAGED,
-                agent: agent_server::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_STAGED,
             },
             StatusCase {
                 variant: DplActivity::Queued,
                 wire: "queued",
                 backend:
                     backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_QUEUED,
-                agent: agent_server::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_QUEUED,
             },
             StatusCase {
                 variant: DplActivity::Deployed,
                 wire: "deployed",
                 backend:
                     backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED,
-                agent: agent_server::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED,
             },
             StatusCase {
                 variant: DplActivity::Removing,
                 wire: "removing",
                 backend:
                     backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_REMOVING,
-                agent: agent_server::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_REMOVING,
             },
             StatusCase {
                 variant: DplActivity::Archived,
                 wire: "archived",
                 backend:
                     backend_client::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_ARCHIVED,
-                agent: agent_server::DeploymentActivityStatus::DEPLOYMENT_ACTIVITY_STATUS_ARCHIVED,
             },
         ]
     }
 }
 
-status_enum_tests!(DplActivity, backend, agent);
+status_enum_tests!(DplActivity, backend);
 
 // ─── error status enum tests ──────────────────────────────────────────────
 
 impl StatusEnumFixture for DplErrStatus {
     type Backend = backend_client::DeploymentErrorStatus;
-    type Agent = agent_server::DeploymentErrorStatus;
 
     fn cases() -> Vec<StatusCase<Self>> {
         vec![
@@ -272,31 +259,27 @@ impl StatusEnumFixture for DplErrStatus {
                 variant: DplErrStatus::None,
                 wire: "none",
                 backend: backend_client::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_NONE,
-                agent: agent_server::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_NONE,
             },
             StatusCase {
                 variant: DplErrStatus::Failed,
                 wire: "failed",
                 backend: backend_client::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_FAILED,
-                agent: agent_server::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_FAILED,
             },
             StatusCase {
                 variant: DplErrStatus::Retrying,
                 wire: "retrying",
                 backend: backend_client::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_RETRYING,
-                agent: agent_server::DeploymentErrorStatus::DEPLOYMENT_ERROR_STATUS_RETRYING,
             },
         ]
     }
 }
 
-status_enum_tests!(DplErrStatus, backend, agent);
+status_enum_tests!(DplErrStatus, backend);
 
 // ─── status enum tests ───────────────────────────────────────────────────────
 
 impl StatusEnumFixture for DplStatus {
     type Backend = backend_client::DeploymentStatus;
-    type Agent = agent_server::DeploymentStatus;
 
     fn cases() -> Vec<StatusCase<Self>> {
         vec![
@@ -304,55 +287,47 @@ impl StatusEnumFixture for DplStatus {
                 variant: DplStatus::Drifted,
                 wire: "drifted",
                 backend: backend_client::DeploymentStatus::DEPLOYMENT_STATUS_DRIFTED,
-                agent: agent_server::DeploymentStatus::DEPLOYMENT_STATUS_DRIFTED,
             },
             StatusCase {
                 variant: DplStatus::Staged,
                 wire: "staged",
                 backend: backend_client::DeploymentStatus::DEPLOYMENT_STATUS_STAGED,
-                agent: agent_server::DeploymentStatus::DEPLOYMENT_STATUS_STAGED,
             },
             StatusCase {
                 variant: DplStatus::Queued,
                 wire: "queued",
                 backend: backend_client::DeploymentStatus::DEPLOYMENT_STATUS_QUEUED,
-                agent: agent_server::DeploymentStatus::DEPLOYMENT_STATUS_QUEUED,
             },
             StatusCase {
                 variant: DplStatus::Deployed,
                 wire: "deployed",
                 backend: backend_client::DeploymentStatus::DEPLOYMENT_STATUS_DEPLOYED,
-                agent: agent_server::DeploymentStatus::DEPLOYMENT_STATUS_DEPLOYED,
             },
             StatusCase {
                 variant: DplStatus::Removing,
                 wire: "removing",
                 backend: backend_client::DeploymentStatus::DEPLOYMENT_STATUS_REMOVING,
-                agent: agent_server::DeploymentStatus::DEPLOYMENT_STATUS_REMOVING,
             },
             StatusCase {
                 variant: DplStatus::Archived,
                 wire: "archived",
                 backend: backend_client::DeploymentStatus::DEPLOYMENT_STATUS_ARCHIVED,
-                agent: agent_server::DeploymentStatus::DEPLOYMENT_STATUS_ARCHIVED,
             },
             StatusCase {
                 variant: DplStatus::Failed,
                 wire: "failed",
                 backend: backend_client::DeploymentStatus::DEPLOYMENT_STATUS_FAILED,
-                agent: agent_server::DeploymentStatus::DEPLOYMENT_STATUS_FAILED,
             },
             StatusCase {
                 variant: DplStatus::Retrying,
                 wire: "retrying",
                 backend: backend_client::DeploymentStatus::DEPLOYMENT_STATUS_RETRYING,
-                agent: agent_server::DeploymentStatus::DEPLOYMENT_STATUS_RETRYING,
             },
         ]
     }
 }
 
-status_enum_tests!(DplStatus, backend, agent);
+status_enum_tests!(DplStatus, backend);
 
 #[test]
 fn status_from_activity_and_error() {

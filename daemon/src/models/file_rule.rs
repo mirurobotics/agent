@@ -2,7 +2,6 @@
 use crate::deserialize_error;
 use crate::models::{status::impl_status_enum, Os};
 use backend_api::models as backend_client;
-use device_api_v02::models as agent_server;
 
 // external crates
 use chrono::{DateTime, Utc};
@@ -42,15 +41,12 @@ impl_status_enum!(
     default: Utc,
     label: "upload timezone",
     log: warn,
-    agent_type: agent_server::FileRuleUploadTimezone,
     backend_type: backend_client::FileRuleUploadTimezone,
     unknown_backend: backend_client::FileRuleUploadTimezone::FileRuleUploadTimezoneUnknown,
     mappings: [
         Utc => "utc" =>
-            agent_server::FileRuleUploadTimezone::FILE_RULE_UPLOAD_TIMEZONE_UTC =>
             backend_client::FileRuleUploadTimezone::FILE_RULE_UPLOAD_TIMEZONE_UTC,
         Device => "device" =>
-            agent_server::FileRuleUploadTimezone::FILE_RULE_UPLOAD_TIMEZONE_DEVICE =>
             backend_client::FileRuleUploadTimezone::FILE_RULE_UPLOAD_TIMEZONE_DEVICE,
     ]
 );

@@ -42,7 +42,7 @@ use tokio::sync::broadcast;
 
 ### Device API conversions
 
-Handlers in `daemon/src/server/v02/handlers.rs` (one module per Device API version) don't convert wire types. Response conversions live in `server/v02/response.rs` and request conversions in `server/v02/request.rs` ([agent#383](https://github.com/mirurobotics/agent/pull/383#discussion_r4363970314)).
+Handlers in `daemon/src/server/v02/handlers.rs` (one module per Device API version) don't convert wire types. Response conversions live in `server/v02/response.rs` and request conversions in `server/v02/request.rs` ([agent#383](https://github.com/mirurobotics/agent/pull/383#discussion_r4363970314)). Enum conversions are hand-written `From` impls in `server/v02/enums.rs` ([agent#489](https://github.com/mirurobotics/agent/pull/489#discussion_r4579822780)).
 
 Stores return the domain type, such as a calibration as a `Report`, not a type shaped for one route; the service or the response conversion picks what the route needs ([agent#421](https://github.com/mirurobotics/agent/pull/421#discussion_r4521100113), [agent#421](https://github.com/mirurobotics/agent/pull/421#discussion_r4521188885)).
 
@@ -67,14 +67,13 @@ use the same code in normal and test builds; tests control dependencies and time
 
 Pick the enum facility by what the enum needs to do:
 
-- **Backend-mirrored status enum** (has a `backend_api` and/or `device_api_v02` twin) →
-  `impl_status_enum!` (`daemon/src/models/status.rs`) with `agent_type` +
-  `backend_type` + `unknown_backend`. Generates the wire `Deserialize`
-  (unknown→default), `variants()`, `as_str()`, all layer conversions, and inline
-  serde + backend forward-compat tests.
-- **Local wire/config enum with no backend twin** → `impl_status_enum!` local or
-  agent-only form (omit `backend_type`; omit `agent_type` too when there is no
-  agent-server twin). Add `display: true`, `aliases: [...]`,
+- **Backend-mirrored status enum** (has a `backend_api` twin) →
+  `impl_status_enum!` (`daemon/src/models/status.rs`) with `backend_type` +
+  `unknown_backend`. Generates the wire `Deserialize` (unknown→default),
+  `variants()`, `as_str()`, the backend conversions, and inline serde + backend
+  forward-compat tests.
+- **Local wire/config enum with no backend twin** → `impl_status_enum!` local
+  form (omit `backend_type`). Add `display: true`, `aliases: [...]`,
   `case_insensitive: true`, and/or `on_non_string: default` only as needed (e.g.
   `LogLevel`). These clauses default off, so the wire-strict, case-sensitive,
   non-string-rejecting behavior is the baseline.

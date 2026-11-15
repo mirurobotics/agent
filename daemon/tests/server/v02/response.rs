@@ -110,27 +110,12 @@ pub mod sync_device_response {
     }
 
     #[test]
-    fn converts_each_code() {
-        let cases = [
-            (
-                SyncCode::Success,
-                openapi::SyncDeviceResult::SYNC_DEVICE_RESULT_SUCCESS,
-            ),
-            (
-                SyncCode::InCooldown,
-                openapi::SyncDeviceResult::SYNC_DEVICE_RESULT_IN_COOLDOWN,
-            ),
-            (
-                SyncCode::NetworkConnectionError,
-                openapi::SyncDeviceResult::SYNC_DEVICE_RESULT_NETWORK_CONNECTION_ERROR,
-            ),
-        ];
+    fn converts_state_not_in_cooldown() {
         let epoch = DateTime::<Utc>::UNIX_EPOCH;
+        let wire_code = openapi::SyncDeviceResult::SYNC_DEVICE_RESULT_SUCCESS;
 
-        for (code, wire_code) in cases {
-            let sdk: openapi::SyncDeviceResponse = (&outcome(code, epoch)).into();
-            assert_eq!(sdk, expected(wire_code, epoch, false), "{code:?}");
-        }
+        let sdk: openapi::SyncDeviceResponse = (&outcome(SyncCode::Success, epoch)).into();
+        assert_eq!(sdk, expected(wire_code, epoch, false));
     }
 
     #[test]
