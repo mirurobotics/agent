@@ -220,11 +220,29 @@ pub mod headers {
     }
 
     #[test]
-    fn miru_daemon_version_contains_daemon_version() {
-        let headers = Headers::default();
+    fn each_header_carries_its_field() {
+        let headers = Headers {
+            daemon_version: "v1.2.3".to_string(),
+            api_version: "2026-01-01".to_string(),
+            host_name: "robot-1".to_string(),
+            arch: "aarch64".to_string(),
+            language: "rust".to_string(),
+            os: "linux".to_string(),
+        };
         let map = headers.to_map().unwrap();
-        let daemon_version = map.get("Miru-Daemon-Version").unwrap().to_str().unwrap();
-        assert_eq!(daemon_version, &headers.daemon_version);
+        let expected = [
+            ("Version", "v1.2.3"),
+            ("Host-Name", "robot-1"),
+            ("Arch", "aarch64"),
+            ("Language", "rust"),
+            ("OS", "linux"),
+        ];
+        for prefix in ["Miru-Daemon", "Miru-Agent"] {
+            for (suffix, value) in expected {
+                let key = format!("{prefix}-{suffix}");
+                assert_eq!(map.get(key.as_str()).unwrap(), value, "{key}");
+            }
+        }
     }
 }
 
