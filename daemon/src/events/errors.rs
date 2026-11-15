@@ -15,6 +15,11 @@ pub struct SerializationErr(pub serde_json::Error);
 impl crate::errors::Error for SerializationErr {}
 
 #[derive(Debug, thiserror::Error)]
+#[error("unknown event type '{0}'")]
+pub struct UnknownEventTypeErr(pub String);
+impl crate::errors::Error for UnknownEventTypeErr {}
+
+#[derive(Debug, thiserror::Error)]
 #[error("cursor {requested} has expired; earliest available event is {earliest_available}")]
 pub struct CursorExpiredErr {
     pub earliest_available: i64,
@@ -55,6 +60,8 @@ pub enum EventsErr {
     #[error(transparent)]
     SerializationErr(SerializationErr),
     #[error(transparent)]
+    UnknownEventTypeErr(UnknownEventTypeErr),
+    #[error(transparent)]
     CursorExpiredErr(CursorExpiredErr),
     #[error(transparent)]
     MalformedCursorErr(MalformedCursorErr),
@@ -80,6 +87,7 @@ crate::impl_error!(EventsErr {
     IoErr,
     FileSysErr,
     SerializationErr,
+    UnknownEventTypeErr,
     CursorExpiredErr,
     MalformedCursorErr,
     SendActorMessageErr,

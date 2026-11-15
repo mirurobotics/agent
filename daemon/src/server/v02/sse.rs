@@ -7,7 +7,7 @@ use std::time::Duration;
 use crate::errors::Error;
 use crate::events::{
     errors::{EventsErr, MalformedCursorErr},
-    model::EventTypeFilter,
+    model::{Event, EventTypeFilter},
 };
 use crate::server::{state::State, v02::request};
 use crate::services::{events as events_svc, ServiceErr};
@@ -63,8 +63,8 @@ async fn events_impl(
     let stream = events_svc::subscribe(&state.event_hub, cursor, filter).await?;
 
     let sse_stream = stream.filter_map(|event| {
-        let api_event = device_server::Event::from(&event);
-        match serde_json::to_string(&api_event) {
+        let json = to_sse_data(&event);
+        match json {
             Ok(json) => Some(Ok::<_, Infallible>(
                 SseEvent::default()
                     .id(event.id.to_string())
@@ -72,7 +72,7 @@ async fn events_impl(
                     .data(json),
             )),
             Err(e) => {
-                warn!("failed to serialize event {}: {e}", event.id);
+                warn!("failed to convert event {}: {e}", event.id);
                 None
             }
         }
@@ -121,4 +121,9 @@ fn resolve_cursor(params: &EventsQuery, headers: &HeaderMap) -> Result<Option<i6
 fn parse_event_filter(types: Option<String>) -> Option<EventTypeFilter> {
     let set: EventTypeFilter = request::split_list(types).into_iter().collect();
     (!set.is_empty()).then_some(set)
+}
+
+fn to_sse_data(event: &Event) -> Result<String, EventsErr> {
+    let api_event = device_server::Event::try_from(event)?;
+    Ok(serde_json::to_string(&api_event)?)
 }
