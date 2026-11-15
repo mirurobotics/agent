@@ -1,14 +1,14 @@
-# Dockerfile.builder - Build environment for miru-agent
+# Dockerfile.builder - Build environment for the Miru Daemon
 #
 # Contains Rust, Zig (for cross-compilation via cargo-zigbuild), and GoReleaser.
 # Pre-built and pushed to GHCR by the builder.yml CI workflow.
 #
 # Build locally:
-#   docker build -f build/Dockerfile.builder -t miru-agent-builder .
+#   docker build -f build/Dockerfile.builder -t miru-daemon-builder .
 FROM rust:1.93.0-bookworm
 
-LABEL org.opencontainers.image.title="miru-agent-builder"
-LABEL org.opencontainers.image.description="Build environment for miru-agent with Rust, Zig, and GoReleaser"
+LABEL org.opencontainers.image.title="miru-daemon-builder"
+LABEL org.opencontainers.image.description="Build environment for the Miru Daemon with Rust, Zig, and GoReleaser"
 LABEL org.opencontainers.image.source="https://github.com/mirurobotics/agent"
 
 # Install build dependencies
