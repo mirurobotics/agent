@@ -42,7 +42,7 @@ use tokio::sync::broadcast;
 
 ### Device API conversions
 
-Handlers in `daemon/src/server/v02/handlers.rs` (one module per Device API version) don't convert wire types. Response conversions live in `server/v02/response.rs` and request conversions in `server/v02/request.rs` ([agent#383](https://github.com/mirurobotics/agent/pull/383#discussion_r4363970314)).
+Handlers in `daemon/src/server/v02/handlers.rs` (one module per Device API version) don't convert wire types. Response conversions live in `server/v02/response.rs` and request conversions in `server/v02/request.rs` ([agent#383](https://github.com/mirurobotics/agent/pull/383#discussion_r4363970314)). Enum conversions are hand-written `From` impls in `server/v02/enums.rs` ([agent#489](https://github.com/mirurobotics/agent/pull/489#discussion_r4579822780)).
 
 Stores return the domain type, such as a calibration as a `Report`, not a type shaped for one route; the service or the response conversion picks what the route needs ([agent#421](https://github.com/mirurobotics/agent/pull/421#discussion_r4521100113), [agent#421](https://github.com/mirurobotics/agent/pull/421#discussion_r4521188885)).
 
@@ -85,9 +85,6 @@ Pick the enum facility by what the enum needs to do:
 Each `impl_status_enum!` enum also gets a hand-written `StatusEnumFixture` table
 and `status_enum_tests!` in its integration test file
 (`daemon/tests/models/harnesses.rs`), so a slip in the macro's mapping fails a test.
-
-Device API enum conversions are hand-written `From` impls in each version's
-`server/vNN/enums.rs`, tested there ([agent#489](https://github.com/mirurobotics/agent/pull/489#discussion_r4579822780)).
 
 ### Terminology
 
