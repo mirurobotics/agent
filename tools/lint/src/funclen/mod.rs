@@ -297,7 +297,7 @@ mod tests {
 
     #[test]
     fn tests_path_exempt() {
-        let violations = check_file(Path::new("agent/tests/foo.rs"), &src_fn(10), 3);
+        let violations = check_file(Path::new("daemon/tests/foo.rs"), &src_fn(10), 3);
         assert!(violations.is_empty());
     }
 

@@ -11,7 +11,7 @@
 #   IMPORT_LINT_CONFIG   — path to .lint-imports.toml
 #
 # Optional env:
-#   CARGO_PKG            — e.g. "--package miru-agent" (empty = default crate)
+#   CARGO_PKG            — e.g. "--package miru-daemon" (empty = default crate)
 #   CARGO_CLIPPY_EXTRA   — e.g. "--all-features"      (empty = no extra flags)
 #   LINT_FIX             — 1 = auto-fix (default), 0 = check-only (CI)
 #   RUN_DIET             — 1 = run cargo diet, 0 = skip (default)

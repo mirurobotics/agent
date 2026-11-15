@@ -178,7 +178,7 @@ mod tests {
         let classifier = Classifier::new(&config);
         let block = parse(content);
         fix_file(
-            Path::new("agent/src/test.rs"),
+            Path::new("daemon/src/test.rs"),
             content,
             &block,
             &classifier,
@@ -343,7 +343,7 @@ fn main() {}
         let classifier = Classifier::new(&config);
         let block = parse(content);
         let result = fix_file(
-            Path::new("agent/src/http/deployments.rs"),
+            Path::new("daemon/src/http/deployments.rs"),
             content,
             &block,
             &classifier,
@@ -368,7 +368,7 @@ use std::sync::Arc;
 fn main() {}
 ";
         let result = fix_file(
-            Path::new("agent/src/main.rs"),
+            Path::new("daemon/src/main.rs"),
             content,
             &parse(content),
             &Classifier::new(&default_config()),

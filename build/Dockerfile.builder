@@ -1,14 +1,14 @@
-# Dockerfile.builder - Build environment for miru-agent
+# Dockerfile.builder - Build environment for the Miru Daemon
 #
 # Contains Rust, Zig (for cross-compilation via cargo-zigbuild), and GoReleaser.
 # Pre-built and pushed to GHCR by the builder.yml CI workflow.
 #
 # Build locally:
-#   docker build -f build/Dockerfile.builder -t miru-agent-builder .
+#   docker build -f build/Dockerfile.builder -t miru-daemon-builder .
 FROM rust:1.93.0-bookworm
 
-LABEL org.opencontainers.image.title="miru-agent-builder"
-LABEL org.opencontainers.image.description="Build environment for miru-agent with Rust, Zig, and GoReleaser"
+LABEL org.opencontainers.image.title="miru-daemon-builder"
+LABEL org.opencontainers.image.description="Build environment for the Miru Daemon with Rust, Zig, and GoReleaser"
 LABEL org.opencontainers.image.source="https://github.com/mirurobotics/agent"
 
 # Install build dependencies
@@ -46,7 +46,7 @@ RUN cargo install cargo-auditable --locked
 # if it isn't "auditable" — so GoReleaser's `tool:`/`command:` cannot point at the
 # cargo-auditable binary directly. This wrapper restores the `cargo auditable`
 # invocation while passing through whatever GoReleaser appends (e.g.
-# `zigbuild --target=... --release -p=miru-agent`).
+# `zigbuild --target=... --release -p=miru-daemon`).
 RUN printf '#!/usr/bin/env bash\nexec cargo auditable "$@"\n' \
         > /usr/local/bin/cargo-auditable-zigbuild \
     && chmod +x /usr/local/bin/cargo-auditable-zigbuild

@@ -1,0 +1,295 @@
+// standard crates
+use std::time::Duration;
+
+// internal crates
+use miru_daemon::mqtt::options::{ConnectAddress, Credentials, Options, Protocol, Timeouts};
+use miru_daemon::network::MqttHost;
+
+// external crates
+use secrecy::{ExposeSecret, SecretString};
+
+mod protocol_display {
+    use super::*;
+
+    #[test]
+    fn tcp_renders_lowercase() {
+        assert_eq!(format!("{}", Protocol::TCP), "tcp");
+    }
+
+    #[test]
+    fn ssl_renders_lowercase() {
+        assert_eq!(format!("{}", Protocol::SSL), "ssl");
+    }
+}
+
+mod connect_address {
+    use super::*;
+
+    #[test]
+    fn default() {
+        let addr = ConnectAddress::default();
+        assert!(matches!(addr.protocol(), Protocol::SSL));
+        assert_eq!(addr.broker().as_str(), "mqtt.mirurobotics.com");
+        assert_eq!(addr.port(), 443);
+    }
+
+    #[test]
+    fn protocol_returns_constructed_protocol() {
+        let addr =
+            ConnectAddress::new(MqttHost::new("localhost").unwrap(), Protocol::TCP, 1883).unwrap();
+        assert!(matches!(addr.protocol(), Protocol::TCP));
+    }
+
+    #[test]
+    fn broker_returns_reference_to_constructed_host() {
+        let addr =
+            ConnectAddress::new(MqttHost::new("localhost").unwrap(), Protocol::TCP, 1883).unwrap();
+        assert_eq!(addr.broker().as_str(), "localhost");
+    }
+
+    #[test]
+    fn port_returns_constructed_port() {
+        let addr =
+            ConnectAddress::new(MqttHost::new("localhost").unwrap(), Protocol::TCP, 1883).unwrap();
+        assert_eq!(addr.port(), 1883);
+    }
+}
+
+mod connect_address_new {
+    use super::*;
+
+    // Host validity is statically guaranteed by `MqttHost`. The constructor
+    // exists to enforce the residual SSL-unless-loopback rule.
+
+    #[test]
+    fn accepts_loopback_tcp() {
+        ConnectAddress::new(MqttHost::new("localhost").unwrap(), Protocol::TCP, 1883).unwrap();
+    }
+
+    #[test]
+    fn accepts_loopback_ssl() {
+        ConnectAddress::new(MqttHost::new("127.0.0.1").unwrap(), Protocol::SSL, 8883).unwrap();
+    }
+
+    #[test]
+    fn accepts_allowed_host_ssl() {
+        ConnectAddress::new(
+            MqttHost::new("mqtt.mirurobotics.com").unwrap(),
+            Protocol::SSL,
+            8883,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn rejects_allowed_host_tcp() {
+        let err = ConnectAddress::new(
+            MqttHost::new("mqtt.mirurobotics.com").unwrap(),
+            Protocol::TCP,
+            1883,
+        )
+        .unwrap_err();
+        assert!(
+            err.msg.contains("Protocol::SSL"),
+            "expected SSL-rule message, got: {}",
+            err.msg
+        );
+    }
+}
+
+mod connect_address_new_or {
+    use super::*;
+
+    #[test]
+    fn returns_constructed_address_on_valid_input() {
+        let fallback = ConnectAddress::default();
+        let addr = ConnectAddress::new_or(
+            MqttHost::new("localhost").unwrap(),
+            Protocol::TCP,
+            1883,
+            fallback,
+        );
+        assert_eq!(addr.broker().as_str(), "localhost");
+        assert_eq!(addr.port(), 1883);
+        assert!(matches!(addr.protocol(), Protocol::TCP));
+    }
+
+    #[test]
+    fn returns_fallback_when_ssl_rule_rejects() {
+        // Non-loopback host with TCP violates the SSL-unless-loopback rule.
+        let fallback = ConnectAddress::default();
+        let addr = ConnectAddress::new_or(
+            MqttHost::new("mqtt.mirurobotics.com").unwrap(),
+            Protocol::TCP,
+            1883,
+            fallback.clone(),
+        );
+        assert_eq!(addr, fallback);
+    }
+}
+
+mod connect_address_display {
+    use super::*;
+
+    #[test]
+    fn renders_tcp_loopback() {
+        let addr =
+            ConnectAddress::new(MqttHost::new("localhost").unwrap(), Protocol::TCP, 1883).unwrap();
+        assert_eq!(format!("{addr}"), "tcp://localhost:1883");
+    }
+
+    #[test]
+    fn renders_ssl_allowed_domain() {
+        let addr = ConnectAddress::new(
+            MqttHost::new("mqtt.mirurobotics.com").unwrap(),
+            Protocol::SSL,
+            8883,
+        )
+        .unwrap();
+        assert_eq!(format!("{addr}"), "ssl://mqtt.mirurobotics.com:8883");
+    }
+}
+
+mod credentials {
+    use super::*;
+
+    #[test]
+    fn default() {
+        let creds = Credentials::default();
+        assert_eq!(creds.username, "miru-agent");
+        assert_eq!(creds.password.expose_secret(), "miru-agent-password");
+    }
+
+    #[test]
+    fn debug_redacts_password() {
+        let creds = Credentials {
+            username: "user".to_string(),
+            password: SecretString::from("super-secret-token"),
+        };
+        let rendered = format!("{creds:?}");
+        assert!(
+            !rendered.contains("super-secret-token"),
+            "password leaked in Debug: {rendered}"
+        );
+        assert!(
+            rendered.contains("REDACTED"),
+            "expected redaction marker in Debug: {rendered}"
+        );
+    }
+}
+
+mod timeouts {
+    use super::*;
+
+    #[test]
+    fn default() {
+        let actual = Timeouts::default();
+        let expected = Timeouts {
+            publish: Duration::from_secs(3),
+            subscribe: Duration::from_secs(3),
+            unsubscribe: Duration::from_secs(3),
+            disconnect: Duration::from_secs(3),
+        };
+        assert_eq!(actual, expected);
+    }
+}
+
+mod opts {
+    use super::*;
+
+    #[test]
+    fn new_defaults() {
+        let creds = Credentials {
+            username: "user".to_string(),
+            password: SecretString::from("pass"),
+        };
+        let actual = Options::new(creds.clone());
+        let expected = Options {
+            credentials: creds,
+            client_id: "user".to_string(),
+            connect_address: ConnectAddress::default(),
+            keep_alive: Duration::from_secs(20),
+            timeouts: Timeouts::default(),
+            capacity: 64,
+        };
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn default() {
+        let actual = Options::default();
+        let expected = Options {
+            credentials: Credentials::default(),
+            client_id: "miru-agent".to_string(),
+            connect_address: ConnectAddress::default(),
+            keep_alive: Duration::from_secs(20),
+            timeouts: Timeouts::default(),
+            capacity: 64,
+        };
+        assert!(matches!(actual.connect_address.protocol(), Protocol::SSL));
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn set_password() {
+        let mut opts = Options::default();
+        opts.set_password(SecretString::from("new-password"));
+        assert_eq!(opts.credentials.password.expose_secret(), "new-password");
+    }
+
+    #[test]
+    fn with_connect_address() {
+        let addr =
+            ConnectAddress::new(MqttHost::new("localhost").unwrap(), Protocol::TCP, 1883).unwrap();
+        let opts = Options::default().with_connect_address(addr);
+        assert!(matches!(opts.connect_address.protocol(), Protocol::TCP));
+        assert_eq!(opts.connect_address.broker().as_str(), "localhost");
+        assert_eq!(opts.connect_address.port(), 1883);
+    }
+
+    #[test]
+    fn with_credentials() {
+        let new_creds = Credentials {
+            username: "other".to_string(),
+            password: SecretString::from("secret"),
+        };
+        let opts = Options::default().with_credentials(new_creds);
+        assert_eq!(opts.credentials.username, "other");
+        assert_eq!(opts.credentials.password.expose_secret(), "secret");
+    }
+
+    #[test]
+    fn debug_redacts_password() {
+        let opts = Options::new(Credentials {
+            username: "user".to_string(),
+            password: SecretString::from("super-secret-token"),
+        });
+        let rendered = format!("{opts:?}");
+        assert!(
+            !rendered.contains("super-secret-token"),
+            "password leaked in Debug: {rendered}"
+        );
+        assert!(
+            rendered.contains("REDACTED"),
+            "expected redaction marker in Debug: {rendered}"
+        );
+    }
+
+    #[test]
+    fn with_client_id() {
+        let opts = Options::default().with_client_id("custom-id".to_string());
+        assert_eq!(opts.client_id, "custom-id");
+    }
+
+    #[test]
+    fn with_timeouts() {
+        let timeouts = Timeouts {
+            publish: Duration::from_secs(10),
+            subscribe: Duration::from_secs(10),
+            unsubscribe: Duration::from_secs(10),
+            disconnect: Duration::from_secs(10),
+        };
+        let opts = Options::default().with_timeouts(timeouts);
+        assert_eq!(opts.timeouts.publish, Duration::from_secs(10));
+    }
+}

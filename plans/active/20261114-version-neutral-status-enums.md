@@ -12,11 +12,11 @@ This plan lives in `agent/plans/` because every change is in the agent repo. Pat
 
 ## Purpose / Big Picture
 
-The agent serves a local HTTP API, the Device API, to programs on the same device. Since agent#485 each Device API version is one generated crate (`libs/device-api-v02`, imported as `device_api_v02`) plus one module (`agent/src/server/v02/`). A later PR adds `/v0.3` as a full copy of `server/v02/` over its own crate `device_api_v03`.
+The agent serves a local HTTP API, the Device API, to programs on the same device. Since agent#485 each Device API version is one generated crate (`libs/device-api-v02`, imported as `device_api_v02`) plus one module (`daemon/src/server/v02/`). A later PR adds `/v0.3` as a full copy of `server/v02/` over its own crate `device_api_v03`.
 
-PR 1 moved the event store off the v0.2 structs. The last place outside `server/v02/` that depends on the v0.2 crate is the domain status enums in `agent/src/models/`: each `impl_status_enum!` call names one v0.2 enum with an `agent_type` clause, and the macro generates the conversion to it. A macro clause can only name one version, so `/v0.3` would have to edit `models/`.
+PR 1 moved the event store off the v0.2 structs. The last place outside `server/v02/` that depends on the v0.2 crate is the domain status enums in `daemon/src/models/`: each `impl_status_enum!` call names one v0.2 enum with an `agent_type` clause, and the macro generates the conversion to it. A macro clause can only name one version, so `/v0.3` would have to edit `models/`.
 
-After this change nothing in `agent/src/` outside `server/v02/` imports `device_api_v02`, and `/v0.3` adds its own conversions in its own `response.rs` without touching `models/` or `events/`. Nothing a client sees changes: every `/v0.2` response body is the same.
+After this change nothing in `daemon/src/` outside `server/v02/` imports `device_api_v02`, and `/v0.3` adds its own conversions in its own `response.rs` without touching `models/` or `events/`. Nothing a client sees changes: every `/v0.2` response body is the same.
 
 ## Decisions
 
@@ -24,7 +24,7 @@ After this change nothing in `agent/src/` outside `server/v02/` imports `device_
 
 | New name | Alternatives | Why this one |
 |----------|--------------|--------------|
-| `assert_converts_each` (private generic test helper in `agent/tests/server/v02/response.rs`) | `assert_wire_conversions`; `assert_agent_conversions` (the harness name it replaces) | Reads like its sibling test `converts_each_code`; "agent" in the old name meant the v0.2 server crate, which is now the module the helper sits in. |
+| `assert_converts_each` (private generic test helper in `daemon/tests/server/v02/response.rs`) | `assert_wire_conversions`; `assert_agent_conversions` (the harness name it replaces) | Reads like its sibling test `converts_each_code`; "agent" in the old name meant the v0.2 server crate, which is now the module the helper sits in. |
 
 The seven `From<&Domain> for device_server::<Enum>` impls add no names.
 
@@ -34,14 +34,14 @@ No new files. New code in existing files mirrors these siblings:
 
 | New code | Mirrors |
 |----------|---------|
-| Seven `impl From<&models::X> for device_server::Y` in `agent/src/server/v02/response.rs` | `impl From<SyncCode> for device_server::SyncDeviceResult` in the same file (a `match` with `Self::` arms) |
-| Module `status_enums` in `agent/tests/server/v02/response.rs` | `sync_device_response::converts_each_code` in the same file (a hand-written table of domain value and wire value) |
+| Seven `impl From<&models::X> for device_server::Y` in `daemon/src/server/v02/response.rs` | `impl From<SyncCode> for device_server::SyncDeviceResult` in the same file (a `match` with `Self::` arms) |
+| Module `status_enums` in `daemon/tests/server/v02/response.rs` | `sync_device_response::converts_each_code` in the same file (a hand-written table of domain value and wire value) |
 
 ### Left out
 
 - A macro clause that takes one Device API type per version (e.g. `device_types: [v02 => ..., v03 => ...]`): each version module is a full copy that writes its own `From` impls, and the tables are 2 to 8 arms.
 - Request-direction conversions (v0.2 enum to domain): none exist today; the agent only sends these enums.
-- Removing `device_api_v02::models::ApiVersion` from `agent/tests/server/tcp.rs` and `agent/tests/app/run.rs`: transport tests need a served path, and v0.2 is the only version.
+- Removing `device_api_v02::models::ApiVersion` from `daemon/tests/server/tcp.rs` and `daemon/tests/app/run.rs`: transport tests need a served path, and v0.2 is the only version.
 - `/v0.3` itself: the follow-up PR.
 - Pattern First, Then Fan Out: the seven enums are one mechanical change to an existing pattern (the `SyncCode` conversion), not a new pattern across resources, and the macro's agent arms can only go once all seven drop `agent_type`. All seven are done here.
 
@@ -74,32 +74,32 @@ No new files. New code in existing files mirrors these siblings:
 
 ## Context and Orientation
 
-`impl_status_enum!` (`agent/src/models/status.rs`) is a `macro_rules!` macro that, from one mapping table, generates a status enum's custom `Deserialize` (an unknown string becomes the default with a log), `variants()`, `as_str()`, optional `Display`, inline serde tests, and conversions to "twins": the same enum in a generated crate. It has four public arms: local (no twin), agent (`agent_type` only), backend+agent (`agent_type`, `backend_type`, `unknown_backend`), backend-only (`backend_type`, `unknown_backend`). The private `@agent` arm generates `impl From<&Domain> for AgentType`; `@backend` generates both directions with `backend_api` (the control-plane client crate) plus tests. The header comment calls backend-only "no current users", which is stale: `InstanceFormat` (`agent/src/models/instance_format.rs`) uses it. `LogLevel` (`agent/src/logs/mod.rs`) uses the local arm.
+`impl_status_enum!` (`daemon/src/models/status.rs`) is a `macro_rules!` macro that, from one mapping table, generates a status enum's custom `Deserialize` (an unknown string becomes the default with a log), `variants()`, `as_str()`, optional `Display`, inline serde tests, and conversions to "twins": the same enum in a generated crate. It has four public arms: local (no twin), agent (`agent_type` only), backend+agent (`agent_type`, `backend_type`, `unknown_backend`), backend-only (`backend_type`, `unknown_backend`). The private `@agent` arm generates `impl From<&Domain> for AgentType`; `@backend` generates both directions with `backend_api` (the control-plane client crate) plus tests. The header comment calls backend-only "no current users", which is stale: `InstanceFormat` (`daemon/src/models/instance_format.rs`) uses it. `LogLevel` (`daemon/src/logs/mod.rs`) uses the local arm.
 
 Seven call sites pass `agent_type: agent_server::...` with `use device_api_v02::models as agent_server;`:
 
-- `agent/src/models/deployment.rs`: `DplTarget` → `DeploymentTargetStatus`, `DplActivity` → `DeploymentActivityStatus`, `DplErrStatus` → `DeploymentErrorStatus`, `DplStatus` → `DeploymentStatus`, each also with `backend_type`.
-- `agent/src/models/os.rs`: `Os` → `Os`, with `backend_type`.
-- `agent/src/models/file_rule.rs`: `UploadTimezone` → `FileRuleUploadTimezone`, with `backend_type`.
-- `agent/src/models/device.rs`: `DeviceStatus` → `DeviceStatus`, agent only.
+- `daemon/src/models/deployment.rs`: `DplTarget` → `DeploymentTargetStatus`, `DplActivity` → `DeploymentActivityStatus`, `DplErrStatus` → `DeploymentErrorStatus`, `DplStatus` → `DeploymentStatus`, each also with `backend_type`.
+- `daemon/src/models/os.rs`: `Os` → `Os`, with `backend_type`.
+- `daemon/src/models/file_rule.rs`: `UploadTimezone` → `FileRuleUploadTimezone`, with `backend_type`.
+- `daemon/src/models/device.rs`: `DeviceStatus` → `DeviceStatus`, agent only.
 
-After PR 1 the generated conversions have one caller, `agent/src/server/v02/response.rs` (imports `device_api_v02::models as device_server`), which uses `(&x).into()` to fill `Device.status`, `Deployment.{status, activity_status, error_status, target_status}`, `Release.os`, `BaseFileRule.os` and `FileRuleUpload.timezone`. Its existing enum conversion `impl From<SyncCode> for device_server::SyncDeviceResult` matches each variant to a `Self::` value.
+After PR 1 the generated conversions have one caller, `daemon/src/server/v02/response.rs` (imports `device_api_v02::models as device_server`), which uses `(&x).into()` to fill `Device.status`, `Deployment.{status, activity_status, error_status, target_status}`, `Release.os`, `BaseFileRule.os` and `FileRuleUpload.timezone`. Its existing enum conversion `impl From<SyncCode> for device_server::SyncDeviceResult` matches each variant to a `Self::` value.
 
 Wire strings. Each domain enum derives `Serialize` with `#[serde(rename_all = "snake_case")]`; each v0.2 enum renames every variant to the same lowercase string and adds an `#[serde(other)]` `...Unknown` variant used only when parsing.
 
-Tests. `agent/tests/models/harnesses.rs` defines `StatusCase<T>` (`variant`, `wire`, `backend: T::Backend`, `agent: T::Agent`), trait `StatusEnumFixture` (`type Backend; type Agent; fn cases()`), `assert_agent_conversions`, `assert_agent_wire_strings`, and `status_enum_tests!(Type, backend, agent)` whose `@agent` arm runs those two. Fixtures: `agent/tests/models/deployment.rs` (four), `os.rs`, `file_rule.rs` (`UploadTimezone`), `device.rs` (`DeviceStatus`, `Backend = ()`), and, with `Agent = ()`, `instance_format.rs` and `agent/tests/logs/mod.rs` (`LogLevel`). The four model test files import `device_api_v02::models as agent_server` only for the fixtures. `agent/tests/server/v02/response.rs` (imports `device_api_v02::models as openapi`) has one module per response type; `sync_device_response::converts_each_code` loops over a `(SyncCode, openapi::SyncDeviceResult)` table.
+Tests. `daemon/tests/models/harnesses.rs` defines `StatusCase<T>` (`variant`, `wire`, `backend: T::Backend`, `agent: T::Agent`), trait `StatusEnumFixture` (`type Backend; type Agent; fn cases()`), `assert_agent_conversions`, `assert_agent_wire_strings`, and `status_enum_tests!(Type, backend, agent)` whose `@agent` arm runs those two. Fixtures: `daemon/tests/models/deployment.rs` (four), `os.rs`, `file_rule.rs` (`UploadTimezone`), `device.rs` (`DeviceStatus`, `Backend = ()`), and, with `Agent = ()`, `instance_format.rs` and `daemon/tests/logs/mod.rs` (`LogLevel`). The four model test files import `device_api_v02::models as agent_server` only for the fixtures. `daemon/tests/server/v02/response.rs` (imports `device_api_v02::models as openapi`) has one module per response type; `sync_device_response::converts_each_code` loops over a `(SyncCode, openapi::SyncDeviceResult)` table.
 
-Coverage. `scripts/covgate.sh` checks every `.covgate` under `agent/src`; each counts every file under its directory. Touched gates: `agent/src/models/.covgate` (100), `agent/src/server/.covgate` (87), `agent/src/server/v02/.covgate` (87). Never lower one.
+Coverage. `scripts/covgate.sh` checks every `.covgate` under `daemon/src`; each counts every file under its directory. Touched gates: `daemon/src/models/.covgate` (100), `daemon/src/server/.covgate` (87), `daemon/src/server/v02/.covgate` (87). Never lower one.
 
 CI. `.github/workflows/ci.yml` runs on pull requests: `lint` (import-order linter, which also limits production functions to 50 lines and flags 4+ `assert_eq!` on fields of one variable in a test; `cargo fmt --check`; clippy `-D warnings`; machete; audit), `test` (the suite plus coverage gates), `windows-check` (`cargo test --package miru-agent --locked`), `windows-agent-build`.
 
 ## Plan of Work
 
-M1, source. In `agent/src/models/status.rs`, delete the "backend + agent" and "agent only" public arms and the `@agent` arm. Rewrite the header comment: the macro generates the backend `From` conversions (not "the agent-server and/or backend"); it has two public forms, local (neither clause, e.g. `LogLevel`, `DeviceStatus`) and backend (`backend_type` + `unknown_backend`, e.g. the `Dpl*` enums, `Os`, `UploadTimezone`, `InstanceFormat`); Device API conversions are written by hand in each version's `server/vNN/response.rs`. Keep the pointer to `AGENTS.md`.
+M1, source. In `daemon/src/models/status.rs`, delete the "backend + agent" and "agent only" public arms and the `@agent` arm. Rewrite the header comment: the macro generates the backend `From` conversions (not "the agent-server and/or backend"); it has two public forms, local (neither clause, e.g. `LogLevel`, `DeviceStatus`) and backend (`backend_type` + `unknown_backend`, e.g. the `Dpl*` enums, `Os`, `UploadTimezone`, `InstanceFormat`); Device API conversions are written by hand in each version's `server/vNN/response.rs`. Keep the pointer to `AGENTS.md`.
 
-In `agent/src/models/deployment.rs`, `os.rs`, `file_rule.rs`, delete the `agent_type:` line and the `agent_server::... =>` part of each mapping, leaving `Variant => "wire" => backend_client::...` (the form `InstanceFormat` uses), and delete `use device_api_v02::models as agent_server;`. In `agent/src/models/device.rs`, delete `agent_type:` and the import and write the mappings as `Online => "online", Offline => "offline"`.
+In `daemon/src/models/deployment.rs`, `os.rs`, `file_rule.rs`, delete the `agent_type:` line and the `agent_server::... =>` part of each mapping, leaving `Variant => "wire" => backend_client::...` (the form `InstanceFormat` uses), and delete `use device_api_v02::models as agent_server;`. In `daemon/src/models/device.rs`, delete `agent_type:` and the import and write the mappings as `Online => "online", Offline => "offline"`.
 
-In `agent/src/server/v02/response.rs`, add seven impls, each placed right after the first impl that calls it (`DeviceStatus` after `From<&models::Device>`, the four deployment enums after `From<&models::Deployment>`, `Os` after `From<&models::Release>`, `UploadTimezone` after `From<&models::FileRuleUpload>`), in the style of `From<SyncCode>`:
+In `daemon/src/server/v02/response.rs`, add seven impls, each placed right after the first impl that calls it (`DeviceStatus` after `From<&models::Device>`, the four deployment enums after `From<&models::Deployment>`, `Os` after `From<&models::Release>`, `UploadTimezone` after `From<&models::FileRuleUpload>`), in the style of `From<SyncCode>`:
 
     impl From<&models::DplTarget> for device_server::DeploymentTargetStatus {
         fn from(status: &models::DplTarget) -> Self {
@@ -113,9 +113,9 @@ In `agent/src/server/v02/response.rs`, add seven impls, each placed right after 
 
 and likewise `DplActivity` → `DeploymentActivityStatus` (drifted, staged, queued, deployed, removing, archived), `DplErrStatus` → `DeploymentErrorStatus` (none, failed, retrying), `DplStatus` → `DeploymentStatus` (drifted, staged, queued, deployed, removing, archived, failed, retrying), `DeviceStatus` → `DeviceStatus` (online, offline), `Os` → `Os` (`OS_LINUX`, `OS_WINDOWS`), `UploadTimezone` → `FileRuleUploadTimezone` (`FILE_RULE_UPLOAD_TIMEZONE_UTC`, `..._DEVICE`). Copy each arm from the mapping table being deleted. Take `&` so the existing `(&x).into()` call sites stay as they are.
 
-M2, tests. In `agent/tests/models/harnesses.rs`, remove `StatusCase::agent`, `StatusEnumFixture::Agent`, `assert_agent_conversions`, `assert_agent_wire_strings` and the `(@agent ...)` arm; make the `StatusCase` doc say "and its backend twin", and the usage example `status_enum_tests!(DplTarget, backend);` and `status_enum_tests!(LogLevel);`. In each fixture remove `type Agent` and every `agent:` field: `agent/tests/models/{deployment,os,file_rule,device,instance_format}.rs` and `agent/tests/logs/mod.rs`. Change `status_enum_tests!(X, backend, agent)` to `status_enum_tests!(X, backend)` for the six backend enums and `status_enum_tests!(DeviceStatus, agent)` to `status_enum_tests!(DeviceStatus)`. Delete the now-unused `use device_api_v02::models as agent_server;` in the four model test files.
+M2, tests. In `daemon/tests/models/harnesses.rs`, remove `StatusCase::agent`, `StatusEnumFixture::Agent`, `assert_agent_conversions`, `assert_agent_wire_strings` and the `(@agent ...)` arm; make the `StatusCase` doc say "and its backend twin", and the usage example `status_enum_tests!(DplTarget, backend);` and `status_enum_tests!(LogLevel);`. In each fixture remove `type Agent` and every `agent:` field: `daemon/tests/models/{deployment,os,file_rule,device,instance_format}.rs` and `daemon/tests/logs/mod.rs`. Change `status_enum_tests!(X, backend, agent)` to `status_enum_tests!(X, backend)` for the six backend enums and `status_enum_tests!(DeviceStatus, agent)` to `status_enum_tests!(DeviceStatus)`. Delete the now-unused `use device_api_v02::models as agent_server;` in the four model test files.
 
-In `agent/tests/server/v02/response.rs`, add `pub mod status_enums` after the last conversion module (`git_commit_response`) with a private helper and seven tests:
+In `daemon/tests/server/v02/response.rs`, add `pub mod status_enums` after the last conversion module (`git_commit_response`) with a private helper and seven tests:
 
     fn assert_converts_each<D, W>(cases: Vec<(D, W)>, variants: Vec<D>)
     where
@@ -138,22 +138,22 @@ M3, docs. In `AGENTS.md` (`CLAUDE.md` is a symlink to it) "Enum conventions": th
 
 All commands run from the agent repo root, `/home/user/agent`, on `refactor/version-neutral-status-enums`.
 
-M1: edit `agent/src/models/{status,deployment,os,file_rule,device}.rs` and `agent/src/server/v02/response.rs`, then check that only the v0.2 module imports the crate:
+M1: edit `daemon/src/models/{status,deployment,os,file_rule,device}.rs` and `daemon/src/server/v02/response.rs`, then check that only the v0.2 module imports the crate:
 
-    grep -rn device_api_v02 agent/src | grep -v '^agent/src/server/v02/'
+    grep -rn device_api_v02 daemon/src | grep -v '^daemon/src/server/v02/'
 
 Expected: no output.
 
-    git add agent/src/models/status.rs agent/src/models/deployment.rs agent/src/models/os.rs agent/src/models/file_rule.rs agent/src/models/device.rs agent/src/server/v02/response.rs
+    git add daemon/src/models/status.rs daemon/src/models/deployment.rs daemon/src/models/os.rs daemon/src/models/file_rule.rs daemon/src/models/device.rs daemon/src/server/v02/response.rs
     git commit -m "refactor(models): convert status enums to v0.2 in the v0.2 module"
 
 M2: edit the test files named in Plan of Work, then check what still imports the crate outside `server/v02`:
 
-    grep -rln device_api_v02 agent/tests | grep -v '^agent/tests/server/v02/'
+    grep -rln device_api_v02 agent/tests | grep -v '^daemon/tests/server/v02/'
 
-Expected exactly `agent/tests/server/tcp.rs` and `agent/tests/app/run.rs` (reasons in Decisions, Left out). PR 1's design review moved the v0.2 payload check out of `agent/tests/events/model.rs`.
+Expected exactly `daemon/tests/server/tcp.rs` and `daemon/tests/app/run.rs` (reasons in Decisions, Left out). PR 1's design review moved the v0.2 payload check out of `daemon/tests/events/model.rs`.
 
-    git add agent/tests/models/harnesses.rs agent/tests/models/deployment.rs agent/tests/models/os.rs agent/tests/models/file_rule.rs agent/tests/models/device.rs agent/tests/models/instance_format.rs agent/tests/logs/mod.rs agent/tests/server/v02/response.rs
+    git add daemon/tests/models/harnesses.rs daemon/tests/models/deployment.rs daemon/tests/models/os.rs daemon/tests/models/file_rule.rs daemon/tests/models/device.rs daemon/tests/models/instance_format.rs daemon/tests/logs/mod.rs daemon/tests/server/v02/response.rs
     git commit -m "test(server): check status enum conversions in the v0.2 layer"
 
 M3: edit `AGENTS.md` and `ARCHITECTURE.md`, then:
@@ -171,9 +171,9 @@ Validation runs in CI (`.github/workflows/ci.yml`) on the pushed branch head and
 - `test` passes with every coverage gate at or above its current value (`models` 100, `server` 87, `server/v02` 87); the seven new `From` impls are fully covered by `status_enums`.
 - `windows-check` and `windows-agent-build` pass.
 
-What the green run demonstrates: `status_enums::converts_each_*` in `agent/tests/server/v02/response.rs` (seven new tests) cover every domain variant's v0.2 value and wire string, so a wrong or missing arm fails. The existing `deployment_response`, `device_response`, `release_response` and `file_rule_response` tests pass unchanged, so `/v0.2` response bodies are unchanged. `status_enum_tests!` still covers each enum's wire strings and backend twin in `agent/tests/models/`, and the macro's inline tests still run. `agent/tests/events/model.rs` and PR 1's `event_response` tests pass unchanged.
+What the green run demonstrates: `status_enums::converts_each_*` in `daemon/tests/server/v02/response.rs` (seven new tests) cover every domain variant's v0.2 value and wire string, so a wrong or missing arm fails. The existing `deployment_response`, `device_response`, `release_response` and `file_rule_response` tests pass unchanged, so `/v0.2` response bodies are unchanged. `status_enum_tests!` still covers each enum's wire strings and backend twin in `daemon/tests/models/`, and the macro's inline tests still run. `daemon/tests/events/model.rs` and PR 1's `event_response` tests pass unchanged.
 
-Static acceptance, run from the repo root: `grep -rn device_api_v02 agent/src | grep -v '^agent/src/server/v02/'` prints nothing.
+Static acceptance, run from the repo root: `grep -rn device_api_v02 daemon/src | grep -v '^daemon/src/server/v02/'` prints nothing.
 
 ## Idempotence and Recovery
 
