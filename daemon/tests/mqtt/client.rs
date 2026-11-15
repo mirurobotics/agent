@@ -4,6 +4,7 @@ use std::time::Duration;
 
 // internal crates
 use crate::mocks::mqtt_client as mock;
+use crate::test_utils::mqtt as test_mqtt;
 use miru_daemon::errors::Error;
 use miru_daemon::mqtt::client::{poll, Publish};
 use miru_daemon::mqtt::options::{ConnectAddress, Credentials, Options, Protocol, Timeouts};
@@ -59,13 +60,7 @@ async fn invalid_broker_url() {
     // Loopback on a port nothing's listening on — exercises the network
     // connection error path without needing an external unreachable IP
     // (which the `MqttHost` would reject anyway).
-    let options = Options::new(Credentials {
-        username: "test".to_string(),
-        password: SecretString::from("test"),
-    })
-    .with_connect_address(
-        ConnectAddress::new(MqttHost::new("127.0.0.1").unwrap(), Protocol::TCP, 1).unwrap(),
-    );
+    let options = mqtt_options();
 
     // create the client and subscribe to the device sync topic
     let (_, mut eventloop) = Client::new(&options);
@@ -99,11 +94,7 @@ async fn invalid_username_or_password() {
 
 // No broker needed for the tests below — they exercise client-side error paths only.
 fn mqtt_options() -> Options {
-    Options::new(Credentials {
-        username: "test".to_string(),
-        password: SecretString::from("test"),
-    })
-    .with_connect_address(
+    test_mqtt::options().with_connect_address(
         ConnectAddress::new(MqttHost::new("127.0.0.1").unwrap(), Protocol::TCP, 1).unwrap(),
     )
 }

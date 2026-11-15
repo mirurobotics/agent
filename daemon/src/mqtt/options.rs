@@ -122,15 +122,6 @@ impl PartialEq for Credentials {
 
 impl Eq for Credentials {}
 
-impl Default for Credentials {
-    fn default() -> Self {
-        Self {
-            username: "miru-agent".to_string(),
-            password: SecretString::from("miru-agent-password"),
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct Timeouts {
     pub publish: Duration,
@@ -194,11 +185,5 @@ impl Options {
 
     pub fn set_password(&mut self, password: SecretString) {
         self.credentials.password = password;
-    }
-}
-
-impl Default for Options {
-    fn default() -> Self {
-        Self::new(Credentials::default())
     }
 }
