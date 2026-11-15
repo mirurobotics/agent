@@ -13,7 +13,7 @@
 #   docker build -f build/Dockerfile --target check .
 #   docker build -f build/Dockerfile --target artifacts --output type=local,dest=./dist .
 
-FROM ghcr.io/mirurobotics/agent-builder:0d2ac7e@sha256:79e78a13ba40bbabeffac2fb7d92d8031f24ebc779e1043ef05cf6114699b915 AS source
+FROM ghcr.io/mirurobotics/daemon-builder:c085e52@sha256:fed217f99d9865afe5577c0756437c87b57abc71283e8f074ee832529ac3c4a6 AS source
 
 COPY . .
 
