@@ -110,6 +110,15 @@ pub mod sync_device_response {
     }
 
     #[test]
+    fn converts_state_not_in_cooldown() {
+        let epoch = DateTime::<Utc>::UNIX_EPOCH;
+        let wire_code = openapi::SyncDeviceResult::SYNC_DEVICE_RESULT_SUCCESS;
+
+        let sdk: openapi::SyncDeviceResponse = (&outcome(SyncCode::Success, epoch)).into();
+        assert_eq!(sdk, expected(wire_code, epoch, false));
+    }
+
+    #[test]
     fn converts_state_in_cooldown() {
         let cooldown_ends_at = Utc::now() + Duration::days(1);
         let wire_code = openapi::SyncDeviceResult::SYNC_DEVICE_RESULT_IN_COOLDOWN;
