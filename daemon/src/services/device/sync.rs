@@ -20,7 +20,11 @@ pub enum SyncCode {
 
 impl SyncCode {
     pub fn variants() -> Vec<SyncCode> {
-        vec![Self::Success, Self::InCooldown, Self::NetworkConnectionError]
+        vec![
+            Self::Success,
+            Self::InCooldown,
+            Self::NetworkConnectionError,
+        ]
     }
 }
 
