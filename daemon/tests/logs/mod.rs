@@ -75,7 +75,6 @@ fn test_log_options_default() {
 
 impl StatusEnumFixture for LogLevel {
     type Backend = ();
-    type Agent = ();
 
     fn cases() -> Vec<StatusCase<Self>> {
         vec![
@@ -83,31 +82,26 @@ impl StatusEnumFixture for LogLevel {
                 variant: LogLevel::Trace,
                 wire: "trace",
                 backend: (),
-                agent: (),
             },
             StatusCase {
                 variant: LogLevel::Debug,
                 wire: "debug",
                 backend: (),
-                agent: (),
             },
             StatusCase {
                 variant: LogLevel::Info,
                 wire: "info",
                 backend: (),
-                agent: (),
             },
             StatusCase {
                 variant: LogLevel::Warn,
                 wire: "warn",
                 backend: (),
-                agent: (),
             },
             StatusCase {
                 variant: LogLevel::Error,
                 wire: "error",
                 backend: (),
-                agent: (),
             },
         ]
     }

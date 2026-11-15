@@ -1,6 +1,5 @@
 // internal crates
 use backend_api::models as backend_client;
-use device_api_v02::models as agent_server;
 use miru_daemon::models::{
     FileRule, FileRuleRetention, FileRuleSource, FileRuleUpload, Os, UploadTimezone,
 };
@@ -325,7 +324,6 @@ fn requires_upload() {
 
 impl StatusEnumFixture for UploadTimezone {
     type Backend = backend_client::FileRuleUploadTimezone;
-    type Agent = agent_server::FileRuleUploadTimezone;
 
     fn cases() -> Vec<StatusCase<Self>> {
         vec![
@@ -333,19 +331,17 @@ impl StatusEnumFixture for UploadTimezone {
                 variant: UploadTimezone::Utc,
                 wire: "utc",
                 backend: backend_client::FileRuleUploadTimezone::FILE_RULE_UPLOAD_TIMEZONE_UTC,
-                agent: agent_server::FileRuleUploadTimezone::FILE_RULE_UPLOAD_TIMEZONE_UTC,
             },
             StatusCase {
                 variant: UploadTimezone::Device,
                 wire: "device",
                 backend: backend_client::FileRuleUploadTimezone::FILE_RULE_UPLOAD_TIMEZONE_DEVICE,
-                agent: agent_server::FileRuleUploadTimezone::FILE_RULE_UPLOAD_TIMEZONE_DEVICE,
             },
         ]
     }
 }
 
-status_enum_tests!(UploadTimezone, backend, agent);
+status_enum_tests!(UploadTimezone, backend);
 
 #[test]
 fn an_upload_cached_without_a_timezone_is_utc() {
