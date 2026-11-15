@@ -1,10 +1,10 @@
 pub const VERSION: &str = concat!("v", env!("CARGO_PKG_VERSION"));
-pub const COMMIT: &str = match option_env!("MIRU_AGENT_GIT_COMMIT_HASH") {
+pub const COMMIT: &str = match option_env!("MIRU_DAEMON_GIT_COMMIT_HASH") {
     Some(v) => v,
     None => "unknown",
 };
 pub const RUST_VERSION: &str = env!("CARGO_PKG_RUST_VERSION");
-pub const BUILD_DATE: &str = match option_env!("MIRU_AGENT_BUILD_DATE") {
+pub const BUILD_DATE: &str = match option_env!("MIRU_DAEMON_BUILD_DATE") {
     Some(v) => v,
     None => "unknown",
 };
