@@ -1,8 +1,8 @@
 cleanup() {
     exit_code=$?
 
-    # restart the agent
-    log "Restarting the Miru Agent"
+    # restart the daemon
+    log "Restarting the Miru Daemon"
     sudo systemctl restart miru >/dev/null 2>&1
 
     exit $exit_code
@@ -10,9 +10,9 @@ cleanup() {
 
 trap cleanup EXIT INT TERM QUIT HUP
 
-log "Activating the Miru Agent..."
+log "Activating the Miru Daemon..."
 if systemctl is-active --quiet miru; then
-    log "Stopping the currently running agent"
+    log "Stopping the currently running daemon"
     sudo systemctl stop miru >/dev/null 2>&1
 fi
 

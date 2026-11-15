@@ -1,0 +1,193 @@
+// standard crates
+use std::future::Future;
+use std::time::Duration;
+
+// internal crates
+use crate::app::errors::UpgradeErr;
+use crate::authn::{self, token::Token};
+use crate::cooldown;
+use crate::disk::{self, Layout, Settings};
+use crate::filesys::{files, PathExt};
+use crate::http::{self, ClientI};
+use crate::models;
+use crate::shutdown::Latch;
+
+// external crates
+use tracing::{error, info, warn};
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct Outcome {
+    pub upgraded: bool,
+    pub attempts: u32,
+}
+
+/// How [`reconcile`] finished when it did not error.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Reconcile {
+    /// Disk already matches, or a rebootstrap completed.
+    Ready(Outcome),
+    /// Shutdown was requested at a safe point (not mid-reset).
+    Stopped,
+}
+
+/// Reconcile on-disk state with the running version. No-op if the marker matches;
+/// otherwise wipes per-version state and rebootstraps from the backend. Retries
+/// network failures until successful or shutdown is requested. Returns
+/// [`Reconcile::Stopped`] on shutdown, but always finishes an active attempt
+/// before stopping so that persistence is never interrupted.
+pub async fn reconcile<F, Fut, HTTPClientT: ClientI>(
+    layout: &Layout,
+    http_client: &HTTPClientT,
+    version: &str,
+    sleep_fn: F,
+    latch: &Latch,
+) -> Result<Reconcile, UpgradeErr>
+where
+    F: Fn(Duration) -> Fut,
+    Fut: Future<Output = ()> + Send,
+{
+    validate_layout(layout)?;
+
+    let backoff = cooldown::Backoff {
+        base_secs: 1,
+        growth_factor: 2,
+        max_secs: 60,
+    };
+    let mut attempts: u32 = 0;
+
+    loop {
+        if latch.is_triggered() {
+            return Ok(Reconcile::Stopped);
+        }
+        if !needs_upgrade(layout, version).await {
+            return Ok(Reconcile::Ready(Outcome {
+                upgraded: false,
+                attempts,
+            }));
+        }
+        info!("resetting miru daemon state to use version '{}'", version);
+
+        let result = reconcile_impl(http_client, layout, version).await;
+        if latch.is_triggered() {
+            return Ok(Reconcile::Stopped);
+        }
+        match result {
+            Ok(_) => {
+                info!(
+                    "upgrade: resetting storage state for version '{}' complete",
+                    version
+                );
+                return Ok(Reconcile::Ready(Outcome {
+                    upgraded: true,
+                    attempts,
+                }));
+            }
+            Err(e) => {
+                warn!("updating daemon version storage failed: {e}");
+                attempts = attempts.saturating_add(1);
+                let wait = cooldown::calc(&backoff, attempts);
+                warn!("retrying in {wait} seconds (attempts: {attempts})");
+                tokio::select! {
+                    biased;
+                    _ = latch.wait() => return Ok(Reconcile::Stopped),
+                    _ = sleep_fn(Duration::from_secs(wait as u64)) => {}
+                }
+            }
+        }
+    }
+}
+
+pub async fn needs_upgrade(layout: &Layout, cur_version: &str) -> bool {
+    let marker_file = layout.agent_version();
+    match disk::agent_version::read(&marker_file).await {
+        Ok(None) => {
+            info!("unable to determine previous miru daemon package version");
+            true
+        }
+        Ok(Some(prev_version)) => {
+            if prev_version == cur_version {
+                return false;
+            }
+            info!(
+                "detected miru daemon package updated from version '{}' to version '{}'",
+                prev_version, cur_version
+            );
+            true
+        }
+        Err(e) => {
+            error!("unable to read daemon version marker file: {e}");
+            info!("unable to determine previous miru daemon package version");
+            true
+        }
+    }
+}
+
+pub fn validate_layout(layout: &Layout) -> Result<(), UpgradeErr> {
+    let auth_dir = layout.auth();
+    auth_dir.private_key().assert_exists()?;
+    auth_dir.public_key().assert_exists()?;
+    Ok(())
+}
+
+pub async fn reconcile_impl<HTTPClientT: ClientI>(
+    http_client: &HTTPClientT,
+    layout: &Layout,
+    version: &str,
+) -> Result<(), UpgradeErr> {
+    let token = issue_token(http_client, layout).await?;
+    let device = fetch_device(http_client, &token).await?;
+    let settings = match files::read_json::<Settings>(&layout.settings()).await {
+        Ok(settings) => settings,
+        Err(e) => {
+            warn!("unable to read settings.json; falling back to defaults: {e}");
+            Settings::default()
+        }
+    };
+    disk::setup::reset(layout, &device, &settings, version).await?;
+    update_device(http_client, &device, version, &token).await?;
+    Ok(())
+}
+
+async fn issue_token<HTTPClientT: ClientI>(
+    http_client: &HTTPClientT,
+    layout: &Layout,
+) -> Result<Token, UpgradeErr> {
+    let auth_dir = layout.auth();
+    let private_key_file = auth_dir.private_key();
+    let public_key_file = auth_dir.public_key();
+    let token = authn::issue_token(http_client, &private_key_file, &public_key_file).await?;
+    Ok(token)
+}
+
+async fn fetch_device<HTTPClientT: ClientI>(
+    http_client: &HTTPClientT,
+    token: &Token,
+) -> Result<models::Device, UpgradeErr> {
+    let api_device = http::devices::get(http_client, &token.token).await?;
+    Ok((&api_device).into())
+}
+
+async fn update_device<HTTPClientT: ClientI>(
+    http_client: &HTTPClientT,
+    device: &models::Device,
+    version: &str,
+    token: &Token,
+) -> Result<(), UpgradeErr> {
+    http::devices::update(
+        http_client,
+        http::devices::UpdateParams {
+            id: &device.id,
+            payload: &backend_api::models::UpdateDeviceFromAgentRequest {
+                agent_version: Some(version.to_string()),
+                os: None,
+                hostname: None,
+                arch: None,
+                os_version: None,
+                kernel_version: None,
+            },
+            token: &token.token,
+        },
+    )
+    .await?;
+    Ok(())
+}

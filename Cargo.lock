@@ -2299,7 +2299,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "miru-agent"
+name = "miru-daemon"
 version = "0.12.4"
 dependencies = [
  "atomicwrites",

@@ -12,7 +12,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}-builder
+  IMAGE_NAME: ${{ github.repository_owner }}/daemon-builder
 
 jobs:
   build-and-push:
@@ -44,6 +44,9 @@ jobs:
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=sha,prefix=
+          labels: |
+            org.opencontainers.image.title=miru-daemon-builder
+            org.opencontainers.image.description=Build environment for the Miru Daemon with Rust, Zig, and GoReleaser
 
       - name: Build and push
         uses: useblacksmith/build-push-action@9b0579bbec7a6cad2f171596c57e7ac1e7658850 # v2.3.0

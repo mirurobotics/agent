@@ -5,7 +5,7 @@ MSI. Native Windows compile CI was established in PR #234; PR #236 adds the
 package contract and direct Windows Installer lifecycle validation.
 
 The MSI installs `miru-agent.exe` as a Windows service named `miru-agent`
-(display name "Miru Agent", description "Miru Config Agent"). The service runs
+(display name "Miru Agent", description "Miru Daemon"). The service runs
 as the virtual account **`NT SERVICE\miru-agent`** with start type
 **Automatic**; it is started on install and stopped and removed on uninstall.
 Major upgrades stop and delete the old service before file replacement, then
@@ -82,7 +82,7 @@ package contract with explicit inputs:
 
 ```powershell
 Set-Location C:\src\agent
-cargo build --target x86_64-pc-windows-msvc --package miru-agent --locked --release
+cargo build --target x86_64-pc-windows-msvc --package miru-daemon --locked --release
 dotnet restore build\windows\miru-agent.wixproj --locked-mode
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File build\windows\tests\package-tests.ps1 -ProjectPath build\windows\miru-agent.wixproj -BinDir target\x86_64-pc-windows-msvc\release -ArtifactsDirectory build\windows\artifacts\package-tests
 ```

@@ -15,7 +15,7 @@ These modes do not share runtime state.
 
 ## Codemap
 
-All source lives under `agent/src/`. The binary entry point is `main.rs`.
+All source lives under `daemon/src/`. The binary entry point is `main.rs`.
 
 ### Core infrastructure
 

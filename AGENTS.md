@@ -6,9 +6,9 @@ Agent-specific conventions for AI coding agents. Read this before making changes
 
 - `ARCHITECTURE.md` — system design, codemap, invariants. Read this first.
 - `Cargo.toml` — workspace layout, shared dependencies, MSRV.
-- `agent/Cargo.toml` — binary package config, feature flags, dev dependencies.
-- `agent/src/main.rs` — entry point (provision vs runtime).
-- `agent/src/lib.rs` — module listing (all 23 public modules).
+- `daemon/Cargo.toml` — binary package config, feature flags, dev dependencies.
+- `daemon/src/main.rs` — entry point (provision vs runtime).
+- `daemon/src/lib.rs` — module listing (all 23 public modules).
 
 ## Review questions
 
@@ -42,7 +42,7 @@ use tokio::sync::broadcast;
 
 ### Device API conversions
 
-Handlers in `agent/src/server/v02/handlers.rs` (one module per Device API version) don't convert wire types. Response conversions live in `server/v02/response.rs` and request conversions in `server/v02/request.rs` ([agent#383](https://github.com/mirurobotics/agent/pull/383#discussion_r4363970314)).
+Handlers in `daemon/src/server/v02/handlers.rs` (one module per Device API version) don't convert wire types. Response conversions live in `server/v02/response.rs` and request conversions in `server/v02/request.rs` ([agent#383](https://github.com/mirurobotics/agent/pull/383#discussion_r4363970314)).
 
 Stores return the domain type, such as a calibration as a `Report`, not a type shaped for one route; the service or the response conversion picks what the route needs ([agent#421](https://github.com/mirurobotics/agent/pull/421#discussion_r4521100113), [agent#421](https://github.com/mirurobotics/agent/pull/421#discussion_r4521188885)).
 
@@ -52,7 +52,7 @@ An actor's `*_impl` module is private to its parent module: callers import the a
 
 ### Error handling
 
-All error types derive `thiserror::Error` and implement the custom `crate::errors::Error` trait (defined in `agent/src/errors/`). The trait provides default implementations for `code()`, `http_status()`, `params()`, and `is_network_conn_err()`. Aggregating enum errors use the `impl_error!` macro (also in `agent/src/errors/`).
+All error types derive `thiserror::Error` and implement the custom `crate::errors::Error` trait (defined in `daemon/src/errors/`). The trait provides default implementations for `code()`, `http_status()`, `params()`, and `is_network_conn_err()`. Aggregating enum errors use the `impl_error!` macro (also in `daemon/src/errors/`).
 
 Don't add a trait method for a failure only one module reacts to. Give the failure its own error variant and match it in that module ([agent#393](https://github.com/mirurobotics/agent/pull/393#discussion_r4368553524)).
 
@@ -60,7 +60,7 @@ Don't add a trait method for a failure only one module reacts to. Give the failu
 
 Use ordinary `#[cfg(test)]` for additive test inspection and state setup, with
 private or `pub(crate)` visibility. Put reusable fixtures in
-`agent/tests/test_utils/`. Production algorithms and client construction must
+`daemon/tests/test_utils/`. Production algorithms and client construction must
 use the same code in normal and test builds; tests control dependencies and time.
 
 ### Enum conventions
@@ -68,7 +68,7 @@ use the same code in normal and test builds; tests control dependencies and time
 Pick the enum facility by what the enum needs to do:
 
 - **Backend-mirrored status enum** (has a `backend_api` and/or `device_api_v02` twin) →
-  `impl_status_enum!` (`agent/src/models/status.rs`) with `agent_type` +
+  `impl_status_enum!` (`daemon/src/models/status.rs`) with `agent_type` +
   `backend_type` + `unknown_backend`. Generates the wire `Deserialize`
   (unknown→default), `variants()`, `as_str()`, all layer conversions, and inline
   serde + backend forward-compat tests.
@@ -85,7 +85,7 @@ Pick the enum facility by what the enum needs to do:
 
 Each `impl_status_enum!` enum also gets a hand-written `StatusEnumFixture` table
 and `status_enum_tests!` in its integration test file
-(`agent/tests/models/harnesses.rs`), so a slip in the macro's mapping fails a test.
+(`daemon/tests/models/harnesses.rs`), so a slip in the macro's mapping fails a test.
 
 ### Terminology
 
@@ -99,13 +99,13 @@ Ordinary Cargo tests and the logging-suppressed wrapper are supported:
 
 ```bash
 cargo test
-cargo test --package miru-agent
+cargo test --package miru-daemon
 ./scripts/test.sh
-# Wrapper runs: RUST_LOG=off cargo test --package miru-agent
+# Wrapper runs: RUST_LOG=off cargo test --package miru-daemon
 ```
 
 No custom feature or preconfigured `RUST_LOG` is required. Cargo discovers the
-integration suite in `agent/tests/mod.rs` and the separate `logs_init_smoke` and
+integration suite in `daemon/tests/mod.rs` and the separate `logs_init_smoke` and
 `logs_init_locked` targets, which isolate logging initialization in their own
 processes. Each integration target uses the ordinary library; integration
 fixture imports use direct paths such as `crate::test_utils::...`.
@@ -116,8 +116,8 @@ which can't get the credentials.
 
 Keep unit tests in inline `#[cfg(test)] mod tests` modules at the bottom of the
 source files they test, not in separate files or nested test directories.
-Shared fixtures stay in `agent/tests/test_utils/`. `agent/src/lib.rs` mounts the
-curated unit-test subset `agent/tests/test_utils/unit.rs` as `crate::test_utils`
+Shared fixtures stay in `daemon/tests/test_utils/`. `daemon/src/lib.rs` mounts the
+curated unit-test subset `daemon/tests/test_utils/unit.rs` as `crate::test_utils`
 (see that file's header for the path rules the shared sources must follow); the
 library does not mount the integration suite.
 
@@ -135,9 +135,9 @@ in the `windows-check` CI job; to deny access, use `make_unreadable` or
 fine for them on every platform; build a raw `PathBuf` fixture that will be
 compared or displayed with `test_utils::filesys::abs_path`.
 
-Integration test files in `agent/tests/` mirror the `agent/src/` module structure.
+Integration test files in `daemon/tests/` mirror the `daemon/src/` module structure.
 
-Route tests in `agent/tests/server/v02/handlers.rs` check the API contract only: status codes and response or error bodies. What a service does with a request, such as how a report is stored, belongs in the service tests ([agent#383](https://github.com/mirurobotics/agent/pull/383#discussion_r4364316671)).
+Route tests in `daemon/tests/server/v02/handlers.rs` check the API contract only: status codes and response or error bodies. What a service does with a request, such as how a report is stored, belongs in the service tests ([agent#383](https://github.com/mirurobotics/agent/pull/383#discussion_r4364316671)).
 
 ### Coverage gates
 
@@ -150,9 +150,9 @@ Each module has a `.covgate` file with a minimum coverage percentage. Run `scrip
 Use `scripts/update-deps.sh` to refresh `Cargo.lock` before linting. Then run `scripts/lint.sh` for a full local lint pass. It runs: the custom import linter, `cargo fmt`, unused dependency checks (machete, diet), security audit, and clippy.
 
 In CI, the Lint workflow runs:
-- The custom linter checks imports in `agent/src/` and `agent/tests/`, function length, and field-by-field assertions (4+ `assert_eq!` on fields of the same variable in a test function). Assertion checks cover all of `agent/src/` and `agent/tests/`. Production functions and closures are limited to 50 non-blank, non-comment body lines (test code exempt); suppress with `// lint:allow(funclen)` on the `fn` line or the line immediately above. Suppress assert findings with `// lint:allow(field-by-field-assert)` inside the test body.
-- `cargo fmt -p miru-agent -- --check`
-- `cargo clippy --package miru-agent --fix --allow-dirty --all-features -- -D warnings`
+- The custom linter checks imports in `daemon/src/` and `daemon/tests/`, function length, and field-by-field assertions (4+ `assert_eq!` on fields of the same variable in a test function). Assertion checks cover all of `daemon/src/` and `daemon/tests/`. Production functions and closures are limited to 50 non-blank, non-comment body lines (test code exempt); suppress with `// lint:allow(funclen)` on the `fn` line or the line immediately above. Suppress assert findings with `// lint:allow(field-by-field-assert)` inside the test body.
+- `cargo fmt -p miru-daemon -- --check`
+- `cargo clippy --package miru-daemon --fix --allow-dirty --all-features -- -D warnings`
 - `cargo machete`
 - `rustsec/audit-check`
 
@@ -164,9 +164,9 @@ In CI, the Lint workflow runs:
 
 ### Adding a new module
 
-1. Create `agent/src/<module>/mod.rs` (and `errors.rs` if needed).
-2. Add `pub mod <module>;` to `agent/src/lib.rs`.
-3. Add public-behavior tests under `agent/tests/<module>/mod.rs` and declare the module in `agent/tests/mod.rs`; place tests needing private access in a local `#[cfg(test)]` module.
+1. Create `daemon/src/<module>/mod.rs` (and `errors.rs` if needed).
+2. Add `pub mod <module>;` to `daemon/src/lib.rs`.
+3. Add public-behavior tests under `daemon/tests/<module>/mod.rs` and declare the module in `daemon/tests/mod.rs`; place tests needing private access in a local `#[cfg(test)]` module.
 4. Add a `.covgate` file in the new module directory with the minimum coverage threshold.
 
 ### Adding or changing an API endpoint
