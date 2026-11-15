@@ -155,7 +155,7 @@ impl fmt::Display for Meta {
 #[derive(Debug)]
 pub struct Headers {
     // build information
-    pub agent_version: String,
+    pub daemon_version: String,
     pub api_version: String,
 
     // host information
@@ -169,7 +169,7 @@ impl Default for Headers {
     fn default() -> Self {
         Self {
             // build information
-            agent_version: version::VERSION.to_string(),
+            daemon_version: version::VERSION.to_string(),
             api_version: backend_api::models::ApiVersion::API_VERSION.to_string(),
 
             // host information
@@ -185,11 +185,31 @@ impl Headers {
     pub fn to_map(&self) -> Result<HeaderMap, HTTPErr> {
         let mut headers = HeaderMap::new();
         insert_header(&mut headers, "Miru-Version", &self.api_version)?;
-        insert_header(&mut headers, "Miru-Agent-Version", &self.agent_version)?;
-        insert_header(&mut headers, "Miru-Agent-Host-Name", &self.host_name)?;
-        insert_header(&mut headers, "Miru-Agent-Arch", &self.arch)?;
-        insert_header(&mut headers, "Miru-Agent-Language", &self.language)?;
-        insert_header(&mut headers, "Miru-Agent-OS", &self.os)?;
+        // (name, legacy name, value): the legacy Miru-Agent-* names stay until
+        // nothing reads them.
+        let rows = [
+            (
+                "Miru-Daemon-Version",
+                "Miru-Agent-Version",
+                &self.daemon_version,
+            ),
+            (
+                "Miru-Daemon-Host-Name",
+                "Miru-Agent-Host-Name",
+                &self.host_name,
+            ),
+            ("Miru-Daemon-Arch", "Miru-Agent-Arch", &self.arch),
+            (
+                "Miru-Daemon-Language",
+                "Miru-Agent-Language",
+                &self.language,
+            ),
+            ("Miru-Daemon-OS", "Miru-Agent-OS", &self.os),
+        ];
+        for (name, legacy, value) in rows {
+            insert_header(&mut headers, name, value)?;
+            insert_header(&mut headers, legacy, value)?;
+        }
         Ok(headers)
     }
 }

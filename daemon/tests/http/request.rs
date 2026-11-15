@@ -198,12 +198,13 @@ pub mod headers {
         let headers = Headers::default();
         let map = headers.to_map().unwrap();
         assert!(map.contains_key("Miru-Version"));
-        assert!(map.contains_key("Miru-Agent-Version"));
-        assert!(map.contains_key("Miru-Agent-Host-Name"));
-        assert!(map.contains_key("Miru-Agent-Arch"));
-        assert!(map.contains_key("Miru-Agent-Language"));
-        assert!(map.contains_key("Miru-Agent-OS"));
-        assert_eq!(map.len(), 6);
+        for prefix in ["Miru-Daemon", "Miru-Agent"] {
+            for suffix in ["Version", "Host-Name", "Arch", "Language", "OS"] {
+                let key = format!("{prefix}-{suffix}");
+                assert!(map.contains_key(key.as_str()), "missing {key}");
+            }
+        }
+        assert_eq!(map.len(), 11);
     }
 
     #[test]
@@ -213,17 +214,35 @@ pub mod headers {
         let api_version = map.get("Miru-Version").unwrap().to_str().unwrap();
         assert_eq!(api_version, &headers.api_version);
         assert_ne!(
-            api_version, &headers.agent_version,
-            "Miru-Version must be the API version, not the agent version"
+            api_version, &headers.daemon_version,
+            "Miru-Version must be the API version, not the daemon version"
         );
     }
 
     #[test]
-    fn miru_agent_version_contains_agent_version() {
-        let headers = Headers::default();
+    fn each_header_carries_its_field() {
+        let headers = Headers {
+            daemon_version: "v1.2.3".to_string(),
+            api_version: "2026-01-01".to_string(),
+            host_name: "robot-1".to_string(),
+            arch: "aarch64".to_string(),
+            language: "rust".to_string(),
+            os: "linux".to_string(),
+        };
         let map = headers.to_map().unwrap();
-        let agent_version = map.get("Miru-Agent-Version").unwrap().to_str().unwrap();
-        assert_eq!(agent_version, &headers.agent_version);
+        let expected = [
+            ("Version", "v1.2.3"),
+            ("Host-Name", "robot-1"),
+            ("Arch", "aarch64"),
+            ("Language", "rust"),
+            ("OS", "linux"),
+        ];
+        for prefix in ["Miru-Daemon", "Miru-Agent"] {
+            for (suffix, value) in expected {
+                let key = format!("{prefix}-{suffix}");
+                assert_eq!(map.get(key.as_str()).unwrap(), value, "{key}");
+            }
+        }
     }
 }
 
@@ -313,10 +332,11 @@ pub mod build {
         let req = request::build(&client, &headers, params).unwrap();
         let h = req.reqwest.headers();
         assert!(h.contains_key("Miru-Version"));
-        assert!(h.contains_key("Miru-Agent-Version"));
-        assert!(h.contains_key("Miru-Agent-Host-Name"));
-        assert!(h.contains_key("Miru-Agent-Arch"));
-        assert!(h.contains_key("Miru-Agent-Language"));
-        assert!(h.contains_key("Miru-Agent-OS"));
+        for prefix in ["Miru-Daemon", "Miru-Agent"] {
+            for suffix in ["Version", "Host-Name", "Arch", "Language", "OS"] {
+                let key = format!("{prefix}-{suffix}");
+                assert!(h.contains_key(key.as_str()), "missing {key}");
+            }
+        }
     }
 }
