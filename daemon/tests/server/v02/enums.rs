@@ -1,5 +1,5 @@
 // internal crates
-use crate::test_utils::enums::assert_converts_each;
+use crate::models::harnesses::assert_converts_each;
 use device_api_v02::models as openapi;
 use miru_daemon::models::{
     DeviceStatus, DplActivity, DplErrStatus, DplStatus, DplTarget, Os, UploadTimezone,
