@@ -141,7 +141,7 @@ impl LatestStoreImpl {
 
     /// The index, which is empty until the first put writes it.
     async fn read_index(&self) -> Result<Index, CalibrationsErr> {
-        Ok(keep_newest(self.read_index_file().await?))
+        Ok(removed_duplicates(self.read_index_file().await?))
     }
 
     /// The index as written, which can hold more than one entry per key.
@@ -200,7 +200,7 @@ fn take_entry(index: &mut Index, metadata: &ReportMetadata) -> Option<ReportMeta
 /// The newest entry for each key. An agent that keyed the store by component,
 /// role and aspect can have left more than one, such as `arm` with role `left`
 /// and `arm-left`. The next put writes the index without the dropped ones.
-fn keep_newest(mut index: Index) -> Index {
+fn removed_duplicates(mut index: Index) -> Index {
     // stable, so on a tie the entry listed first stays
     index.sort_by_key(|entry| Reverse(entry.reported_at));
     let mut keys = HashSet::new();
@@ -236,7 +236,7 @@ fn not_found(report_id: Uuid) -> CalibrationsErr {
 #[cfg(test)]
 mod tests {
     // internal crates
-    use super::{check_capacity, keep_newest, matches, not_found, take_entry, Index};
+    use super::{check_capacity, removed_duplicates, matches, not_found, take_entry, Index};
     use crate::test_utils::calibrations::reported;
     use miru_daemon::calibrations::ReportMetadata;
     use miru_daemon::models::InstanceFormat;
@@ -309,7 +309,7 @@ mod tests {
 
     // =========================== KEEP NEWEST ============================ //
     #[test]
-    fn keep_newest_keeps_the_newer_split_in_either_order() {
+    fn removed_duplicates_keeps_the_newer_split_in_either_order() {
         let (split, joined) = two_splits();
         let orders = [
             vec![split.clone(), joined.clone()],
@@ -317,12 +317,12 @@ mod tests {
         ];
 
         for index in orders {
-            assert_eq!(keep_newest(index), std::slice::from_ref(&joined));
+            assert_eq!(removed_duplicates(index), std::slice::from_ref(&joined));
         }
     }
 
     #[test]
-    fn keep_newest_keeps_the_first_listed_on_a_tie() {
+    fn removed_duplicates_keeps_the_first_listed_on_a_tie() {
         let (split, joined) = two_splits();
         let tied = ReportMetadata {
             reported_at: split.reported_at,
@@ -334,7 +334,7 @@ mod tests {
         ];
 
         for (index, first) in cases {
-            assert_eq!(keep_newest(index), std::slice::from_ref(first));
+            assert_eq!(removed_duplicates(index), std::slice::from_ref(first));
         }
     }
 
