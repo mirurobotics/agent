@@ -669,7 +669,7 @@ pub mod create_calibration_response {
 
 pub mod latest_calibrations_response {
     use super::*;
-    use miru_daemon::calibrations::ReportMetadata;
+    use miru_daemon::calibrations::{Invalidation, ReportMetadata};
     use miru_daemon::models::InstanceFormat;
     use miru_daemon::server::v03::response::latest_calibrations;
 
@@ -684,6 +684,7 @@ pub mod latest_calibrations_response {
             reported_by: Some("Ada Lovelace".into()),
             deployment_id: Some("dpl_1".into()),
             reported_at: fixed_time(),
+            invalidation: None,
         }
     }
 
@@ -699,10 +700,27 @@ pub mod latest_calibrations_response {
             serial_number: Some("SN-1".into()),
             reported_by: Some("Ada Lovelace".into()),
             reported_at: fixed_time().to_rfc3339(),
+            invalidated_at: None,
         };
 
         let sdk: openapi::Calibration = (&metadata).into();
         assert_eq!(sdk, expected);
+    }
+
+    #[test]
+    fn converts_an_invalidation_to_its_time() {
+        let invalidated_at = fixed_time() + Duration::seconds(1);
+        let metadata = ReportMetadata {
+            invalidation: Some(Invalidation {
+                invalidated_at,
+                reason: "power cycle".into(),
+            }),
+            ..metadata(Uuid::new_v4())
+        };
+
+        let sdk: openapi::Calibration = (&metadata).into();
+
+        assert_eq!(sdk.invalidated_at, Some(invalidated_at.to_rfc3339()));
     }
 
     #[test]

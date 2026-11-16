@@ -27,6 +27,7 @@ fn metadata(name: &str) -> ReportMetadata {
         reported_by: Some("Ada Lovelace".to_string()),
         deployment_id: Some("dpl_1".to_string()),
         reported_at: DateTime::from_timestamp(1000, 0).unwrap(),
+        invalidation: None,
     }
 }
 

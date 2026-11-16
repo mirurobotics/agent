@@ -5,7 +5,7 @@ use std::collections::HashSet;
 // internal crates
 use crate::calibrations::{
     errors::{CalibrationNotFoundErr, CalibrationStoreFullErr, CalibrationsErr},
-    report::{Report, ReportMetadata},
+    report::{Invalidation, Report, ReportMetadata},
 };
 use crate::disk::layout::LatestCalsLayout;
 use crate::filesys::{dirs, files, Dir, File, FileSysErr, WriteOptions};
@@ -142,6 +142,26 @@ impl LatestStoreImpl {
         }
     }
 
+    /// Mark the entry for `report_id` invalid with `invalidation`, unless it
+    /// already is, and return the entry. The first invalidation stays.
+    pub(crate) async fn invalidate(
+        &self,
+        report_id: Uuid,
+        invalidation: Invalidation,
+    ) -> Result<ReportMetadata, CalibrationsErr> {
+        let mut index = self.read_index().await?;
+        let Some(entry) = index.iter_mut().find(|m| m.report_id == report_id) else {
+            return Err(not_found(report_id));
+        };
+        if entry.invalidation.is_some() {
+            return Ok(entry.clone());
+        }
+        entry.invalidation = Some(invalidation);
+        let entry = entry.clone();
+        self.write_index(index).await?;
+        Ok(entry)
+    }
+
     /// The index, which is empty until the first put writes it.
     async fn read_index(&self) -> Result<Index, CalibrationsErr> {
         Ok(removed_duplicates(self.read_index_file().await?))
@@ -202,7 +222,7 @@ fn take_entry(index: &mut Index, metadata: &ReportMetadata) -> Option<ReportMeta
 
 /// The newest entry for each key. An agent that keyed the store by component,
 /// role and aspect can have left more than one, such as `arm` with role `left`
-/// and `arm-left`. The next put writes the index without the dropped ones.
+/// and `arm-left`. The next write of the index leaves out the dropped ones.
 fn removed_duplicates(mut index: Index) -> Index {
     // stable, so on a tie the entry listed first stays
     index.sort_by_key(|entry| Reverse(entry.reported_at));

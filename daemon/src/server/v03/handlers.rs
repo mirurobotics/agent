@@ -235,6 +235,26 @@ pub async fn get_latest_calibration_content(
     }
 }
 
+pub async fn invalidate_latest_calibration(
+    AxumState(state): AxumState<Arc<State>>,
+    Path(report_id): Path<String>,
+    request: Result<Json<device_server::InvalidateCalibrationRequest>, JsonRejection>,
+) -> impl IntoResponse {
+    handle(
+        async {
+            let Json(request) = request.map_err(reject_body)?;
+            let reason =
+                request::invalidation_reason(request).map_err(ServerErr::InvalidRequestErr)?;
+            let invalidated =
+                calibration_svc::invalidate(&state.latest_cals, &report_id, reason, Utc::now())
+                    .await?;
+            Ok::<_, ServerErr>(device_server::Calibration::from(&invalidated))
+        },
+        "Error invalidating calibration",
+    )
+    .await
+}
+
 // ================================ UTILITIES ====================================== //
 async fn handle<F, T, E>(service: F, err_msg: &str) -> (StatusCode, Json<Value>)
 where

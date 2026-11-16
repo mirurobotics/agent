@@ -102,6 +102,10 @@ fn calibrations(api_version: &str) -> Router<Arc<State>> {
             format!("/{api_version}/calibrations/latest/{{report_id}}/content").as_str(),
             get(handlers::get_latest_calibration_content),
         )
+        .route(
+            format!("/{api_version}/calibrations/latest/{{report_id}}/invalidate").as_str(),
+            post(handlers::invalidate_latest_calibration),
+        )
 }
 
 fn events(api_version: &str) -> Router<Arc<State>> {

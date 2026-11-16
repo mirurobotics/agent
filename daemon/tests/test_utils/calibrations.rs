@@ -43,6 +43,7 @@ pub fn report(slug: &str) -> Report {
             reported_by: None,
             deployment_id: None,
             reported_at: received_at(),
+            invalidation: None,
         },
         data: r#"{"offset":[1,2,3]}"#.to_string(),
     }

@@ -48,6 +48,17 @@ pub struct ReportMetadata {
     pub deployment_id: Option<String>,
     /// When the agent received the calibration.
     pub reported_at: DateTime<Utc>,
+    /// Set when a device app marks the latest calibration invalid, and never
+    /// on intake; a newer report for the key replaces the entry.
+    #[serde(default)]
+    pub invalidation: Option<Invalidation>,
+}
+
+/// When and why a device app marked a calibration invalid.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Invalidation {
+    pub invalidated_at: DateTime<Utc>,
+    pub reason: String,
 }
 
 impl ReportMetadata {
@@ -92,6 +103,7 @@ impl From<backend_client::Calibration> for ReportMetadata {
                     error!("Error parsing reported_at: {e}");
                     DateTime::<Utc>::UNIX_EPOCH
                 }),
+            invalidation: None,
         }
     }
 }
