@@ -152,6 +152,34 @@ async fn spawn_keeps_the_contents_when_the_index_is_corrupt() {
     assert_eq!(f.content_ids().await, [orphan]);
 }
 
+#[tokio::test]
+async fn spawn_keeps_only_the_newest_of_two_splits_of_one_key() {
+    let f = Fixture::new().await;
+    let split = reported("arm", Some("left"), None);
+    let joined = ReportMetadata {
+        component: "arm-left".to_string(),
+        role: None,
+        ..reported_after(&split, 1)
+    };
+    // as an agent that keyed the store by component, role and aspect wrote it,
+    // the older entry first
+    let index = serde_json::json!({ "entries": [split, joined] });
+    files::write_json(&f.layout.index(), &index, WriteOptions::OVERWRITE_ATOMIC)
+        .await
+        .unwrap();
+    for report_id in [split.report_id, joined.report_id] {
+        let file = f.content_file(report_id);
+        files::write_string(&file, DATA, WriteOptions::OVERWRITE_ATOMIC)
+            .await
+            .unwrap();
+    }
+
+    f.reopen().await;
+
+    assert_eq!(f.entries().await, std::slice::from_ref(&joined));
+    assert_eq!(f.content_ids().await, [joined.report_id]);
+}
+
 // =============================== CAPACITY =============================== //
 #[tokio::test]
 async fn put_rejects_only_a_new_key_at_capacity() {

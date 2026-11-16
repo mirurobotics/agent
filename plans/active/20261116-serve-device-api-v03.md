@@ -59,7 +59,7 @@ How to see it, on a device running this build (Linux, as root or a `miru` group 
 ### Left out
 
 - Factoring the version-neutral helpers out of `server/v02/` into `server/`: `request::split_list`, `handlers::{reject_body, reject_query, handle, error_response}` (generic except for the `ErrorResponse` type), `response::{calibration_content, to_retention}`, and `sse::{resolve_cursor, parse_event_filter}` with the stream assembly in `events_impl`. A later release drops `/v0.2`, leaving one copy, and a move must land first as its own PR (shared rule). Proposed follow-up only if a reviewer wants the overlap shorter.
-- Keying the latest store or its `Filter` by flat component: it would change `/v0.2` results and the on-disk `index.json` key.
+- Matching the store's `Filter` on flat component: it would change `/v0.2`'s `component`, `role` and `aspect` filters. `/v0.3` filters in the service instead.
 - Rejecting `role`/`aspect` sent to `/v0.3`: the spec allows extra properties and the generated struct ignores them, as an unknown query parameter is ignored.
 - `NULL_SLUG` checks on `/v0.3`: it has no role or aspect.
 - Changing the backend client, `calibrations::sender` or the pull: Agent API v0.5 keeps its shape, and a `/v0.3` report is a v0.2-shaped report with `role` and `aspect` `None`.
@@ -67,14 +67,15 @@ How to see it, on a device running this build (Linux, as root or a `miru` group 
 
 ### Open questions
 
-- Should `GET /v0.3/calibrations/latest/{report_id}/content` return 404 for an entry that `/v0.3` list hides because a newer entry has the same flat component? Default: no; it calls the same `calibration::get_content` as `/v0.2` and serves any entry the store holds. Such a pair exists only when one flat component was reported under two splits (for example `arm`+`left` on `/v0.2` and `arm-left` on `/v0.3`).
-- When two entries with the same flat component have the same `reported_at`, which wins? Default: the one later in the store's key order (the control plane breaks ties by `created_at`, which the agent doesn't have).
+- Resolved by keying the store by flat component (Decision Log, 2026-11-16): should `GET /v0.3/calibrations/latest/{report_id}/content` return 404 for an entry that the `/v0.3` list hides behind a newer entry with the same flat component? No entry is hidden any more: a newer report replaces the older one and deletes its content, so the older report's content is 404 on both versions.
+- Resolved by the same decision: when two entries with the same flat component have the same `reported_at`, which wins? The store holds one entry per flat component, and `put_if_newer` and the pull keep the entry it has on a tie (`is_as_new_as`), as they did per (component, role, aspect).
 - Copy every `/v0.2` test for `/v0.3`, or only what differs? Default: copy every one, adapted, because the `/v0.2` tests leave with `/v0.2` and `/v0.3` must then stand alone and keep `server/v03/.covgate` at 87.
 
 ## Progress
 
 - [x] M1: source: dependency and lint config, `flat_component`, `list_latest_flat`, `server/v03/`, router merge, docs.
 - [x] Source written
+- [x] Design review: store keyed by flat component (user's choice); `list_latest_flat` reduced to filter and sort; an index with several entries for one flat component keeps the newest on read.
 - [ ] M2: tests: `daemon/tests/server/v03/`, router test, `list_latest_flat` service tests, `flat_component` unit tests.
 - [ ] CI green on the pushed head (`$preflight` reports `CLEAN`).
 
@@ -86,10 +87,13 @@ How to see it, on a device running this build (Linux, as root or a `miru` group 
 
 - Decision: the join lives on the domain type, as `ReportMetadata::flat_component`, and `list_latest_flat` in the calibration service picks the newest entry for each flat component; `server/v03/response.rs` calls `flat_component` to fill `Calibration.component`. The store and its `Filter` don't change.
   Rationale: the join is the control plane's rule (Agent API v0.5: "a report's component, role and aspect together name one component"), not only a v0.3 wire format, and both the service (to group and filter) and the v0.3 response need it; the server must not be imported by services. Stores return the domain type and the service picks what the route needs (AGENTS.md).
-  Date/Author: 2026-11-16, plan authoring.
+  Date/Author: 2026-11-16, plan authoring. Superseded in part by the store-keying entry below: the store changes, and `list_latest_flat` only filters and sorts.
 - Decision: the store stays keyed by (component, role, aspect). On `/v0.3`, entries whose keys join to the same flat component count as one, and the newest `reported_at` wins, as the control plane's latest does; the `component` filter matches the flat component; results are ordered by flat component. `/v0.2` lists every entry as reported, as today.
   Rationale: `/v0.3` promises "one for each component"; `/v0.2` must not change.
-  Date/Author: 2026-11-16, plan authoring.
+  Date/Author: 2026-11-16, plan authoring. Superseded by the next entry.
+- Decision: the store is keyed by flat component. `ReportMetadata::key()` and its `Key` tuple are gone; `is_as_new_as` and the store's `take_entry` compare `flat_component()`, so `put`, `put_if_newer`, the pull's skip check and the capacity limit work per flat component. `index.json` stores no key, so its format doesn't change. `LatestStoreImpl::list` still orders by (component, role, aspect), so `/v0.2`'s order and its `Filter` don't change; `list_latest_flat` keeps the entries whose flat component is listed and sorts them by it. Every index read keeps the newest entry for each flat component (`keep_newest`; on a tie the one listed first), because an index an earlier agent wrote can hold `arm`+`left` and `arm-left`; the dropped entry's content is then orphaned, and the worker's start deletes it as it does any orphan.
+  Rationale: the control plane treats `arm`+`left` and `arm-left` as one component; keying the store the same way removes the hidden entries and the tie rule from `/v0.3`. Accepted consequence: `/v0.2` lists one entry instead of two only when one flat component was reported under two splits; it still forwards role and aspect on create and returns them as reported.
+  Date/Author: 2026-11-16, design review; the user's choice.
 - Decision: `/v0.3/version` reports the v0.3 crate's constants (`v0.3`, `v0.3.0-next`, openapi commit `36f5894...`); `/v0.2/version` keeps v0.2's. Nothing else reports a Device API version (the only other `ApiVersion` use, `daemon/src/http/request.rs`, is the backend API's).
   Date/Author: 2026-11-16, plan authoring.
 - Decision: `server::routes::router` binds the merged table first (`let routes = v02::routes::table().merge(v03::routes::table());`) and then calls `middleware(routes.with_state(state))`, rather than one nested call.
@@ -121,7 +125,7 @@ The v0.3 contract. `diff -r libs/device-api-v02/src libs/device-api-v03/src` sho
 
 The control plane (Agent API v0.5, `libs/backend-api`, unchanged): create still takes `component`, `role`, `aspect`; the control plane joins them with `-`, skipping empty ones, to find the flat component, and stores and returns `component_slug`/`role_slug`/`aspect_slug` as reported. Its latest list is "the calibration with the latest `reported_at` for each component ..., where a report's `component`, `role` and `aspect` together name one component, breaking ties by `created_at`". This plan calls that joined slug the flat component: `arm` with role `left` and no aspect is `arm-left`.
 
-Calibrations in the agent. `daemon/src/calibrations/report.rs` `ReportMetadata { report_id, component, format, role: Option<String>, aspect: Option<String>, serial_number, reported_by, deployment_id, reported_at }`, with `pub(crate) fn key()` = (component, role, aspect) and `is_as_new_as`, and inline unit tests at the bottom. `calibrations::LatestStore` (`latest.rs`, an actor over `latest_impl.rs`) keeps one entry per key; `list(&Filter)` returns the entries `Filter { component, role, aspect }` matches (stored values), ordered by key; `get(report_id)`. `daemon/src/services/calibration/` has `create(cal_uploader, deployments, CreateParams, now)`, `list_latest(store, &Filter)` (`latest.rs`) and `get_content(store, report_id)` (`content.rs`); `services/calibration/.covgate` is 100.00. The sender uploads `role`/`aspect` from the metadata and omits them when `None`.
+Calibrations in the agent. `daemon/src/calibrations/report.rs` `ReportMetadata { report_id, component, format, role: Option<String>, aspect: Option<String>, serial_number, reported_by, deployment_id, reported_at }`, with `pub(crate) fn flat_component()` and `is_as_new_as` (same flat component, reported at the same time or later), and inline unit tests at the bottom. `calibrations::LatestStore` (`latest.rs`, an actor over `latest_impl.rs`) keeps one entry per flat component; `list(&Filter)` returns the entries `Filter { component, role, aspect }` matches (stored values), ordered by (component, role, aspect); `get(report_id)`. `daemon/src/services/calibration/` has `create(cal_uploader, deployments, CreateParams, now)`, `list_latest(store, &Filter)` (`latest.rs`) and `get_content(store, report_id)` (`content.rs`); `services/calibration/.covgate` is 100.00. The sender uploads `role`/`aspect` from the metadata and omits them when `None`.
 
 Tests. `daemon/tests/server/v02/` mirrors the module: `handlers.rs` (route tests through `routes::router` with a `Fixture`; they check status codes and bodies only), `request.rs`, `response.rs`, `enums.rs` (uses `crate::models::harnesses::assert_converts_each`), `sse.rs`; `daemon/tests/server/mod.rs` lists the submodules; `daemon/tests/server/routes.rs` tests the merged router. Service tests: `daemon/tests/services/calibration/latest.rs` with `helpers::{Fixture, params}` (`Fixture.latest` is the `LatestStore`; `Fixture.create` stamps the fixed `received_at()`). `crate::test_utils::calibrations::reported(component, role, aspect)` builds a `ReportMetadata`.
 
@@ -145,7 +149,7 @@ The join. In `daemon/src/calibrations/report.rs`, in `impl ReportMetadata` after
         parts.join("-")
     }
 
-The v0.3 read path. In `daemon/src/services/calibration/latest.rs`, after `list_latest`, add `pub async fn list_latest_flat(store: &LatestStore, components: &[String]) -> Result<Vec<ReportMetadata>, ServiceErr>`. It calls `store.list(&Filter::default())`, skips entries whose `flat_component()` is not in `components` (an empty slice matches any), keeps in a `BTreeMap<String, ReportMetadata>` keyed by flat component the entry with the latest `reported_at` (replace when `entry.reported_at >= kept.reported_at`, so on a tie the entry later in key order wins), and returns the map's values, which are ordered by flat component. Doc comment: the latest calibration for each flat component, as the control plane keys them; answers from the store and never calls the control plane.
+The v0.3 read path. In `daemon/src/services/calibration/latest.rs`, after `list_latest`, add `pub async fn list_latest_flat(store: &LatestStore, components: &[String]) -> Result<Vec<ReportMetadata>, ServiceErr>`. It calls `store.list(&Filter::default())`, keeps the entries whose `flat_component()` is in `components` (an empty slice keeps all), and sorts them by flat component. The store holds one entry per flat component (Decision Log), so nothing needs collapsing. Doc comment: the latest calibration for each flat component, as the control plane keys them; answers from the store and never calls the control plane.
 
 The v0.3 module. Copy `daemon/src/server/v02/*.rs` and `.covgate` to `daemon/src/server/v03/` (commands below), replace `device_api_v02` with `device_api_v03` and `v02::` with `v03::`, and change the comment in `response.rs` above `to_event_data` to say v0.3. Then make only these v0.3 differences:
 
@@ -156,7 +160,7 @@ The v0.3 module. Copy `daemon/src/server/v02/*.rs` and `.covgate` to `daemon/src
 
 Mount it. In `daemon/src/server/mod.rs` add `pub mod v03;` after `pub mod v02;`. In `daemon/src/server/routes.rs`, import `v03` beside `v02` and build `middleware(v02::routes::table().merge(v03::routes::table()).with_state(state))`; the doc comment on `router` stays true.
 
-Docs. `ARCHITECTURE.md`: in the `server` paragraph, say each Device API version is a module (`server/v02/`, `server/v03/`) and that the router serves both until a later release drops `/v0.2`; in the calibrations paragraphs, add that `POST /v0.3/calibrations` takes only `component` (queued with no role or aspect), and that `GET /v0.3/calibrations/latest` lists, for each flat component (component, role and aspect joined with `-`), the newest entry, filtering by that flat component (`services::calibration::list_latest_flat`), while the store stays keyed by component, role and aspect. `README.md`: under `libs/`, add `device-api-v03/  #   Device API v0.3 server`.
+Docs. `ARCHITECTURE.md`: in the `server` paragraph, say each Device API version is a module (`server/v02/`, `server/v03/`) and that the router serves both until a later release drops `/v0.2`; in the calibrations paragraphs, add that `POST /v0.3/calibrations` takes only `component` (queued with no role or aspect), and that `GET /v0.3/calibrations/latest` lists each entry under its flat component (component, role and aspect joined with `-`), filtering by it (`services::calibration::list_latest_flat`), and that the store is keyed by flat component, so a report under another split replaces the entry, and every read keeps the newest of an older agent's duplicates. `README.md`: under `libs/`, add `device-api-v03/  #   Device API v0.3 server`.
 
 ### M2: tests
 
@@ -171,10 +175,11 @@ Router: in `daemon/tests/server/routes.rs` `mod router`, add `serves_each_versio
 
 Service: in `daemon/tests/services/calibration/latest.rs`, add, putting entries with `f.latest.put(metadata, data)` and `reported(...)` where a test needs chosen keys or times:
 
-- `list_latest_flat_lists_each_entry_under_its_flat_component`: entries `arm`/`left`/None and `leg`/None/None give two results, ordered `arm-left`, `leg`, each the stored metadata unchanged.
-- `list_latest_flat_keeps_the_newest_entry_for_a_flat_component`: `arm`/`left`/None at t and `arm-left`/None/None at t+1s give only the second; swapping the times gives only the first.
+- `list_latest_flat_orders_by_flat_component`: entries `arm`/None/`pose` and `arm`/`left`/None (which the store lists in that order) give `arm-left`, then `arm-pose`, each the stored metadata unchanged.
 - `list_latest_flat_matches_the_flat_component`: with `arm`/`left`/None stored, `["arm-left"]` lists it and `["arm"]` lists nothing.
 - `list_latest_flat_fails_when_the_store_cannot_be_read`: as the `list_latest` sibling, with `corrupt_latest_index`.
+
+Store: in `daemon/tests/calibrations/latest.rs`, add `put_replaces_the_entry_of_another_split_of_its_key` (`arm`/`left`/None, then `arm-left`/None/None, lists only the second and keeps only its content) and `put_if_newer_keeps_a_newer_entry_of_another_split` (the reverse, with the stored entry 1 s later). `spawn_keeps_only_the_newest_of_two_splits_of_one_key` (an `index.json` holding both splits) landed with the design-review revision.
 
 Unit: in `daemon/src/calibrations/report.rs` `mod tests`, add a `FLAT COMPONENT` section with `flat_component_joins_the_parts_it_has`, a table over `reported(...)`: (`arm`, None, None) is `arm`; (`arm`, `left`, None) is `arm-left`; (`arm`, None, `pose`) is `arm-pose`; (`arm`, `left`, `pose`) is `arm-left-pose`; (`arm`, `""`, `pose`) is `arm-pose`.
 
@@ -225,8 +230,8 @@ Acceptance, each proven by a named test:
 - Every `/v0.3/...` route answers as its `/v0.2` twin does, with v0.3 types: `daemon/tests/server/v03/handlers.rs`, `sse.rs`; both versions are mounted together: `server::routes::router::serves_each_version`.
 - `GET /v0.3/version` reports `api_version` `v0.3` and `api_release_version` `v0.3.0-next`: `server::v03::handlers::version_tests`.
 - `POST /v0.3/calibrations` queues the report with role and aspect `None`: `server::v03::request::create_calibration_request::converts_every_field`.
-- `/v0.3` reads return the joined slug, one per flat component, newest first, filtered by it: `services::calibration::latest::list_latest_flat_*`, `server::v03::response::latest_calibrations_response::converts_report_metadata`, `calibrations::report::tests::flat_component_joins_the_parts_it_has`.
-- `/v0.2` is unchanged: every existing `daemon/tests/server/v02/` test passes without edits.
+- `/v0.3` reads return the joined slug, one per flat component, ordered and filtered by it: `services::calibration::latest::list_latest_flat_*`, `server::v03::response::latest_calibrations_response::converts_report_metadata`, `calibrations::report::tests::flat_component_joins_the_parts_it_has`.
+- `/v0.2` is unchanged except that two splits of one flat component are one entry: every existing `daemon/tests/server/v02/` test passes without edits; the store keeps one entry per flat component: `calibrations::latest::{put_replaces_the_entry_of_another_split_of_its_key, put_if_newer_keeps_a_newer_entry_of_another_split, spawn_keeps_only_the_newest_of_two_splits_of_one_key}`.
 
 ## Idempotence and Recovery
 

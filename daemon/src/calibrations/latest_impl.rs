@@ -1,4 +1,5 @@
 // standard crates
+use std::cmp::Reverse;
 use std::collections::HashSet;
 
 // internal crates
@@ -42,10 +43,11 @@ impl Filter {
     }
 }
 
-/// The newest calibration for each component, role and aspect: one entry per
-/// key in `index.json`, and each entry's data in its own file under `contents/`,
-/// named by its `report_id`. A report replaces its key's entry, and a new key
-/// past the capacity is rejected rather than evicting another.
+/// The newest calibration for each key, a report's flat component, as the
+/// control plane keys its latest: one entry per key in `index.json`, and each
+/// entry's data in its own file under `contents/`, named by its `report_id`. A
+/// report replaces its key's entry, and a new key past the capacity is
+/// rejected rather than evicting another.
 /// [`LatestStore`]'s worker owns it, so it is the store's only writer.
 ///
 /// [`LatestStore`]: crate::calibrations::LatestStore
@@ -119,7 +121,7 @@ impl LatestStoreImpl {
     ) -> Result<Vec<ReportMetadata>, CalibrationsErr> {
         let mut entries = self.read_index().await?;
         entries.retain(|metadata| filter.is_match(metadata));
-        entries.sort_by(|a, b| a.key().cmp(&b.key()));
+        entries.sort_by(|a, b| list_order(a).cmp(&list_order(b)));
         Ok(entries)
     }
 
@@ -142,7 +144,7 @@ impl LatestStoreImpl {
     async fn read_index(&self) -> Result<Index, CalibrationsErr> {
         match files::read_json_with_retry::<IndexFile>(&self.index).await {
             Err(FileSysErr::PathDoesNotExistErr(_)) => Ok(Index::new()),
-            result => Ok(result?.entries),
+            result => Ok(keep_newest(result?.entries)),
         }
     }
 
@@ -184,10 +186,29 @@ impl LatestStoreImpl {
 
 /// Remove and return the entry with `metadata`'s key, if there is one.
 fn take_entry(index: &mut Index, metadata: &ReportMetadata) -> Option<ReportMetadata> {
-    let slot = index
-        .iter()
-        .position(|entry| entry.key() == metadata.key())?;
+    let key = metadata.flat_component();
+    let slot = index.iter().position(|m| m.flat_component() == key)?;
     Some(index.swap_remove(slot))
+}
+
+/// What [`LatestStoreImpl::list`] orders entries by: component, role and aspect.
+fn list_order(metadata: &ReportMetadata) -> (&str, Option<&str>, Option<&str>) {
+    (
+        metadata.component.as_str(),
+        metadata.role.as_deref(),
+        metadata.aspect.as_deref(),
+    )
+}
+
+/// The newest entry for each key. An agent that keyed the store by component,
+/// role and aspect can have left more than one, such as `arm` with role `left`
+/// and `arm-left`; a dropped entry's content is then orphaned.
+fn keep_newest(mut index: Index) -> Index {
+    // stable, so on a tie the entry listed first stays
+    index.sort_by_key(|entry| Reverse(entry.reported_at));
+    let mut keys = HashSet::new();
+    index.retain(|entry| keys.insert(entry.flat_component()));
+    index
 }
 
 /// Whether `value` is one of `values`, where an empty list matches any value.
@@ -267,7 +288,7 @@ mod tests {
 
     // =============================== KEY ================================ //
     #[test]
-    fn key_is_the_component_role_and_aspect_only() {
+    fn key_is_the_flat_component_only() {
         let arm = reported("arm", Some("left"), Some("pose"));
         // each differs from `arm` in one part of the key
         let others = [
@@ -276,9 +297,9 @@ mod tests {
             reported("arm", Some("left"), Some("offset")),
         ];
 
-        assert_eq!(arm.key(), same_key(&arm).key());
+        assert_eq!(arm.flat_component(), same_key(&arm).flat_component());
         for other in &others {
-            assert_ne!(arm.key(), other.key(), "{other:?}");
+            assert_ne!(arm.flat_component(), other.flat_component(), "{other:?}");
         }
     }
 
