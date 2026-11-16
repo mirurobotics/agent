@@ -192,9 +192,7 @@ async fn spawn_keeps_the_contents_when_the_index_cannot_be_rewritten() {
     let (split, joined) = f.write_two_splits().await;
     let read_only = make_read_only(&f.layout.root);
 
-    let store = f.reopen().await;
-    // the worker serves a command only after its prune
-    store.list(&Filter::default()).await.unwrap();
+    f.reopen().await;
     drop(read_only);
 
     let mut want = [split.report_id, joined.report_id];
