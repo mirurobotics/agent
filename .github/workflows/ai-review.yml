@@ -3,7 +3,8 @@
 # See the reusable workflow for details.
 #
 # pull_request_target runs this file from the base branch, so a PR cannot
-# edit or delete its own review.
+# edit or delete its own review. The merge queue's run uses the queued
+# PR's copy instead, which that review has already approved.
 #
 # The reusable workflow is pinned to a commit, so a change to it only takes
 # effect here through a reviewed PR that bumps the SHA.
@@ -13,9 +14,10 @@ name: AI Review
 on:
   pull_request_target:
     types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
+  merge_group:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.event.merge_group.head_sha }}
   cancel-in-progress: true
 
 permissions:
@@ -25,7 +27,7 @@ permissions:
 
 jobs:
   ai-review:
-    uses: mirurobotics/.github/.github/workflows/ai-review.yml@bf0916104b6b5b5373c09a5f5b413ec6bded2cb5
+    uses: mirurobotics/workflows/.github/workflows/ai-review.yml@fa369ac8b2ad8326cafe85625c430e7a62be3edf
     with:
       runs-on: ubuntu-latest # standard GitHub-hosted runners are free in public repos
     secrets:
