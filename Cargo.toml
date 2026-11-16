@@ -61,7 +61,7 @@ openssl = { version = "0.10.64", features = ["vendored"] }
 rumqttc = { version = "0.25.1", default-features = false, features = ["use-native-tls"] }
 rumqttd = { version = "0.20.0", default-features = false, features = ["use-native-tls"] }
 secrecy = "0.10.3"
-serial_test = "3.2.0"
+serial_test = "4.0.1"
 serde = { version = "1.0.215", features = ["derive"] }
 serde_json = "1.0.132"
 serde_with = { version = "3.12.0", features = ["base64"] }
