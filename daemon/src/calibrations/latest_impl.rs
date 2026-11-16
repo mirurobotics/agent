@@ -307,7 +307,7 @@ mod tests {
         assert_eq!(index, [arm]);
     }
 
-    // ======================== REMOVED DUPLICATES ======================== //
+    // ========================== REMOVED DUPLICATES ========================== //
     #[test]
     fn removed_duplicates_keeps_the_newer_split_in_either_order() {
         let (split, joined) = two_splits();
