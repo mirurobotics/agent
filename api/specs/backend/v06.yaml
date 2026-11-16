@@ -2,442 +2,20 @@ openapi: 3.0.3
 info:
   title: Miru Agent API
   description: The API between the Miru Backend and the Agent; for internal use only
-  version: v0.5
+  version: v0.6
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
-  x-release-version: v0.5.18
+  x-release-version: v0.6.0-beta.1
   x-git-commit:
-    sha: 2f22b25c28c397fbe5ce8c0f9da47d6b98671382
-    url: https://github.com/mirurobotics/openapi/commit/2f22b25c28c397fbe5ce8c0f9da47d6b98671382
-    message: 'feat(device,agent): read the latest calibrations on the device (#416)
-
-
-      <!-- claude-projects-attribution: {"github_login":"miru-agents"} -->
-
-      _Requested by **bens-agent** · [project
-
-      thread](https://claude.ai/code/project/chan_015imaa8aZrnubYZcZCvjeHx?thread=cmsg_015imaa8aZrnubYZcZCvjeHx36xcf18iv6t3BwQxEECTE9)_
-
-
-      Step 1 of
-
-      [ENG-1726](https://linear.app/mirurobotics/issue/ENG-1726/featdevice-api-read-the-latest-calibrations-on-the-device-including),
-
-      implementing [RFC: Latest Calibrations on the
-
-      Device](https://linear.app/mirurobotics/document/rfc-latest-calibrations-on-the-device-763bc5676fd0).
-
-      The agent answers from a store on disk, so nothing here proxies to Miru
-
-      (unlike the routes #413 reverted).
-
-
-      ## Summary
-
-      - **Device API** `GET /calibrations/latest` (`listLatestCalibrations`):
-
-      one `Calibration` per (component, role, aspect), uploaded or not, with
-
-      `upload_status` (`queued`, `uploaded`, `dropped`). Filters `component`,
-
-      `role`, `aspect`, where `null` matches calibrations reported without
-
-      one. No pagination. The body is a `LatestCalibrationsResponse`,
-
-      `{is_confirmed, calibrations: [...]}`, where `is_confirmed` is false
-
-      until the agent''s first load from Miru.
-
-      - **Device API** `GET /calibrations/{report_id}/content`
-
-      (`getCalibrationContent`) returns the raw bytes, `Content-Type` set from
-
-      the format, like the Agent API''s config instance content download. SDK:
-
-      `calibrations.latest`, `calibrations.download` and the `calibration`
-
-      model in `tools/stainless/device.yml`.
-
-      - **Agent API** `GET /calibrations/latest`: a `CalibrationList` of
-
-      Miru''s calibration with the latest `reported_at` per key for the calling
-
-      device (ties broken by `created_at`), which the agent loads its store
-
-      from after a reset. Paginated with `offset` and `limit`, like every
-
-      backend list, with `expand=reported_by` and `expand=total_count`, and no
-
-      stated order. It takes no filters and carries no content. The agent
-
-      `Calibration` gets back `component_slug`, `role_slug` and `aspect_slug`,
-
-      plus the expandable `reported_by` #406 had, and gains a required
-
-      `format` (`InstanceFormat`), so the initial load can set `Content-Type`
-
-      on the device download (agent#421 design review).
-
-      - **Agent API** `GET /calibrations/{calibration_id}/content`
-
-      (`getCalibrationContent`): the raw bytes of one calibration, which the
-
-      initial load downloads per key, the way the deployment sync downloads
-
-      each config instance''s content. Like `getConfigInstanceContent`, it
-
-      takes `disposition` and returns `Content-Disposition`.
-
-      - **Both** `POST /calibrations` say `null` is reserved for `role` and
-
-      `aspect` again. #413 removed that.
-
-
-      ## Decisions
-
-
-      ### Names
-
-
-      | New name | Alternatives | Why this one |
-
-      |----------|--------------|--------------|
-
-      | `GET /calibrations/latest` | `/calibrations/current`, `/calibrations`
-
-      | The RFC''s choice: `/deployments/current` means "in effect", and this
-
-      only knows the newest. A bare list would read as history. |
-
-      | `listLatestCalibrations` (device and agent operationId) |
-
-      `getLatestCalibrations`, `listCalibrationsLatest` | `list` prefix like
-
-      every list operation; `Latest` matches the path. |
-
-      | `Calibration` (device schema), `object: calibration` |
-
-      `LatestCalibration`, `DeviceCalibration` | The reviewer asked for
-
-      `Calibration`. It is a different schema from the Platform and Agent
-
-      `Calibration`, in another bundle; the device item has no `cal_` id or
-
-      `created_at`. |
-
-      | `CalibrationList` (agent `PaginatedList`) | `LatestCalibrationList`,
-
-      `LatestCalibrations` | The reviewer asked for `CalibrationList`; #413
-
-      removed the old agent `CalibrationList`, so the name is free. |
-
-      | `LatestCalibrationsResponse` with `is_confirmed` (boolean) and
-
-      `calibrations` (array) | `ListLatestCalibrationsResponse`; `seeded_at`,
-
-      `is_seeded`, `is_complete`, `is_trusted`, `is_synced`,
-
-      `is_cloud_loaded`; a `CalibrationList` envelope with `object` and `data`
-
-      | The reviewer asked to drop `List` from the name, and the author asked
-
-      for a plain response holding only the boolean and the array. The author
-
-      chose `is_confirmed`: the list has been checked against Miru.
-
-      `is_trusted` would hint at an integrity or security check. |
-
-      | `format` (agent `Calibration`, `InstanceFormat`) | `content_format`,
-
-      `media_type` | The name and enum the `InstanceContent` that every
-
-      calibration is reported with already uses. |
-
-      | `CalibrationUploadStatus` (`queued`, `uploaded`, `dropped`;
-
-      `CALIBRATION_UPLOAD_STATUS_*`) | `UploadStatus`,
-
-      `LatestCalibrationUploadStatus` | `UploadStatus` already names the
-
-      upload ledger''s `pending`/`uploaded` in
-
-      `apis/configs/components/enums/upload-status.yaml`. |
-
-      | `upload_status` (property) | `status`, `sync_status` | Says what the
-
-      status is about; a plain `status` would clash with a later Hardware
-
-      Manifest validity status. |
-
-      | Device `GET /calibrations/{report_id}/content`,
-
-      `getCalibrationContent` | `/calibrations/latest/{report_id}/content` |
-
-      The RFC''s lean; `report_id` is the only id every device calibration has,
-
-      and the Device API has no `calibration_id` route. |
-
-      | Agent `GET /calibrations/{calibration_id}/content`,
-
-      `getCalibrationContent` | `expand=content` on the list | Mirrors the
-
-      agent `getConfigInstanceContent`; on Miru every calibration has a `cal_`
-
-      id. |
-
-      | `report_id` (path parameter in `apis/configs/params.yaml`) |
-
-      `calibration_report_id` | Same name as the `report_id` field it takes. |
-
-      | `component_slug`, `role_slug`, `aspect_slug` (agent `Calibration`) |
-
-      `component`, `role`, `aspect` | The names the reviewer chose on #370 for
-
-      the agent object, so they don''t read as objects next to `component_id`.
-
-      |
-
-      | `CalibrationListExpansion` (agent, `reported_by`, `total_count`) and
-
-      `calibration_list_expansions` | `LatestCalibrationListExpansion` | What
-
-      the reverted #370 named the agent''s paginated calibration list
-
-      expansion. MIRU002 needs a `CalibrationExpansion` with the same values
-
-      but `total_count`, so `CalibrationExpansion` stays, registered in the
-
-      agent `openapi.yaml` like `DplSearch`; MIRU009 checks the values against
-
-      `Calibration`. |
-
-      | `calibration_search_component`, `_role`, `_aspect` and `CalSearch`
-
-      (device only, in `apis/apps/device-server/paths/calibrations.yaml`) |
-
-      shared copies in `apis/configs/paths/calibrations.yaml` | The device is
-
-      their only user, and the Platform API keeps its own copies without
-
-      `null` matching. MIRU005 fails without a `CalSearch` matching the three
-
-      filters. |
-
-      | SDK: `calibrations.latest`, `calibrations.download`, model
-
-      `calibration` | `calibrations.list_latest`, `calibrations.content` |
-
-      `latest` is the ENG-1726 SDK name; `download` matches the platform SDK''s
-
-      config instance content method. |
-
-
-      ### Precedent
-
-
-      | New file | Mirrors |
-
-      |----------|---------|
-
-      | `apis/apps/device-server/components/schemas/calibration.yaml` |
-
-      `apis/apps/backend-server/platform/components/schemas/calibration.yaml`
-
-      (fields, descriptions); file named for the resource like
-
-      `components/schemas/deployment.yaml`. |
-
-      |
-
-      `apis/apps/device-server/components/enums/calibration-upload-status.yaml`
-
-      | `apis/apps/device-server/components/enums/device-status.yaml` and
-
-      `apis/configs/components/enums/upload-status.yaml`. |
-
-
-      The device routes mirror the reverted
-
-      `apis/apps/device-server/paths/platform-calibrations.yaml` (#370/#409)
-
-      for filters and `CalSearch`, and the Agent API''s `GET
-
-      /config_instances/{config_instance_id}/content` for the download. The
-
-      agent content route mirrors that same config instance route,
-
-      `disposition` and `Content-Disposition` included.
-
-      `LatestCalibrationsResponse` sits next to `CreateCalibrationResponse` in
-
-      `apis/apps/device-server/components/responses/calibration.yaml`, and
-
-      like the other Device API responses it is a plain object with no list
-
-      envelope. The agent `Calibration` additions restore the slugs and
-
-      expandable `reported_by` that #406 left, with its
-
-      `.redocly.lint-ignore.yaml` entries. Its `format` deviates from the
-
-      agent `ConfigInstance`, which has none: the agent writes config
-
-      instances to a file path, but it serves calibrations with a
-
-      `Content-Type`. The agent list mirrors the agent `DeploymentList`
-
-      (`PaginatedList`, `offset`, `limit`, `*ListExpansion` with
-
-      `total_count`), which also states no order.
-
-
-      ### Left out
-
-
-      - Pagination on the device list, and `order_by`, `serial_number` and
-
-      `report_id` filters: one item per key, served locally (RFC).
-
-      - A stated order on the agent list: the author decided it isn''t needed.
-
-      Like the agent `DeploymentList`, it is served in backend''s default order
-
-      (`created_at` descending). The initial load relies on that only to avoid
-
-      skipping a key while paging, which holds because only the device creates
-
-      its calibrations, so a new one always lands first. The plan''s Decision
-
-      Log has the reasoning.
-
-      - A list envelope (`object: "list"`, `data`) on the device response: the
-
-      author asked for only `is_confirmed` and `calibrations`.
-
-      - `digest` on the device `Calibration`: the reviewer asked to leave it
-
-      out for now. A new report has a new `report_id`, and the field can be
-
-      added later without breaking clients.
-
-      - `format` on the device `Calibration`: the device download already sets
-
-      `Content-Type`. The Platform `Calibration` has its own `format` since
-
-      #374.
-
-      - Filters on the agent list: its only caller, the agent''s initial load,
-
-      always fetches every key.
-
-      - `expand=content` on either list: one page could carry up to 1 MiB per
-
-      item, so content is its own download on both APIs, like config
-
-      instances.
-
-      - A `calibration.reported` event: write-through already puts a report in
-
-      the list when POST returns, and apps load at startup. It is additive and
-
-      can come when an app needs live reloads.
-
-      - A Miru `id` on the device `Calibration`: it duplicated
-
-      `upload_status`, and nothing on the device takes a `cal_` id. Adding it
-
-      later does not break clients.
-
-      - The `disposition` query parameter and `Content-Disposition` header on
-
-      the device download: no Device API route has them, and device apps read
-
-      the bytes.
-
-      - Documented 4xx responses: no Device or Agent API route documents error
-
-      responses; the 404 is stated in the operation description.
-
-      - `null` matching on the Platform API''s slug filters: the platform keeps
-
-      its own filters; nothing in ENG-1726 needs it.
-
-      - A content field on the device `Calibration`, a `status` for Hardware
-
-      Manifest, and robot-level calibrations: RFC non-goals or later work.
-
-      - Release tags: `device` and `agent` are tagged by hand after merge, as
-
-      #370 and #406 did.
-
-
-      ### Open questions
-
-
-      - Should the agent `CreateCalibrationRequest` also document the reserved
-
-      `null`? Backend rejects it on the Agent API (ENG-1726 step 2). Default:
-
-      yes, on both the device and agent create requests, as #370 had it.
-
-
-      ## Rollout
-
-
-      Merge, then tag `device` and `agent` by hand. The backend (step 2) and
-
-      agent (steps 3 and 4) PRs vendor them. The cross-repo plan is in the
-
-      comment below.
-
-
-      ## Reviewer notes
-
-      - Q1 `apis/apps/backend-server/agent/openapi.yaml:47`:
-
-      `CalibrationExpansion` is registered although no route uses it. MIRU002
-
-      fails when `CalibrationListExpansion` has values other than
-
-      `total_count` and has no matching `*Expansion`. The registration follows
-
-      `DplSearch`, which is also registered only for lint.
-
-      - Q1 `apis/apps/device-server/paths/calibrations.yaml:8`: `CalSearch`
-
-      serves only MIRU005, which fails when the `calibration_search_*` filters
-
-      have no matching `*Search` enum.
-
-      - The agent `Calibration.format` is a bare `$ref` to `InstanceFormat`,
-
-      while the Platform `Calibration.format` that #374 added uses `allOf`
-
-      plus a description. I left it as is so the approved head stays put; it''s
-
-      a documentation-only difference.
-
-
-      ---
-
-      🤖 Generated with [Claude Code](https://claude.com/claude-code)
-
-
-      https://claude.ai/code/session_01XHScKYzk9naPpNDFHzWwcc
-
-
-      ---------
-
-
-      Co-authored-by: Claude <noreply@anthropic.com>
-
-      Co-authored-by: Ben <ben@mirurobotics.com>'
+    sha: dcf7e1bd6b8ca022af9591454618fe70bfe488d8
+    url: https://github.com/mirurobotics/openapi/commit/dcf7e1bd6b8ca022af9591454618fe70bfe488d8
+    message: 'ci: bump the workflows pin to 1eab2d1 (#510)'
     author: Ben's Agent
     branch: HEAD
     dirty: false
   x-build:
-    built_at: '2026-11-03T20:39:00.069450+00:00'
+    built_at: '2026-11-16T23:33:19.399191+00:00'
 servers:
 - url: https://staging.api.mirurobotics.com/agent/v1
   description: Staging
@@ -482,11 +60,7 @@ paths:
             header is set according to the instance format.
           headers:
             Content-Disposition:
-              description: Header indicating whether the file is returned inline or
-                as an attachment.
-              schema:
-                type: string
-                example: inline
+              $ref: '#/components/headers/content_disposition'
             Content-Type:
               description: The MIME type of the instance content.
               schema:
@@ -665,19 +239,17 @@ paths:
 
         calibration''s ID. The device''s identity is derived from the token and is
 
-        never read from the request body. The first report of a new
+        never read from the request body. The `component`, `role` and `aspect`
 
-        `component` slug creates a component, and the first report of a new
+        slugs are joined with `-`, skipping empty ones, into the slug of the
 
-        `role` or `aspect` for a component adds it to the component''s `roles`
+        component the calibration belongs to; the first report of a new joined
 
-        or `aspects`; each name is inferred from its slug.
+        slug creates that component, with a name inferred from the slug. A
 
-        A workspace holds at most 100 components, and each component holds at
+        workspace holds at most 100 components; once it is full, reports that
 
-        most 100 roles and 100 aspects; once one is full, reports that would add
-
-        a new component, role or aspect to it are rejected.
+        would add a new component are rejected.
 
         If the device already reported a calibration with the request''s
 
@@ -705,8 +277,9 @@ paths:
       - Calibrations
       summary: List Latest
       operationId: listLatestCalibrations
-      description: List the calibration with the latest `reported_at` for each component,
-        role and aspect the device reported, breaking ties by `created_at`.
+      description: List the calibration with the latest `reported_at` for each component
+        the device reported, where a report's `component`, `role` and `aspect` together
+        name one component, breaking ties by `created_at`.
       parameters:
       - $ref: '#/components/parameters/offset'
       - $ref: '#/components/parameters/limit'
@@ -718,6 +291,42 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CalibrationList'
+  /calibrations/invalidate:
+    parameters:
+    - $ref: '#/components/parameters/MiruVersion'
+    post:
+      tags:
+      - Calibrations
+      summary: Invalidate
+      operationId: invalidateCalibration
+      description: 'Mark the device''s calibration with the request''s `report_id`
+        invalid,
+
+        storing `invalidated_at` and `reason`. The device''s identity is derived
+
+        from the token. Returns 404 until Miru has recorded the calibration with
+
+        that `report_id`, so the agent retries. If the calibration is already
+
+        invalid, Miru keeps the first invalidation and returns the calibration
+
+        unchanged.
+
+        '
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InvalidateCalibrationRequest'
+      responses:
+        '200':
+          description: Successfully invalidated the calibration, or it was already
+            invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Calibration'
   /calibrations/{calibration_id}/content:
     parameters:
     - $ref: '#/components/parameters/MiruVersion'
@@ -736,11 +345,7 @@ paths:
             header is set according to the content format.
           headers:
             Content-Disposition:
-              description: Header indicating whether the file is returned inline or
-                as an attachment.
-              schema:
-                type: string
-                example: inline
+              $ref: '#/components/headers/content_disposition'
             Content-Type:
               description: The MIME type of the calibration content.
               schema:
@@ -1045,21 +650,21 @@ components:
     APIVersion:
       type: string
       enum:
-      - v0.5
+      - v0.6
       x-enum-varnames:
       - API_VERSION
       x-stainless-const: true
     ReleaseVersion:
       type: string
       enum:
-      - v0.5.18
+      - v0.6.0-beta.1
       x-enum-varnames:
       - RELEASE_VERSION
       x-stainless-const: true
     APIGitCommit:
       type: string
       enum:
-      - 2f22b25c28c397fbe5ce8c0f9da47d6b98671382
+      - dcf7e1bd6b8ca022af9591454618fe70bfe488d8
       x-enum-varnames:
       - API_GIT_COMMIT
       x-stainless-const: true
@@ -1613,17 +1218,21 @@ components:
           description: Name of the bucket this rule uploads to.
         path:
           type: string
-          pattern: .*\{upload_id\}.*
+          pattern: .*\{(upload_id|device_id|device_name|bundle_id)\}.*
           maxLength: 1024
           example: '{device_id}/{year}-{month}-{day}/{upload_id}/{file_name}'
-          description: 'Object-path template for the uploaded file. Contains `{upload_id}`,
-            is at most 1024 bytes, has balanced braces, and contains no `..` or empty
-            segments. Variables: `{device_id}`, `{device_name}`, `{file_name}`, `{upload_id}`,
-            `{bundle_id}`, `{year}`, `{month}`, `{day}`, `{hour}`, `{minute}`, `{timezone}`,
-            plus any `source.glob` capture. `{bundle_id}` requires `bundle`. The time
-            variables are zero-padded and rendered from the file''s mtime (its last-modified
-            time, from the device clock) in `timezone`; `{timezone}` is that instant''s
-            UTC offset in ISO 8601 basic format (`+0000`, `-0500`).'
+          description: 'Object-path template for the uploaded file. Contains `{upload_id}`
+            or at least one of `{device_id}`, `{device_name}` or `{bundle_id}`; without
+            `{upload_id}`, a file whose rendered path another upload already holds
+            is stored with `{upload_id}` as a folder before its last segment (`run_42/{upload_id}/camera.mcap`).
+            It is at most 1024 bytes, has balanced braces, and contains no `..` or
+            empty segments. Variables: `{device_id}`, `{device_name}`, `{file_name}`,
+            `{upload_id}`, `{bundle_id}`, `{year}`, `{month}`, `{day}`, `{hour}`,
+            `{minute}`, `{timezone}`, plus any `source.glob` capture. `{bundle_id}`
+            requires `bundle`. The time variables are zero-padded and rendered from
+            the file''s mtime (its last-modified time, from the device clock) in `timezone`;
+            `{timezone}` is that instant''s UTC offset in ISO 8601 basic format (`+0000`,
+            `-0500`).'
         timezone:
           allOf:
           - $ref: '#/components/schemas/FileRuleUploadTimezone'
@@ -2139,13 +1748,6 @@ components:
           format: int64
           example: 1048576
           description: The size of the file in bytes.
-        incomplete:
-          type: boolean
-          default: false
-          example: false
-          description: Whether the file was incomplete when collected (e.g. it was
-            never closed cleanly / has no finalization marker). Sets the upload's
-            `incomplete` flag. Defaults to false.
         deployment_id:
           type: string
           example: dpl_123
@@ -2173,7 +1775,7 @@ components:
           type: string
           example: logs/dvc_123/robot.log
           description: The object path the file was written to in the destination
-            bucket. Carries the device's verified ID.
+            bucket.
       example:
         bucket_id: bkt_123
         bucket_name: my-uploads-bucket
@@ -2203,19 +1805,18 @@ components:
       - id
       - device_id
       - file_rule_id
+      - upload_collection_id
       - upload_collection_name
       - source
       - destination
       - digest
       - size
       - status
-      - incomplete
       - release_id
       - deployment_id
       - uploaded_at
       - created_at
       - updated_at
-      - workspace_id
       properties:
         object:
           type: string
@@ -2236,6 +1837,11 @@ components:
           type: string
           example: file_rule_123
           description: ID of the file rule that produced the upload.
+        upload_collection_id:
+          type: string
+          example: upl_col_123
+          description: ID of the upload collection the producing file rule uploads
+            to.
         upload_collection_name:
           type: string
           example: Robot Logs
@@ -2262,11 +1868,6 @@ components:
           description: The size of the uploaded file in bytes.
         status:
           $ref: '#/components/schemas/UploadStatus'
-        incomplete:
-          type: boolean
-          example: false
-          description: 'Whether the file was incomplete when collected (the mint request
-            carried `incomplete: true`). Independent of `status`.'
         release_id:
           type: string
           example: rls_123
@@ -2293,10 +1894,6 @@ components:
           format: date-time
           example: '2021-01-01T00:00:00Z'
           description: Timestamp of when the upload was last updated.
-        workspace_id:
-          type: string
-          example: wksp_123
-          description: ID of the workspace that owns the upload.
     Upload:
       title: Upload
       allOf:
@@ -2306,6 +1903,7 @@ components:
         id: upl_123
         device_id: dvc_123
         file_rule_id: file_rule_123
+        upload_collection_id: upl_col_123
         upload_collection_name: Robot Logs
         source:
           file_path: /var/log/robot/robot.log
@@ -2319,13 +1917,11 @@ components:
         digest: sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
         size: 1048576
         status: uploaded
-        incomplete: false
         release_id: rls_123
         deployment_id: dpl_123
         uploaded_at: '2021-01-01T00:00:10Z'
         created_at: '2021-01-01T00:00:00Z'
         updated_at: '2021-01-01T00:00:00Z'
-        workspace_id: wksp_123
     S3UploadCredentials:
       title: S3 Upload Credentials
       type: object
@@ -2548,6 +2144,7 @@ components:
           id: upl_123
           device_id: dvc_123
           file_rule_id: file_rule_123
+          upload_collection_id: upl_col_123
           upload_collection_name: Robot Logs
           source:
             file_path: /var/log/robot/robot.log
@@ -2561,13 +2158,11 @@ components:
           digest: sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
           size: 1048576
           status: uploaded
-          incomplete: false
           release_id: rls_123
           deployment_id: dpl_123
           uploaded_at: '2021-01-01T00:00:10Z'
           created_at: '2021-01-01T00:00:00Z'
           updated_at: '2021-01-01T00:00:00Z'
-          workspace_id: wksp_123
         credentials:
           scheme: gcs
           gcs_credentials:
@@ -2613,17 +2208,17 @@ components:
         component:
           type: string
           example: arm
-          description: Slug of the component the calibrated unit belongs to, such
-            as `arm`. Miru resolves it to the component, creating the component the
-            first time it is reported.
+          description: Slug of the calibrated unit's component, such as `arm`, kept
+            on the calibration as reported. Miru joins it with `role` and `aspect`
+            into the slug of the component the calibration belongs to.
         role:
           type: string
           example: front-left
           description: Slug of the role the calibrated unit fills on the device, such
             as `left` or `front-left`. Distinguishes several units of one component
-            on a device. Validated like a slug; `null` is reserved. Miru resolves
-            it to one of the component's `roles`, creating the role the first time
-            it is reported.
+            on a device. Validated like a slug; `null` is reserved. Miru joins it
+            after `component` with `-` (`meca500` and `aligner-1` give `meca500-aligner-1`)
+            and keeps it on the calibration as reported.
         serial_number:
           type: string
           maxLength: 255
@@ -2641,8 +2236,9 @@ components:
           example: pose
           description: Slug of the aspect of the unit that was calibrated, when it
             has more than one, e.g. `intrinsics` vs `extrinsics`, or `pose` vs `joint-offsets`.
-            Validated like a slug; `null` is reserved. Miru resolves it to one of
-            the component's `aspects`, creating the aspect the first time it is reported.
+            Validated like a slug; `null` is reserved. Miru joins it after `component`
+            and `role` with `-` (`optic-flipper` and `pose` give `optic-flipper-pose`)
+            and keeps it on the calibration as reported.
         content:
           allOf:
           - $ref: '#/components/schemas/InstanceContent'
@@ -2662,14 +2258,14 @@ components:
       - id
       - device_id
       - component_id
-      - role_id
-      - aspect_id
       - serial_number
       - digest
       - deployment_id
       - reported_by_id
       - report_id
       - reported_at
+      - invalidated_at
+      - invalidation_reason
       - created_at
       properties:
         object:
@@ -2691,18 +2287,6 @@ components:
           type: string
           example: cmp_123
           description: ID of the component the calibrated unit belongs to.
-        role_id:
-          type: string
-          nullable: true
-          example: cmp_rol_123
-          description: ID of the component role the calibrated unit fills; null if
-            no role was reported.
-        aspect_id:
-          type: string
-          nullable: true
-          example: cmp_asp_123
-          description: ID of the component aspect that was calibrated; null if no
-            aspect was reported.
         serial_number:
           type: string
           nullable: true
@@ -2740,6 +2324,20 @@ components:
           description: Timestamp of when the calibration was reported to the agent
             on the device. The agent may upload it much later, for example after an
             outage, so this can be well before `created_at`.
+        invalidated_at:
+          type: string
+          format: date-time
+          nullable: true
+          example: '2026-03-11T08:00:00Z'
+          description: Timestamp of when the device marked the calibration invalid,
+            or null if it is valid. Set once and never cleared.
+        invalidation_reason:
+          type: string
+          nullable: true
+          maxLength: 512
+          example: power cycle
+          description: Why the device marked the calibration invalid, such as `power
+            cycle`, or null if it is valid. Free text, at most 512 characters.
         created_at:
           type: string
           format: date-time
@@ -2833,9 +2431,7 @@ components:
         device_id: dvc_123
         component_id: cmp_123
         component_slug: arm
-        role_id: cmp_rol_123
         role_slug: front-left
-        aspect_id: null
         aspect_slug: null
         format: json
         serial_number: SN-1234
@@ -2844,6 +2440,8 @@ components:
         reported_by_id: ext_usr_123
         report_id: 0b6f3c2e-6a51-4e0f-9a43-2f1d7c9e8b10
         reported_at: '2021-01-01T00:00:00Z'
+        invalidated_at: null
+        invalidation_reason: null
         created_at: '2021-01-01T00:00:00Z'
     CalibrationListExpansion:
       type: string
@@ -2865,7 +2463,36 @@ components:
             type: array
             items:
               $ref: '#/components/schemas/Calibration'
-            description: The newest calibration for each component, role and aspect.
+            description: The newest calibration for each component, where a report's
+              `component`, `role` and `aspect` together name one component.
+    InvalidateCalibrationRequest:
+      title: Invalidate Calibration Request
+      type: object
+      required:
+      - report_id
+      - invalidated_at
+      - reason
+      properties:
+        report_id:
+          type: string
+          format: uuid
+          example: 0b6f3c2e-6a51-4e0f-9a43-2f1d7c9e8b10
+          description: ID the agent gave the report of the calibration to mark invalid.
+        invalidated_at:
+          type: string
+          format: date-time
+          example: '2026-03-11T08:00:00Z'
+          description: When the device app marked the calibration invalid. The agent
+            may upload it much later, for example after an outage, so Miru stores
+            this time as the calibration's `invalidated_at`.
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 512
+          example: power cycle
+          description: Why the calibration is no longer valid, such as `power cycle`.
+            Free text, at most 512 characters, and not blank. Miru trims surrounding
+            whitespace.
     DeviceStatus:
       type: string
       description: 'The status of the device.
@@ -3260,7 +2887,7 @@ components:
       required: true
       schema:
         type: string
-        example: v0.5
+        example: v0.6
       description: The API version the client was built against.
     config_instance_id:
       name: config_instance_id
@@ -3419,3 +3046,10 @@ components:
       schema:
         type: string
         example: dvc_123
+  headers:
+    content_disposition:
+      description: Header indicating whether the file is returned inline or as an
+        attachment.
+      schema:
+        type: string
+        example: inline
