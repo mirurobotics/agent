@@ -73,7 +73,7 @@ aws-smithy-runtime-api = { workspace = true, features = ["test-util"] }
 aws-smithy-types = { workspace = true }
 http = { workspace = true }
 http-body-util = "0.1"
-mockall = "0.14"
+mockall = "0.15"
 pastey = "0.2"
 reqwest = { workspace = true, features = ["form", "json"] }
 rumqttd = { workspace = true }
