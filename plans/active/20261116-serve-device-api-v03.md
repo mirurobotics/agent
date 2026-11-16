@@ -77,7 +77,8 @@ How to see it, on a device running this build (Linux, as root or a `miru` group 
 - [x] Design review: `Filter` gains `flat_component` and the store's `list` orders by key, replacing `list_latest_flat`, `into_components` and `list_order`; `/v0.3` converts its query into a `Filter` as `/v0.2` does.
 - [x] Rebased onto `main` after agent#510 and agent#512: `server/v03/` imports the shared plumbing in `server/request.rs`, `server/response.rs` and `server/sse.rs` instead of its own copies; the lint config and README line came with agent#510.
 - [x] Self-review.
-- [ ] M2: tests: `daemon/tests/server/v03/`, router test, the store's flat-component filter test, `flat_component` unit tests.
+- [x] M2: tests: `daemon/tests/server/v03/`, router test, the store's flat-component filter test, `flat_component` unit tests.
+- [x] Tests written
 - [ ] CI green on the pushed head (`$preflight` reports `CLEAN`).
 
 ## Surprises & Discoveries
@@ -112,7 +113,7 @@ How to see it, on a device running this build (Linux, as root or a `miru` group 
 
 ## Outcomes & Retrospective
 
-(Summarize at completion or major milestones.)
+M2 landed as planned. `daemon/tests/server/v03/` is the `/v0.2` test set copied and renamed, with the calibration tests adapted to the flat contract: create sends `arm-left` with no role or aspect and queues role and aspect `None`, the list filters by flat component (`?component=arm-left,hand`, and a repeated `component` is 422), and a response's `component` is the flat component. The `/v0.2`-only tests (reserved `null` role or aspect, a missing role and aspect, `null` slug filters) have no `/v0.3` copy. `server::routes::router::serves_each_version`, three store tests (`put_replaces_the_entry_of_another_split_of_its_key`, `put_if_newer_keeps_a_newer_entry_of_another_split`, `list_filters_by_flat_component`) and `flat_component_joins_the_parts_it_has` cover the rest. Whether `server/v03/` reaches its 87% gate is CI's to show.
 
 ## Context and Orientation
 
