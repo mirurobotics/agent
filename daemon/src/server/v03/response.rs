@@ -138,8 +138,8 @@ impl TryFrom<&events::model::Event> for device_server::Event {
     }
 }
 
-// Builds the v0.2 payload from the stored one, so the compiler checks it
-// against the v0.2 contract.
+// Builds the v0.3 payload from the stored one, so the compiler checks it
+// against the v0.3 contract.
 fn to_event_data(payload: &EventPayload) -> Result<serde_json::Value, serde_json::Error> {
     match payload {
         EventPayload::Deployed(event) => {
@@ -193,9 +193,7 @@ impl From<&ReportMetadata> for device_server::Calibration {
         device_server::Calibration {
             object: device_server::calibration::Object::Calibration,
             report_id: metadata.report_id,
-            component: metadata.component.clone(),
-            role: metadata.role.clone(),
-            aspect: metadata.aspect.clone(),
+            component: metadata.key(),
             serial_number: metadata.serial_number.clone(),
             reported_by: metadata.reported_by.clone(),
             reported_at: metadata.reported_at.to_rfc3339(),

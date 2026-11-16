@@ -113,6 +113,7 @@ pub mod latest_calibrations_query {
             component: vec!["arm".into(), "leg".into()],
             role: vec![Some("left".into()), Some("right".into())],
             aspect: vec![Some("pose".into())],
+            key: vec![],
         };
         assert_eq!(Filter::from(query), expected);
     }
@@ -130,6 +131,7 @@ pub mod latest_calibrations_query {
             component: vec!["null".into()],
             role: vec![None, Some("left".into())],
             aspect: vec![None],
+            key: vec![],
         };
         assert_eq!(Filter::from(query), expected);
     }

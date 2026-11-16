@@ -27,12 +27,13 @@ struct IndexFile {
 }
 
 /// Which entries to list. Empty means any; `None` in `role`/`aspect` matches an
-/// entry without one.
+/// entry without one, and `key` matches an entry's key.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Filter {
     pub component: Vec<String>,
     pub role: Vec<Option<String>>,
     pub aspect: Vec<Option<String>>,
+    pub key: Vec<String>,
 }
 
 impl Filter {
@@ -40,6 +41,7 @@ impl Filter {
         matches(&self.component, &metadata.component)
             && matches(&self.role, &metadata.role)
             && matches(&self.aspect, &metadata.aspect)
+            && matches(&self.key, &metadata.key())
     }
 }
 

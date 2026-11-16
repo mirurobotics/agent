@@ -75,6 +75,7 @@ impl From<LatestCalibrationsQuery> for Filter {
             component: split_list(query.component),
             role: split_slugs(query.role),
             aspect: split_slugs(query.aspect),
+            key: Vec::new(),
         }
     }
 }

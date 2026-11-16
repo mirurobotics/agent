@@ -7,11 +7,9 @@ use miru_daemon::services::calibration::CreateParams;
 
 fn calibration_request(format: openapi::InstanceFormat) -> openapi::CreateCalibrationRequest {
     openapi::CreateCalibrationRequest {
-        component: "arm".into(),
-        role: Some("left".into()),
+        component: "arm-left".into(),
         serial_number: Some("SN-1".into()),
         reported_by: Some("Ada Lovelace".into()),
-        aspect: Some("pose".into()),
         content: Box::new(openapi::InstanceContent::new(format, "offset: 1\n".into())),
     }
 }
@@ -24,25 +22,15 @@ pub mod create_calibration_request {
         let request = calibration_request(openapi::InstanceFormat::INSTANCE_FORMAT_YAML);
 
         let expected = CreateParams {
-            component: "arm".into(),
-            role: Some("left".into()),
-            aspect: Some("pose".into()),
+            component: "arm-left".into(),
+            role: None,
+            aspect: None,
             serial_number: Some("SN-1".into()),
             reported_by: Some("Ada Lovelace".into()),
             format: InstanceFormat::Yaml,
             data: "offset: 1\n".into(),
         };
         assert_eq!(CreateParams::try_from(request).unwrap(), expected);
-    }
-
-    #[test]
-    fn accepts_a_missing_role_and_aspect() {
-        let mut request = calibration_request(openapi::InstanceFormat::INSTANCE_FORMAT_JSON);
-        request.role = None;
-        request.aspect = None;
-
-        let params = CreateParams::try_from(request).unwrap();
-        assert_eq!((params.role, params.aspect), (None, None));
     }
 
     #[test]
@@ -85,17 +73,6 @@ pub mod create_calibration_request {
 
         assert!(CreateParams::try_from(request).is_err());
     }
-
-    #[test]
-    fn rejects_a_null_role_or_aspect() {
-        let mut role = calibration_request(openapi::InstanceFormat::INSTANCE_FORMAT_JSON);
-        role.role = Some("null".into());
-        let mut aspect = calibration_request(openapi::InstanceFormat::INSTANCE_FORMAT_JSON);
-        aspect.aspect = Some("null".into());
-
-        assert!(CreateParams::try_from(role).is_err());
-        assert!(CreateParams::try_from(aspect).is_err());
-    }
 }
 
 pub mod latest_calibrations_query {
@@ -105,31 +82,11 @@ pub mod latest_calibrations_query {
     fn splits_comma_separated_values() {
         let query = LatestCalibrationsQuery {
             component: Some("arm, leg,,".into()),
-            role: Some("left,right".into()),
-            aspect: Some(" pose ".into()),
         };
 
         let expected = Filter {
-            component: vec!["arm".into(), "leg".into()],
-            role: vec![Some("left".into()), Some("right".into())],
-            aspect: vec![Some("pose".into())],
-        };
-        assert_eq!(Filter::from(query), expected);
-    }
-
-    #[test]
-    fn maps_a_null_role_or_aspect_to_none() {
-        let query = LatestCalibrationsQuery {
-            component: Some("null".into()),
-            role: Some("null,left".into()),
-            aspect: Some("null".into()),
-        };
-
-        // a component is never missing, so `null` is only a slug there
-        let expected = Filter {
-            component: vec!["null".into()],
-            role: vec![None, Some("left".into())],
-            aspect: vec![None],
+            key: vec!["arm".into(), "leg".into()],
+            ..Filter::default()
         };
         assert_eq!(Filter::from(query), expected);
     }
