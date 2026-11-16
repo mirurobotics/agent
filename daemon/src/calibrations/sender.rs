@@ -10,7 +10,9 @@ use crate::calibrations::{
 };
 use crate::http::{self, ClientI, HTTPErr};
 use crate::trace;
-use backend_api::models::{CreateCalibrationRequest, InstanceContent, InvalidateCalibrationRequest};
+use backend_api::models::{
+    CreateCalibrationRequest, InstanceContent, InvalidateCalibrationRequest,
+};
 
 // external crates
 use reqwest::StatusCode;

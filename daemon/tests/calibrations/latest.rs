@@ -598,7 +598,10 @@ async fn invalidate_marks_the_entry_and_returns_it() {
         ..arm
     };
     assert_eq!(invalidated, expected);
-    assert_eq!(f.reopen().await.list(&Filter::default()).await.unwrap(), [expected]);
+    assert_eq!(
+        f.reopen().await.list(&Filter::default()).await.unwrap(),
+        [expected]
+    );
 }
 
 #[tokio::test]

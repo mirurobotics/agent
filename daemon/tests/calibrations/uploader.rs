@@ -345,8 +345,12 @@ async fn an_invalidation_is_stored_and_uploaded() {
     h.await_drained(&["a"]).await;
     let report_id = report("a").metadata.report_id;
 
-    let invalidated =
-        guard(h.uploader().invalidate(report_id, invalidation("power cycle"))).await.unwrap();
+    let invalidated = guard(
+        h.uploader()
+            .invalidate(report_id, invalidation("power cycle")),
+    )
+    .await
+    .unwrap();
 
     assert_eq!(invalidated.invalidation, Some(invalidation("power cycle")));
     assert_eq!(h.latest_entries().await, [invalidated]);
@@ -368,10 +372,16 @@ async fn an_invalid_entry_is_returned_unchanged_and_not_queued_again() {
     h.report("a").await;
     h.await_drained(&["a"]).await;
     let report_id = report("a").metadata.report_id;
-    let first =
-        guard(h.uploader().invalidate(report_id, invalidation("power cycle"))).await.unwrap();
+    let first = guard(
+        h.uploader()
+            .invalidate(report_id, invalidation("power cycle")),
+    )
+    .await
+    .unwrap();
 
-    let again = guard(h.uploader().invalidate(report_id, invalidation("dropped"))).await.unwrap();
+    let again = guard(h.uploader().invalidate(report_id, invalidation("dropped")))
+        .await
+        .unwrap();
 
     assert_eq!(again, first);
     assert_eq!(h.num_queued_uploads().await, 1);
@@ -383,8 +393,12 @@ async fn invalidating_an_unknown_report_queues_nothing() {
     h.spawn().await;
     let report_id = Uuid::new_v4();
 
-    let err =
-        guard(h.uploader().invalidate(report_id, invalidation("power cycle"))).await.unwrap_err();
+    let err = guard(
+        h.uploader()
+            .invalidate(report_id, invalidation("power cycle")),
+    )
+    .await
+    .unwrap_err();
 
     assert!(matches!(err, CalibrationsErr::NotFoundErr(_)), "{err:?}");
     assert_eq!(h.num_queued_uploads().await, 0);
@@ -403,8 +417,12 @@ async fn a_full_queue_leaves_the_entry_valid() {
     h.report("a").await;
     let report_id = report("a").metadata.report_id;
 
-    let err =
-        guard(h.uploader().invalidate(report_id, invalidation("power cycle"))).await.unwrap_err();
+    let err = guard(
+        h.uploader()
+            .invalidate(report_id, invalidation("power cycle")),
+    )
+    .await
+    .unwrap_err();
 
     assert!(matches!(err, CalibrationsErr::QueueFullErr(_)), "{err:?}");
     assert_eq!(h.latest_entries().await, [report("a").metadata]);

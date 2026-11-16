@@ -249,7 +249,10 @@ pub mod invalidate {
 
         let err = invalidate(&client).await.unwrap_err();
 
-        assert!(matches!(err, CalibrationsErr::ReportNotRecordedErr(_)), "{err:?}");
+        assert!(
+            matches!(err, CalibrationsErr::ReportNotRecordedErr(_)),
+            "{err:?}"
+        );
         assert!(!err.is_terminal());
     }
 
