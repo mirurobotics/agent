@@ -260,7 +260,7 @@ mod tests {
 
     /// `arm` with role `left`, and the same key reported as `arm-left` a
     /// second later.
-    fn two_splits() -> (ReportMetadata, ReportMetadata) {
+    fn duplicate_keys() -> (ReportMetadata, ReportMetadata) {
         let split = reported("arm", Some("left"), None);
         let joined = ReportMetadata {
             component: "arm-left".to_string(),
@@ -286,7 +286,7 @@ mod tests {
 
     #[test]
     fn take_entry_removes_another_split_of_the_key() {
-        let (split, joined) = two_splits();
+        let (split, joined) = duplicate_keys();
         let leg = reported("leg", None, None);
         let mut index: Index = vec![split.clone(), leg.clone()];
 
@@ -310,7 +310,7 @@ mod tests {
     // ========================== REMOVED DUPLICATES ========================== //
     #[test]
     fn removed_duplicates_keeps_the_newer_split_in_either_order() {
-        let (split, joined) = two_splits();
+        let (split, joined) = duplicate_keys();
         let orders = [
             vec![split.clone(), joined.clone()],
             vec![joined.clone(), split.clone()],
@@ -323,7 +323,7 @@ mod tests {
 
     #[test]
     fn removed_duplicates_keeps_the_first_listed_on_a_tie() {
-        let (split, joined) = two_splits();
+        let (split, joined) = duplicate_keys();
         let tied = ReportMetadata {
             reported_at: split.reported_at,
             ..joined

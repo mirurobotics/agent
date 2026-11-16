@@ -99,7 +99,7 @@ impl Fixture {
     /// Write an index holding `arm` with role `left` and, a second later,
     /// `arm-left`, with both contents, as an agent that keyed the store by
     /// component, role and aspect could have left them. Returns the two.
-    async fn write_two_splits(&self) -> (ReportMetadata, ReportMetadata) {
+    async fn write_duplicate_keys(&self) -> (ReportMetadata, ReportMetadata) {
         let split = reported("arm", Some("left"), None);
         let joined = ReportMetadata {
             component: "arm-left".to_string(),
@@ -175,7 +175,7 @@ async fn spawn_keeps_the_contents_when_the_index_is_corrupt() {
 #[tokio::test]
 async fn spawn_keeps_an_older_splits_content_until_a_put_drops_it() {
     let f = Fixture::new().await;
-    let (split, joined) = f.write_two_splits().await;
+    let (split, joined) = f.write_duplicate_keys().await;
 
     f.reopen().await;
 
