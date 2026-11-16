@@ -75,4 +75,19 @@ pub mod router {
 
         assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
     }
+
+    #[tokio::test]
+    async fn serves_each_version() {
+        let fixture = Fixture::new("routes_serves_each_version").await;
+
+        for uri in ["/v0.2/health", "/v0.3/health"] {
+            let request = Request::get(uri).body(Body::empty()).unwrap();
+            let response = routes::router(fixture.state.clone())
+                .oneshot(request)
+                .await
+                .unwrap();
+
+            assert_eq!(response.status(), StatusCode::OK, "{uri}");
+        }
+    }
 }

@@ -208,4 +208,20 @@ mod tests {
             assert!(!later.is_as_new_as(&arm), "{other:?}");
         }
     }
+
+    // =========================== FLAT COMPONENT =========================== //
+    #[test]
+    fn flat_component_joins_the_parts_it_has() {
+        let cases = [
+            (reported("arm", None, None), "arm"),
+            (reported("arm", Some("left"), None), "arm-left"),
+            (reported("arm", None, Some("pose")), "arm-pose"),
+            (reported("arm", Some("left"), Some("pose")), "arm-left-pose"),
+            (reported("arm", Some(""), Some("pose")), "arm-pose"),
+        ];
+
+        for (metadata, want) in cases {
+            assert_eq!(metadata.flat_component(), want, "{metadata:?}");
+        }
+    }
 }

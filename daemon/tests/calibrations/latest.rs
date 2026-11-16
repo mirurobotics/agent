@@ -241,6 +241,23 @@ async fn put_replaces_the_keys_entry_and_deletes_its_content() {
 }
 
 #[tokio::test]
+async fn put_replaces_the_entry_of_another_split_of_its_key() {
+    let f = Fixture::new().await;
+    let split = reported("arm", Some("left"), None);
+    let joined = ReportMetadata {
+        component: "arm-left".to_string(),
+        role: None,
+        ..newer(&split)
+    };
+    put_all(&f.store, &[&split]).await;
+
+    f.store.put(joined.clone(), DATA).await.unwrap();
+
+    assert_eq!(f.entries().await, std::slice::from_ref(&joined));
+    assert_eq!(f.content_ids().await, [joined.report_id]);
+}
+
+#[tokio::test]
 async fn putting_the_same_report_again_keeps_its_content() {
     let f = Fixture::new().await;
     let arm = reported("arm", None, None);
@@ -350,6 +367,23 @@ async fn put_if_newer_keeps_an_entry_reported_at_the_same_time_or_later() {
 }
 
 #[tokio::test]
+async fn put_if_newer_keeps_a_newer_entry_of_another_split() {
+    let f = Fixture::new().await;
+    let split = reported("arm", Some("left"), None);
+    let joined = ReportMetadata {
+        component: "arm-left".to_string(),
+        role: None,
+        ..reported_after(&split, 1)
+    };
+    put_all(&f.store, &[&joined]).await;
+
+    assert!(!f.store.put_if_newer(split, DATA).await.unwrap());
+
+    assert_eq!(f.entries().await, std::slice::from_ref(&joined));
+    assert_eq!(f.content_ids().await, [joined.report_id]);
+}
+
+#[tokio::test]
 async fn put_if_newer_rejects_a_new_key_at_capacity() {
     let f = Fixture::with_capacity(1).await;
     let arm = reported("arm", None, None);
@@ -451,6 +485,24 @@ async fn list_filters_by_component_role_and_aspect() {
     ];
 
     for (filter, want) in cases {
+        let entries = f.store.list(&filter).await.unwrap();
+        assert_eq!(entries, std::slice::from_ref(want), "{filter:?}");
+    }
+}
+
+#[tokio::test]
+async fn list_filters_by_flat_component() {
+    let f = Fixture::new().await;
+    let bare = reported("arm", None, None);
+    let with_role = reported("arm", Some("left"), None);
+    put_all(&f.store, &[&bare, &with_role]).await;
+    let cases = [("arm-left", &with_role), ("arm", &bare)];
+
+    for (flat_component, want) in cases {
+        let filter = Filter {
+            flat_component: vec![flat_component.to_string()],
+            ..Filter::default()
+        };
         let entries = f.store.list(&filter).await.unwrap();
         assert_eq!(entries, std::slice::from_ref(want), "{filter:?}");
     }
