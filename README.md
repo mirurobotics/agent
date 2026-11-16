@@ -22,7 +22,8 @@ agent/
 ├── build/                  # Docker, GoReleaser, release scripts
 ├── libs/                   # Generated libraries (do not edit)
 │   ├── backend-api/        #   Backend API client
-│   └── device-api-v02/     #   Device API v0.2 server
+│   ├── device-api-v02/     #   Device API v0.2 server
+│   └── device-api-v03/     #   Device API v0.3 server
 ├── scripts/                # Dev tooling (test, lint, coverage, etc.)
 └── testdata/               # Test fixtures
 ```
