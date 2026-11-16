@@ -340,9 +340,14 @@ mod tests {
             reported_at: split.reported_at,
             ..joined
         };
-        let index = vec![tied.clone(), split];
+        let cases = [
+            (vec![tied.clone(), split.clone()], &tied),
+            (vec![split.clone(), tied.clone()], &split),
+        ];
 
-        assert_eq!(keep_newest(index), [tied]);
+        for (index, first) in cases {
+            assert_eq!(keep_newest(index), std::slice::from_ref(first));
+        }
     }
 
     // ============================== MATCHES ============================= //
