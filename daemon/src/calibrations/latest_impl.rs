@@ -43,11 +43,10 @@ impl Filter {
     }
 }
 
-/// The newest calibration for each key, a report's flat component, as the
-/// control plane keys its latest: one entry per key in `index.json`, and each
-/// entry's data in its own file under `contents/`, named by its `report_id`. A
-/// report replaces its key's entry, and a new key past the capacity is
-/// rejected rather than evicting another.
+/// The newest calibration for each component, role and aspect: one entry per
+/// key in `index.json`, and each entry's data in its own file under `contents/`,
+/// named by its `report_id`. A report replaces its key's entry, and a new key
+/// past the capacity is rejected rather than evicting another.
 /// [`LatestStore`]'s worker owns it, so it is the store's only writer.
 ///
 /// [`LatestStore`]: crate::calibrations::LatestStore
