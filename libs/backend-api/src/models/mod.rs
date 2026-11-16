@@ -80,6 +80,8 @@ pub mod instance_content;
 pub use self::instance_content::InstanceContent;
 pub mod instance_format;
 pub use self::instance_format::InstanceFormat;
+pub mod invalidate_calibration_request;
+pub use self::invalidate_calibration_request::InvalidateCalibrationRequest;
 pub mod os;
 pub use self::os::Os;
 pub mod paginated_list;
