@@ -12,6 +12,7 @@ pub mod tcp;
 #[cfg(unix)]
 pub mod unix;
 pub mod v02;
+pub mod v03;
 
 pub use self::errors::ServerErr;
 pub use self::state::State;
