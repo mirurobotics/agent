@@ -76,7 +76,7 @@ impl TryFrom<LatestCalibrationsQuery> for Filter {
     fn try_from(query: LatestCalibrationsQuery) -> Result<Self, Self::Error> {
         reject_v02_fields(query.role.is_some(), query.aspect.is_some())?;
         Ok(Filter {
-            key: split_list(query.component),
+            component: split_list(query.component),
             ..Filter::default()
         })
     }

@@ -479,10 +479,10 @@ async fn list_filters_by_component_role_and_aspect() {
     let cases = [
         (
             Filter {
-                component: vec!["arm".to_string(), "wrist".to_string()],
+                legacy_component: vec!["arm".to_string(), "wrist".to_string()],
                 role: vec![Some("left".to_string())],
                 aspect: vec![Some("pose".to_string())],
-                key: vec![],
+                component: vec![],
             },
             &matched,
         ),
@@ -504,7 +504,7 @@ async fn list_filters_by_component_role_and_aspect() {
 }
 
 #[tokio::test]
-async fn list_filters_by_key() {
+async fn list_filters_by_component() {
     let f = Fixture::new().await;
     let bare = reported("arm", None, None);
     let with_role = reported("arm", Some("left"), None);
@@ -513,7 +513,7 @@ async fn list_filters_by_key() {
 
     for (key, want) in cases {
         let filter = Filter {
-            key: vec![key.to_string()],
+            component: vec![key.to_string()],
             ..Filter::default()
         };
         let entries = f.store.list(&filter).await.unwrap();

@@ -106,7 +106,7 @@ pub mod latest_calibrations_query {
         };
 
         let expected = Filter {
-            key: vec!["arm".into(), "leg".into()],
+            component: vec!["arm".into(), "leg".into()],
             ..Filter::default()
         };
         assert_eq!(Filter::try_from(query).unwrap(), expected);

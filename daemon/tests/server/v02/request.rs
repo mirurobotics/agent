@@ -110,10 +110,10 @@ pub mod latest_calibrations_query {
         };
 
         let expected = Filter {
-            component: vec!["arm".into(), "leg".into()],
+            legacy_component: vec!["arm".into(), "leg".into()],
             role: vec![Some("left".into()), Some("right".into())],
             aspect: vec![Some("pose".into())],
-            key: vec![],
+            component: vec![],
         };
         assert_eq!(Filter::from(query), expected);
     }
@@ -128,10 +128,10 @@ pub mod latest_calibrations_query {
 
         // a component is never missing, so `null` is only a slug there
         let expected = Filter {
-            component: vec!["null".into()],
+            legacy_component: vec!["null".into()],
             role: vec![None, Some("left".into())],
             aspect: vec![None],
-            key: vec![],
+            component: vec![],
         };
         assert_eq!(Filter::from(query), expected);
     }
