@@ -72,7 +72,7 @@ impl LatestStoreImpl {
         metadata: ReportMetadata,
         data: &str,
     ) -> Result<(), CalibrationsErr> {
-        let index = self.read_index().await?;
+        let index = self.read_index_file().await?;
         self.put_impl(index, metadata, data).await
     }
 
@@ -83,7 +83,7 @@ impl LatestStoreImpl {
         metadata: ReportMetadata,
         data: &str,
     ) -> Result<bool, CalibrationsErr> {
-        let index = self.read_index().await?;
+        let index = self.read_index_file().await?;
         if index.iter().any(|entry| entry.is_as_new_as(&metadata)) {
             return Ok(false);
         }
@@ -118,7 +118,7 @@ impl LatestStoreImpl {
         &self,
         filter: &Filter,
     ) -> Result<Vec<ReportMetadata>, CalibrationsErr> {
-        let mut entries = self.read_index().await?;
+        let mut entries = self.read_index_file().await?;
         entries.retain(|metadata| filter.is_match(metadata));
         entries.sort_by_cached_key(ReportMetadata::flat_component);
         Ok(entries)
@@ -126,7 +126,7 @@ impl LatestStoreImpl {
 
     /// The entry for `report_id`, with its data.
     pub(crate) async fn get(&self, report_id: Uuid) -> Result<Report, CalibrationsErr> {
-        let index = self.read_index().await?;
+        let index = self.read_index_file().await?;
         let Some(entry) = index.into_iter().find(|m| m.report_id == report_id) else {
             return Err(not_found(report_id));
         };
@@ -140,15 +140,10 @@ impl LatestStoreImpl {
     }
 
     /// The index, which is empty until the first put writes it.
-    async fn read_index(&self) -> Result<Index, CalibrationsErr> {
-        Ok(removed_duplicates(self.read_index_file().await?))
-    }
-
-    /// The index as written, which can hold more than one entry per key.
     async fn read_index_file(&self) -> Result<Index, CalibrationsErr> {
         match files::read_json_with_retry::<IndexFile>(&self.index).await {
             Err(FileSysErr::PathDoesNotExistErr(_)) => Ok(Index::new()),
-            result => Ok(result?.entries),
+            result => Ok(removed_duplicates(result?.entries)),
         }
     }
 
@@ -171,9 +166,7 @@ impl LatestStoreImpl {
     }
 
     /// Delete the content no entry names, which a crash or a failed write or
-    /// delete leaves. It reads the index as written, so content stays while
-    /// any entry names it, even one a read drops. If the index can't be read,
-    /// nothing is deleted.
+    /// delete leaves. If the index can't be read, nothing is deleted.
     pub(crate) async fn prune_orphaned_contents(&self) {
         let index = match self.read_index_file().await {
             Ok(index) => index,
