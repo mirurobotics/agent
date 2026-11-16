@@ -236,7 +236,7 @@ fn not_found(report_id: Uuid) -> CalibrationsErr {
 #[cfg(test)]
 mod tests {
     // internal crates
-    use super::{check_capacity, removed_duplicates, matches, not_found, take_entry, Index};
+    use super::{check_capacity, matches, not_found, removed_duplicates, take_entry, Index};
     use crate::test_utils::calibrations::reported;
     use miru_daemon::calibrations::ReportMetadata;
     use miru_daemon::models::InstanceFormat;
