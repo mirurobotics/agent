@@ -144,9 +144,14 @@ impl LatestStoreImpl {
 
     /// The index, which is empty until the first put writes it.
     async fn read_index(&self) -> Result<Index, CalibrationsErr> {
+        Ok(keep_newest(self.read_index_file().await?))
+    }
+
+    /// The index as written, which can hold more than one entry per key.
+    async fn read_index_file(&self) -> Result<Index, CalibrationsErr> {
         match files::read_json_with_retry::<IndexFile>(&self.index).await {
             Err(FileSysErr::PathDoesNotExistErr(_)) => Ok(Index::new()),
-            result => Ok(keep_newest(result?.entries)),
+            result => Ok(result?.entries),
         }
     }
 
@@ -169,19 +174,30 @@ impl LatestStoreImpl {
     }
 
     /// Delete the content no entry names, which a crash or a failed write or
-    /// delete leaves. If the index can't be read, nothing is deleted.
+    /// delete leaves. An index with more than one entry per key is rewritten
+    /// first, so that it never names deleted content. If the index can't be
+    /// read or rewritten, nothing is deleted.
     pub(crate) async fn prune_orphaned_contents(&self) {
-        let index = match self.read_index().await {
+        let written = match self.read_index_file().await {
             Ok(index) => index,
             Err(e) => {
                 error!("calibrations: not pruning latest contents, index unreadable: {e}");
                 return;
             }
         };
+        let written_len = written.len();
+        let index = keep_newest(written);
         let named: HashSet<String> = index
             .iter()
             .map(|metadata| metadata.report_id.to_string())
             .collect();
+        if index.len() < written_len {
+            let result = self.write_index(index).await;
+            if let Err(e) = result {
+                error!("calibrations: not pruning latest contents, index not rewritten: {e}");
+                return;
+            }
+        }
         dirs::delete_files_except(&self.contents, &named).await;
     }
 }
@@ -254,6 +270,18 @@ mod tests {
         }
     }
 
+    /// `arm` with role `left`, and the same key reported as `arm-left` a
+    /// second later.
+    fn two_splits() -> (ReportMetadata, ReportMetadata) {
+        let split = reported("arm", Some("left"), None);
+        let joined = ReportMetadata {
+            component: "arm-left".to_string(),
+            role: None,
+            ..same_key(&split)
+        };
+        (split, joined)
+    }
+
     // ============================ TAKE ENTRY ============================ //
     #[test]
     fn take_entry_removes_the_entry_with_the_same_key() {
@@ -269,6 +297,18 @@ mod tests {
     }
 
     #[test]
+    fn take_entry_removes_another_split_of_the_key() {
+        let (split, joined) = two_splits();
+        let leg = reported("leg", None, None);
+        let mut index: Index = vec![split.clone(), leg.clone()];
+
+        let taken = take_entry(&mut index, &joined);
+
+        assert_eq!(taken, Some(split));
+        assert_eq!(index, [leg]);
+    }
+
+    #[test]
     fn take_entry_leaves_the_index_for_a_new_key() {
         let arm = reported("arm", None, None);
         let mut index: Index = vec![arm.clone()];
@@ -280,18 +320,6 @@ mod tests {
     }
 
     // =========================== KEEP NEWEST ============================ //
-    /// `arm` with role `left`, and the same key reported as `arm-left` a
-    /// second later.
-    fn two_splits() -> (ReportMetadata, ReportMetadata) {
-        let split = reported("arm", Some("left"), None);
-        let joined = ReportMetadata {
-            component: "arm-left".to_string(),
-            role: None,
-            ..same_key(&split)
-        };
-        (split, joined)
-    }
-
     #[test]
     fn keep_newest_keeps_the_newer_split_in_either_order() {
         let (split, joined) = two_splits();
@@ -315,23 +343,6 @@ mod tests {
         let index = vec![tied.clone(), split];
 
         assert_eq!(keep_newest(index), [tied]);
-    }
-
-    // =============================== KEY ================================ //
-    #[test]
-    fn key_is_the_flat_component_only() {
-        let arm = reported("arm", Some("left"), Some("pose"));
-        // each differs from `arm` in one part of the key
-        let others = [
-            reported("leg", Some("left"), Some("pose")),
-            reported("arm", Some("right"), Some("pose")),
-            reported("arm", Some("left"), Some("offset")),
-        ];
-
-        assert_eq!(arm.flat_component(), same_key(&arm).flat_component());
-        for other in &others {
-            assert_ne!(arm.flat_component(), other.flat_component(), "{other:?}");
-        }
     }
 
     // ============================== MATCHES ============================= //

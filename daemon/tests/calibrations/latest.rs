@@ -178,6 +178,9 @@ async fn spawn_keeps_only_the_newest_of_two_splits_of_one_key() {
 
     assert_eq!(f.entries().await, std::slice::from_ref(&joined));
     assert_eq!(f.content_ids().await, [joined.report_id]);
+    // rewritten, so an older agent rolled back to doesn't list `split`
+    let index: serde_json::Value = files::read_json(&f.layout.index()).await.unwrap();
+    assert_eq!(index, serde_json::json!({ "entries": [joined] }));
 }
 
 // =============================== CAPACITY =============================== //

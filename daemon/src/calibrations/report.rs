@@ -218,6 +218,8 @@ mod tests {
             (reported("arm", None, Some("pose")), "arm-pose"),
             (reported("arm", Some("left"), Some("pose")), "arm-left-pose"),
             (reported("arm", Some(""), Some("pose")), "arm-pose"),
+            (reported("arm", Some("left"), Some("")), "arm-left"),
+            (reported("", Some("left"), Some("pose")), "left-pose"),
         ];
 
         for (metadata, want) in cases {
