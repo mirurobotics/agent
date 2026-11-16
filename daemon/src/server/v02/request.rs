@@ -1,7 +1,7 @@
 // internal crates
 use crate::calibrations::Filter;
 use crate::models::InstanceFormat;
-use crate::server::errors::InvalidRequestErr;
+use crate::server::{errors::InvalidRequestErr, request::split_list};
 use crate::services::calibration;
 use crate::trace;
 use device_api_v02::models as device_server;
@@ -77,13 +77,6 @@ impl From<LatestCalibrationsQuery> for Filter {
             aspect: split_slugs(query.aspect),
         }
     }
-}
-
-/// The trimmed, non-empty items of a comma-separated list.
-pub(crate) fn split_list(list: Option<String>) -> Vec<String> {
-    let list = list.unwrap_or_default();
-    let items = list.split(',').map(|item| item.trim().to_string());
-    items.filter(|item| !item.is_empty()).collect()
 }
 
 /// A list of role or aspect slugs, where [`NULL_SLUG`] matches a missing one.
