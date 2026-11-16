@@ -157,7 +157,7 @@ In CI, the Lint workflow runs:
 
 ## Generated code
 
-`libs/backend-api/` and `libs/device-api-v02/` are auto-generated from OpenAPI specs. Do not edit by hand. Regenerate via `make -C api` or `api/regen.sh`. Clippy warnings in generated code are expected and unrelated to agent source quality.
+`libs/backend-api/` and each `libs/device-api-vNN/` crate are auto-generated from OpenAPI specs. Do not edit by hand. Regenerate via `make -C api` or `api/regen.sh`. Clippy warnings in generated code are expected and unrelated to agent source quality.
 
 ## Common tasks
 

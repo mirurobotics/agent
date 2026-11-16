@@ -9,29 +9,16 @@ codegen_dir=$this_dir/codegen
 cd "$this_dir"
 make gen
 
-# backend
-codegen_backend_models_dir=$codegen_dir/backend/src/models
-backend_models_target_dir=$git_repo_root_dir/libs/backend-api/src/models
+# replace a crate's models with the generated ones
+copy_models() {
+    local codegen_models_dir=$codegen_dir/$1/src/models
+    local target_models_dir=$git_repo_root_dir/libs/$2/src/models
 
-# replace the target model directories with the generated ones
-rm -rf "${backend_models_target_dir:?}"/*
+    mkdir -p "$target_models_dir"
+    rm -rf "${target_models_dir:?}"/*
+    cp -r "$codegen_models_dir"/* "$target_models_dir"
+}
 
-# copy all the files in the generated models dirs to the target models dirs
-if [ ! -d "$backend_models_target_dir" ]; then
-    mkdir "$backend_models_target_dir"
-fi
-cp -r "$codegen_backend_models_dir"/* "$backend_models_target_dir"
-
-
-# device
-codegen_device_models_dir=$codegen_dir/device-v02/src/models
-device_models_target_dir=$git_repo_root_dir/libs/device-api-v02/src/models
-
-# replace the target model directories with the generated ones
-rm -rf "${device_models_target_dir:?}"/*
-
-# copy all the files in the generated models dirs to the target models dirs
-if [ ! -d "$device_models_target_dir" ]; then
-    mkdir "$device_models_target_dir"
-fi
-cp -r "$codegen_device_models_dir"/* "$device_models_target_dir"
+copy_models backend backend-api
+copy_models device-v02 device-api-v02
+copy_models device-v03 device-api-v03
