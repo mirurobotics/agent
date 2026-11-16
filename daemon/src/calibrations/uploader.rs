@@ -7,7 +7,7 @@ use std::time::Duration;
 use crate::calibrations::{
     errors::{CalibrationsErr, ReceiveActorMessageErr, SendActorMessageErr},
     latest::LatestStore,
-    report::{QueueEntry, QueueSnapshotFile, Report},
+    report::{Invalidation, QueueEntry, QueueSnapshotFile, Report, ReportMetadata},
     sender::Sender,
     uploader_impl::{NextAttempt, UploaderImpl, UploaderOptions},
 };
@@ -19,6 +19,7 @@ use chrono::{DateTime, Utc};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{error, info};
+use uuid::Uuid;
 
 pub struct UploaderArgs<S, F, N> {
     /// Where the queue persists; `None` keeps it in memory only.
@@ -39,6 +40,11 @@ enum Command {
     Enqueue {
         report: Box<Report>,
         respond_to: oneshot::Sender<Result<(), CalibrationsErr>>,
+    },
+    Invalidate {
+        report_id: Uuid,
+        invalidation: Invalidation,
+        respond_to: oneshot::Sender<Result<ReportMetadata, CalibrationsErr>>,
     },
     Len {
         respond_to: oneshot::Sender<usize>,
@@ -105,6 +111,33 @@ where
         Ok(())
     }
 
+    /// Queue the upload of `invalidation` for the latest entry with
+    /// `report_id`, then mark the entry invalid. An entry that is already
+    /// invalid is returned unchanged and nothing is queued. A failed store
+    /// write removes the queued invalidation, so on error nothing changes.
+    async fn invalidate(
+        &mut self,
+        report_id: Uuid,
+        invalidation: Invalidation,
+    ) -> Result<ReportMetadata, CalibrationsErr> {
+        let entry = self.latest.get(report_id).await?.metadata;
+        if entry.invalidation.is_some() {
+            return Ok(entry);
+        }
+        let job = ReportMetadata {
+            invalidation: Some(invalidation.clone()),
+            ..entry
+        };
+        let id = self.uploader.enqueue_invalidation(job).await?;
+        match self.latest.invalidate(report_id, invalidation).await {
+            Ok(entry) => Ok(entry),
+            Err(e) => {
+                self.uploader.remove(id).await;
+                Err(e)
+            }
+        }
+    }
+
     /// Drive `fut` to completion while serving commands, so intake never
     /// waits on Miru. `None` when a shutdown arrived; `fut` is then dropped.
     async fn serve_until<T>(&mut self, fut: impl Future<Output = T>) -> Option<T> {
@@ -151,6 +184,14 @@ where
                 let result = self.enqueue(*report).await;
                 respond(respond_to, result, "enqueue");
             }
+            Command::Invalidate {
+                report_id,
+                invalidation,
+                respond_to,
+            } => {
+                let result = self.invalidate(report_id, invalidation).await;
+                respond(respond_to, result, "invalidate");
+            }
             Command::Len { respond_to } => respond(respond_to, self.uploader.len(), "len"),
             Command::Shutdown { respond_to } => {
                 respond(respond_to, (), "shutdown");
@@ -169,10 +210,10 @@ fn respond<T>(respond_to: oneshot::Sender<T>, value: T, op: &str) {
 
 // ================================== HANDLE ======================================= //
 /// Handle to the calibration uploader: one task that owns the calibration
-/// queue, writes intake to it and the latest store, and uploads reports to
-/// Miru one at a time, oldest due first, retrying a failed report at the tail
-/// after its own backoff. It keeps serving intake during an upload or a
-/// backoff.
+/// queue, writes intake and invalidations to it and the latest store, and
+/// uploads them to the control plane one at a time, oldest due first, retrying
+/// a failed one at the tail after its own backoff. It keeps serving intake
+/// during an upload or a backoff.
 #[derive(Debug)]
 pub struct Uploader {
     sender: mpsc::Sender<Command>,
@@ -212,6 +253,23 @@ impl Uploader {
     pub async fn report(&self, report: Report) -> Result<(), CalibrationsErr> {
         self.send_command("enqueue", |respond_to| Command::Enqueue {
             report: Box::new(report),
+            respond_to,
+        })
+        .await?
+    }
+
+    /// Mark the latest entry for `report_id` invalid and queue the
+    /// invalidation's upload, unless the entry already is invalid, and return
+    /// the entry. Not found unless an entry has that `report_id`; a full queue
+    /// is the 507 [`CalibrationsErr::QueueFullErr`].
+    pub async fn invalidate(
+        &self,
+        report_id: Uuid,
+        invalidation: Invalidation,
+    ) -> Result<ReportMetadata, CalibrationsErr> {
+        self.send_command("invalidate", |respond_to| Command::Invalidate {
+            report_id,
+            invalidation,
             respond_to,
         })
         .await?

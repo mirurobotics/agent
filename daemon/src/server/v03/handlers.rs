@@ -246,7 +246,7 @@ pub async fn invalidate_latest_calibration(
             let reason =
                 request::invalidation_reason(request).map_err(ServerErr::InvalidRequestErr)?;
             let invalidated =
-                calibration_svc::invalidate(&state.latest_cals, &report_id, reason, Utc::now())
+                calibration_svc::invalidate(&state.cal_uploader, &report_id, reason, Utc::now())
                     .await?;
             Ok::<_, ServerErr>(device_server::Calibration::from(&invalidated))
         },

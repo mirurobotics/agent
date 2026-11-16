@@ -1,16 +1,16 @@
 // internal crates
-use crate::calibrations::{Invalidation, LatestStore, ReportMetadata};
+use crate::calibrations::{Invalidation, ReportMetadata, Uploader};
 use crate::services::{calibration::content::parse_report_id, errors::ServiceErr};
 
 // external crates
 use chrono::{DateTime, Utc};
 
-/// Mark the latest calibration with `report_id` invalid at `now` for `reason`,
-/// unless it already is, and return it. A report a newer one replaced is not
-/// found. Only the device's store records it; nothing is sent to the control
-/// plane yet.
+/// Mark the latest calibration with `report_id` invalid at `now` for `reason`
+/// and queue the invalidation for the control plane, unless it already is
+/// invalid, and return it. A report a newer one replaced is not found. Nothing
+/// here waits on the control plane.
 pub async fn invalidate(
-    store: &LatestStore,
+    cal_uploader: &Uploader,
     report_id: &str,
     reason: String,
     now: DateTime<Utc>,
@@ -20,5 +20,5 @@ pub async fn invalidate(
         invalidated_at: now,
         reason,
     };
-    Ok(store.invalidate(report_id, invalidation).await?)
+    Ok(cal_uploader.invalidate(report_id, invalidation).await?)
 }

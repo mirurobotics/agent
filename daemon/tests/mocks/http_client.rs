@@ -40,6 +40,7 @@ pub enum Call {
     CreateCalibration,
     ListLatestCalibrations,
     GetCalibrationContent,
+    InvalidateCalibration,
 }
 
 // ================================ CAPTURED REQUEST ================================ //
@@ -73,6 +74,7 @@ type CreateCalibrationFn = Mutex<Box<dyn Fn() -> Result<Calibration, HTTPErr> + 
 type ListLatestCalibrationsFn =
     Mutex<Box<dyn Fn() -> Result<CalibrationList, HTTPErr> + Send + Sync>>;
 type GetCalibrationContentFn = Mutex<Box<dyn Fn(&str) -> Result<String, HTTPErr> + Send + Sync>>;
+type InvalidateCalibrationFn = Mutex<Box<dyn Fn() -> Result<Calibration, HTTPErr> + Send + Sync>>;
 
 pub struct MockClient {
     pub provision_device_fn: Box<dyn Fn() -> Result<Device, HTTPErr> + Send + Sync>,
@@ -93,6 +95,7 @@ pub struct MockClient {
     pub create_calibration_fn: CreateCalibrationFn,
     pub list_latest_calibrations_fn: ListLatestCalibrationsFn,
     pub get_calibration_content_fn: GetCalibrationContentFn,
+    pub invalidate_calibration_fn: InvalidateCalibrationFn,
     pub requests: Arc<Mutex<Vec<CapturedRequest>>>,
 }
 
@@ -117,6 +120,7 @@ impl Default for MockClient {
             create_calibration_fn: Mutex::new(Box::new(|| Ok(Calibration::default()))),
             list_latest_calibrations_fn: Mutex::new(Box::new(|| Ok(CalibrationList::default()))),
             get_calibration_content_fn: Mutex::new(Box::new(|_id| Ok("{}".to_string()))),
+            invalidate_calibration_fn: Mutex::new(Box::new(|| Ok(Calibration::default()))),
             requests: Arc::new(Mutex::new(Vec::new())),
         }
     }
@@ -228,6 +232,13 @@ impl MockClient {
         *self.create_calibration_fn.lock().unwrap() = Box::new(f);
     }
 
+    pub fn set_invalidate_calibration<F>(&self, f: F)
+    where
+        F: Fn() -> Result<Calibration, HTTPErr> + Send + Sync + 'static,
+    {
+        *self.invalidate_calibration_fn.lock().unwrap() = Box::new(f);
+    }
+
     pub fn set_list_latest_calibrations<F>(&self, f: F)
     where
         F: Fn() -> Result<CalibrationList, HTTPErr> + Send + Sync + 'static,
@@ -299,6 +310,9 @@ impl MockClient {
             }
             (m, p) if *m == Method::POST && p == "/uploads" => Call::CreateUpload,
             (m, p) if *m == Method::POST && p == "/calibrations" => Call::CreateCalibration,
+            (m, p) if *m == Method::POST && p == "/calibrations/invalidate" => {
+                Call::InvalidateCalibration
+            }
             (m, p) if *m == Method::GET && p == "/calibrations/latest" => {
                 Call::ListLatestCalibrations
             }
@@ -352,6 +366,9 @@ impl MockClient {
                     .and_then(|s| s.strip_suffix("/content"))
                     .unwrap_or("");
                 (self.get_calibration_content_fn.lock().unwrap())(id)
+            }
+            Call::InvalidateCalibration => {
+                json(&(self.invalidate_calibration_fn.lock().unwrap())()?)
             }
         }
     }
