@@ -19,7 +19,8 @@ pub struct CreateCalibrationBody {
     pub aspect: Option<serde_json::Value>,
 }
 
-/// Checks the request's shape; the control plane judges the rest.
+/// Checks the request's shape and rejects v0.2's role and aspect; the
+/// control plane judges the rest.
 impl TryFrom<CreateCalibrationBody> for calibration::CreateParams {
     type Error = InvalidRequestErr;
 

@@ -5,7 +5,7 @@ use miru_daemon::models::InstanceFormat;
 use miru_daemon::server::v03::request::{CreateCalibrationBody, LatestCalibrationsQuery};
 use miru_daemon::services::calibration::CreateParams;
 
-fn calibration_request(format: openapi::InstanceFormat) -> CreateCalibrationBody {
+fn calibration_body(format: openapi::InstanceFormat) -> CreateCalibrationBody {
     CreateCalibrationBody {
         request: openapi::CreateCalibrationRequest {
             component: "arm-left".into(),
@@ -18,12 +18,12 @@ fn calibration_request(format: openapi::InstanceFormat) -> CreateCalibrationBody
     }
 }
 
-pub mod create_calibration_request {
+pub mod create_calibration_body {
     use super::*;
 
     #[test]
     fn converts_every_field() {
-        let request = calibration_request(openapi::InstanceFormat::INSTANCE_FORMAT_YAML);
+        let body = calibration_body(openapi::InstanceFormat::INSTANCE_FORMAT_YAML);
 
         let expected = CreateParams {
             component: "arm-left".into(),
@@ -34,7 +34,7 @@ pub mod create_calibration_request {
             format: InstanceFormat::Yaml,
             data: "offset: 1\n".into(),
         };
-        assert_eq!(CreateParams::try_from(request).unwrap(), expected);
+        assert_eq!(CreateParams::try_from(body).unwrap(), expected);
     }
 
     #[test]
@@ -66,28 +66,28 @@ pub mod create_calibration_request {
             ),
         ];
         for (format, want) in cases {
-            let params = CreateParams::try_from(calibration_request(format)).unwrap();
+            let params = CreateParams::try_from(calibration_body(format)).unwrap();
             assert_eq!(params.format, want, "{format:?}");
         }
     }
 
     #[test]
     fn rejects_an_unknown_format() {
-        let request = calibration_request(openapi::InstanceFormat::InstanceFormatUnknown);
+        let body = calibration_body(openapi::InstanceFormat::InstanceFormatUnknown);
 
-        assert!(CreateParams::try_from(request).is_err());
+        assert!(CreateParams::try_from(body).is_err());
     }
 
     #[test]
     fn rejects_a_role_or_aspect() {
-        let body = || calibration_request(openapi::InstanceFormat::INSTANCE_FORMAT_YAML);
+        let base = || calibration_body(openapi::InstanceFormat::INSTANCE_FORMAT_YAML);
         let role = CreateCalibrationBody {
             role: Some("left".into()),
-            ..body()
+            ..base()
         };
         let aspect = CreateCalibrationBody {
             aspect: Some("pose".into()),
-            ..body()
+            ..base()
         };
 
         assert!(CreateParams::try_from(role).is_err());
