@@ -2324,6 +2324,7 @@ dependencies = [
  "chrono",
  "crc-fast",
  "device-api-v02",
+ "device-api-v03",
  "futures",
  "glob",
  "http 1.5.0",

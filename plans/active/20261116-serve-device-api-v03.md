@@ -91,6 +91,12 @@ How to see it, on a device running this build (Linux, as root or a `miru` group 
   Date/Author: 2026-11-16, plan authoring.
 - Decision: `/v0.3/version` reports the v0.3 crate's constants (`v0.3`, `v0.3.0-next`, openapi commit `36f5894...`); `/v0.2/version` keeps v0.2's. Nothing else reports a Device API version (the only other `ApiVersion` use, `daemon/src/http/request.rs`, is the backend API's).
   Date/Author: 2026-11-16, plan authoring.
+- Decision: `server::routes::router` binds the merged table first (`let routes = v02::routes::table().merge(v03::routes::table());`) and then calls `middleware(routes.with_state(state))`, rather than one nested call.
+  Rationale: the single expression exceeds rustfmt's call and chain widths, so rustfmt would split it over five lines; two lines read better and behave the same.
+  Date/Author: 2026-11-16, source stage.
+- Decision: ARCHITECTURE.md's generated-code paragraph and "Generated code is never hand-edited" invariant also name `libs/device-api-v03`, beside the planned `server` and calibrations edits.
+  Rationale: they listed only `libs/device-api-v02`, which stops being true once the daemon depends on the v0.3 crate; README's `libs/` tree gets the same line in the plan.
+  Date/Author: 2026-11-16, source stage.
 
 ## Outcomes & Retrospective
 

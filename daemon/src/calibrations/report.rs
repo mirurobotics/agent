@@ -67,6 +67,22 @@ impl ReportMetadata {
     pub(crate) fn is_as_new_as(&self, other: &ReportMetadata) -> bool {
         self.key() == other.key() && self.reported_at >= other.reported_at
     }
+
+    /// The component the control plane files this report under: the
+    /// component, role and aspect joined with `-`, skipping missing or empty ones.
+    pub(crate) fn flat_component(&self) -> String {
+        let parts = [
+            Some(self.component.as_str()),
+            self.role.as_deref(),
+            self.aspect.as_deref(),
+        ];
+        let parts: Vec<&str> = parts
+            .into_iter()
+            .flatten()
+            .filter(|part| !part.is_empty())
+            .collect();
+        parts.join("-")
+    }
 }
 
 impl From<backend_client::Calibration> for ReportMetadata {
