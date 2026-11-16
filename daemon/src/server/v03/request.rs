@@ -1,4 +1,5 @@
 // internal crates
+use crate::calibrations::Filter;
 use crate::models::InstanceFormat;
 use crate::server::errors::InvalidRequestErr;
 use crate::services::calibration;
@@ -53,9 +54,12 @@ pub struct LatestCalibrationsQuery {
     pub component: Option<String>,
 }
 
-impl LatestCalibrationsQuery {
-    pub fn into_components(self) -> Vec<String> {
-        split_list(self.component)
+impl From<LatestCalibrationsQuery> for Filter {
+    fn from(query: LatestCalibrationsQuery) -> Self {
+        Filter {
+            flat_component: split_list(query.component),
+            ..Filter::default()
+        }
     }
 }
 

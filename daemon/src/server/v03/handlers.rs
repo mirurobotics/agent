@@ -214,8 +214,8 @@ pub async fn list_latest_calibrations(
     handle(
         async {
             let Query(query) = query.map_err(reject_query)?;
-            let components = query.into_components();
-            let latest = calibration_svc::list_latest_flat(&state.latest_cals, &components).await?;
+            let filter = query.into();
+            let latest = calibration_svc::list_latest(&state.latest_cals, &filter).await?;
             Ok::<_, ServerErr>(response::latest_calibrations(&latest))
         },
         "Error listing latest calibrations",

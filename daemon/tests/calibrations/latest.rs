@@ -260,8 +260,8 @@ async fn role_and_aspect_are_part_of_the_key() {
 
     put_all(&f.store, &[&bare, &with_role, &with_aspect]).await;
 
-    // in key order, a missing slug first
-    assert_eq!(f.entries().await, [bare, with_aspect, with_role]);
+    // in key order: `arm`, `arm-left`, `arm-pose`
+    assert_eq!(f.entries().await, [bare, with_role, with_aspect]);
 }
 
 #[tokio::test]
@@ -385,15 +385,16 @@ async fn put_if_newer_checks_and_puts_in_one_command() {
 
 // ================================= LIST ================================= //
 #[tokio::test]
-async fn list_sorts_by_component_then_role_then_aspect() {
+async fn list_sorts_by_key() {
     let f = Fixture::new().await;
-    // in sorted order, where a missing role or aspect sorts first
+    // in key order: `arm`, `arm-left`, `arm-left-offset`, `arm-left-pose`,
+    // `arm-pose`, `arm-right`, `leg`
     let sorted = [
         reported("arm", None, None),
-        reported("arm", None, Some("pose")),
         reported("arm", Some("left"), None),
         reported("arm", Some("left"), Some("offset")),
         reported("arm", Some("left"), Some("pose")),
+        reported("arm", None, Some("pose")),
         reported("arm", Some("right"), None),
         reported("leg", None, None),
     ];
@@ -434,6 +435,7 @@ async fn list_filters_by_component_role_and_aspect() {
                 component: vec!["arm".to_string(), "wrist".to_string()],
                 role: vec![Some("left".to_string())],
                 aspect: vec![Some("pose".to_string())],
+                flat_component: vec![],
             },
             &matched,
         ),

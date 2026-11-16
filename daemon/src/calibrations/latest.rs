@@ -149,7 +149,7 @@ impl LatestStore {
         .await?
     }
 
-    /// The entries `filter` matches, ordered by component, role and aspect.
+    /// The entries `filter` matches, ordered by key.
     pub async fn list(&self, filter: &Filter) -> Result<Vec<ReportMetadata>, CalibrationsErr> {
         self.send_command("list", |respond_to| Command::List {
             filter: filter.clone(),

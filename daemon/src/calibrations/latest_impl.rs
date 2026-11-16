@@ -27,12 +27,13 @@ struct IndexFile {
 }
 
 /// Which entries to list. Empty means any; `None` in `role`/`aspect` matches an
-/// entry without one.
+/// entry without one, and `flat_component` matches an entry's key.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Filter {
     pub component: Vec<String>,
     pub role: Vec<Option<String>>,
     pub aspect: Vec<Option<String>>,
+    pub flat_component: Vec<String>,
 }
 
 impl Filter {
@@ -40,6 +41,7 @@ impl Filter {
         matches(&self.component, &metadata.component)
             && matches(&self.role, &metadata.role)
             && matches(&self.aspect, &metadata.aspect)
+            && matches(&self.flat_component, &metadata.flat_component())
     }
 }
 
@@ -114,14 +116,14 @@ impl LatestStoreImpl {
         Ok(())
     }
 
-    /// The entries `filter` matches, ordered by component, role and aspect.
+    /// The entries `filter` matches, ordered by key.
     pub(crate) async fn list(
         &self,
         filter: &Filter,
     ) -> Result<Vec<ReportMetadata>, CalibrationsErr> {
         let mut entries = self.read_index().await?;
         entries.retain(|metadata| filter.is_match(metadata));
-        entries.sort_by(|a, b| list_order(a).cmp(&list_order(b)));
+        entries.sort_by_cached_key(ReportMetadata::flat_component);
         Ok(entries)
     }
 
@@ -189,15 +191,6 @@ fn take_entry(index: &mut Index, metadata: &ReportMetadata) -> Option<ReportMeta
     let key = metadata.flat_component();
     let slot = index.iter().position(|m| m.flat_component() == key)?;
     Some(index.swap_remove(slot))
-}
-
-/// What [`LatestStoreImpl::list`] orders entries by: component, role and aspect.
-fn list_order(metadata: &ReportMetadata) -> (&str, Option<&str>, Option<&str>) {
-    (
-        metadata.component.as_str(),
-        metadata.role.as_deref(),
-        metadata.aspect.as_deref(),
-    )
 }
 
 /// The newest entry for each key. An agent that keyed the store by component,
