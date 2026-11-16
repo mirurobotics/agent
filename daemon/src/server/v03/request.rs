@@ -19,20 +19,13 @@ pub struct CreateCalibrationBody {
     pub aspect: Option<serde_json::Value>,
 }
 
+/// Checks the request's shape; the control plane judges the rest.
 impl TryFrom<CreateCalibrationBody> for calibration::CreateParams {
     type Error = InvalidRequestErr;
 
     fn try_from(body: CreateCalibrationBody) -> Result<Self, Self::Error> {
         reject_v02_fields(body.role.is_some(), body.aspect.is_some())?;
-        calibration::CreateParams::try_from(body.request)
-    }
-}
-
-/// Checks the request's shape; the control plane judges the rest.
-impl TryFrom<device_server::CreateCalibrationRequest> for calibration::CreateParams {
-    type Error = InvalidRequestErr;
-
-    fn try_from(request: device_server::CreateCalibrationRequest) -> Result<Self, Self::Error> {
+        let request = body.request;
         let content = *request.content;
         let Some(format) = to_instance_format(content.format) else {
             return Err(InvalidRequestErr {

@@ -5,12 +5,16 @@ use miru_daemon::models::InstanceFormat;
 use miru_daemon::server::v03::request::{CreateCalibrationBody, LatestCalibrationsQuery};
 use miru_daemon::services::calibration::CreateParams;
 
-fn calibration_request(format: openapi::InstanceFormat) -> openapi::CreateCalibrationRequest {
-    openapi::CreateCalibrationRequest {
-        component: "arm-left".into(),
-        serial_number: Some("SN-1".into()),
-        reported_by: Some("Ada Lovelace".into()),
-        content: Box::new(openapi::InstanceContent::new(format, "offset: 1\n".into())),
+fn calibration_request(format: openapi::InstanceFormat) -> CreateCalibrationBody {
+    CreateCalibrationBody {
+        request: openapi::CreateCalibrationRequest {
+            component: "arm-left".into(),
+            serial_number: Some("SN-1".into()),
+            reported_by: Some("Ada Lovelace".into()),
+            content: Box::new(openapi::InstanceContent::new(format, "offset: 1\n".into())),
+        },
+        role: None,
+        aspect: None,
     }
 }
 
@@ -73,29 +77,10 @@ pub mod create_calibration_request {
 
         assert!(CreateParams::try_from(request).is_err());
     }
-}
-
-pub mod create_calibration_body {
-    use super::*;
-
-    fn body() -> CreateCalibrationBody {
-        CreateCalibrationBody {
-            request: calibration_request(openapi::InstanceFormat::INSTANCE_FORMAT_YAML),
-            role: None,
-            aspect: None,
-        }
-    }
-
-    #[test]
-    fn converts_the_request() {
-        let request = calibration_request(openapi::InstanceFormat::INSTANCE_FORMAT_YAML);
-
-        let expected = CreateParams::try_from(request).unwrap();
-        assert_eq!(CreateParams::try_from(body()).unwrap(), expected);
-    }
 
     #[test]
     fn rejects_a_role_or_aspect() {
+        let body = || calibration_request(openapi::InstanceFormat::INSTANCE_FORMAT_YAML);
         let role = CreateCalibrationBody {
             role: Some("left".into()),
             ..body()
