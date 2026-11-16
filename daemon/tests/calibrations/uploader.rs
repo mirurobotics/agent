@@ -14,6 +14,7 @@ use crate::mocks::error::SleepController;
 use crate::test_utils::calibrations::{
     latest_cals_layout, latest_store, layout, received_at, report,
 };
+use crate::test_utils::filesys::access::make_read_only;
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_daemon::calibrations::{
     latest, CalibrationsErr, Filter, Invalidation, LatestStore, Queue, QueueSnapshotFile,
@@ -426,6 +427,29 @@ async fn a_full_queue_leaves_the_entry_valid() {
 
     assert!(matches!(err, CalibrationsErr::QueueFullErr(_)), "{err:?}");
     assert_eq!(h.latest_entries().await, [report("a").metadata]);
+}
+
+#[tokio::test]
+async fn a_failed_store_write_removes_the_queued_invalidation() {
+    let mut h = Harness::new();
+    h.spawn().await;
+    h.report("a").await;
+    h.await_drained(&["a"]).await;
+    let report_id = report("a").metadata.report_id;
+    let _read_only = make_read_only(&h.latest_layout.root);
+
+    let err = guard(
+        h.uploader()
+            .invalidate(report_id, invalidation("power cycle")),
+    )
+    .await
+    .unwrap_err();
+
+    assert!(matches!(err, CalibrationsErr::FileSysErr(_)), "{err:?}");
+    assert_eq!(h.num_queued_uploads().await, 0);
+    assert_eq!(h.queued_on_disk().await, 0);
+    assert_eq!(h.latest_entries().await, [report("a").metadata]);
+    assert!(h.sender.invalidations().is_empty());
 }
 
 #[tokio::test]
