@@ -6,6 +6,7 @@ use std::sync::Arc;
 use crate::errors::Error;
 use crate::server::{
     errors::*,
+    request::{reject_body, reject_query},
     response::calibration_content,
     state::State,
     v02::{request, response},
@@ -189,7 +190,7 @@ pub async fn create_calibration(
 ) -> impl IntoResponse {
     handle(
         async {
-            let Json(request) = request?;
+            let Json(request) = request.map_err(reject_body)?;
             let params = calibration_svc::CreateParams::try_from(request)
                 .map_err(ServerErr::InvalidRequestErr)?;
             let created = calibration_svc::create(
@@ -212,7 +213,7 @@ pub async fn list_latest_calibrations(
 ) -> impl IntoResponse {
     handle(
         async {
-            let Query(query) = query?;
+            let Query(query) = query.map_err(reject_query)?;
             let filter = query.into();
             let latest = calibration_svc::list_latest(&state.latest_cals, &filter).await?;
             Ok::<_, ServerErr>(response::latest_calibrations(&latest))
