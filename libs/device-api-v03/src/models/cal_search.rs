@@ -15,10 +15,6 @@ use serde::{Deserialize, Serialize};
 pub enum CalSearch {
     #[serde(rename = "component")]
     CAL_SEARCH_COMPONENT,
-    #[serde(rename = "role")]
-    CAL_SEARCH_ROLE,
-    #[serde(rename = "aspect")]
-    CAL_SEARCH_ASPECT,
 
     /// Catch-all for values added by the API after this client was
     /// generated. `#[serde(other)]` makes unrecognized strings
@@ -31,8 +27,6 @@ impl std::fmt::Display for CalSearch {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
             Self::CAL_SEARCH_COMPONENT => write!(f, "component"),
-            Self::CAL_SEARCH_ROLE => write!(f, "role"),
-            Self::CAL_SEARCH_ASPECT => write!(f, "aspect"),
             Self::CalSearchUnknown => write!(f, "unknown"),
         }
     }
