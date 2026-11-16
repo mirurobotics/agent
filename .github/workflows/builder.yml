@@ -1,14 +1,13 @@
 name: Builder Image
 
+# Runs only on main, so the digest to repin comes from a reviewed run.
 on:
   push:
     branches:
       - main
-      - release/*
     paths:
       - 'build/Dockerfile.builder'
       - '.github/workflows/builder.yml'
-  workflow_dispatch:
 
 env:
   REGISTRY: ghcr.io
@@ -49,6 +48,7 @@ jobs:
             org.opencontainers.image.description=Build environment for the Miru Daemon with Rust, Zig, and GoReleaser
 
       - name: Build and push
+        id: build
         uses: useblacksmith/build-push-action@9b0579bbec7a6cad2f171596c57e7ac1e7658850 # v2.3.0
         with:
           context: .
@@ -57,3 +57,12 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
+      - name: Log the pinned reference
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          [ -n "$DIGEST" ] || { echo '::error::build-push-action returned no digest'; exit 1; }
+          ref="$IMAGE:${GITHUB_SHA::7}@$DIGEST"
+          echo "$ref"
+          echo "Pin \`build/Dockerfile\` to \`$ref\`" >> "$GITHUB_STEP_SUMMARY"
