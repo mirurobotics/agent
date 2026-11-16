@@ -1,6 +1,6 @@
 name: Builder Image
 
-# Publish only from main, so every builder image in GHCR comes from reviewed code.
+# Runs only on main, so the digest to repin comes from a reviewed run.
 on:
   push:
     branches:
@@ -62,6 +62,7 @@ jobs:
           IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           DIGEST: ${{ steps.build.outputs.digest }}
         run: |
+          [ -n "$DIGEST" ] || { echo '::error::build-push-action returned no digest'; exit 1; }
           ref="$IMAGE:${GITHUB_SHA::7}@$DIGEST"
           echo "$ref"
           echo "Pin \`build/Dockerfile\` to \`$ref\`" >> "$GITHUB_STEP_SUMMARY"
