@@ -7,23 +7,23 @@ info:
     default on Windows at `127.0.0.1:6478`, every route requires `Authorization: Bearer
     <token>`. Clients read the port and token from the agent''s discovery file, `%ProgramData%\Miru\device-api\device-api.json`
     on Windows; the token changes every time the agent starts.'
-  version: v0.3
+  version: v0.2
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
-  x-release-version: v0.3.0-next
+  x-release-version: v0.2.5
   x-git-commit:
-    sha: 36f589410c2088909607a1f68ccde69ccabb8fc0
-    url: https://github.com/mirurobotics/openapi/commit/36f589410c2088909607a1f68ccde69ccabb8fc0
-    message: 'refactor(calibrations)!: flatten components, remove roles and aspects
-      (#470)'
+    sha: 19eb0d408a2b07e39e7eaedb867ed2e8836bea30
+    url: https://github.com/mirurobotics/openapi/commit/19eb0d408a2b07e39e7eaedb867ed2e8836bea30
+    message: 'docs(device): title the latest calibration download "Download Latest"
+      (#471)'
     author: Ben's Agent
-    branch: main
+    branch: HEAD
     dirty: false
   x-build:
-    built_at: '2026-11-16T02:23:07.828510+00:00'
+    built_at: '2026-11-10T07:34:57+00:00'
 servers:
-- url: http://localhost/v0.3
+- url: http://localhost/v0.2
   description: localhost
 security:
 - {}
@@ -83,9 +83,12 @@ paths:
       - Calibrations
       summary: List Latest
       operationId: listLatestCalibrations
-      description: List the latest calibration for each component on the device.
+      description: List the latest calibration for each component, role and aspect
+        on the device.
       parameters:
       - $ref: '#/components/parameters/calibration_search_component'
+      - $ref: '#/components/parameters/calibration_search_role'
+      - $ref: '#/components/parameters/calibration_search_aspect'
       responses:
         '200':
           description: Successfully listed the latest calibrations.
@@ -313,21 +316,21 @@ components:
     APIVersion:
       type: string
       enum:
-      - v0.3
+      - v0.2
       x-enum-varnames:
       - API_VERSION
       x-stainless-const: true
     ReleaseVersion:
       type: string
       enum:
-      - v0.3.0-next
+      - v0.2.5
       x-enum-varnames:
       - RELEASE_VERSION
       x-stainless-const: true
     APIGitCommit:
       type: string
       enum:
-      - 36f589410c2088909607a1f68ccde69ccabb8fc0
+      - 19eb0d408a2b07e39e7eaedb867ed2e8836bea30
       x-enum-varnames:
       - API_GIT_COMMIT
       x-stainless-const: true
@@ -430,8 +433,12 @@ components:
         '
       enum:
       - component
+      - role
+      - aspect
       x-enum-varnames:
       - CAL_SEARCH_COMPONENT
+      - CAL_SEARCH_ROLE
+      - CAL_SEARCH_ASPECT
     HealthResponse:
       type: object
       required:
@@ -467,7 +474,7 @@ components:
         api_version:
           type: string
           description: The API version of the agent.
-          example: v0.3
+          example: v0.2
         api_git_commit:
           type: string
           description: The git commit of the API.
@@ -475,7 +482,7 @@ components:
         api_release_version:
           type: string
           description: The API release version of the agent.
-          example: v0.3.0-next
+          example: v0.2.5
         rust_version:
           type: string
           description: The version of Rust.
@@ -496,9 +503,9 @@ components:
       example:
         version: v1.0.0
         git_commit: a1b2c3d4
-        api_version: v0.3
+        api_version: v0.2
         api_git_commit: a1b2c3d4
-        api_release_version: v0.3.0-next
+        api_release_version: v0.2.5
         rust_version: 1.93.0
         build_date: '2026-02-24T10:30:00Z'
         os: linux
@@ -568,6 +575,14 @@ components:
           description: Slug of the component the calibrated unit belongs to, such
             as `arm`. Miru resolves it to the component, creating the component the
             first time it is reported.
+        role:
+          type: string
+          example: front-left
+          description: Slug of the role the calibrated unit fills on the device, such
+            as `left` or `front-left`. Distinguishes several units of one component
+            on a device. Validated like a slug; `null` is reserved. Miru resolves
+            it to one of the component's `roles`, creating the role the first time
+            it is reported.
         serial_number:
           type: string
           maxLength: 255
@@ -581,6 +596,13 @@ components:
           description: Who reported the calibration, as the device knows them, such
             as `Benjamin Smidt`. Free text, at most 255 characters. Miru stores it
             unchanged.
+        aspect:
+          type: string
+          example: pose
+          description: Slug of the aspect of the unit that was calibrated, when it
+            has more than one, e.g. `intrinsics` vs `extrinsics`, or `pose` vs `joint-offsets`.
+            Validated like a slug; `null` is reserved. Miru resolves it to one of
+            the component's `aspects`, creating the aspect the first time it is reported.
         content:
           allOf:
           - $ref: '#/components/schemas/InstanceContent'
@@ -611,11 +633,14 @@ components:
     Calibration:
       title: Calibration
       type: object
-      description: The newest calibration the device has for one component.
+      description: The newest calibration the device has for one component, role and
+        aspect.
       required:
       - object
       - report_id
       - component
+      - role
+      - aspect
       - serial_number
       - reported_by
       - reported_at
@@ -636,7 +661,20 @@ components:
         component:
           type: string
           example: arm
-          description: Slug of the component the calibrated unit belongs to.
+          description: Slug of the component the calibrated unit belongs to, as it
+            was reported.
+        role:
+          type: string
+          nullable: true
+          example: front-left
+          description: Slug of the role the calibrated unit fills on the device, as
+            it was reported; null if no role was reported.
+        aspect:
+          type: string
+          nullable: true
+          example: pose
+          description: Slug of the aspect of the unit that was calibrated, as it was
+            reported; null if no aspect was reported.
         serial_number:
           type: string
           nullable: true
@@ -661,6 +699,8 @@ components:
         object: calibration
         report_id: 0b6f3c2e-6a51-4e0f-9a43-2f1d7c9e8b10
         component: arm
+        role: front-left
+        aspect: null
         serial_number: SN-1234
         reported_by: Benjamin Smidt
         reported_at: '2026-03-10T12:00:00Z'
@@ -674,12 +714,14 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Calibration'
-          description: The latest calibrations, one for each component.
+          description: The latest calibrations, one for each component, role and aspect.
       example:
         calibrations:
         - object: calibration
           report_id: 0b6f3c2e-6a51-4e0f-9a43-2f1d7c9e8b10
           component: arm
+          role: front-left
+          aspect: null
           serial_number: SN-1234
           reported_by: Benjamin Smidt
           reported_at: '2026-03-10T12:00:00Z'
@@ -1098,11 +1140,10 @@ components:
           description: 'Object-path template for the uploaded file. Contains `{upload_id}`
             or at least one of `{device_id}`, `{device_name}` or `{bundle_id}`; without
             `{upload_id}`, a file whose rendered path another upload already holds
-            is stored with `{upload_id}` as a folder before its last segment (`run_42/{upload_id}/camera.mcap`).
-            It is at most 1024 bytes, has balanced braces, and contains no `..` or
-            empty segments. Variables: `{device_id}`, `{device_name}`, `{file_name}`,
-            `{upload_id}`, `{bundle_id}`, `{year}`, `{month}`, `{day}`, `{hour}`,
-            `{minute}`, `{timezone}`, plus any `source.glob` capture. `{bundle_id}`
+            is not uploaded. It is at most 1024 bytes, has balanced braces, and contains
+            no `..` or empty segments. Variables: `{device_id}`, `{device_name}`,
+            `{file_name}`, `{upload_id}`, `{bundle_id}`, `{year}`, `{month}`, `{day}`,
+            `{hour}`, `{minute}`, `{timezone}`, plus any `source.glob` capture. `{bundle_id}`
             requires `bundle`. The time variables are zero-padded and rendered from
             the file''s mtime (its last-modified time, from the device clock) in `timezone`;
             `{timezone}` is that instant''s UTC offset in ISO 8601 basic format (`+0000`,
@@ -1476,6 +1517,36 @@ components:
           type: string
         example:
         - arm
+    calibration_search_role:
+      name: role
+      in: query
+      required: false
+      style: form
+      explode: false
+      description: The role slugs to filter by; `null` matches calibrations reported
+        without a role. Role slugs are unique only within a component, so filter by
+        component too to match one component's role.
+      schema:
+        type: array
+        items:
+          type: string
+        example:
+        - front-left
+    calibration_search_aspect:
+      name: aspect
+      in: query
+      required: false
+      style: form
+      explode: false
+      description: The aspect slugs to filter by; `null` matches calibrations reported
+        without an aspect. Aspect slugs are unique only within a component, so filter
+        by component too to match one component's aspect.
+      schema:
+        type: array
+        items:
+          type: string
+        example:
+        - pose
     report_id:
       name: report_id
       in: path

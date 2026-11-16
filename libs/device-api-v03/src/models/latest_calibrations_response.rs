@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LatestCalibrationsResponse {
-    /// The latest calibrations, one for each component.
+    /// The latest calibrations, one for each component, role and aspect.
     #[serde(rename = "calibrations")]
     pub calibrations: Vec<models::Calibration>,
 }
