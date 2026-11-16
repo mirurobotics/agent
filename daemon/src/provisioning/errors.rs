@@ -1,0 +1,141 @@
+// internal crates
+use crate::crypt;
+use crate::disk::DiskErr;
+use crate::errors::Trace;
+use crate::filesys;
+use crate::http;
+use crate::logs;
+
+#[derive(Debug, thiserror::Error)]
+#[error("Missing environment variable: {name}")]
+pub struct MissingEnvVarErr {
+    pub name: String,
+    pub trace: Box<Trace>,
+}
+
+impl crate::errors::Error for MissingEnvVarErr {}
+
+#[derive(Debug, thiserror::Error)]
+#[error(
+    "this machine is already provisioned as device '{device_name}'\n\nTo attach it to a different device, run `miru-agent reprovision`. To provision it as a new device, uninstall the daemon and delete its data first."
+)]
+pub struct AlreadyProvisionedErr {
+    pub device_name: String,
+    pub trace: Box<Trace>,
+}
+
+impl crate::errors::Error for AlreadyProvisionedErr {}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ProvisionErr {
+    #[error(transparent)]
+    MissingEnvVarErr(MissingEnvVarErr),
+    #[error(transparent)]
+    AlreadyProvisionedErr(AlreadyProvisionedErr),
+    #[error(transparent)]
+    CryptErr(crypt::CryptErr),
+    #[error(transparent)]
+    FileSysErr(filesys::FileSysErr),
+    #[error(transparent)]
+    HTTPErr(http::HTTPErr),
+    #[error(transparent)]
+    LogsErr(logs::LogsErr),
+    #[error(transparent)]
+    DiskErr(DiskErr),
+}
+
+impl From<crypt::CryptErr> for ProvisionErr {
+    fn from(e: crypt::CryptErr) -> Self {
+        Self::CryptErr(e)
+    }
+}
+
+impl From<filesys::FileSysErr> for ProvisionErr {
+    fn from(e: filesys::FileSysErr) -> Self {
+        Self::FileSysErr(e)
+    }
+}
+
+impl From<http::HTTPErr> for ProvisionErr {
+    fn from(e: http::HTTPErr) -> Self {
+        Self::HTTPErr(e)
+    }
+}
+
+impl From<logs::LogsErr> for ProvisionErr {
+    fn from(e: logs::LogsErr) -> Self {
+        Self::LogsErr(e)
+    }
+}
+
+impl From<DiskErr> for ProvisionErr {
+    fn from(e: DiskErr) -> Self {
+        Self::DiskErr(e)
+    }
+}
+
+crate::impl_error!(ProvisionErr {
+    MissingEnvVarErr,
+    AlreadyProvisionedErr,
+    CryptErr,
+    FileSysErr,
+    HTTPErr,
+    LogsErr,
+    DiskErr,
+});
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    mod from_conversions {
+        use super::*;
+
+        #[test]
+        fn from_crypt_err() {
+            let err = crypt::CryptErr::InvalidJWTErr(crate::crypt::errors::InvalidJWTErr {
+                msg: "test".to_string(),
+                trace: crate::trace!(),
+            });
+            let install_err = ProvisionErr::from(err);
+            assert!(matches!(install_err, ProvisionErr::CryptErr(_)));
+        }
+
+        #[test]
+        fn from_filesys_err() {
+            let err =
+                filesys::FileSysErr::InvalidDirNameErr(crate::filesys::errors::InvalidDirNameErr {
+                    name: "test".to_string(),
+                    trace: crate::trace!(),
+                });
+            let install_err = ProvisionErr::from(err);
+            assert!(matches!(install_err, ProvisionErr::FileSysErr(_)));
+        }
+
+        #[test]
+        fn from_http_err() {
+            let err = http::HTTPErr::MockErr(crate::http::errors::MockErr {
+                is_network_conn_err: false,
+            });
+            let install_err = ProvisionErr::from(err);
+            assert!(matches!(install_err, ProvisionErr::HTTPErr(_)));
+        }
+
+        #[test]
+        fn from_storage_err() {
+            let err = DiskErr::DeviceNotActivatedErr(crate::disk::DeviceNotActivatedErr {
+                msg: "test".to_string(),
+                trace: crate::trace!(),
+            });
+            let install_err = ProvisionErr::from(err);
+            assert!(matches!(install_err, ProvisionErr::DiskErr(_)));
+        }
+
+        #[test]
+        fn from_logs_err() {
+            let err = logs::LogsErr::ReloadFailed("test".to_string());
+            let install_err = ProvisionErr::from(err);
+            assert!(matches!(install_err, ProvisionErr::LogsErr(_)));
+        }
+    }
+}

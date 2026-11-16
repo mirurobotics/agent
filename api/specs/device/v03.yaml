@@ -1,0 +1,1526 @@
+openapi: 3.0.3
+info:
+  title: Miru Agent API
+  description: 'The API between the Miru Agent and any external client living on the
+    same device as the Miru Agent. On Linux the agent serves it over the Unix socket
+    `/run/miru/miru.sock` with no authentication. Over loopback TCP, which is on by
+    default on Windows at `127.0.0.1:6478`, every route requires `Authorization: Bearer
+    <token>`. Clients read the port and token from the agent''s discovery file, `%ProgramData%\Miru\device-api\device-api.json`
+    on Windows; the token changes every time the agent starts.'
+  version: v0.3
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+  x-release-version: v0.3.0-next
+  x-git-commit:
+    sha: 36f589410c2088909607a1f68ccde69ccabb8fc0
+    url: https://github.com/mirurobotics/openapi/commit/36f589410c2088909607a1f68ccde69ccabb8fc0
+    message: 'refactor(calibrations)!: flatten components, remove roles and aspects
+      (#470)'
+    author: Ben's Agent
+    branch: main
+    dirty: false
+  x-build:
+    built_at: '2026-11-16T02:23:07.828510+00:00'
+servers:
+- url: http://localhost/v0.3
+  description: localhost
+security:
+- {}
+- BearerAuth: []
+paths:
+  /health:
+    get:
+      tags:
+      - Agent
+      summary: Health
+      description: Retrieve the health of the agent.
+      operationId: health
+      responses:
+        '200':
+          description: Successfully retrieved the health of the agent.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+  /version:
+    get:
+      tags:
+      - Agent
+      summary: Version
+      description: Retrieve the version of the agent.
+      operationId: version
+      responses:
+        '200':
+          description: Successfully retrieved the version of the agent.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VersionResponse'
+  /calibrations:
+    post:
+      tags:
+      - Calibrations
+      summary: Create
+      operationId: createCalibration
+      description: Report a calibration to Miru.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCalibrationRequest'
+      responses:
+        '200':
+          description: The agent saved the calibration and will upload it to Miru.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateCalibrationResponse'
+  /calibrations/latest:
+    get:
+      tags:
+      - Calibrations
+      summary: List Latest
+      operationId: listLatestCalibrations
+      description: List the latest calibration for each component on the device.
+      parameters:
+      - $ref: '#/components/parameters/calibration_search_component'
+      responses:
+        '200':
+          description: Successfully listed the latest calibrations.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LatestCalibrationsResponse'
+  /calibrations/latest/{report_id}/content:
+    get:
+      tags:
+      - Calibrations
+      summary: Download Latest
+      operationId: getLatestCalibrationContent
+      description: Download the content of a latest calibration by its report ID.
+        An older report returns 404.
+      parameters:
+      - $ref: '#/components/parameters/report_id'
+      responses:
+        '200':
+          description: Successfully retrieved the calibration content. The Content-Type
+            header is set according to the content format.
+          headers:
+            Content-Disposition:
+              $ref: '#/components/headers/content_disposition'
+            Content-Type:
+              description: The MIME type of the calibration content.
+              schema:
+                type: string
+                example: application/json
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+                description: The raw calibration content, exactly as it was reported.
+  /deployments/{deployment_id}:
+    get:
+      tags:
+      - Deployments
+      summary: Get
+      operationId: getDeployment
+      description: Retrieve a deployment by its ID.
+      parameters:
+      - $ref: '#/components/parameters/deployment_id'
+      responses:
+        '200':
+          description: Successfully retrieved the deployment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Deployment'
+  /deployments/current:
+    get:
+      tags:
+      - Deployments
+      summary: Get Current
+      operationId: getCurrentDeployment
+      description: Get the current deployment for the device.
+      responses:
+        '200':
+          description: Successfully retrieved the current deployment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Deployment'
+  /device:
+    get:
+      tags:
+      - Device
+      summary: Get
+      description: Retrieve the device.
+      operationId: getDevice
+      responses:
+        '200':
+          description: Successfully retrieved the device.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Device'
+  /device/sync:
+    post:
+      tags:
+      - Device
+      summary: Sync
+      description: Manually force a device sync with the edits made in the dashboard.
+      operationId: syncDevice
+      responses:
+        '200':
+          description: Successfully synced the device.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncDeviceResponse'
+  /file_rules/{file_rule_id}:
+    get:
+      tags:
+      - File Rules
+      summary: Get
+      description: Retrieve a file rule by its ID.
+      operationId: getFileRule
+      parameters:
+      - $ref: '#/components/parameters/file_rule_id'
+      responses:
+        '200':
+          description: Successfully retrieved the file rule.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BaseFileRule'
+  /git_commits/{git_commit_id}:
+    get:
+      tags:
+      - Git Commits
+      summary: Get
+      description: Retrieve a git commit by its ID.
+      operationId: getGitCommit
+      parameters:
+      - $ref: '#/components/parameters/git_commit_id'
+      responses:
+        '200':
+          description: Successfully retrieved the git commit.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GitCommit'
+  /releases/{release_id}:
+    get:
+      tags:
+      - Releases
+      summary: Get
+      description: Retrieve a release by its ID.
+      operationId: getRelease
+      parameters:
+      - $ref: '#/components/parameters/release_id'
+      responses:
+        '200':
+          description: Successfully retrieved the release.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Release'
+  /releases/current:
+    get:
+      tags:
+      - Releases
+      summary: Get Current
+      description: Retrieve the current release.
+      operationId: getCurrentRelease
+      responses:
+        '200':
+          description: Successfully retrieved the current release.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Release'
+  /events:
+    get:
+      tags:
+      - Events
+      summary: Stream Events
+      operationId: streamEvents
+      description: Subscribe to a Server-Sent Events (SSE) stream of agent lifecycle
+        events.
+      parameters:
+      - name: after
+        in: query
+        required: false
+        description: Event ID cursor to resume from. Retained events with `id` greater
+          than this value are replayed, then live events follow. If the cursor is
+          older than the earliest retained event, the server returns `410 Gone`. Takes
+          precedence over the `Last-Event-ID` header.
+        schema:
+          type: integer
+          format: int64
+        example: 42
+      - name: types
+        in: query
+        required: false
+        description: Event types to receive. If omitted, all event types are sent.
+        style: form
+        explode: false
+        schema:
+          type: array
+          items:
+            type: string
+        example:
+        - deployment.deployed
+        - deployment.removed
+      - name: Last-Event-ID
+        in: header
+        required: false
+        description: Standard SSE reconnection header. Used as the replay cursor if
+          `after` query parameter is not provided. If the cursor is older than the
+          earliest retained event, the server returns `410 Gone`.
+        schema:
+          type: string
+        example: '42'
+      responses:
+        '200':
+          description: 'SSE event stream. Each event is delivered as an SSE frame
+            with `id`, `event`, and `data` fields. Events are delivered at-least-once,
+            so deduplicate by event `id`. A ": heartbeat" comment is sent immediately
+            when the connection opens, and again every 30 seconds while the stream
+            is idle. Comments carry no data and should be ignored by clients.'
+          content:
+            text/event-stream:
+              schema:
+                $ref: '#/components/schemas/Event'
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: The token from the agent's discovery file (`%ProgramData%\Miru\device-api\device-api.json`
+        on Windows). Required over loopback TCP (`127.0.0.1:6478` by default on Windows)
+        and accepted by every route; not used over the Unix socket.
+  schemas:
+    ErrorResponse:
+      type: object
+      required:
+      - error
+      properties:
+        error:
+          $ref: '#/components/schemas/Error'
+    APIVersion:
+      type: string
+      enum:
+      - v0.3
+      x-enum-varnames:
+      - API_VERSION
+      x-stainless-const: true
+    ReleaseVersion:
+      type: string
+      enum:
+      - v0.3.0-next
+      x-enum-varnames:
+      - RELEASE_VERSION
+      x-stainless-const: true
+    APIGitCommit:
+      type: string
+      enum:
+      - 36f589410c2088909607a1f68ccde69ccabb8fc0
+      x-enum-varnames:
+      - API_GIT_COMMIT
+      x-stainless-const: true
+    DeploymentDeployedEvent:
+      title: DeploymentDeployedEvent
+      type: object
+      x-summary: A deployment's config instances have been written to the device's
+        file system.
+      description: Emitted when a deployment's config instances have been written
+        to the device's file system and are available for consumption. Use this event
+        to reload configuration, restart dependent services, or confirm that new configuration
+        is live on the device.
+      required:
+      - deployment_id
+      - release_id
+      - status
+      - activity_status
+      - error_status
+      - target_status
+      properties:
+        deployment_id:
+          type: string
+          description: ID of the deployment.
+          example: dpl_123
+        release_id:
+          type: string
+          description: ID of the release associated with this deployment.
+          example: rls_123
+        status:
+          $ref: '#/components/schemas/DeploymentStatus'
+        activity_status:
+          $ref: '#/components/schemas/DeploymentActivityStatus'
+        error_status:
+          $ref: '#/components/schemas/DeploymentErrorStatus'
+        target_status:
+          $ref: '#/components/schemas/DeploymentTargetStatus'
+        deployed_at:
+          type: string
+          format: date-time
+          description: Timestamp of when the deployment was deployed.
+          example: '2026-03-10T12:00:00Z'
+      example:
+        deployment_id: dpl_123
+        release_id: rls_123
+        status: deployed
+        activity_status: deployed
+        error_status: none
+        target_status: deployed
+        deployed_at: '2026-03-10T12:00:00Z'
+    DeploymentRemovedEvent:
+      title: DeploymentRemovedEvent
+      type: object
+      x-summary: A deployment's config instances have been removed from the device's
+        file system.
+      description: Emitted when a deployment's config instances have been removed
+        from the device's file system and the deployment has been archived. Use this
+        event to clean up resources or stop services that depended on the removed
+        configuration.
+      required:
+      - deployment_id
+      - release_id
+      - status
+      - activity_status
+      - error_status
+      - target_status
+      properties:
+        deployment_id:
+          type: string
+          description: ID of the deployment.
+          example: dpl_123
+        release_id:
+          type: string
+          description: ID of the release associated with this deployment.
+          example: rls_123
+        status:
+          $ref: '#/components/schemas/DeploymentStatus'
+        activity_status:
+          $ref: '#/components/schemas/DeploymentActivityStatus'
+        error_status:
+          $ref: '#/components/schemas/DeploymentErrorStatus'
+        target_status:
+          $ref: '#/components/schemas/DeploymentTargetStatus'
+        archived_at:
+          type: string
+          format: date-time
+          description: Timestamp of when the deployment was archived.
+          example: '2026-03-10T12:00:00Z'
+      example:
+        deployment_id: dpl_123
+        release_id: rls_123
+        status: archived
+        activity_status: archived
+        error_status: none
+        target_status: archived
+        archived_at: '2026-03-10T12:00:00Z'
+    CalSearch:
+      type: string
+      description: '**Internal server use only**: an enum of possible search fields.
+
+        '
+      enum:
+      - component
+      x-enum-varnames:
+      - CAL_SEARCH_COMPONENT
+    HealthResponse:
+      type: object
+      required:
+      - status
+      properties:
+        status:
+          type: string
+          description: The status of the agent.
+          example: ok
+      example:
+        status: ok
+    VersionResponse:
+      type: object
+      required:
+      - version
+      - git_commit
+      - api_version
+      - api_git_commit
+      - api_release_version
+      - rust_version
+      - build_date
+      - os
+      - arch
+      properties:
+        version:
+          type: string
+          description: The version of the agent.
+          example: v1.0.0
+        git_commit:
+          type: string
+          description: The git commit of the agent.
+          example: a1b2c3d4
+        api_version:
+          type: string
+          description: The API version of the agent.
+          example: v0.3
+        api_git_commit:
+          type: string
+          description: The git commit of the API.
+          example: a1b2c3d4
+        api_release_version:
+          type: string
+          description: The API release version of the agent.
+          example: v0.3.0-next
+        rust_version:
+          type: string
+          description: The version of Rust.
+          example: 1.93.0
+        build_date:
+          type: string
+          format: date-time
+          description: The build date of the agent.
+          example: '2026-02-24T10:30:00Z'
+        os:
+          type: string
+          description: The operating system of the agent.
+          example: linux
+        arch:
+          type: string
+          description: The architecture of the agent.
+          example: aarch64
+      example:
+        version: v1.0.0
+        git_commit: a1b2c3d4
+        api_version: v0.3
+        api_git_commit: a1b2c3d4
+        api_release_version: v0.3.0-next
+        rust_version: 1.93.0
+        build_date: '2026-02-24T10:30:00Z'
+        os: linux
+        arch: aarch64
+    InstanceFormat:
+      title: Instance Format
+      type: string
+      description: 'The serialization format of stored content, such as a config instance
+        or a calibration. A config instance is written to the device filesystem in
+        this format.
+
+        - `json`: standard JSON.
+
+        - `yaml`: YAML 1.2.
+
+        - `jsonc`: JSON with comments (JSON plus `//` and `/* */` comment syntax).
+
+        - `xml`: XML.
+
+        - `csv`: comma-separated values (RFC 4180).
+
+        - `text`: plain, unstructured text with no specific format.
+
+        '
+      enum:
+      - json
+      - yaml
+      - jsonc
+      - xml
+      - csv
+      - text
+      x-enum-varnames:
+      - INSTANCE_FORMAT_JSON
+      - INSTANCE_FORMAT_YAML
+      - INSTANCE_FORMAT_JSONC
+      - INSTANCE_FORMAT_XML
+      - INSTANCE_FORMAT_CSV
+      - INSTANCE_FORMAT_TEXT
+    InstanceContent:
+      title: Instance Content
+      type: object
+      required:
+      - format
+      - data
+      properties:
+        format:
+          $ref: '#/components/schemas/InstanceFormat'
+        data:
+          type: string
+          description: The content's values, serialized in `format`.
+          example: "{\n  \"enable_autonomy\": true,\n  \"enable_remote_control\":\
+            \ true,\n  \"max_payload_kg\": 10.0\n}\n"
+      example:
+        format: json
+        data: "{\n  \"enable_autonomy\": true,\n  \"enable_remote_control\": true,\n\
+          \  \"max_payload_kg\": 10.0\n}\n"
+    CreateCalibrationRequest:
+      title: Create Calibration Request
+      type: object
+      required:
+      - component
+      - content
+      properties:
+        component:
+          type: string
+          example: arm
+          description: Slug of the component the calibrated unit belongs to, such
+            as `arm`. Miru resolves it to the component, creating the component the
+            first time it is reported.
+        serial_number:
+          type: string
+          maxLength: 255
+          example: SN-1234
+          description: Serial number of the physical unit that was calibrated, not
+            of the device, such as `SN-1234`. Free text, at most 255 characters.
+        reported_by:
+          type: string
+          maxLength: 255
+          example: Benjamin Smidt
+          description: Who reported the calibration, as the device knows them, such
+            as `Benjamin Smidt`. Free text, at most 255 characters. Miru stores it
+            unchanged.
+        content:
+          allOf:
+          - $ref: '#/components/schemas/InstanceContent'
+          description: The calibration's content, at most 1 MiB. The agent uploads
+            it to Miru unchanged.
+    CreateCalibrationResponse:
+      title: Create Calibration Response
+      type: object
+      required:
+      - report_id
+      - reported_at
+      properties:
+        report_id:
+          type: string
+          format: uuid
+          example: 0b6f3c2e-6a51-4e0f-9a43-2f1d7c9e8b10
+          description: ID the agent gave this report. The agent sends it to Miru with
+            the calibration, and Miru stores it as the calibration's `report_id`.
+        reported_at:
+          type: string
+          format: date-time
+          example: '2026-03-10T12:00:00Z'
+          description: Timestamp of when the agent received the calibration. Miru
+            stores it as the time the calibration was reported.
+      example:
+        report_id: 0b6f3c2e-6a51-4e0f-9a43-2f1d7c9e8b10
+        reported_at: '2026-03-10T12:00:00Z'
+    Calibration:
+      title: Calibration
+      type: object
+      description: The newest calibration the device has for one component.
+      required:
+      - object
+      - report_id
+      - component
+      - serial_number
+      - reported_by
+      - reported_at
+      properties:
+        object:
+          type: string
+          enum:
+          - calibration
+          example: calibration
+          x-stainless-const: true
+          description: The object type, which is always `calibration`.
+        report_id:
+          type: string
+          format: uuid
+          example: 0b6f3c2e-6a51-4e0f-9a43-2f1d7c9e8b10
+          description: ID the agent gave the report this calibration came from. Download
+            the content with it.
+        component:
+          type: string
+          example: arm
+          description: Slug of the component the calibrated unit belongs to.
+        serial_number:
+          type: string
+          nullable: true
+          maxLength: 255
+          example: SN-1234
+          description: Serial number of the physical unit that was calibrated, not
+            of the device, such as `SN-1234`, or null if none was reported. Free text,
+            at most 255 characters.
+        reported_by:
+          type: string
+          nullable: true
+          maxLength: 255
+          example: Benjamin Smidt
+          description: Who reported the calibration, as it was reported, such as `Benjamin
+            Smidt`; null if no one was reported.
+        reported_at:
+          type: string
+          format: date-time
+          example: '2026-03-10T12:00:00Z'
+          description: Timestamp of when the agent received the calibration.
+      example:
+        object: calibration
+        report_id: 0b6f3c2e-6a51-4e0f-9a43-2f1d7c9e8b10
+        component: arm
+        serial_number: SN-1234
+        reported_by: Benjamin Smidt
+        reported_at: '2026-03-10T12:00:00Z'
+    LatestCalibrationsResponse:
+      title: Latest Calibrations Response
+      type: object
+      required:
+      - calibrations
+      properties:
+        calibrations:
+          type: array
+          items:
+            $ref: '#/components/schemas/Calibration'
+          description: The latest calibrations, one for each component.
+      example:
+        calibrations:
+        - object: calibration
+          report_id: 0b6f3c2e-6a51-4e0f-9a43-2f1d7c9e8b10
+          component: arm
+          serial_number: SN-1234
+          reported_by: Benjamin Smidt
+          reported_at: '2026-03-10T12:00:00Z'
+    DeploymentStatus:
+      type: string
+      description: 'This status merges the ''activity_status'' and ''error_status''
+        fields, with error states taking precedence over activity states when errors
+        are present. For example, if the activity status is ''deployed'' but the error
+        status is ''failed'', the status is ''failed''. However, if the error status
+        is ''none'' and the activity status is ''deployed'', the status is ''deployed''.
+
+        '
+      enum:
+      - drifted
+      - staged
+      - queued
+      - deployed
+      - removing
+      - archived
+      - failed
+      - retrying
+      x-enum-varnames:
+      - DEPLOYMENT_STATUS_DRIFTED
+      - DEPLOYMENT_STATUS_STAGED
+      - DEPLOYMENT_STATUS_QUEUED
+      - DEPLOYMENT_STATUS_DEPLOYED
+      - DEPLOYMENT_STATUS_REMOVING
+      - DEPLOYMENT_STATUS_ARCHIVED
+      - DEPLOYMENT_STATUS_FAILED
+      - DEPLOYMENT_STATUS_RETRYING
+    DeploymentActivityStatus:
+      type: string
+      description: 'Last known activity state of the deployment.
+
+
+        `drifted` means the device''s configurations have drifted since this deployment
+        was staged, and the deployment needs to be reviewed before it can be deployed.
+
+
+        `staged` means the deployment is ready to be deployed.
+
+
+        `queued` means the deployment''s config instances are waiting to be received
+        by the device and will be deployed as soon as the device is online.
+
+
+        `deployed` means the deployment''s config instances are currently available
+        for consumption on the device.
+
+
+        `removing` means the deployment''s config instances are being removed from
+        the device.
+
+
+        `archived` means the deployment is available for historical reference but
+        cannot be deployed and is not active on the device.
+
+        '
+      enum:
+      - drifted
+      - staged
+      - queued
+      - deployed
+      - removing
+      - archived
+      x-enum-varnames:
+      - DEPLOYMENT_ACTIVITY_STATUS_DRIFTED
+      - DEPLOYMENT_ACTIVITY_STATUS_STAGED
+      - DEPLOYMENT_ACTIVITY_STATUS_QUEUED
+      - DEPLOYMENT_ACTIVITY_STATUS_DEPLOYED
+      - DEPLOYMENT_ACTIVITY_STATUS_REMOVING
+      - DEPLOYMENT_ACTIVITY_STATUS_ARCHIVED
+    DeploymentErrorStatus:
+      type: string
+      description: 'Last known error state of the deployment.
+
+
+        `none` means there are no errors.
+
+
+        `retrying` means an error has been encountered and the agent is retrying to
+        reach the target status.
+
+
+        `failed` means a fatal error has been encountered; the deployment is archived
+        and, if deployed, removed from the device.
+
+        '
+      enum:
+      - none
+      - failed
+      - retrying
+      x-enum-varnames:
+      - DEPLOYMENT_ERROR_STATUS_NONE
+      - DEPLOYMENT_ERROR_STATUS_FAILED
+      - DEPLOYMENT_ERROR_STATUS_RETRYING
+    DeploymentTargetStatus:
+      type: string
+      description: 'Desired state of the deployment.
+
+
+        `staged` means the deployment is ready to be deployed.
+
+
+        `deployed` means all config instances in the deployment are available for
+        consumption on the device.
+
+
+        `archived` means the deployment is available for historical reference but
+        cannot be deployed and is not active on the device.
+
+        '
+      enum:
+      - staged
+      - deployed
+      - archived
+      x-enum-varnames:
+      - DEPLOYMENT_TARGET_STATUS_STAGED
+      - DEPLOYMENT_TARGET_STATUS_DEPLOYED
+      - DEPLOYMENT_TARGET_STATUS_ARCHIVED
+    Deployment:
+      title: Deployment
+      type: object
+      required:
+      - object
+      - id
+      - description
+      - status
+      - activity_status
+      - error_status
+      - target_status
+      - device_id
+      - release_id
+      - created_at
+      properties:
+        object:
+          type: string
+          enum:
+          - deployment
+          example: deployment
+          x-stainless-const: true
+          description: The object type, which is always `deployment`.
+        id:
+          type: string
+          example: dpl_123
+          description: ID of the deployment.
+        description:
+          type: string
+          example: Deployment for the motion control config instance
+          description: The description of the deployment.
+        status:
+          $ref: '#/components/schemas/DeploymentStatus'
+        activity_status:
+          $ref: '#/components/schemas/DeploymentActivityStatus'
+        error_status:
+          $ref: '#/components/schemas/DeploymentErrorStatus'
+        target_status:
+          $ref: '#/components/schemas/DeploymentTargetStatus'
+        device_id:
+          type: string
+          example: dvc_123
+          description: ID of the device.
+        release_id:
+          type: string
+          example: rls_123
+          description: ID of the release.
+        created_at:
+          type: string
+          format: date-time
+          example: '2024-01-01T00:00:00Z'
+          description: Timestamp of when the deployment was created.
+      example:
+        object: deployment
+        id: dpl_123
+        description: Deployment for the motion control config instance
+        status: staged
+        activity_status: staged
+        error_status: none
+        target_status: staged
+        device_id: dvc_123
+        release_id: rls_123
+        created_at: '2024-01-01T00:00:00Z'
+    DeviceStatus:
+      type: string
+      description: 'The status of the device.
+
+        - Online: The miru agent is connected
+
+        - Offline: The miru agent is disconnected (e.g. network issues, device is
+        powered off, etc.)
+
+        '
+      enum:
+      - online
+      - offline
+      x-enum-varnames:
+      - DEVICE_STATUS_ONLINE
+      - DEVICE_STATUS_OFFLINE
+    Device:
+      title: Device
+      type: object
+      required:
+      - object
+      - id
+      - name
+      - status
+      - last_synced_at
+      - last_connected_at
+      - last_disconnected_at
+      properties:
+        object:
+          type: string
+          enum:
+          - device
+          example: device
+          x-stainless-const: true
+          description: The object type, which is always `device`.
+        id:
+          type: string
+          example: dvc_123
+          description: ID of the device.
+        name:
+          type: string
+          example: My Device
+          description: Name of the device.
+        status:
+          $ref: '#/components/schemas/DeviceStatus'
+        last_synced_at:
+          type: string
+          format: date-time
+          example: '2021-01-01T00:00:00Z'
+          description: Timestamp of when the device was last synced.
+        last_connected_at:
+          type: string
+          format: date-time
+          example: '2021-01-01T00:00:00Z'
+          description: Timestamp of the last successful connection event with the
+            backend.
+        last_disconnected_at:
+          type: string
+          format: date-time
+          example: '2021-01-01T00:00:00Z'
+          description: Timestamp of the last successful disconnection event with the
+            backend.
+      example:
+        object: device
+        id: dvc_123
+        name: My Device
+        status: online
+        last_synced_at: '2021-01-01T00:00:00Z'
+        last_connected_at: '2021-01-01T00:00:00Z'
+        last_disconnected_at: '2021-01-01T00:00:00Z'
+    SyncDeviceResult:
+      type: string
+      description: The result of attempting to sync the device.
+      enum:
+      - success
+      - network_connection_error
+      - in_cooldown
+      x-enum-varnames:
+      - SYNC_DEVICE_RESULT_SUCCESS
+      - SYNC_DEVICE_RESULT_NETWORK_CONNECTION_ERROR
+      - SYNC_DEVICE_RESULT_IN_COOLDOWN
+    SyncDeviceResponse:
+      title: Sync Device Response
+      type: object
+      required:
+      - code
+      - message
+      - last_synced_at
+      - last_attempted_sync_at
+      - in_cooldown
+      - cooldown_ends_at
+      properties:
+        code:
+          $ref: '#/components/schemas/SyncDeviceResult'
+        message:
+          type: string
+          example: Device is not connected to the backend.
+          description: The message of the result.
+        last_synced_at:
+          type: string
+          format: date-time
+          example: '2021-01-01T00:00:00Z'
+          description: Timestamp of when the device was last synced.
+        last_attempted_sync_at:
+          type: string
+          format: date-time
+          example: '2021-01-01T00:00:00Z'
+          description: Timestamp of when the last *attempted* sync occurred.
+        in_cooldown:
+          type: boolean
+          example: true
+          description: Whether the device is currently in cooldown.
+        cooldown_ends_at:
+          type: string
+          format: date-time
+          example: '2021-01-01T00:00:00Z'
+          description: Timestamp of when the cooldown will end.
+      example:
+        code: in_cooldown
+        message: Device is not connected to the backend.
+        last_synced_at: '2021-01-01T00:00:00Z'
+        last_attempted_sync_at: '2021-01-01T00:00:00Z'
+        in_cooldown: true
+        cooldown_ends_at: '2021-01-01T00:00:00Z'
+    OS:
+      title: OS
+      type: string
+      description: 'An operating system family, from the agent''s build-time OS vocabulary.
+        Shared across resources (devices, config schemas, file rules, releases). This
+        is the machine-readable OS kind, distinct from a human-readable version string.
+
+        - `linux`
+
+        - `windows`
+
+        '
+      example: linux
+      enum:
+      - linux
+      - windows
+      x-enum-varnames:
+      - OS_LINUX
+      - OS_WINDOWS
+    FileRuleSource:
+      title: File Rule Source
+      type: object
+      required:
+      - glob
+      - stability_window_secs
+      properties:
+        glob:
+          type: string
+          pattern: ^(/|[A-Za-z]:[\\/])
+          maxLength: 1024
+          example: /var/log/robot/*.log
+          description: Absolute glob of the files this rule manages (`/` on Linux,
+            `C:\…` or `C:/…` on Windows; max 1024 bytes; no `.`, `..` or empty segments).
+            A `{name}` capture matches like `*` within one segment and must be used
+            in `upload.bundle` or `upload.path`. Names match `[a-z][a-z0-9_]*`, are
+            unique, and must not reuse a built-in path variable. A segment holds at
+            most one capture, and the rest of that segment must be constant text (no
+            `*`, `?`, `[`, `\` or other braces). A capture may not have `**` segments
+            both before and after it. `{a,b}` is literal. Devices see each capture
+            as `*`.
+        stability_window_secs:
+          type: integer
+          format: int64
+          example: 60
+          description: How long, in seconds, a matching file's size and modification
+            time must stay unchanged (quiescent) before it is considered finished
+            and eligible for upload. Files in a format with a finalization marker
+            (e.g. MCAP, parquet) are detected directly; this window is the fallback
+            for other files.
+      example:
+        glob: /var/log/robot/*.log
+        stability_window_secs: 60
+    FileRuleUploadTimezone:
+      title: File Rule Upload Timezone
+      type: string
+      description: 'The time zone a file rule renders its upload path''s time variables
+
+        (`{year}`, `{month}`, `{day}`, `{hour}`, `{minute}` and `{timezone}`) in.
+
+        - `utc`: Coordinated Universal Time.
+
+        - `device`: the device''s local time zone, as the agent resolves it from the
+        `TZ` environment variable or, when `TZ` is unset, the system time zone (`/etc/localtime`
+        on Linux). The UTC offset is taken at the rendered instant, so it follows
+        daylight saving time. A device running an agent that does not report its UTC
+        offset renders in UTC.
+
+        '
+      example: utc
+      enum:
+      - utc
+      - device
+      x-enum-varnames:
+      - FILE_RULE_UPLOAD_TIMEZONE_UTC
+      - FILE_RULE_UPLOAD_TIMEZONE_DEVICE
+    FileRuleUpload:
+      title: File Rule Upload
+      type: object
+      required:
+      - upload_collection_id
+      - upload_collection_name
+      - bucket_id
+      - bucket_name
+      - path
+      - timezone
+      properties:
+        upload_collection_id:
+          type: string
+          example: upl_col_123
+          description: ID of the upload collection the resulting uploads are grouped
+            into.
+        upload_collection_name:
+          type: string
+          example: Robot Logs
+          description: The name of the upload collection the resulting uploads are
+            grouped into.
+        bucket_id:
+          type: string
+          example: bkt_123
+          description: ID of the bucket this rule uploads to.
+        bucket_name:
+          type: string
+          example: my-uploads-bucket
+          description: Name of the bucket this rule uploads to.
+        path:
+          type: string
+          pattern: .*\{(upload_id|device_id|device_name|bundle_id)\}.*
+          maxLength: 1024
+          example: '{device_id}/{year}-{month}-{day}/{upload_id}/{file_name}'
+          description: 'Object-path template for the uploaded file. Contains `{upload_id}`
+            or at least one of `{device_id}`, `{device_name}` or `{bundle_id}`; without
+            `{upload_id}`, a file whose rendered path another upload already holds
+            is stored with `{upload_id}` as a folder before its last segment (`run_42/{upload_id}/camera.mcap`).
+            It is at most 1024 bytes, has balanced braces, and contains no `..` or
+            empty segments. Variables: `{device_id}`, `{device_name}`, `{file_name}`,
+            `{upload_id}`, `{bundle_id}`, `{year}`, `{month}`, `{day}`, `{hour}`,
+            `{minute}`, `{timezone}`, plus any `source.glob` capture. `{bundle_id}`
+            requires `bundle`. The time variables are zero-padded and rendered from
+            the file''s mtime (its last-modified time, from the device clock) in `timezone`;
+            `{timezone}` is that instant''s UTC offset in ISO 8601 basic format (`+0000`,
+            `-0500`).'
+        timezone:
+          allOf:
+          - $ref: '#/components/schemas/FileRuleUploadTimezone'
+          description: 'The time zone the time variables in `path` are rendered in:
+            `utc`, or `device` for the device''s local time zone. `utc` for a rule
+            created without one.'
+        bundle:
+          type: array
+          minItems: 1
+          maxItems: 16
+          uniqueItems: true
+          items:
+            type: string
+            pattern: ^[a-z][a-z0-9_]*$
+          example:
+          - recording
+          description: 'Names of the `source.glob` captures whose values group the
+            rule''s uploads into bundles: uploads from the same device and upload
+            collection that captured the same values, in the order listed, share a
+            bundle, across rules and over time. Capture names don''t affect matching,
+            so rules that name their captures differently still share a bundle when
+            they list them in the same order. Every name must be a `source.glob` capture,
+            listed once, with at most 16 names. Absent when the rule does not bundle.'
+      example:
+        upload_collection_id: upl_col_123
+        upload_collection_name: Robot Logs
+        bucket_id: bkt_123
+        bucket_name: my-uploads-bucket
+        path: '{device_id}/{year}-{month}-{day}/{upload_id}/{file_name}'
+        timezone: utc
+    FileRuleRetention:
+      title: File Rule Retention
+      type: object
+      description: 'The retention block a file rule carries when it deletes local
+        files; a
+
+        rule without one keeps matching files indefinitely and Miru never
+
+        deletes them. Retention operates in two phases. The retention guarantee
+
+        ends once a matching file goes quiescent — its size and modification
+
+        time have stayed unchanged for `source.stability_window_secs` — and,
+
+        when `require_upload` is `true`, once its upload has been durably
+
+        confirmed; the file is then eligible for deletion, and callers may no
+
+        longer rely on it being present. `ttl_secs` schedules the enforcement
+
+        that follows: how long the file lives on after the guarantee ends
+
+        before the device deletes it. Both phases keep running on the device
+
+        even when no release is deployed, so tearing down a deployment does not
+
+        silently stop reclaiming disk.
+
+        '
+      required:
+      - ttl_secs
+      properties:
+        require_upload:
+          type: boolean
+          example: true
+          description: 'Whether a file must have its upload durably confirmed before
+            it may be deleted. Present exactly when the rule has an `upload` block.
+            When `true`, a slow or failing upload keeps the local file: the device
+            abandons an upload after 9 attempts, so a permanently failing upload retains
+            the file indefinitely. When `false`, the upload is best-effort: the file
+            may be deleted once eligible even if its upload has not completed, and
+            an unfinished upload is abandoned.'
+        ttl_secs:
+          type: integer
+          format: int64
+          example: 604800
+          description: 'How long, in seconds, the file lives on after it becomes eligible
+            for deletion. The clock starts when the retention guarantee ends, not
+            when the file was written: this schedules enforcement of a guarantee that
+            has already ended, so it defers the deletion, not the end of the guarantee.
+            `0` means the file is deleted as soon as it becomes eligible.'
+      example:
+        require_upload: true
+        ttl_secs: 604800
+    BaseFileRule:
+      title: Base File Rule
+      type: object
+      description: A file rule declares which files on a device Miru manages and whether
+        to upload them, delete them, or both.
+      required:
+      - object
+      - id
+      - name
+      - digest
+      - os
+      - source
+      - created_at
+      - updated_at
+      properties:
+        object:
+          type: string
+          enum:
+          - file_rule
+          example: file_rule
+          x-stainless-const: true
+          description: The object type, which is always `file_rule`.
+        id:
+          type: string
+          example: file_rule_123
+          description: ID of the file rule.
+        name:
+          type: string
+          example: Robot Logs
+          description: 'A human-readable name for the file rule. Not unique within
+            a workspace: file rules are immutable, so each authored revision mints
+            a new rule and several rules may share a name. The name participates in
+            the rule''s digest, so renaming a rule mints a new rule.'
+        digest:
+          type: string
+          example: sha256:1234567890
+          description: The digest of the file rule. File rules are immutable and deduplicated
+            by digest within a workspace.
+        os:
+          allOf:
+          - $ref: '#/components/schemas/OS'
+          readOnly: true
+          description: 'The operating system family this file rule targets, derived
+            from `source.glob`: a glob starting with `/` is `linux`, and a glob starting
+            with a drive letter is `windows`. Read-only: clients cannot set it.'
+        source:
+          $ref: '#/components/schemas/FileRuleSource'
+        upload:
+          allOf:
+          - $ref: '#/components/schemas/FileRuleUpload'
+          description: Where matching files are uploaded. Absent when the rule only
+            enforces local retention.
+        retention:
+          allOf:
+          - $ref: '#/components/schemas/FileRuleRetention'
+          description: Governs deletion of the local copies of matching files. Absent
+            when the device keeps matching files indefinitely — Miru never deletes
+            them; present when the rule deletes each matching file once its retention
+            guarantee ends.
+        created_at:
+          type: string
+          format: date-time
+          example: '2021-01-01T00:00:00Z'
+          description: Timestamp of when the file rule was created.
+        updated_at:
+          type: string
+          format: date-time
+          example: '2021-01-01T00:00:00Z'
+          description: Timestamp of when the file rule was last updated.
+      example:
+        object: file_rule
+        id: file_rule_123
+        name: Robot Logs
+        digest: sha256:1234567890
+        os: linux
+        source:
+          glob: /var/log/robot/*.log
+          stability_window_secs: 60
+        upload:
+          upload_collection_id: upl_col_123
+          upload_collection_name: Robot Logs
+          bucket_id: bkt_123
+          bucket_name: my-uploads-bucket
+          path: '{device_id}/{year}-{month}-{day}/{upload_id}/{file_name}'
+          timezone: utc
+        retention:
+          require_upload: true
+          ttl_secs: 604800
+        created_at: '2021-01-01T00:00:00Z'
+        updated_at: '2021-01-01T00:00:00Z'
+    GitCommit:
+      title: Git Commit
+      type: object
+      required:
+      - object
+      - id
+      - sha
+      - message
+      - commit_url
+      - created_at
+      properties:
+        object:
+          type: string
+          enum:
+          - git_commit
+          example: git_commit
+          x-stainless-const: true
+          description: The object type, which is always `git_commit`.
+        id:
+          type: string
+          example: git_commit_123
+          description: ID of the git commit.
+        sha:
+          type: string
+          example: a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0
+          description: The SHA hash of the git commit.
+        message:
+          type: string
+          example: Add basic motion configurations
+          description: The commit message.
+        commit_url:
+          type: string
+          example: https://github.com/user/repo/commit/a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0
+          description: The URL of the git commit.
+        created_at:
+          type: string
+          format: date-time
+          example: '2021-01-01T00:00:00Z'
+          description: Timestamp of when the git commit was created.
+      example:
+        object: git_commit
+        id: git_commit_123
+        sha: a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0
+        message: Add basic motion configurations
+        commit_url: https://github.com/user/repo/commit/a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0
+        created_at: '2021-01-01T00:00:00Z'
+    Release:
+      title: Release
+      type: object
+      required:
+      - object
+      - id
+      - version
+      - git_commit_id
+      - file_rule_ids
+      - os
+      - created_at
+      properties:
+        object:
+          type: string
+          enum:
+          - release
+          example: release
+          x-stainless-const: true
+          description: The object type, which is always `release`.
+        id:
+          type: string
+          example: rls_123
+          description: ID of the release.
+        version:
+          type: string
+          example: v1.0.0
+          description: The version of the release.
+        git_commit_id:
+          type: string
+          nullable: true
+          example: git_commit_123
+          description: The ID of the git commit associated with this release.
+        file_rule_ids:
+          type: array
+          items:
+            type: string
+          example:
+          - file_rule_123
+          description: IDs of the file rules included in this release. Retrieve each
+            file rule with `GET /file_rules/{file_rule_id}`.
+        os:
+          allOf:
+          - $ref: '#/components/schemas/OS'
+          readOnly: true
+          description: 'The operating system family this release targets, derived
+            from its config schemas and file rules, which must all agree. A release
+            with neither is `linux`. Read-only: clients cannot set it.'
+        created_at:
+          type: string
+          format: date-time
+          example: '2024-01-01T00:00:00Z'
+          description: Timestamp of when the release was created.
+      example:
+        object: release
+        id: rls_123
+        version: v1.0.0
+        git_commit_id: git_commit_123
+        file_rule_ids:
+        - file_rule_123
+        os: linux
+        created_at: '2024-01-01T00:00:00Z'
+    Event:
+      title: Event
+      type: object
+      required:
+      - object
+      - id
+      - type
+      - occurred_at
+      - data
+      properties:
+        object:
+          type: string
+          enum:
+          - event
+          x-stainless-const: true
+          description: The object type, which is always `event`.
+          example: event
+        id:
+          type: integer
+          format: int64
+          description: Monotonically increasing event ID. Used as the SSE `id` field
+            and for replay cursors.
+          example: 42
+        type:
+          type: string
+          description: Event type string in the format `{resource}.{action}`.
+          example: deployment.deployed
+        occurred_at:
+          type: string
+          format: date-time
+          description: Timestamp of when the event occurred.
+          example: '2026-03-10T12:00:00Z'
+        data:
+          type: object
+          description: Event-specific payload. Shape varies by event type.
+      example:
+        object: event
+        id: 42
+        type: deployment.deployed
+        occurred_at: '2026-03-10T12:00:00Z'
+        data:
+          deployment_id: dpl_123
+          release_id: rls_123
+          status: deployed
+          activity_status: deployed
+          error_status: none
+          target_status: deployed
+          deployed_at: '2026-03-10T12:00:00Z'
+    Error:
+      type: object
+      required:
+      - code
+      - params
+      - message
+      properties:
+        code:
+          type: string
+          example: invalid_request
+          description: The error code identifying the type of error.
+        params:
+          type: object
+          additionalProperties: true
+          example:
+            param1: value1
+            param2: value2
+          description: Additional parameters providing context about the error.
+        message:
+          type: string
+          example: This is a message for a user
+          description: A human-readable message describing the error.
+      example:
+        code: invalid_request
+        params: {}
+        message: This is a message for a user
+  parameters:
+    calibration_search_component:
+      name: component
+      in: query
+      required: false
+      style: form
+      explode: false
+      description: The component slugs to filter by.
+      schema:
+        type: array
+        items:
+          type: string
+        example:
+        - arm
+    report_id:
+      name: report_id
+      in: path
+      required: true
+      description: The ID the agent gave the calibration report.
+      schema:
+        type: string
+        format: uuid
+        example: 0b6f3c2e-6a51-4e0f-9a43-2f1d7c9e8b10
+    deployment_id:
+      name: deployment_id
+      in: path
+      required: true
+      description: The unique identifier of the deployment.
+      schema:
+        type: string
+        example: dpl_123
+    file_rule_id:
+      name: file_rule_id
+      in: path
+      required: true
+      description: The unique identifier of the file rule.
+      schema:
+        type: string
+        example: file_rule_123
+    git_commit_id:
+      name: git_commit_id
+      in: path
+      required: true
+      description: The unique identifier of the git commit.
+      schema:
+        type: string
+        example: git_commit_123
+    release_id:
+      name: release_id
+      in: path
+      required: true
+      description: The unique identifier of the release.
+      schema:
+        type: string
+        example: rls_123
+  headers:
+    content_disposition:
+      description: Header indicating whether the file is returned inline or as an
+        attachment.
+      schema:
+        type: string
+        example: inline

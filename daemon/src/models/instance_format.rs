@@ -1,0 +1,65 @@
+// internal crates
+use crate::models::status::impl_status_enum;
+use backend_api::models as backend_client;
+
+// external crates
+use serde::Serialize;
+use tracing::warn;
+
+/// The serialization format of instance content, such as a calibration's data.
+#[derive(Clone, Copy, Debug, Default, Serialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum InstanceFormat {
+    Json,
+    Yaml,
+    Jsonc,
+    Xml,
+    Csv,
+    /// Plain text, and the fallback for a format this agent doesn't know.
+    #[default]
+    Text,
+}
+
+impl_status_enum!(
+    enum InstanceFormat,
+    default: Text,
+    label: "instance format",
+    log: warn,
+    backend_type: backend_client::InstanceFormat,
+    unknown_backend: backend_client::InstanceFormat::InstanceFormatUnknown,
+    mappings: [
+        Json => "json" => backend_client::InstanceFormat::INSTANCE_FORMAT_JSON,
+        Yaml => "yaml" => backend_client::InstanceFormat::INSTANCE_FORMAT_YAML,
+        Jsonc => "jsonc" => backend_client::InstanceFormat::INSTANCE_FORMAT_JSONC,
+        Xml => "xml" => backend_client::InstanceFormat::INSTANCE_FORMAT_XML,
+        Csv => "csv" => backend_client::InstanceFormat::INSTANCE_FORMAT_CSV,
+        Text => "text" => backend_client::InstanceFormat::INSTANCE_FORMAT_TEXT,
+    ]
+);
+
+impl InstanceFormat {
+    /// The media type served for content in this format, the same types Miru's
+    /// content downloads send.
+    pub fn media_type(&self) -> &'static str {
+        match self {
+            Self::Json => "application/json",
+            Self::Yaml => "application/yaml",
+            Self::Jsonc => "application/jsonc",
+            Self::Xml => "application/xml",
+            Self::Csv => "text/csv",
+            Self::Text => "application/octet-stream",
+        }
+    }
+
+    /// The extension Miru gives a file in this format; text has none.
+    pub fn file_ext(&self) -> Option<&'static str> {
+        match self {
+            Self::Json => Some("json"),
+            Self::Yaml => Some("yaml"),
+            Self::Jsonc => Some("jsonc"),
+            Self::Xml => Some("xml"),
+            Self::Csv => Some("csv"),
+            Self::Text => None,
+        }
+    }
+}

@@ -1,0 +1,426 @@
+// internal crates
+use crate::errors::harnesses::{assert_error, Expected};
+use backend_api::models::{Error as ApiError, ErrorResponse};
+use miru_daemon::errors::{Code, Error};
+use miru_daemon::http::errors::{
+    reqwest_err_to_http_client_err, MockErr, RequestFailed, ReqwestErr, ReqwestErrKind, TimeoutErr,
+};
+use miru_daemon::http::request::{Meta, Params};
+use miru_daemon::http::HTTPErr;
+
+fn meta() -> Meta {
+    Params::get("http://test/errors").meta().unwrap()
+}
+
+fn trace() -> Box<miru_daemon::errors::Trace> {
+    miru_daemon::trace!()
+}
+
+pub mod request_failed {
+    use super::*;
+
+    fn make_error_response(code: &str, message: &str) -> ErrorResponse {
+        ErrorResponse::new(ApiError::new(
+            code.to_string(),
+            std::collections::HashMap::new(),
+            message.to_string(),
+        ))
+    }
+
+    #[test]
+    fn display_with_error() {
+        let err = RequestFailed {
+            request: meta(),
+            status: reqwest::StatusCode::NOT_FOUND,
+            error: Some(make_error_response("not_found", "resource not found")),
+            trace: trace(),
+        };
+        let display = format!("{err}");
+        assert!(display.contains("404"));
+        assert!(display.contains("resource not found"));
+    }
+
+    #[test]
+    fn display_without_error() {
+        let err = RequestFailed {
+            request: meta(),
+            status: reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+            error: None,
+            trace: trace(),
+        };
+        let display = format!("{err}");
+        assert!(display.contains("500"));
+        assert!(display.contains("unknown miru server error"));
+    }
+
+    // Covers the `error: Some(..)` branch of code()/params() and the http_status
+    // passthrough: BackendError code, the response params serialized to `{}`, and
+    // the set status.
+    #[test]
+    fn trait_surface_with_error() {
+        let err = RequestFailed {
+            request: meta(),
+            status: reqwest::StatusCode::NOT_FOUND,
+            error: Some(make_error_response("not_found", "msg")),
+            trace: trace(),
+        };
+        assert_error(
+            &err,
+            Expected::new(
+                Code::BackendError("not_found".to_string()),
+                reqwest::StatusCode::NOT_FOUND,
+            )
+            .with_params(serde_json::json!({})),
+        );
+    }
+
+    // A 404 without an error body keeps the HTTP status and uses the same code as
+    // every other body-less failure. The backend's own not-found code arrives only
+    // in an error JSON body.
+    #[test]
+    fn not_found_without_error_is_internal() {
+        let err = RequestFailed {
+            request: meta(),
+            status: reqwest::StatusCode::NOT_FOUND,
+            error: None,
+            trace: trace(),
+        };
+        assert_error(
+            &err,
+            Expected::new(Code::InternalServerError, reqwest::StatusCode::NOT_FOUND),
+        );
+    }
+
+    // Covers the `error: None` branch of code()/params() and the http_status
+    // passthrough with a distinct status: InternalServerError code, no params.
+    #[test]
+    fn trait_surface_without_error() {
+        let err = RequestFailed {
+            request: meta(),
+            status: reqwest::StatusCode::BAD_REQUEST,
+            error: None,
+            trace: trace(),
+        };
+        assert_error(
+            &err,
+            Expected::new(Code::InternalServerError, reqwest::StatusCode::BAD_REQUEST),
+        );
+    }
+
+    #[test]
+    fn is_terminal_classification_by_status() {
+        let cases = [
+            (400u16, true),
+            (403, true),
+            (404, true),
+            (409, true),
+            (422, true),
+            (401, false),
+            (408, false),
+            (429, false),
+            (500, false),
+            (502, false),
+            (503, false),
+        ];
+        for (status, expected) in cases {
+            let err = RequestFailed {
+                request: meta(),
+                status: reqwest::StatusCode::from_u16(status).unwrap(),
+                error: None,
+                trace: trace(),
+            };
+            assert_eq!(err.is_terminal(), expected, "status {status}");
+        }
+    }
+}
+
+pub mod timeout_err {
+    use super::*;
+
+    #[test]
+    fn display_format() {
+        let err = TimeoutErr {
+            msg: "timed out".to_string(),
+            request: meta(),
+            trace: trace(),
+        };
+        let display = format!("{err}");
+        assert!(display.contains("timed out"));
+        assert!(display.contains("10 seconds"));
+    }
+
+    #[test]
+    fn is_network_conn_err_returns_true() {
+        let err = TimeoutErr {
+            msg: "timed out".to_string(),
+            request: meta(),
+            trace: trace(),
+        };
+        assert_error(
+            &err,
+            Expected::new(
+                Code::InternalServerError,
+                reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+            )
+            .with_network_conn_err(true),
+        );
+    }
+}
+
+pub mod reqwest_err_kind {
+    use super::*;
+
+    // We can't easily construct a real reqwest::Error, so we test display via
+    // the HTTPErr wrapper and test is_network_conn_err on ReqwestErrKind.
+
+    #[test]
+    fn connection_is_network_conn_err() {
+        // Make a real reqwest::Error by connecting to a refused port
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let err = rt
+            .block_on(async {
+                reqwest::Client::new()
+                    .get("http://127.0.0.1:1")
+                    .send()
+                    .await
+            })
+            .unwrap_err();
+
+        let reqwest_err = ReqwestErr {
+            kind: ReqwestErrKind::Connection,
+            request: meta(),
+            source: err,
+            trace: trace(),
+        };
+        let display = format!("{reqwest_err}");
+        assert!(display.contains("network connection error"));
+        assert_error(
+            &reqwest_err,
+            Expected::new(
+                Code::InternalServerError,
+                reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+            )
+            .with_network_conn_err(true),
+        );
+    }
+
+    #[test]
+    fn other_is_not_network_connection_error() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let err = rt
+            .block_on(async {
+                reqwest::Client::new()
+                    .get("http://127.0.0.1:1")
+                    .send()
+                    .await
+            })
+            .unwrap_err();
+
+        let reqwest_err = ReqwestErr {
+            kind: ReqwestErrKind::Other,
+            request: meta(),
+            source: err,
+            trace: trace(),
+        };
+        assert_error(
+            &reqwest_err,
+            Expected::new(
+                Code::InternalServerError,
+                reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+            ),
+        );
+    }
+
+    #[tokio::test]
+    async fn decode_body_display() {
+        let err = reqwest::Client::new()
+            .get("http://127.0.0.1:1")
+            .send()
+            .await
+            .unwrap_err();
+
+        let reqwest_err = ReqwestErr {
+            kind: ReqwestErrKind::DecodeBody,
+            request: meta(),
+            source: err,
+            trace: trace(),
+        };
+        let display = format!("{reqwest_err}");
+        assert!(display.contains("decode response body"));
+    }
+
+    #[tokio::test]
+    async fn other_display() {
+        let err = reqwest::Client::new()
+            .get("http://127.0.0.1:1")
+            .send()
+            .await
+            .unwrap_err();
+
+        let reqwest_err = ReqwestErr {
+            kind: ReqwestErrKind::Other,
+            request: meta(),
+            source: err,
+            trace: trace(),
+        };
+        let display = format!("{reqwest_err}");
+        assert!(display.contains("reqwest crate error"));
+    }
+}
+
+pub mod mock_err {
+    use super::*;
+
+    #[test]
+    fn is_network_conn_err_delegates_to_field_true() {
+        let err = MockErr {
+            is_network_conn_err: true,
+        };
+        assert_error(
+            &err,
+            Expected::new(
+                Code::InternalServerError,
+                reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+            )
+            .with_network_conn_err(true),
+        );
+    }
+
+    #[test]
+    fn is_network_conn_err_delegates_to_field_false() {
+        let err = MockErr {
+            is_network_conn_err: false,
+        };
+        assert_error(
+            &err,
+            Expected::new(
+                Code::InternalServerError,
+                reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+            ),
+        );
+    }
+
+    #[test]
+    fn display_format() {
+        let err = MockErr {
+            is_network_conn_err: true,
+        };
+        let display = format!("{err}");
+        assert!(display.contains("true"));
+    }
+
+    #[test]
+    fn non_status_error_is_not_terminal_through_dispatch() {
+        let err = HTTPErr::MockErr(MockErr {
+            is_network_conn_err: false,
+        });
+        assert!(!err.is_terminal());
+    }
+}
+
+pub mod reqwest_err_to_http_client_err_fn {
+    use super::*;
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+    async fn respond_once(listener: tokio::net::TcpListener, response: &'static [u8]) {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        {
+            let mut reader = BufReader::new(&mut socket);
+            let mut line = String::new();
+            loop {
+                line.clear();
+                if reader.read_line(&mut line).await.unwrap() == 0 || line == "\r\n" {
+                    break;
+                }
+            }
+        }
+        socket.write_all(response).await.unwrap();
+        socket.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn connection_error_maps_to_connection() {
+        let err = reqwest::Client::new()
+            .get("http://127.0.0.1:1")
+            .send()
+            .await
+            .unwrap_err();
+        assert!(err.is_connect());
+
+        let result = reqwest_err_to_http_client_err(err, meta(), trace());
+        match result {
+            HTTPErr::ReqwestErr(e) => assert_eq!(e.kind, ReqwestErrKind::Connection),
+            other => panic!("expected ReqwestErr(Connection), got: {other}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn timeout_error_maps_to_timeout() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        // Accept the connection but never respond so the client times out.
+        tokio::spawn(async move {
+            let (_socket, _) = listener.accept().await.unwrap();
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+        });
+
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_millis(50))
+            .build()
+            .unwrap();
+        let err = client
+            .get(format!("http://{addr}/"))
+            .send()
+            .await
+            .unwrap_err();
+        assert!(err.is_timeout());
+
+        let result = reqwest_err_to_http_client_err(err, meta(), trace());
+        match result {
+            // Variant match is the primary assertion; msg is reqwest's Display
+            // which may not contain "timed out" on all platforms.
+            HTTPErr::TimeoutErr(e) => assert!(!e.msg.is_empty()),
+            other => panic!("expected TimeoutErr, got: {other}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn decode_error_maps_to_decode_body() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(respond_once(
+            listener,
+            b"HTTP/1.1 200 OK\r\ncontent-length: 11\r\n\r\nnot json!!!",
+        ));
+
+        let resp = reqwest::get(format!("http://{addr}/")).await.unwrap();
+        let err = resp.json::<serde_json::Value>().await.unwrap_err();
+        assert!(err.is_decode());
+
+        let result = reqwest_err_to_http_client_err(err, meta(), trace());
+        match result {
+            HTTPErr::ReqwestErr(e) => assert_eq!(e.kind, ReqwestErrKind::DecodeBody),
+            other => panic!("expected ReqwestErr(DecodeBody), got: {other}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn status_error_maps_to_other() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(respond_once(
+            listener,
+            b"HTTP/1.1 400 Bad Request\r\ncontent-length: 0\r\n\r\n",
+        ));
+
+        let resp = reqwest::get(format!("http://{addr}/")).await.unwrap();
+        let err = resp.error_for_status().unwrap_err();
+        assert!(!err.is_connect() && !err.is_timeout() && !err.is_decode());
+
+        let result = reqwest_err_to_http_client_err(err, meta(), trace());
+        match result {
+            HTTPErr::ReqwestErr(e) => assert_eq!(e.kind, ReqwestErrKind::Other),
+            other => panic!("expected ReqwestErr(Other), got: {other}"),
+        }
+    }
+}

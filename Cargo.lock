@@ -1251,7 +1251,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "device-api"
+name = "device-api-v02"
+version = "0.12.4"
+dependencies = [
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
+name = "device-api-v03"
 version = "0.12.4"
 dependencies = [
  "serde",
@@ -2299,7 +2308,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "miru-agent"
+name = "miru-daemon"
 version = "0.12.4"
 dependencies = [
  "atomicwrites",
@@ -2314,7 +2323,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "crc-fast",
- "device-api",
+ "device-api-v02",
  "futures",
  "glob",
  "http 1.5.0",
@@ -2849,9 +2858,9 @@ dependencies = [
 
 [[package]]
 name = "quinn-udp"
-version = "0.5.15"
+version = "0.5.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "35a133f956daabe89a61a685c2649f13d82d5aa4bd5d12d1277e1072a21c0694"
+checksum = "af66907df18639dcf4db56ca65490cabc4b27a97dbadd96f2926cca73298f016"
 dependencies = [
  "cfg_aliases",
  "libc",

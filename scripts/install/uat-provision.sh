@@ -4,7 +4,7 @@ set -e
 # Script: uat-provision.sh
 # Jinja Template: provision.j2
 # Build Timestamp: 2026-05-09T19:53:58.827613
-# Description: Provision a device & install the Miru Agent in the UAT environment
+# Description: Provision a device & install the Miru Daemon in the UAT environment
 
 # DISPLAY #
 # ======= #
@@ -71,7 +71,7 @@ for arg in "$@"; do
     esac
 done
 if [ "$DEBUG" = true ]; then
-    debug "from-pkg: '$FROM_PKG' (should be the path to the agent package on this machine)"
+    debug "from-pkg: '$FROM_PKG' (should be the path to the daemon package on this machine)"
 fi
 
 ALLOW_REACTIVATION=false
@@ -145,7 +145,7 @@ verify_checksum() {
 # ========= #
 ARCH="$(uname -m)"
 DOWNLOAD_DIR="$HOME/.miru/downloads"
-AGENT_DEB_PKG_NAME="miru-agent"
+DAEMON_DEB_PKG_NAME="miru-agent"
 GITHUB_REPO="mirurobotics/agent"
 CHECKSUMS_FILE="$DOWNLOAD_DIR/checksums.txt"
 DEB_PKG_MIME_TYPE="application/vnd.debian.binary-package"
@@ -154,7 +154,7 @@ DEB_PKG_MIME_TYPE="application/vnd.debian.binary-package"
 # ========== #
 OS=$(uname -s)
 if [ "$OS" != "Linux" ]; then
-    fatal "'${OS}' is not a supported operating system, the Miru Agent is only supported on Linux machines"
+    fatal "'${OS}' is not a supported operating system, the Miru Daemon is only supported on Linux machines"
 fi
 DEB_ARCH=$ARCH
 case $DEB_ARCH in
@@ -174,13 +174,13 @@ if [ -n "$FROM_PKG" ]; then
     if [ "$(file -b --mime-type "$FROM_PKG")" != "$DEB_PKG_MIME_TYPE" ]; then
         fatal "The provided package is not a valid Debian package. Expected mimetype '$DEB_PKG_MIME_TYPE' but got '$(file -b --mime-type "$FROM_PKG")'."
     fi
-    if [ "$(dpkg -f "$FROM_PKG" Package)" != "$AGENT_DEB_PKG_NAME" ]; then
-        fatal "The provided package is not a valid Miru Agent package. Expected package name '$AGENT_DEB_PKG_NAME' but got '$(dpkg -f "$FROM_PKG" Package)'."
+    if [ "$(dpkg -f "$FROM_PKG" Package)" != "$DAEMON_DEB_PKG_NAME" ]; then
+        fatal "The provided package is not a valid Miru Daemon package. Expected package name '$DAEMON_DEB_PKG_NAME' but got '$(dpkg -f "$FROM_PKG" Package)'."
     fi
     if [ "$(dpkg -f "$FROM_PKG" Architecture)" != "$DEB_ARCH" ]; then
         fatal "The provided package architecture ($(dpkg -f "$FROM_PKG" Architecture)) does not match this machine's architecture ($DEB_ARCH)."
     fi
-    AGENT_DEB_PKG=$FROM_PKG
+    DAEMON_DEB_PKG=$FROM_PKG
 
     VERSION=$(dpkg -f "$FROM_PKG" Version)
 fi
@@ -300,12 +300,12 @@ log "Version to install: ${VERSION}"
 # REJECT v0.9.0+ — INSTALL VIA APT INSTEAD #
 # ---------------------------------------- #
 if [ "$MAJOR" -gt 0 ] || { [ "$MAJOR" -eq 0 ] && [ "$MINOR" -ge 9 ]; }; then
-    fatal "Version v$VERSION cannot be installed with this script. Miru Agent v0.9.0 and later use a new apt-based provisioning workflow. See https://docs.mirurobotics.com/docs/learn/devices/provision for instructions."
+    fatal "Version v$VERSION cannot be installed with this script. Miru Daemon v0.9.0 and later use a new apt-based provisioning workflow. See https://docs.mirurobotics.com/docs/learn/devices/provision for instructions."
 fi
 
-# DOWNLOAD THE AGENT #
-# ------------------ #
-INSTALLED_VERSION=$(dpkg-query -W -f='${Version}' "$AGENT_DEB_PKG_NAME" 2>/dev/null || echo "")
+# DOWNLOAD THE DAEMON #
+# ------------------- #
+INSTALLED_VERSION=$(dpkg-query -W -f='${Version}' "$DAEMON_DEB_PKG_NAME" 2>/dev/null || echo "")
 # replace '~' with '-' 
 if [ -n "$INSTALLED_VERSION" ]; then
     INSTALLED_VERSION=$(echo "$INSTALLED_VERSION" | sed 's/~/-/g')
@@ -315,22 +315,22 @@ if [ "$INSTALLED_VERSION" != "$VERSION" ]; then
     rm -rf "$DOWNLOAD_DIR"
     mkdir -p "$DOWNLOAD_DIR"
 
-    # download the agent deb package if not provided locally
-    if [ -z "$AGENT_DEB_PKG" ] || [ ! -f "$AGENT_DEB_PKG" ]; then
+    # download the daemon deb package if not provided locally
+    if [ -z "$DAEMON_DEB_PKG" ] || [ ! -f "$DAEMON_DEB_PKG" ]; then
         log "Downloading version ${VERSION}"
-        AGENT_DEB_PKG="$DOWNLOAD_DIR/${AGENT_DEB_PKG_NAME}.deb"
-        AGENT_DEB_PKG_URL="https://github.com/${GITHUB_REPO}/releases/download/v${VERSION}/${AGENT_DEB_PKG_NAME}_${VERSION}_${DEB_ARCH}.deb"
-        curl -#fL "$AGENT_DEB_PKG_URL" -o "$AGENT_DEB_PKG" ||
-            fatal "Failed to download ${AGENT_DEB_PKG_NAME}"
+        DAEMON_DEB_PKG="$DOWNLOAD_DIR/${DAEMON_DEB_PKG_NAME}.deb"
+        DAEMON_DEB_PKG_URL="https://github.com/${GITHUB_REPO}/releases/download/v${VERSION}/${DAEMON_DEB_PKG_NAME}_${VERSION}_${DEB_ARCH}.deb"
+        curl -#fL "$DAEMON_DEB_PKG_URL" -o "$DAEMON_DEB_PKG" ||
+            fatal "Failed to download ${DAEMON_DEB_PKG_NAME}"
     fi
 
     # download the checksums file
     CHECKSUM_URL="https://github.com/${GITHUB_REPO}/releases/download/v${VERSION}/agent_${VERSION}_checksums.txt"
     curl -fsSL "$CHECKSUM_URL" -o "$CHECKSUMS_FILE" || fatal "Failed to download checksums.txt"
 
-    EXPECTED_CHECKSUM=$(grep "${AGENT_DEB_PKG_NAME}_${VERSION}_${DEB_ARCH}.deb" "$CHECKSUMS_FILE" | cut -d ' ' -f 1)
+    EXPECTED_CHECKSUM=$(grep "${DAEMON_DEB_PKG_NAME}_${VERSION}_${DEB_ARCH}.deb" "$CHECKSUMS_FILE" | cut -d ' ' -f 1)
     if [ -n "$EXPECTED_CHECKSUM" ]; then
-        verify_checksum "$AGENT_DEB_PKG" "$EXPECTED_CHECKSUM" ||
+        verify_checksum "$DAEMON_DEB_PKG" "$EXPECTED_CHECKSUM" ||
             fatal "Checksum verification failed"
     else
         fatal "Checksums not found inside $CHECKSUM_URL" 
@@ -341,7 +341,7 @@ if [ "$INSTALLED_VERSION" != "$VERSION" ]; then
     else
         log "Installing version ${VERSION}"
     fi
-    sudo dpkg -i "$AGENT_DEB_PKG" || fatal "Failed to install the agent"
+    sudo dpkg -i "$DAEMON_DEB_PKG" || fatal "Failed to install the daemon"
 
     log "Removing downloaded files"
     rm -rf "$DOWNLOAD_DIR"
@@ -349,13 +349,13 @@ else
     log "Version ${VERSION} is already installed"
 fi
 
-# ACTIVATE THE AGENT #
-# ------------------ #
+# ACTIVATE THE DAEMON #
+# ------------------- #
 cleanup() {
     exit_code=$?
 
-    # restart the agent
-    log "Restarting the Miru Agent"
+    # restart the daemon
+    log "Restarting the Miru Daemon"
     sudo systemctl restart miru >/dev/null 2>&1
 
     exit $exit_code
@@ -363,9 +363,9 @@ cleanup() {
 
 trap cleanup EXIT INT TERM QUIT HUP
 
-log "Activating the Miru Agent..."
+log "Activating the Miru Daemon..."
 if systemctl is-active --quiet miru; then
-    log "Stopping the currently running agent"
+    log "Stopping the currently running daemon"
     sudo systemctl stop miru >/dev/null 2>&1
 fi
 
