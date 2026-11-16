@@ -173,14 +173,24 @@ async fn spawn_keeps_the_contents_when_the_index_is_corrupt() {
 }
 
 #[tokio::test]
-async fn spawn_deletes_an_older_splits_content() {
+async fn spawn_keeps_an_older_splits_content_until_a_put_drops_it() {
     let f = Fixture::new().await;
-    let (_, joined) = f.write_two_splits().await;
+    let (split, joined) = f.write_two_splits().await;
 
     f.reopen().await;
 
     assert_eq!(f.entries().await, std::slice::from_ref(&joined));
-    assert_eq!(f.content_ids().await, [joined.report_id]);
+    let mut both = [split.report_id, joined.report_id];
+    both.sort();
+    assert_eq!(f.content_ids().await, both);
+
+    let leg = reported("leg", None, None);
+    put_all(&f.store, &[&leg]).await;
+    f.reopen().await;
+
+    let mut kept = [joined.report_id, leg.report_id];
+    kept.sort();
+    assert_eq!(f.content_ids().await, kept);
 }
 
 // =============================== CAPACITY =============================== //
