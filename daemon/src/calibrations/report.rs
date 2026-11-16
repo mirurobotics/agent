@@ -51,15 +51,15 @@ pub struct ReportMetadata {
 }
 
 impl ReportMetadata {
-    /// Whether `self` is for `other`'s flat component and was reported at the
-    /// same time or later, so a merge keeps it over `other`.
+    /// Whether `self` is for `other`'s key and was reported at the same time
+    /// or later, so a merge keeps it over `other`.
     pub(crate) fn is_as_new_as(&self, other: &ReportMetadata) -> bool {
-        self.flat_component() == other.flat_component() && self.reported_at >= other.reported_at
+        self.key() == other.key() && self.reported_at >= other.reported_at
     }
 
     /// The component the control plane files this report under: the
     /// component, role and aspect joined with `-`, skipping missing or empty ones.
-    pub(crate) fn flat_component(&self) -> String {
+    pub(crate) fn key(&self) -> String {
         let parts = [
             Some(self.component.as_str()),
             self.role.as_deref(),
@@ -209,9 +209,9 @@ mod tests {
         }
     }
 
-    // =========================== FLAT COMPONENT =========================== //
+    // ================================ KEY ================================= //
     #[test]
-    fn flat_component_joins_the_parts_it_has() {
+    fn key_joins_the_parts_it_has() {
         let cases = [
             (reported("arm", None, None), "arm"),
             (reported("arm", Some("left"), None), "arm-left"),
@@ -223,7 +223,7 @@ mod tests {
         ];
 
         for (metadata, want) in cases {
-            assert_eq!(metadata.flat_component(), want, "{metadata:?}");
+            assert_eq!(metadata.key(), want, "{metadata:?}");
         }
     }
 }

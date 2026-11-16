@@ -120,7 +120,7 @@ impl LatestStoreImpl {
     ) -> Result<Vec<ReportMetadata>, CalibrationsErr> {
         let mut entries = self.read_index().await?;
         entries.retain(|metadata| filter.is_match(metadata));
-        entries.sort_by_cached_key(ReportMetadata::flat_component);
+        entries.sort_by_cached_key(ReportMetadata::key);
         Ok(entries)
     }
 
@@ -192,8 +192,8 @@ impl LatestStoreImpl {
 
 /// Remove and return the entry with `metadata`'s key, if there is one.
 fn take_entry(index: &mut Index, metadata: &ReportMetadata) -> Option<ReportMetadata> {
-    let key = metadata.flat_component();
-    let slot = index.iter().position(|m| m.flat_component() == key)?;
+    let key = metadata.key();
+    let slot = index.iter().position(|m| m.key() == key)?;
     Some(index.swap_remove(slot))
 }
 
@@ -204,7 +204,7 @@ fn removed_duplicates(mut index: Index) -> Index {
     // stable, so on a tie the entry listed first stays
     index.sort_by_key(|entry| Reverse(entry.reported_at));
     let mut keys = HashSet::new();
-    index.retain(|entry| keys.insert(entry.flat_component()));
+    index.retain(|entry| keys.insert(entry.key()));
     index
 }
 
