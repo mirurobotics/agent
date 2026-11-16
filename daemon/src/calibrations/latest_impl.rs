@@ -27,7 +27,8 @@ struct IndexFile {
 }
 
 /// Which entries to list. Empty means any; `None` in `role`/`aspect` matches an
-/// entry without one.
+/// entry without one. They match the parts an entry was last reported with,
+/// not its key, as `/v0.2` filters them.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Filter {
     pub component: Vec<String>,
