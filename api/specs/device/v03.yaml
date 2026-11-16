@@ -11,17 +11,16 @@ info:
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
-  x-release-version: v0.3.0-next
+  x-release-version: v0.3.0-beta.1
   x-git-commit:
-    sha: 36f589410c2088909607a1f68ccde69ccabb8fc0
-    url: https://github.com/mirurobotics/openapi/commit/36f589410c2088909607a1f68ccde69ccabb8fc0
-    message: 'refactor(calibrations)!: flatten components, remove roles and aspects
-      (#470)'
+    sha: dcf7e1bd6b8ca022af9591454618fe70bfe488d8
+    url: https://github.com/mirurobotics/openapi/commit/dcf7e1bd6b8ca022af9591454618fe70bfe488d8
+    message: 'ci: bump the workflows pin to 1eab2d1 (#510)'
     author: Ben's Agent
-    branch: main
+    branch: HEAD
     dirty: false
   x-build:
-    built_at: '2026-11-16T02:23:07.828510+00:00'
+    built_at: '2026-11-16T23:00:04.971031+00:00'
 servers:
 - url: http://localhost/v0.3
   description: localhost
@@ -121,6 +120,31 @@ paths:
                 type: string
                 format: binary
                 description: The raw calibration content, exactly as it was reported.
+  /calibrations/latest/{report_id}/invalidate:
+    post:
+      tags:
+      - Calibrations
+      summary: Invalidate Latest
+      operationId: invalidateLatestCalibration
+      description: Mark a latest calibration invalid by its report ID. An older report
+        returns 404.
+      parameters:
+      - $ref: '#/components/parameters/report_id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InvalidateCalibrationRequest'
+      responses:
+        '200':
+          description: The agent marked the calibration invalid and will upload the
+            invalidation to Miru. If the calibration is already invalid, the agent
+            returns it unchanged.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Calibration'
   /deployments/{deployment_id}:
     get:
       tags:
@@ -320,14 +344,14 @@ components:
     ReleaseVersion:
       type: string
       enum:
-      - v0.3.0-next
+      - v0.3.0-beta.1
       x-enum-varnames:
       - RELEASE_VERSION
       x-stainless-const: true
     APIGitCommit:
       type: string
       enum:
-      - 36f589410c2088909607a1f68ccde69ccabb8fc0
+      - dcf7e1bd6b8ca022af9591454618fe70bfe488d8
       x-enum-varnames:
       - API_GIT_COMMIT
       x-stainless-const: true
@@ -475,7 +499,7 @@ components:
         api_release_version:
           type: string
           description: The API release version of the agent.
-          example: v0.3.0-next
+          example: v0.3.0-beta.1
         rust_version:
           type: string
           description: The version of Rust.
@@ -498,7 +522,7 @@ components:
         git_commit: a1b2c3d4
         api_version: v0.3
         api_git_commit: a1b2c3d4
-        api_release_version: v0.3.0-next
+        api_release_version: v0.3.0-beta.1
         rust_version: 1.93.0
         build_date: '2026-02-24T10:30:00Z'
         os: linux
@@ -619,6 +643,7 @@ components:
       - serial_number
       - reported_by
       - reported_at
+      - invalidated_at
       properties:
         object:
           type: string
@@ -657,6 +682,14 @@ components:
           format: date-time
           example: '2026-03-10T12:00:00Z'
           description: Timestamp of when the agent received the calibration.
+        invalidated_at:
+          type: string
+          format: date-time
+          nullable: true
+          example: '2026-03-11T08:00:00Z'
+          description: Timestamp of when a device app marked this calibration invalid,
+            or null if it is valid. A newer calibration for the component replaces
+            it.
       example:
         object: calibration
         report_id: 0b6f3c2e-6a51-4e0f-9a43-2f1d7c9e8b10
@@ -664,6 +697,7 @@ components:
         serial_number: SN-1234
         reported_by: Benjamin Smidt
         reported_at: '2026-03-10T12:00:00Z'
+        invalidated_at: null
     LatestCalibrationsResponse:
       title: Latest Calibrations Response
       type: object
@@ -683,6 +717,20 @@ components:
           serial_number: SN-1234
           reported_by: Benjamin Smidt
           reported_at: '2026-03-10T12:00:00Z'
+          invalidated_at: null
+    InvalidateCalibrationRequest:
+      title: Invalidate Calibration Request
+      type: object
+      required:
+      - reason
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 512
+          example: power cycle
+          description: Why the calibration is no longer valid, such as `power cycle`.
+            Free text, at most 512 characters, and not blank.
     DeploymentStatus:
       type: string
       description: 'This status merges the ''activity_status'' and ''error_status''
