@@ -180,9 +180,10 @@ impl LatestStore {
         .await?
     }
 
-    /// Mark the entry for `report_id` invalid with `invalidation`, unless it
-    /// already is, and return the entry. Not found unless an entry has that
-    /// `report_id`, so a report a newer one replaced can't be invalidated.
+    /// Mark the entry for `report_id` invalid with `invalidation` and return
+    /// the entry. Not found unless an entry has that `report_id`, so a report a
+    /// newer one replaced can't be invalidated. The calibration uploader keeps
+    /// an entry's first invalidation.
     pub async fn invalidate(
         &self,
         report_id: Uuid,
