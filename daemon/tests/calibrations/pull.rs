@@ -153,7 +153,12 @@ async fn replaces_an_older_entry_under_another_split() {
 
     fx.pull(latest::DEFAULT_CAPACITY).await.unwrap();
 
-    assert_eq!(fx.entries().await, vec![report("arm-left").metadata]);
+    let arm_left = report("arm-left").metadata;
+    assert_eq!(fx.entries().await, std::slice::from_ref(&arm_left));
+    // replaced in the index itself, not only hidden by a read
+    let index_file = latest_cals_layout(&fx.dir).index();
+    let index: serde_json::Value = files::read_json(&index_file).await.unwrap();
+    assert_eq!(index, serde_json::json!({ "entries": [arm_left] }));
 }
 
 #[tokio::test]
