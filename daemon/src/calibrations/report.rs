@@ -51,12 +51,6 @@ pub struct ReportMetadata {
 }
 
 impl ReportMetadata {
-    /// Whether `self` is for `other`'s key and was reported at the same time
-    /// or later, so a merge keeps it over `other`.
-    pub(crate) fn is_as_new_as(&self, other: &ReportMetadata) -> bool {
-        self.key() == other.key() && self.reported_at >= other.reported_at
-    }
-
     /// The component the control plane files this report under: the
     /// component, role and aspect joined with `-`, skipping missing or empty ones.
     pub(crate) fn key(&self) -> String {
@@ -71,6 +65,12 @@ impl ReportMetadata {
             .filter(|part| !part.is_empty())
             .collect();
         parts.join("-")
+    }
+
+    /// Whether `self` is for `other`'s key and was reported at the same time
+    /// or later, so a merge keeps it over `other`.
+    pub(crate) fn is_as_new_as(&self, other: &ReportMetadata) -> bool {
+        self.key() == other.key() && self.reported_at >= other.reported_at
     }
 }
 
