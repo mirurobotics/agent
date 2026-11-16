@@ -3,7 +3,10 @@ use crate::filesys;
 
 pub mod auth;
 pub mod errors;
+pub mod request;
+pub mod response;
 pub mod routes;
+pub mod sse;
 pub mod state;
 pub mod tcp;
 #[cfg(unix)]

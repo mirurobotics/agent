@@ -9,8 +9,13 @@ use crate::errors::{Code, HTTPCode, Trace};
 use crate::events;
 use crate::filesys;
 use crate::http;
+use crate::server::routes;
 use crate::services;
 use crate::sync;
+use crate::trace;
+
+// external crates
+use axum::extract::rejection::{JsonRejection, QueryRejection};
 
 #[derive(Debug, thiserror::Error)]
 #[error("shutdown manager was provided the same argument ({arg_name}) twice")]
@@ -248,6 +253,32 @@ impl From<sync::SyncErr> for ServerErr {
 impl From<upload::UploadErr> for ServerErr {
     fn from(e: upload::UploadErr) -> Self {
         Self::UploadErr(Box::new(e))
+    }
+}
+
+/// A body over the limit is 413; any other unreadable body is 422.
+impl From<JsonRejection> for ServerErr {
+    fn from(rejection: JsonRejection) -> Self {
+        if rejection.status() == HTTPCode::PAYLOAD_TOO_LARGE {
+            return Self::CalibrationRequestTooLargeErr(CalibrationRequestTooLargeErr {
+                max_request_bytes: routes::MAX_REQUEST_BYTES,
+                trace: trace!(),
+            });
+        }
+        Self::InvalidRequestErr(InvalidRequestErr {
+            msg: rejection.body_text(),
+            trace: trace!(),
+        })
+    }
+}
+
+/// An unreadable query, such as a repeated filter, is 422.
+impl From<QueryRejection> for ServerErr {
+    fn from(rejection: QueryRejection) -> Self {
+        Self::InvalidRequestErr(InvalidRequestErr {
+            msg: rejection.body_text(),
+            trace: trace!(),
+        })
     }
 }
 
