@@ -693,6 +693,20 @@ pub mod routes {
         }
 
         #[tokio::test]
+        async fn create_calibration_returns_422_for_a_role() {
+            let f = Fixture::new("handler_create_calibration_role").await;
+            let body = json!({
+                "component": "arm",
+                "role": "left",
+                "content": { "format": "json", "data": "{}" },
+            });
+
+            let (status, bytes) = f.post_json(URI, body.to_string()).await;
+            assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+            assert_eq!(error_code(&bytes), "invalid_request");
+        }
+
+        #[tokio::test]
         async fn create_calibration_returns_507_when_the_buffer_is_full() {
             let options = UploaderOptions {
                 capacity: 0,
@@ -743,6 +757,16 @@ pub mod routes {
             let f = Fixture::new("handler_list_latest_calibrations_repeated").await;
 
             let uri = "/v0.3/calibrations/latest?component=a&component=b";
+            let (status, bytes) = f.get(uri).await;
+            assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+            assert_eq!(error_code(&bytes), "invalid_request");
+        }
+
+        #[tokio::test]
+        async fn list_latest_calibrations_returns_422_for_a_role() {
+            let f = Fixture::new("handler_list_latest_calibrations_role").await;
+
+            let uri = "/v0.3/calibrations/latest?component=arm&role=left";
             let (status, bytes) = f.get(uri).await;
             assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
             assert_eq!(error_code(&bytes), "invalid_request");

@@ -3,6 +3,7 @@ use std::future::Future;
 use std::sync::Arc;
 
 // internal crates
+use crate::calibrations::Filter;
 use crate::errors::Error;
 use crate::server::{
     errors::*,
@@ -186,7 +187,7 @@ pub async fn get_file_rule(
 // =============================== CALIBRATIONS ==================================== //
 pub async fn create_calibration(
     AxumState(state): AxumState<Arc<State>>,
-    request: Result<Json<device_server::CreateCalibrationRequest>, JsonRejection>,
+    request: Result<Json<request::CreateCalibrationBody>, JsonRejection>,
 ) -> impl IntoResponse {
     handle(
         async {
@@ -214,7 +215,7 @@ pub async fn list_latest_calibrations(
     handle(
         async {
             let Query(query) = query.map_err(reject_query)?;
-            let filter = query.into();
+            let filter = Filter::try_from(query).map_err(ServerErr::InvalidRequestErr)?;
             let latest = calibration_svc::list_latest(&state.latest_cals, &filter).await?;
             Ok::<_, ServerErr>(response::latest_calibrations(&latest))
         },
