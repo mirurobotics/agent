@@ -95,6 +95,26 @@ impl Fixture {
             .await
             .unwrap();
     }
+
+    /// Write an index holding `arm` with role `left` and, a second later,
+    /// `arm-left`, with both contents, as an agent that keyed the store by
+    /// component, role and aspect could have left them. Returns the two.
+    async fn write_duplicate_keys(&self) -> (ReportMetadata, ReportMetadata) {
+        let split = reported("arm", Some("left"), None);
+        let joined = ReportMetadata {
+            component: "arm-left".to_string(),
+            role: None,
+            ..reported_after(&split, 1)
+        };
+        let index = serde_json::json!({ "entries": [split, joined] });
+        files::write_json(&self.layout.index(), &index, WriteOptions::OVERWRITE_ATOMIC)
+            .await
+            .unwrap();
+        for report_id in [split.report_id, joined.report_id] {
+            self.write_orphan(report_id).await;
+        }
+        (split, joined)
+    }
 }
 
 /// A newer report for `metadata`'s key, with a fresh `report_id` as intake
@@ -150,6 +170,27 @@ async fn spawn_keeps_the_contents_when_the_index_is_corrupt() {
     f.reopen().await;
 
     assert_eq!(f.content_ids().await, [orphan]);
+}
+
+#[tokio::test]
+async fn spawn_keeps_an_older_splits_content_until_a_put_drops_it() {
+    let f = Fixture::new().await;
+    let (split, joined) = f.write_duplicate_keys().await;
+
+    f.reopen().await;
+
+    assert_eq!(f.entries().await, std::slice::from_ref(&joined));
+    let mut both = [split.report_id, joined.report_id];
+    both.sort();
+    assert_eq!(f.content_ids().await, both);
+
+    let leg = reported("leg", None, None);
+    put_all(&f.store, &[&leg]).await;
+    f.reopen().await;
+
+    let mut kept = [joined.report_id, leg.report_id];
+    kept.sort();
+    assert_eq!(f.content_ids().await, kept);
 }
 
 // =============================== CAPACITY =============================== //
@@ -213,6 +254,23 @@ async fn put_replaces_the_keys_entry_and_deletes_its_content() {
 }
 
 #[tokio::test]
+async fn put_replaces_the_entry_of_another_split_of_its_key() {
+    let f = Fixture::new().await;
+    let split = reported("arm", Some("left"), None);
+    let joined = ReportMetadata {
+        component: "arm-left".to_string(),
+        role: None,
+        ..newer(&split)
+    };
+    put_all(&f.store, &[&split]).await;
+
+    f.store.put(joined.clone(), DATA).await.unwrap();
+
+    assert_eq!(f.entries().await, std::slice::from_ref(&joined));
+    assert_eq!(f.content_ids().await, [joined.report_id]);
+}
+
+#[tokio::test]
 async fn putting_the_same_report_again_keeps_its_content() {
     let f = Fixture::new().await;
     let arm = reported("arm", None, None);
@@ -232,8 +290,8 @@ async fn role_and_aspect_are_part_of_the_key() {
 
     put_all(&f.store, &[&bare, &with_role, &with_aspect]).await;
 
-    // in key order, a missing slug first
-    assert_eq!(f.entries().await, [bare, with_aspect, with_role]);
+    // in key order: `arm`, `arm-left`, `arm-pose`
+    assert_eq!(f.entries().await, [bare, with_role, with_aspect]);
 }
 
 #[tokio::test]
@@ -322,6 +380,23 @@ async fn put_if_newer_keeps_an_entry_reported_at_the_same_time_or_later() {
 }
 
 #[tokio::test]
+async fn put_if_newer_keeps_a_newer_entry_of_another_split() {
+    let f = Fixture::new().await;
+    let split = reported("arm", Some("left"), None);
+    let joined = ReportMetadata {
+        component: "arm-left".to_string(),
+        role: None,
+        ..reported_after(&split, 1)
+    };
+    put_all(&f.store, &[&joined]).await;
+
+    assert!(!f.store.put_if_newer(split, DATA).await.unwrap());
+
+    assert_eq!(f.entries().await, std::slice::from_ref(&joined));
+    assert_eq!(f.content_ids().await, [joined.report_id]);
+}
+
+#[tokio::test]
 async fn put_if_newer_rejects_a_new_key_at_capacity() {
     let f = Fixture::with_capacity(1).await;
     let arm = reported("arm", None, None);
@@ -357,15 +432,16 @@ async fn put_if_newer_checks_and_puts_in_one_command() {
 
 // ================================= LIST ================================= //
 #[tokio::test]
-async fn list_sorts_by_component_then_role_then_aspect() {
+async fn list_sorts_by_key() {
     let f = Fixture::new().await;
-    // in sorted order, where a missing role or aspect sorts first
+    // in key order: `arm`, `arm-left`, `arm-left-offset`, `arm-left-pose`,
+    // `arm-pose`, `arm-right`, `leg`
     let sorted = [
         reported("arm", None, None),
-        reported("arm", None, Some("pose")),
         reported("arm", Some("left"), None),
         reported("arm", Some("left"), Some("offset")),
         reported("arm", Some("left"), Some("pose")),
+        reported("arm", None, Some("pose")),
         reported("arm", Some("right"), None),
         reported("leg", None, None),
     ];

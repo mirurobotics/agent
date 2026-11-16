@@ -7,6 +7,7 @@ on:
     branches: ["release/*"]
   pull_request:
     branches: [main, "release/*"]
+  merge_group:
   workflow_dispatch:
   workflow_call:
 
@@ -218,7 +219,7 @@ jobs:
 
       # Credentials for the real-GCS and real-S3 upload tests. Fork and
       # Dependabot PRs get no OIDC token, so these steps and those tests skip
-      # there.
+      # there. Merge queue runs always authenticate: the PR is approved by then.
       - name: Authenticate to Google Cloud
         id: gcs
         if: github.actor != 'dependabot[bot]' && !github.event.pull_request.head.repo.fork
