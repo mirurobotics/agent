@@ -50,22 +50,27 @@ pub struct ReportMetadata {
     pub reported_at: DateTime<Utc>,
 }
 
-/// A report's component, role and aspect: the store keeps one entry per key.
-pub(crate) type Key<'a> = (&'a str, Option<&'a str>, Option<&'a str>);
-
 impl ReportMetadata {
-    pub(crate) fn key(&self) -> Key<'_> {
-        (
-            self.component.as_str(),
-            self.role.as_deref(),
-            self.aspect.as_deref(),
-        )
+    /// Whether `self` is for `other`'s flat component and was reported at the
+    /// same time or later, so a merge keeps it over `other`.
+    pub(crate) fn is_as_new_as(&self, other: &ReportMetadata) -> bool {
+        self.flat_component() == other.flat_component() && self.reported_at >= other.reported_at
     }
 
-    /// Whether `self` is for `other`'s key and was reported at the same time
-    /// or later, so a merge keeps it over `other`.
-    pub(crate) fn is_as_new_as(&self, other: &ReportMetadata) -> bool {
-        self.key() == other.key() && self.reported_at >= other.reported_at
+    /// The component the control plane files this report under: the
+    /// component, role and aspect joined with `-`, skipping missing or empty ones.
+    pub(crate) fn flat_component(&self) -> String {
+        let parts = [
+            Some(self.component.as_str()),
+            self.role.as_deref(),
+            self.aspect.as_deref(),
+        ];
+        let parts: Vec<&str> = parts
+            .into_iter()
+            .flatten()
+            .filter(|part| !part.is_empty())
+            .collect();
+        parts.join("-")
     }
 }
 
@@ -201,6 +206,24 @@ mod tests {
                 ..other.clone()
             };
             assert!(!later.is_as_new_as(&arm), "{other:?}");
+        }
+    }
+
+    // =========================== FLAT COMPONENT =========================== //
+    #[test]
+    fn flat_component_joins_the_parts_it_has() {
+        let cases = [
+            (reported("arm", None, None), "arm"),
+            (reported("arm", Some("left"), None), "arm-left"),
+            (reported("arm", None, Some("pose")), "arm-pose"),
+            (reported("arm", Some("left"), Some("pose")), "arm-left-pose"),
+            (reported("arm", Some(""), Some("pose")), "arm-pose"),
+            (reported("arm", Some("left"), Some("")), "arm-left"),
+            (reported("", Some("left"), Some("pose")), "left-pose"),
+        ];
+
+        for (metadata, want) in cases {
+            assert_eq!(metadata.flat_component(), want, "{metadata:?}");
         }
     }
 }

@@ -98,7 +98,8 @@ fn respond<T>(respond_to: oneshot::Sender<T>, value: T, op: &str) {
 
 // ================================== HANDLE ======================================= //
 /// Handle to the latest calibrations store's worker, which owns the store's
-/// files, so it is the store's only writer. Clones share the worker.
+/// files, so it is the store's only writer. Clones share the worker. The store
+/// keeps one entry per key, a report's flat component.
 #[derive(Clone, Debug)]
 pub struct LatestStore {
     sender: mpsc::Sender<Command>,
@@ -148,7 +149,7 @@ impl LatestStore {
         .await?
     }
 
-    /// The entries `filter` matches, ordered by component, role and aspect.
+    /// The entries `filter` matches, ordered by key.
     pub async fn list(&self, filter: &Filter) -> Result<Vec<ReportMetadata>, CalibrationsErr> {
         self.send_command("list", |respond_to| Command::List {
             filter: filter.clone(),

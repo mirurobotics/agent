@@ -1,4 +1,5 @@
 // standard crates
+use std::cmp::Reverse;
 use std::collections::HashSet;
 
 // internal crates
@@ -42,10 +43,11 @@ impl Filter {
     }
 }
 
-/// The newest calibration for each component, role and aspect: one entry per
-/// key in `index.json`, and each entry's data in its own file under `contents/`,
-/// named by its `report_id`. A report replaces its key's entry, and a new key
-/// past the capacity is rejected rather than evicting another.
+/// The newest calibration for each key, a report's flat component, as the
+/// control plane keys its latest: one entry per key in `index.json`, and each
+/// entry's data in its own file under `contents/`, named by its `report_id`. A
+/// report replaces its key's entry, and a new key past the capacity is
+/// rejected rather than evicting another.
 /// [`LatestStore`]'s worker owns it, so it is the store's only writer.
 ///
 /// [`LatestStore`]: crate::calibrations::LatestStore
@@ -112,14 +114,14 @@ impl LatestStoreImpl {
         Ok(())
     }
 
-    /// The entries `filter` matches, ordered by component, role and aspect.
+    /// The entries `filter` matches, ordered by key.
     pub(crate) async fn list(
         &self,
         filter: &Filter,
     ) -> Result<Vec<ReportMetadata>, CalibrationsErr> {
         let mut entries = self.read_index().await?;
         entries.retain(|metadata| filter.is_match(metadata));
-        entries.sort_by(|a, b| a.key().cmp(&b.key()));
+        entries.sort_by_cached_key(ReportMetadata::flat_component);
         Ok(entries)
     }
 
@@ -140,6 +142,11 @@ impl LatestStoreImpl {
 
     /// The index, which is empty until the first put writes it.
     async fn read_index(&self) -> Result<Index, CalibrationsErr> {
+        Ok(keep_newest(self.read_index_file().await?))
+    }
+
+    /// The index as written, which can hold more than one entry per key.
+    async fn read_index_file(&self) -> Result<Index, CalibrationsErr> {
         match files::read_json_with_retry::<IndexFile>(&self.index).await {
             Err(FileSysErr::PathDoesNotExistErr(_)) => Ok(Index::new()),
             result => Ok(result?.entries),
@@ -165,29 +172,50 @@ impl LatestStoreImpl {
     }
 
     /// Delete the content no entry names, which a crash or a failed write or
-    /// delete leaves. If the index can't be read, nothing is deleted.
+    /// delete leaves. An index with more than one entry per key is rewritten
+    /// first, so that it never names deleted content. If the index can't be
+    /// read or rewritten, nothing is deleted.
     pub(crate) async fn prune_orphaned_contents(&self) {
-        let index = match self.read_index().await {
+        let written = match self.read_index_file().await {
             Ok(index) => index,
             Err(e) => {
                 error!("calibrations: not pruning latest contents, index unreadable: {e}");
                 return;
             }
         };
+        let written_len = written.len();
+        let index = keep_newest(written);
         let named: HashSet<String> = index
             .iter()
             .map(|metadata| metadata.report_id.to_string())
             .collect();
+        if index.len() < written_len {
+            let result = self.write_index(index).await;
+            if let Err(e) = result {
+                error!("calibrations: not pruning latest contents, index not rewritten: {e}");
+                return;
+            }
+        }
         dirs::delete_files_except(&self.contents, &named).await;
     }
 }
 
 /// Remove and return the entry with `metadata`'s key, if there is one.
 fn take_entry(index: &mut Index, metadata: &ReportMetadata) -> Option<ReportMetadata> {
-    let slot = index
-        .iter()
-        .position(|entry| entry.key() == metadata.key())?;
+    let key = metadata.flat_component();
+    let slot = index.iter().position(|m| m.flat_component() == key)?;
     Some(index.swap_remove(slot))
+}
+
+/// The newest entry for each key. An agent that keyed the store by component,
+/// role and aspect can have left more than one, such as `arm` with role `left`
+/// and `arm-left`; a dropped entry's content is then orphaned.
+fn keep_newest(mut index: Index) -> Index {
+    // stable, so on a tie the entry listed first stays
+    index.sort_by_key(|entry| Reverse(entry.reported_at));
+    let mut keys = HashSet::new();
+    index.retain(|entry| keys.insert(entry.flat_component()));
+    index
 }
 
 /// Whether `value` is one of `values`, where an empty list matches any value.
@@ -218,7 +246,7 @@ fn not_found(report_id: Uuid) -> CalibrationsErr {
 #[cfg(test)]
 mod tests {
     // internal crates
-    use super::{check_capacity, matches, not_found, take_entry, Index};
+    use super::{check_capacity, keep_newest, matches, not_found, take_entry, Index};
     use crate::test_utils::calibrations::reported;
     use miru_daemon::calibrations::ReportMetadata;
     use miru_daemon::models::InstanceFormat;
@@ -240,6 +268,18 @@ mod tests {
         }
     }
 
+    /// `arm` with role `left`, and the same key reported as `arm-left` a
+    /// second later.
+    fn two_splits() -> (ReportMetadata, ReportMetadata) {
+        let split = reported("arm", Some("left"), None);
+        let joined = ReportMetadata {
+            component: "arm-left".to_string(),
+            role: None,
+            ..same_key(&split)
+        };
+        (split, joined)
+    }
+
     // ============================ TAKE ENTRY ============================ //
     #[test]
     fn take_entry_removes_the_entry_with_the_same_key() {
@@ -255,6 +295,18 @@ mod tests {
     }
 
     #[test]
+    fn take_entry_removes_another_split_of_the_key() {
+        let (split, joined) = two_splits();
+        let leg = reported("leg", None, None);
+        let mut index: Index = vec![split.clone(), leg.clone()];
+
+        let taken = take_entry(&mut index, &joined);
+
+        assert_eq!(taken, Some(split));
+        assert_eq!(index, [leg]);
+    }
+
+    #[test]
     fn take_entry_leaves_the_index_for_a_new_key() {
         let arm = reported("arm", None, None);
         let mut index: Index = vec![arm.clone()];
@@ -265,20 +317,34 @@ mod tests {
         assert_eq!(index, [arm]);
     }
 
-    // =============================== KEY ================================ //
+    // =========================== KEEP NEWEST ============================ //
     #[test]
-    fn key_is_the_component_role_and_aspect_only() {
-        let arm = reported("arm", Some("left"), Some("pose"));
-        // each differs from `arm` in one part of the key
-        let others = [
-            reported("leg", Some("left"), Some("pose")),
-            reported("arm", Some("right"), Some("pose")),
-            reported("arm", Some("left"), Some("offset")),
+    fn keep_newest_keeps_the_newer_split_in_either_order() {
+        let (split, joined) = two_splits();
+        let orders = [
+            vec![split.clone(), joined.clone()],
+            vec![joined.clone(), split.clone()],
         ];
 
-        assert_eq!(arm.key(), same_key(&arm).key());
-        for other in &others {
-            assert_ne!(arm.key(), other.key(), "{other:?}");
+        for index in orders {
+            assert_eq!(keep_newest(index), std::slice::from_ref(&joined));
+        }
+    }
+
+    #[test]
+    fn keep_newest_keeps_the_first_listed_on_a_tie() {
+        let (split, joined) = two_splits();
+        let tied = ReportMetadata {
+            reported_at: split.reported_at,
+            ..joined
+        };
+        let cases = [
+            (vec![tied.clone(), split.clone()], &tied),
+            (vec![split.clone(), tied.clone()], &split),
+        ];
+
+        for (index, first) in cases {
+            assert_eq!(keep_newest(index), std::slice::from_ref(first));
         }
     }
 
