@@ -9,7 +9,7 @@ This ExecPlan is a living document. The sections Progress, Surprises & Discoveri
 | `agent/` | read-write | Add `daemon/src/server/v03/` over `libs/device-api-v03`, mount it beside `/v0.2`, add the flat-component read path for calibrations, tests, docs |
 | `openapi/` | read-only | Source of the v0.3 contract (openapi#470) and of the Agent API v0.5 rule for how the control plane names a component |
 
-This plan lives in `agent/plans/` because every change is in the agent repo. Paths are relative to the agent repo root (the directory holding the workspace `Cargo.toml` and `ARCHITECTURE.md`); the crate is `daemon/`. Branch: `feat/device-api-v03`, stacked on the draft PR branch `chore/vendor-device-v03-spec` (agent#510), which vendors `api/specs/device/v03.yaml` and generates `libs/device-api-v03`.
+This plan lives in `agent/plans/` because every change is in the agent repo. Paths are relative to the agent repo root (the directory holding the workspace `Cargo.toml` and `ARCHITECTURE.md`); the crate is `daemon/`. Branch: `feat/device-api-v03`, based on `main`. Two merged PRs precede it: agent#510 vendors `api/specs/device/v03.yaml`, generates `libs/device-api-v03`, lists `device_api_v03` in `.lint-imports.toml`, adds the README `libs/` line and names the generated crates `libs/device-api-vNN` in ARCHITECTURE.md; agent#512 moves the version-neutral server plumbing into `daemon/src/server/{request,response,sse}.rs`, which `server/v03/` imports as `server/v02/` does.
 
 ## Purpose / Big Picture
 
@@ -57,7 +57,7 @@ How to see it, on a device running this build (Linux, as root or a `miru` group 
 
 ### Left out
 
-- Factoring the version-neutral helpers out of `server/v02/` into `server/`: `request::split_list`, `handlers::{reject_body, reject_query, handle, error_response}` (generic except for the `ErrorResponse` type), `response::{calibration_content, to_retention}`, and `sse::{resolve_cursor, parse_event_filter}` with the stream assembly in `events_impl`. A later release drops `/v0.2`, leaving one copy, and a move must land first as its own PR (shared rule). Proposed follow-up only if a reviewer wants the overlap shorter.
+- Sharing what still builds or reads one version's generated types: `handlers::{handle, error_response, to_error_response}` and `sse::events`'s error mapping (the version's `ErrorResponse`), `request::to_instance_format`, and the `response.rs` and `enums.rs` conversions. agent#512 moved the rest (`split_list`, `reject_body`, `reject_query`, `calibration_content`, the event stream) into `server/`, and `/v0.3` uses those. A later release drops `/v0.2`, leaving one copy of each.
 - Rejecting `role`/`aspect` sent to `/v0.3`: the spec allows extra properties and the generated struct ignores them, as an unknown query parameter is ignored.
 - `NULL_SLUG` checks on `/v0.3`: it has no role or aspect.
 - Changing the backend client, `calibrations::sender` or the pull: Agent API v0.5 keeps its shape, and a `/v0.3` report is a v0.2-shaped report with `role` and `aspect` `None`.
@@ -71,10 +71,12 @@ How to see it, on a device running this build (Linux, as root or a `miru` group 
 
 ## Progress
 
-- [x] M1: source: dependency and lint config, `flat_component`, `list_latest_flat`, `server/v03/`, router merge, docs.
+- [x] M1: source: dependency, `flat_component`, `list_latest_flat` (removed in the second design review), `server/v03/`, router merge, docs.
 - [x] Source written
 - [x] Design review: store keyed by flat component (user's choice); `list_latest_flat` reduced to filter and sort; an index with several entries for one flat component keeps the newest on read.
 - [x] Design review: `Filter` gains `flat_component` and the store's `list` orders by key, replacing `list_latest_flat`, `into_components` and `list_order`; `/v0.3` converts its query into a `Filter` as `/v0.2` does.
+- [x] Rebased onto `main` after agent#510 and agent#512: `server/v03/` imports the shared plumbing in `server/request.rs`, `server/response.rs` and `server/sse.rs` instead of its own copies; the lint config and README line came with agent#510.
+- [x] Self-review.
 - [ ] M2: tests: `daemon/tests/server/v03/`, router test, the store's flat-component filter test, `flat_component` unit tests.
 - [ ] CI green on the pushed head (`$preflight` reports `CLEAN`).
 
@@ -103,7 +105,10 @@ How to see it, on a device running this build (Linux, as root or a `miru` group 
   Date/Author: 2026-11-16, source stage.
 - Decision: ARCHITECTURE.md's generated-code paragraph and "Generated code is never hand-edited" invariant also name `libs/device-api-v03`, beside the planned `server` and calibrations edits.
   Rationale: they listed only `libs/device-api-v02`, which stops being true once the daemon depends on the v0.3 crate; README's `libs/` tree gets the same line in the plan.
-  Date/Author: 2026-11-16, source stage.
+  Date/Author: 2026-11-16, source stage. Superseded by the next entry: agent#510 renamed both to `libs/device-api-vNN` and added the README line, so this PR edits neither.
+- Decision: rebase onto `main` once agent#510 and agent#512 merged. `server/v03/` drops its copies of `split_list`, `reject_body`, `reject_query`, `calibration_content` and the event stream, and imports the shared ones from `server/request.rs`, `server/response.rs` and `server/sse.rs`, as `server/v02/` does; `v03/sse.rs` keeps only the `events` route and its `to_sse_data`. The `.lint-imports.toml`, README and ARCHITECTURE generated-code edits came with agent#510 and leave this PR.
+  Rationale: the plan's "Left out" proposed that move as its own PR; agent#512 is that PR, so `/v0.3` copies only what builds a v0.3 wire type.
+  Date/Author: 2026-11-16, rebase; recorded at self-review.
 
 ## Outcomes & Retrospective
 
@@ -115,11 +120,13 @@ Device API versions. Since agent#485 each version is one generated crate plus on
 
 - `mod.rs`: `mod enums; pub mod handlers; pub mod request; pub mod response; pub mod routes; pub mod sse;`
 - `routes.rs`: `pub fn table() -> Router<Arc<State>>`, building every path as `/{api_version}/...` from `device_api_v02::models::ApiVersion::API_VERSION`.
-- `handlers.rs`: one async fn per route; each calls a service in `daemon/src/services/` and returns `device_server::X::from(&domain)`. `version()` fills `VersionResponse` from `device_server::{ApiVersion, ApiGitCommit, ReleaseVersion}`. Utilities `handle`, `error_response`, `to_error_response`, `reject_body`, `reject_query`.
-- `request.rs`: `impl TryFrom<device_server::CreateCalibrationRequest> for calibration::CreateParams` (rejects role or aspect `"null"`, the reserved `NULL_SLUG`, and an unknown format), `LatestCalibrationsQuery { component, role, aspect: Option<String> }` with `impl From<LatestCalibrationsQuery> for calibrations::Filter`, `pub(crate) fn split_list` (also used by `sse.rs`), `split_slugs`, and inline unit tests for `split_slugs`.
-- `response.rs`: `From` impls from domain types to wire types, including `From<&ReportMetadata> for device_server::Calibration`, `pub fn latest_calibrations(&[ReportMetadata])` and `pub fn calibration_content(calibration::Content) -> Response`.
+- `handlers.rs`: one async fn per route; each calls a service in `daemon/src/services/` and returns `device_server::X::from(&domain)`. `version()` fills `VersionResponse` from `device_server::{ApiVersion, ApiGitCommit, ReleaseVersion}`. Utilities `handle`, `error_response`, `to_error_response`, which build the version's `ErrorResponse`.
+- `request.rs`: `impl TryFrom<device_server::CreateCalibrationRequest> for calibration::CreateParams` (rejects role or aspect `"null"`, the reserved `NULL_SLUG`, and an unknown format), `to_instance_format`, `LatestCalibrationsQuery { component, role, aspect: Option<String> }` with `impl From<LatestCalibrationsQuery> for calibrations::Filter`, `split_slugs`, and inline unit tests for `split_slugs`.
+- `response.rs`: `From` impls from domain types to wire types, including `From<&ReportMetadata> for device_server::Calibration` and `pub fn latest_calibrations(&[ReportMetadata])`.
 - `enums.rs`: `From` impls from domain enums to wire enums.
-- `sse.rs`: `GET /events`, a server-sent event stream; it converts each stored event with `device_server::Event::try_from`.
+- `sse.rs`: the `GET /events` route; it passes its `to_sse_data` (`device_server::Event::try_from`, then JSON) to the shared stream and maps a failure to the version's `ErrorResponse`.
+
+The version-neutral plumbing (agent#512) lives in `daemon/src/server/`, and every version imports it: `request.rs` has `reject_body`, `reject_query` and `split_list`; `response.rs` has `calibration_content(calibration::Content) -> Response`; `sse.rs` has `EventsQuery` and `event_stream`, which builds the stream with the version's event conversion.
 
 `daemon/src/server/routes.rs` `router(state)` returns `middleware(v02::routes::table().with_state(state))`; `daemon/src/server/mod.rs` declares `pub mod v02;`. `daemon/src/server/state.rs` `State` holds the stores and actors every version shares, including `latest_cals: calibrations::LatestStore` and `cal_uploader`. AGENTS.md "Device API conversions": handlers don't convert wire types; response conversions go in `response.rs`, request conversions in `request.rs`.
 
@@ -131,7 +138,7 @@ Calibrations in the agent. `daemon/src/calibrations/report.rs` `ReportMetadata {
 
 Tests. `daemon/tests/server/v02/` mirrors the module: `handlers.rs` (route tests through `routes::router` with a `Fixture`; they check status codes and bodies only), `request.rs`, `response.rs`, `enums.rs` (uses `crate::models::harnesses::assert_converts_each`), `sse.rs`; `daemon/tests/server/mod.rs` lists the submodules; `daemon/tests/server/routes.rs` tests the merged router. Service tests: `daemon/tests/services/calibration/latest.rs` with `helpers::{Fixture, params}` (`Fixture.latest` is the `LatestStore`; `Fixture.create` stamps the fixed `received_at()`). `crate::test_utils::calibrations::reported(component, role, aspect)` builds a `ReportMetadata`.
 
-Build and lint config. `daemon/Cargo.toml` depends on `device-api-v02 = { workspace = true }` only; the workspace already declares `device-api-v03`. `.lint-imports.toml` lists `internal_crates = ["backend_api", "device_api_v02", "miru_daemon"]`; the CI import linter fails a `device_api_v03` import outside the "internal crates" group unless it is listed. CI builds with `--locked`, so `Cargo.lock` must gain `device-api-v03` in `miru-daemon`'s dependencies.
+Build and lint config. `daemon/Cargo.toml` depends on `device-api-v02 = { workspace = true }` only; the workspace already declares `device-api-v03`. `.lint-imports.toml` already lists `device_api_v03` in `internal_crates` (agent#510), so the CI import linter accepts it in the "internal crates" group. CI builds with `--locked`, so `Cargo.lock` must gain `device-api-v03` in `miru-daemon`'s dependencies.
 
 CI: `.github/workflows/ci.yml` on pull requests runs `lint` (`scripts/lint.sh`: import linter, function length, field-by-field asserts, `cargo fmt --check`, clippy `-D warnings`, machete, audit), `test` (`scripts/covgate.sh`: the suite plus each `.covgate`; a `.covgate` covers its directory and subdirectories), `windows-check` and `windows-agent-build`.
 
@@ -139,7 +146,7 @@ CI: `.github/workflows/ci.yml` on pull requests runs `lint` (`scripts/lint.sh`: 
 
 ### M1: source
 
-Dependencies and lint config. In `daemon/Cargo.toml`, add `device-api-v03 = { workspace = true }` after `device-api-v02`, and refresh `Cargo.lock` with the command in Concrete Steps (never by hand). In `.lint-imports.toml`, add `"device_api_v03"` after `"device_api_v02"`.
+Dependency. In `daemon/Cargo.toml`, add `device-api-v03 = { workspace = true }` after `device-api-v02`, and refresh `Cargo.lock` with the command in Concrete Steps (never by hand). `.lint-imports.toml` already lists `device_api_v03` (agent#510).
 
 The join. In `daemon/src/calibrations/report.rs`, in `impl ReportMetadata` after `is_as_new_as`, add:
 
@@ -151,18 +158,18 @@ The join. In `daemon/src/calibrations/report.rs`, in `impl ReportMetadata` after
         parts.join("-")
     }
 
-The v0.3 read path. In `daemon/src/calibrations/latest_impl.rs`, add `pub flat_component: Vec<String>` to `Filter`, matched in `is_match` against `metadata.flat_component()`, and have `list` sort with `sort_by_cached_key(ReportMetadata::flat_component)`, deleting `list_order`; the `list` doc comments in `latest_impl.rs` and `latest.rs` say "ordered by key". In `daemon/src/server/v02/request.rs`, `From<LatestCalibrationsQuery> for Filter` sets `flat_component: Vec::new()`. The store holds one entry per flat component (Decision Log), so nothing needs collapsing, and `services::calibration::list_latest` serves both versions.
+The v0.3 read path. In `daemon/src/calibrations/latest_impl.rs`, add `pub flat_component: Vec<String>` to `Filter`, matched in `is_match` against `metadata.flat_component()`, and have `list` sort with `sort_by_cached_key(ReportMetadata::flat_component)`, deleting `list_order`; the `list` doc comments in `latest_impl.rs` and `latest.rs` say "ordered by key". In `daemon/src/server/v02/request.rs`, `From<LatestCalibrationsQuery> for Filter` sets `flat_component: Vec::new()`. The store holds one entry per flat component (Decision Log): `is_as_new_as` and `take_entry` compare `flat_component()`, `ReportMetadata::key` and its `Key` type are deleted, and `read_index` passes the entries through `keep_newest`. So nothing needs collapsing, and `services::calibration::list_latest` serves both versions.
 
 The v0.3 module. Copy `daemon/src/server/v02/*.rs` and `.covgate` to `daemon/src/server/v03/` (commands below), replace `device_api_v02` with `device_api_v03` and `v02::` with `v03::`, and change the comment in `response.rs` above `to_event_data` to say v0.3. Then make only these v0.3 differences:
 
-- `request.rs`: the `TryFrom<device_server::CreateCalibrationRequest> for calibration::CreateParams` keeps only the format check and sets `component: request.component`, `role: None`, `aspect: None`; its doc comment says it checks the request's shape and the control plane judges the rest. Delete `NULL_SLUG`, `split_slugs` and the inline `mod tests` (they test `split_slugs`). `LatestCalibrationsQuery` keeps only `pub component: Option<String>`. `impl From<LatestCalibrationsQuery> for Filter` builds `Filter { flat_component: split_list(query.component), ..Filter::default() }`. Keep `to_instance_format` and `pub(crate) fn split_list` as they are.
+- `request.rs`: the `TryFrom<device_server::CreateCalibrationRequest> for calibration::CreateParams` keeps only the format check and sets `component: request.component`, `role: None`, `aspect: None`; its doc comment says it checks the request's shape and the control plane judges the rest. Delete `NULL_SLUG`, `split_slugs` and the inline `mod tests` (they test `split_slugs`). `LatestCalibrationsQuery` keeps only `pub component: Option<String>`. `impl From<LatestCalibrationsQuery> for Filter` builds `Filter { flat_component: split_list(query.component), ..Filter::default() }`. Keep `to_instance_format`; `split_list` is the shared `server::request::split_list`.
 - `handlers.rs`: the copy as is, so `list_latest_calibrations` converts the query into a `Filter` and calls `calibration_svc::list_latest`; `version()` now reads the v0.3 constants through the `device_server` alias.
 - `response.rs`: `From<&ReportMetadata> for device_server::Calibration` sets `component: metadata.flat_component()` and has no `role` or `aspect`. Everything else is the copy.
-- `routes.rs`, `enums.rs`, `sse.rs`, `mod.rs`: the copy with the renames only.
+- `routes.rs`, `enums.rs`, `sse.rs`, `mod.rs`: the copy with the renames only. Like `/v0.2`'s, the copies import the shared plumbing in `server/request.rs`, `server/response.rs` and `server/sse.rs` (agent#512) rather than holding their own.
 
 Mount it. In `daemon/src/server/mod.rs` add `pub mod v03;` after `pub mod v02;`. In `daemon/src/server/routes.rs`, import `v03` beside `v02` and build `middleware(v02::routes::table().merge(v03::routes::table()).with_state(state))`; the doc comment on `router` stays true.
 
-Docs. `ARCHITECTURE.md`: in the `server` paragraph, say each Device API version is a module (`server/v02/`, `server/v03/`) and that the router serves both until a later release drops `/v0.2`; in the calibrations paragraphs, add that `POST /v0.3/calibrations` takes only `component` (queued with no role or aspect), and that `GET /v0.3/calibrations/latest` lists each entry under its flat component (component, role and aspect joined with `-`), filtering by it through the store's `Filter` as `/v0.2` does, both versions ordered by flat component, and that the store is keyed by flat component, so a report under another split replaces the entry, and every read keeps the newest of an older agent's duplicates. `README.md`: under `libs/`, add `device-api-v03/  #   Device API v0.3 server`.
+Docs. `ARCHITECTURE.md`: in the `server` paragraph, say each Device API version is a module (`server/v02/`, `server/v03/`) and that the router serves both until a later release drops `/v0.2`; in the calibrations paragraphs, add that `POST /v0.3/calibrations` takes only `component` (queued with no role or aspect), and that `GET /v0.3/calibrations/latest` lists each entry under its flat component (component, role and aspect joined with `-`), filtering by it through the store's `Filter` as `/v0.2` does, both versions ordered by flat component, and that the store is keyed by flat component, so a report under another split replaces the entry, and every read keeps the newest of an older agent's duplicates. `README.md` already lists `libs/device-api-v03` (agent#510).
 
 ### M2: tests
 
@@ -188,16 +195,13 @@ M1:
     sed -i 's/^device-api-v02 = { workspace = true }$/&\ndevice-api-v03 = { workspace = true }/' daemon/Cargo.toml
     cargo update --workspace --offline     # lockfile refresh only; if offline fails, drop --offline
     git diff --stat Cargo.lock             # expect: 1 file changed, 1 insertion(+)
-    sed -i 's/"device_api_v02", /"device_api_v02", "device_api_v03", /' .lint-imports.toml
     mkdir -p daemon/src/server/v03
     cp daemon/src/server/v02/*.rs daemon/src/server/v02/.covgate daemon/src/server/v03/
     sed -i 's/device_api_v02/device_api_v03/g; s/v02::/v03::/g; s/v0\.2/v0.3/g' daemon/src/server/v03/*.rs
 
-Then make the edits in Plan of Work (report.rs, services latest.rs, the v03 differences, server mod.rs and routes.rs, docs), and commit:
+Then make the edits in Plan of Work (report.rs, latest_impl.rs and latest.rs, v02 request.rs, the v03 differences, server mod.rs and routes.rs, docs), and commit:
 
-    git add daemon/Cargo.toml Cargo.lock .lint-imports.toml daemon/src/calibrations/report.rs \
-      daemon/src/services/calibration/latest.rs daemon/src/server/mod.rs daemon/src/server/routes.rs \
-      daemon/src/server/v03 ARCHITECTURE.md README.md
+    git add daemon/Cargo.toml Cargo.lock daemon/src/calibrations daemon/src/server ARCHITECTURE.md
     git commit -m "feat(server): serve Device API v0.3 beside v0.2"   # plus the session trailers
 
 M2:
