@@ -3,7 +3,7 @@
 
 // internal crates
 use crate::test_utils::calibrations::{latest_cals_layout, latest_store, reported};
-use crate::test_utils::filesys::dirs as test_dirs;
+use crate::test_utils::filesys::{access::make_read_only, dirs as test_dirs};
 use miru_daemon::calibrations::{
     latest, CalibrationsErr, Filter, LatestStore, Report, ReportMetadata,
 };
@@ -95,6 +95,26 @@ impl Fixture {
             .await
             .unwrap();
     }
+
+    /// Write an index holding `arm` with role `left` and, a second later,
+    /// `arm-left`, with both contents, as an agent that keyed the store by
+    /// component, role and aspect could have left them. Returns the two.
+    async fn write_two_splits(&self) -> (ReportMetadata, ReportMetadata) {
+        let split = reported("arm", Some("left"), None);
+        let joined = ReportMetadata {
+            component: "arm-left".to_string(),
+            role: None,
+            ..reported_after(&split, 1)
+        };
+        let index = serde_json::json!({ "entries": [split, joined] });
+        files::write_json(&self.layout.index(), &index, WriteOptions::OVERWRITE_ATOMIC)
+            .await
+            .unwrap();
+        for report_id in [split.report_id, joined.report_id] {
+            self.write_orphan(report_id).await;
+        }
+        (split, joined)
+    }
 }
 
 /// A newer report for `metadata`'s key, with a fresh `report_id` as intake
@@ -155,24 +175,7 @@ async fn spawn_keeps_the_contents_when_the_index_is_corrupt() {
 #[tokio::test]
 async fn spawn_keeps_only_the_newest_of_two_splits_of_one_key() {
     let f = Fixture::new().await;
-    let split = reported("arm", Some("left"), None);
-    let joined = ReportMetadata {
-        component: "arm-left".to_string(),
-        role: None,
-        ..reported_after(&split, 1)
-    };
-    // as an agent that keyed the store by component, role and aspect wrote it,
-    // the older entry first
-    let index = serde_json::json!({ "entries": [split, joined] });
-    files::write_json(&f.layout.index(), &index, WriteOptions::OVERWRITE_ATOMIC)
-        .await
-        .unwrap();
-    for report_id in [split.report_id, joined.report_id] {
-        let file = f.content_file(report_id);
-        files::write_string(&file, DATA, WriteOptions::OVERWRITE_ATOMIC)
-            .await
-            .unwrap();
-    }
+    let (_, joined) = f.write_two_splits().await;
 
     f.reopen().await;
 
@@ -181,6 +184,22 @@ async fn spawn_keeps_only_the_newest_of_two_splits_of_one_key() {
     // rewritten, so an older agent rolled back to doesn't list `split`
     let index: serde_json::Value = files::read_json(&f.layout.index()).await.unwrap();
     assert_eq!(index, serde_json::json!({ "entries": [joined] }));
+}
+
+#[tokio::test]
+async fn spawn_keeps_the_contents_when_the_index_cannot_be_rewritten() {
+    let f = Fixture::new().await;
+    let (split, joined) = f.write_two_splits().await;
+    let read_only = make_read_only(&f.layout.root);
+
+    let store = f.reopen().await;
+    // the worker serves a command only after its prune
+    store.list(&Filter::default()).await.unwrap();
+    drop(read_only);
+
+    let mut want = [split.report_id, joined.report_id];
+    want.sort();
+    assert_eq!(f.content_ids().await, want);
 }
 
 // =============================== CAPACITY =============================== //
