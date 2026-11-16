@@ -1260,6 +1260,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "device-api-v03"
+version = "0.12.4"
+dependencies = [
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
 name = "diff"
 version = "0.1.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"

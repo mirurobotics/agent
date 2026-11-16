@@ -96,14 +96,14 @@ All workers receive a broadcast shutdown signal and clean up gracefully.
 
 ### Generated code (workspace siblings)
 
-`libs/backend-api` and `libs/device-api-v02` (one crate per Device API version) are auto-generated from OpenAPI specs in `api/specs/`. Never edit these by hand. The specs themselves are sourced from [`mirurobotics/openapi`](https://github.com/mirurobotics/openapi) — to change schemas, modify the source repo, regenerate the bundle there, then copy the updated spec here and run `api/regen.sh`. The vendored specs are the openapi release-stamped artifacts (they carry `x-release-version` and `x-git-commit`), not raw bundles.
+`libs/backend-api` and the `libs/device-api-vNN` crates (one per Device API version) are auto-generated from OpenAPI specs in `api/specs/`. Never edit these by hand. The specs themselves are sourced from [`mirurobotics/openapi`](https://github.com/mirurobotics/openapi) — to change schemas, modify the source repo, regenerate the bundle there, then copy the updated spec here and run `api/regen.sh`. The vendored specs are the openapi release-stamped artifacts (they carry `x-release-version` and `x-git-commit`), not raw bundles.
 
 ## Architectural Invariants
 
 - **Provision and runtime are mutually exclusive.** `main.rs` picks one path at startup. They share no runtime state; provision writes the files that runtime later reads.
 - **All backend HTTP goes through `http::Client`.** No module uses raw reqwest. The client handles retry logic and attaches auth headers.
 - **Shutdown ordering matters.** Syncer shuts down before storage (it writes during sync). The latest calibrations store shuts down after the calibration uploader, whose worker writes it. Token manager shuts down last. This is enforced in `AppState::shutdown()`.
-- **Generated code is never hand-edited.** `libs/backend-api` and `libs/device-api-v02` are overwritten on regeneration.
+- **Generated code is never hand-edited.** `libs/backend-api` and each `libs/device-api-vNN` are overwritten on regeneration.
 - **Tests exercise ordinary production behavior.** `cargo test` needs no custom feature or logging environment; production algorithms and client construction are identical in normal and test builds, and tests control dependencies and time. Test layout conventions live in `AGENTS.md` § Testing.
 - **The agent has no direct database.** All persistence is file-based via `disk::Layout`. The backend owns the database.
 - **The agent always runs persistently.** It exits only on a shutdown signal or a fatal startup error. A `settings.json` that still contains `is_persistent` loads normally; the key is ignored.
