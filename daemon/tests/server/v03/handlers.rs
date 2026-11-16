@@ -693,17 +693,20 @@ pub mod routes {
         }
 
         #[tokio::test]
-        async fn create_calibration_returns_422_for_a_role() {
-            let f = Fixture::new("handler_create_calibration_role").await;
-            let body = json!({
-                "component": "arm",
-                "role": "left",
-                "content": { "format": "json", "data": "{}" },
-            });
+        async fn create_calibration_returns_422_for_a_role_or_aspect() {
+            let f = Fixture::new("handler_create_calibration_role_or_aspect").await;
 
-            let (status, bytes) = f.post_json(URI, body.to_string()).await;
-            assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
-            assert_eq!(error_code(&bytes), "invalid_request");
+            for field in ["role", "aspect"] {
+                let mut body = json!({
+                    "component": "arm",
+                    "content": { "format": "json", "data": "{}" },
+                });
+                body[field] = json!("left");
+
+                let (status, bytes) = f.post_json(URI, body.to_string()).await;
+                assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{field}");
+                assert_eq!(error_code(&bytes), "invalid_request", "{field}");
+            }
         }
 
         #[tokio::test]
@@ -763,13 +766,15 @@ pub mod routes {
         }
 
         #[tokio::test]
-        async fn list_latest_calibrations_returns_422_for_a_role() {
-            let f = Fixture::new("handler_list_latest_calibrations_role").await;
+        async fn list_latest_calibrations_returns_422_for_a_role_or_aspect() {
+            let f = Fixture::new("handler_list_latest_calibrations_role_or_aspect").await;
 
-            let uri = "/v0.3/calibrations/latest?component=arm&role=left";
-            let (status, bytes) = f.get(uri).await;
-            assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
-            assert_eq!(error_code(&bytes), "invalid_request");
+            for field in ["role", "aspect"] {
+                let uri = format!("/v0.3/calibrations/latest?component=arm&{field}=left");
+                let (status, bytes) = f.get(&uri).await;
+                assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{field}");
+                assert_eq!(error_code(&bytes), "invalid_request", "{field}");
+            }
         }
 
         #[tokio::test]
