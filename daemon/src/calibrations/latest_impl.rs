@@ -172,30 +172,21 @@ impl LatestStoreImpl {
     }
 
     /// Delete the content no entry names, which a crash or a failed write or
-    /// delete leaves. An index with more than one entry per key is rewritten
-    /// first, so that it never names deleted content. If the index can't be
-    /// read or rewritten, nothing is deleted.
+    /// delete leaves. It reads the index as written, so content stays while
+    /// any entry names it, even one a read drops. If the index can't be read,
+    /// nothing is deleted.
     pub(crate) async fn prune_orphaned_contents(&self) {
-        let written = match self.read_index_file().await {
+        let index = match self.read_index_file().await {
             Ok(index) => index,
             Err(e) => {
                 error!("calibrations: not pruning latest contents, index unreadable: {e}");
                 return;
             }
         };
-        let written_len = written.len();
-        let index = keep_newest(written);
         let named: HashSet<String> = index
             .iter()
             .map(|metadata| metadata.report_id.to_string())
             .collect();
-        if index.len() < written_len {
-            let result = self.write_index(index).await;
-            if let Err(e) = result {
-                error!("calibrations: not pruning latest contents, index not rewritten: {e}");
-                return;
-            }
-        }
         dirs::delete_files_except(&self.contents, &named).await;
     }
 }
@@ -209,7 +200,7 @@ fn take_entry(index: &mut Index, metadata: &ReportMetadata) -> Option<ReportMeta
 
 /// The newest entry for each key. An agent that keyed the store by component,
 /// role and aspect can have left more than one, such as `arm` with role `left`
-/// and `arm-left`; a dropped entry's content is then orphaned.
+/// and `arm-left`. The next put writes the index without the dropped ones.
 fn keep_newest(mut index: Index) -> Index {
     // stable, so on a tie the entry listed first stays
     index.sort_by_key(|entry| Reverse(entry.reported_at));

@@ -3,7 +3,7 @@
 
 // internal crates
 use crate::test_utils::calibrations::{latest_cals_layout, latest_store, reported};
-use crate::test_utils::filesys::{access::make_read_only, dirs as test_dirs};
+use crate::test_utils::filesys::dirs as test_dirs;
 use miru_daemon::calibrations::{
     latest, CalibrationsErr, Filter, LatestStore, Report, ReportMetadata,
 };
@@ -173,31 +173,24 @@ async fn spawn_keeps_the_contents_when_the_index_is_corrupt() {
 }
 
 #[tokio::test]
-async fn spawn_keeps_only_the_newest_of_two_splits_of_one_key() {
+async fn spawn_keeps_an_older_splits_content_until_a_put_drops_it() {
     let f = Fixture::new().await;
-    let (_, joined) = f.write_two_splits().await;
+    let (split, joined) = f.write_two_splits().await;
 
     f.reopen().await;
 
     assert_eq!(f.entries().await, std::slice::from_ref(&joined));
-    assert_eq!(f.content_ids().await, [joined.report_id]);
-    // rewritten, so an older agent rolled back to doesn't list `split`
-    let index: serde_json::Value = files::read_json(&f.layout.index()).await.unwrap();
-    assert_eq!(index, serde_json::json!({ "entries": [joined] }));
-}
+    let mut both = [split.report_id, joined.report_id];
+    both.sort();
+    assert_eq!(f.content_ids().await, both);
 
-#[tokio::test]
-async fn spawn_keeps_the_contents_when_the_index_cannot_be_rewritten() {
-    let f = Fixture::new().await;
-    let (split, joined) = f.write_two_splits().await;
-    let read_only = make_read_only(&f.layout.root);
-
+    let leg = reported("leg", None, None);
+    put_all(&f.store, &[&leg]).await;
     f.reopen().await;
-    drop(read_only);
 
-    let mut want = [split.report_id, joined.report_id];
-    want.sort();
-    assert_eq!(f.content_ids().await, want);
+    let mut kept = [joined.report_id, leg.report_id];
+    kept.sort();
+    assert_eq!(f.content_ids().await, kept);
 }
 
 // =============================== CAPACITY =============================== //
