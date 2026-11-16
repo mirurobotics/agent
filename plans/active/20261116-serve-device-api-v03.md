@@ -73,7 +73,8 @@ How to see it, on a device running this build (Linux, as root or a `miru` group 
 
 ## Progress
 
-- [ ] M1: source: dependency and lint config, `flat_component`, `list_latest_flat`, `server/v03/`, router merge, docs.
+- [x] M1: source: dependency and lint config, `flat_component`, `list_latest_flat`, `server/v03/`, router merge, docs.
+- [x] Source written
 - [ ] M2: tests: `daemon/tests/server/v03/`, router test, `list_latest_flat` service tests, `flat_component` unit tests.
 - [ ] CI green on the pushed head (`$preflight` reports `CLEAN`).
 
