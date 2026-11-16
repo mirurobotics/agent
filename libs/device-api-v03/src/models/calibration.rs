@@ -9,7 +9,7 @@
 use crate::models;
 use serde::{Deserialize, Serialize};
 
-/// Calibration : The newest calibration the device has for one component, role and aspect.
+/// Calibration : The newest calibration the device has for one component.
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Calibration {
     /// The object type, which is always `calibration`.
@@ -18,15 +18,9 @@ pub struct Calibration {
     /// ID the agent gave the report this calibration came from. Download the content with it.
     #[serde(rename = "report_id")]
     pub report_id: uuid::Uuid,
-    /// Slug of the component the calibrated unit belongs to, as it was reported.
+    /// Slug of the component the calibrated unit belongs to.
     #[serde(rename = "component")]
     pub component: String,
-    /// Slug of the role the calibrated unit fills on the device, as it was reported; null if no role was reported.
-    #[serde(rename = "role", deserialize_with = "Option::deserialize")]
-    pub role: Option<String>,
-    /// Slug of the aspect of the unit that was calibrated, as it was reported; null if no aspect was reported.
-    #[serde(rename = "aspect", deserialize_with = "Option::deserialize")]
-    pub aspect: Option<String>,
     /// Serial number of the physical unit that was calibrated, not of the device, such as `SN-1234`, or null if none was reported. Free text, at most 255 characters.
     #[serde(rename = "serial_number", deserialize_with = "Option::deserialize")]
     pub serial_number: Option<String>,
@@ -39,14 +33,12 @@ pub struct Calibration {
 }
 
 impl Calibration {
-    /// The newest calibration the device has for one component, role and aspect.
-    pub fn new(object: Object, report_id: uuid::Uuid, component: String, role: Option<String>, aspect: Option<String>, serial_number: Option<String>, reported_by: Option<String>, reported_at: String) -> Calibration {
+    /// The newest calibration the device has for one component.
+    pub fn new(object: Object, report_id: uuid::Uuid, component: String, serial_number: Option<String>, reported_by: Option<String>, reported_at: String) -> Calibration {
         Calibration {
             object,
             report_id,
             component,
-            role,
-            aspect,
             serial_number,
             reported_by,
             reported_at,

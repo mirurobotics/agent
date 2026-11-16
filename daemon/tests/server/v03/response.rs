@@ -695,9 +695,7 @@ pub mod latest_calibrations_response {
         let expected = openapi::Calibration {
             object: openapi::calibration::Object::Calibration,
             report_id,
-            component: "arm".into(),
-            role: Some("left".into()),
-            aspect: None,
+            component: "arm-left".into(),
             serial_number: Some("SN-1".into()),
             reported_by: Some("Ada Lovelace".into()),
             reported_at: fixed_time().to_rfc3339(),

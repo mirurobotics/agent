@@ -14,8 +14,7 @@ use axum::{
 };
 
 pub fn table() -> Router<Arc<State>> {
-    // a literal until the v0.3 spec replaces the copied v0.2 one
-    let api_version = "v0.3".to_string();
+    let api_version = device_api_v03::models::ApiVersion::API_VERSION.to_string();
     Router::new()
         .merge(agent_info(&api_version))
         .merge(device(&api_version))

@@ -26,20 +26,23 @@ struct IndexFile {
     entries: Index,
 }
 
-/// Which entries to list. Empty means any; `None` in `role`/`aspect` matches an
-/// entry without one.
+/// Which entries to list. Empty means any. `legacy_component`, `role` and
+/// `aspect` match the parts an entry was reported with, where `None` matches
+/// an entry without one; `component` matches an entry's key.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Filter {
-    pub component: Vec<String>,
+    pub legacy_component: Vec<String>,
     pub role: Vec<Option<String>>,
     pub aspect: Vec<Option<String>>,
+    pub component: Vec<String>,
 }
 
 impl Filter {
     pub fn is_match(&self, metadata: &ReportMetadata) -> bool {
-        matches(&self.component, &metadata.component)
+        matches(&self.legacy_component, &metadata.component)
             && matches(&self.role, &metadata.role)
             && matches(&self.aspect, &metadata.aspect)
+            && matches(&self.component, &metadata.key())
     }
 }
 

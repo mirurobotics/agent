@@ -9,24 +9,24 @@ use device_api_v03::models as device_server;
 // external crates
 use serde::Deserialize;
 
-/// The role or aspect that the slug filters use to match a missing one, so
-/// a report can't use it.
-const NULL_SLUG: &str = "null";
+/// The create body: the v0.3 request, and the `role` and `aspect` that v0.2
+/// took, read only to reject them.
+#[derive(Debug, Deserialize)]
+pub struct CreateCalibrationBody {
+    #[serde(flatten)]
+    pub request: device_server::CreateCalibrationRequest,
+    pub role: Option<serde_json::Value>,
+    pub aspect: Option<serde_json::Value>,
+}
 
-/// Checks the request's shape and the reserved [`NULL_SLUG`]; Miru judges
-/// the rest.
-impl TryFrom<device_server::CreateCalibrationRequest> for calibration::CreateParams {
+/// Checks the request's shape and rejects v0.2's role and aspect; the
+/// control plane judges the rest.
+impl TryFrom<CreateCalibrationBody> for calibration::CreateParams {
     type Error = InvalidRequestErr;
 
-    fn try_from(request: device_server::CreateCalibrationRequest) -> Result<Self, Self::Error> {
-        for (field, slug) in [("role", &request.role), ("aspect", &request.aspect)] {
-            if slug.as_deref() == Some(NULL_SLUG) {
-                return Err(InvalidRequestErr {
-                    msg: format!("{field} '{NULL_SLUG}' is reserved"),
-                    trace: trace!(),
-                });
-            }
-        }
+    fn try_from(body: CreateCalibrationBody) -> Result<Self, Self::Error> {
+        reject_v02_fields(body.role.is_some(), body.aspect.is_some())?;
+        let request = body.request;
         let content = *request.content;
         let Some(format) = to_instance_format(content.format) else {
             return Err(InvalidRequestErr {
@@ -36,8 +36,8 @@ impl TryFrom<device_server::CreateCalibrationRequest> for calibration::CreatePar
         };
         Ok(calibration::CreateParams {
             component: request.component,
-            role: request.role,
-            aspect: request.aspect,
+            role: None,
+            aspect: None,
             serial_number: request.serial_number,
             reported_by: request.reported_by,
             format,
@@ -60,8 +60,9 @@ fn to_instance_format(format: device_server::InstanceFormat) -> Option<InstanceF
     }
 }
 
-/// The `GET /calibrations/latest` query. Each filter is a comma-separated
+/// The `GET /calibrations/latest` query. The filter is a comma-separated
 /// list, as the spec's `explode: false` sends it.
+/// `role` and `aspect` are the v0.2 filters, read only to reject them.
 #[derive(Debug, Default, Deserialize)]
 pub struct LatestCalibrationsQuery {
     pub component: Option<String>,
@@ -69,51 +70,28 @@ pub struct LatestCalibrationsQuery {
     pub aspect: Option<String>,
 }
 
-impl From<LatestCalibrationsQuery> for Filter {
-    fn from(query: LatestCalibrationsQuery) -> Self {
-        Filter {
+impl TryFrom<LatestCalibrationsQuery> for Filter {
+    type Error = InvalidRequestErr;
+
+    fn try_from(query: LatestCalibrationsQuery) -> Result<Self, Self::Error> {
+        reject_v02_fields(query.role.is_some(), query.aspect.is_some())?;
+        Ok(Filter {
             component: split_list(query.component),
-            role: split_slugs(query.role),
-            aspect: split_slugs(query.aspect),
+            ..Filter::default()
+        })
+    }
+}
+
+/// Rejects a `role` or `aspect`, which v0.3 removed, so a client that only
+/// changed the version fails instead of having it ignored.
+fn reject_v02_fields(has_role: bool, has_aspect: bool) -> Result<(), InvalidRequestErr> {
+    for (field, is_set) in [("role", has_role), ("aspect", has_aspect)] {
+        if is_set {
+            return Err(InvalidRequestErr {
+                msg: format!("{field} is not in v0.3; join it into component with '-'"),
+                trace: trace!(),
+            });
         }
     }
-}
-
-/// A list of role or aspect slugs, where [`NULL_SLUG`] matches a missing one.
-fn split_slugs(list: Option<String>) -> Vec<Option<String>> {
-    let slugs = split_list(list).into_iter();
-    slugs
-        .map(|slug| (slug != NULL_SLUG).then_some(slug))
-        .collect()
-}
-
-#[cfg(test)]
-mod tests {
-    // internal crates
-    use super::*;
-
-    #[test]
-    fn split_slugs_maps_null_to_none() {
-        let slugs = split_slugs(Some("left, null ,,right".into()));
-
-        assert_eq!(
-            slugs,
-            [Some("left".to_string()), None, Some("right".to_string())]
-        );
-    }
-
-    #[test]
-    fn split_slugs_matches_null_exactly() {
-        let slugs = split_slugs(Some("NULL,nullish".into()));
-
-        assert_eq!(
-            slugs,
-            [Some("NULL".to_string()), Some("nullish".to_string())]
-        );
-    }
-
-    #[test]
-    fn split_slugs_of_no_list_is_empty() {
-        assert!(split_slugs(None).is_empty());
-    }
+    Ok(())
 }

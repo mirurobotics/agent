@@ -72,9 +72,10 @@ pub struct LatestCalibrationsQuery {
 impl From<LatestCalibrationsQuery> for Filter {
     fn from(query: LatestCalibrationsQuery) -> Self {
         Filter {
-            component: split_list(query.component),
+            legacy_component: split_list(query.component),
             role: split_slugs(query.role),
             aspect: split_slugs(query.aspect),
+            component: Vec::new(),
         }
     }
 }

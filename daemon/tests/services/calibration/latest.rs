@@ -42,7 +42,7 @@ async fn list_latest_applies_the_filter() {
     };
     let created = f.create(leg).await.unwrap();
     let filter = Filter {
-        component: vec!["leg".to_string()],
+        legacy_component: vec!["leg".to_string()],
         ..Filter::default()
     };
 
