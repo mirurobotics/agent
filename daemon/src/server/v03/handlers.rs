@@ -6,7 +6,8 @@ use std::sync::Arc;
 use crate::errors::Error;
 use crate::server::{
     errors::*,
-    routes,
+    request::{reject_body, reject_query},
+    response::calibration_content,
     state::State,
     v03::{request, response},
 };
@@ -14,7 +15,6 @@ use crate::services::{
     calibration as calibration_svc, deployment as dpl_svc, device as dvc_svc,
     file_rule as file_rule_svc, git_commit as git_cmt_svc, release as rls_svc, HttpBackend,
 };
-use crate::trace;
 use crate::version;
 use device_api_v03::models as device_server;
 
@@ -229,31 +229,9 @@ pub async fn get_latest_calibration_content(
     Path(report_id): Path<String>,
 ) -> Response {
     match calibration_svc::get_content(&state.latest_cals, &report_id).await {
-        Ok(content) => response::calibration_content(content),
+        Ok(content) => calibration_content(content),
         Err(e) => error_response(e.into(), "Error getting calibration content").into_response(),
     }
-}
-
-/// A body over the limit is 413; any other unreadable body is 422.
-fn reject_body(rejection: JsonRejection) -> ServerErr {
-    if rejection.status() == StatusCode::PAYLOAD_TOO_LARGE {
-        return ServerErr::CalibrationRequestTooLargeErr(CalibrationRequestTooLargeErr {
-            max_request_bytes: routes::MAX_REQUEST_BYTES,
-            trace: trace!(),
-        });
-    }
-    ServerErr::InvalidRequestErr(InvalidRequestErr {
-        msg: rejection.body_text(),
-        trace: trace!(),
-    })
-}
-
-/// An unreadable query, such as a repeated filter, is 422.
-fn reject_query(rejection: QueryRejection) -> ServerErr {
-    ServerErr::InvalidRequestErr(InvalidRequestErr {
-        msg: rejection.body_text(),
-        trace: trace!(),
-    })
 }
 
 // ================================ UTILITIES ====================================== //
