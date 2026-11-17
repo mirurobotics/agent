@@ -5,13 +5,17 @@ use std::time::Duration;
 
 // internal crates
 use crate::calibrations::{
-    errors::{CalibrationsErr, ReceiveActorMessageErr, SendActorMessageErr},
+    errors::{
+        CalibrationsErr, LatestCalibrationNotFoundErr, ReceiveActorMessageErr,
+        SendActorMessageErr,
+    },
     invalidation::Invalidation,
     latest::LatestStore,
     queue::{QueueEntry, QueueSnapshotFile},
     report::{Report, ReportMetadata},
     sender::Sender,
     uploader_impl::{NextAttempt, UploaderImpl, UploaderOptions},
+    Filter,
 };
 use crate::filesys::Dir;
 use crate::trace;
@@ -44,7 +48,8 @@ enum Command {
         respond_to: oneshot::Sender<Result<(), CalibrationsErr>>,
     },
     Invalidate {
-        report_id: Uuid,
+        component: String,
+        report_id: Option<Uuid>,
         invalidation: Invalidation,
         respond_to: oneshot::Sender<Result<ReportMetadata, CalibrationsErr>>,
     },
@@ -113,20 +118,21 @@ where
         Ok(())
     }
 
-    /// Queue the upload of `invalidation` for the latest entry with
-    /// `report_id`, then mark the entry invalid. An entry that is already
-    /// invalid is returned unchanged and nothing is queued. A failed store
-    /// write removes the queued invalidation, so on error nothing changes.
+    /// Queue the upload of `invalidation` for `component`'s latest entry, then
+    /// mark the entry invalid. An entry that is already invalid is returned
+    /// unchanged and nothing is queued. A failed store write removes the
+    /// queued invalidation, so on error nothing changes.
     async fn invalidate(
         &mut self,
-        report_id: Uuid,
+        component: String,
+        report_id: Option<Uuid>,
         invalidation: Invalidation,
     ) -> Result<ReportMetadata, CalibrationsErr> {
-        let entry = self.latest.get(report_id).await?.metadata;
+        let entry = self.latest_entry(component, report_id).await?;
         if entry.invalidated_at.is_some() {
             return Ok(entry);
         }
-        let invalidated_at = invalidation.invalidated_at;
+        let (report_id, invalidated_at) = (entry.report_id, invalidation.invalidated_at);
         let id = self
             .uploader
             .enqueue_invalidation(report_id, invalidation)
@@ -137,6 +143,28 @@ where
                 self.uploader.remove(id).await;
                 Err(e)
             }
+        }
+    }
+
+    /// `component`'s latest entry, if `report_id` is unset or names it.
+    async fn latest_entry(
+        &self,
+        component: String,
+        report_id: Option<Uuid>,
+    ) -> Result<ReportMetadata, CalibrationsErr> {
+        let filter = Filter {
+            component: vec![component.clone()],
+            ..Filter::default()
+        };
+        // a key has at most one entry
+        match self.latest.list(&filter).await?.pop() {
+            Some(entry) if report_id.is_none_or(|id| id == entry.report_id) => Ok(entry),
+            _ => Err(LatestCalibrationNotFoundErr {
+                component,
+                report_id,
+                trace: trace!(),
+            }
+            .into()),
         }
     }
 
@@ -187,11 +215,12 @@ where
                 respond(respond_to, result, "enqueue_report");
             }
             Command::Invalidate {
+                component,
                 report_id,
                 invalidation,
                 respond_to,
             } => {
-                let result = self.invalidate(report_id, invalidation).await;
+                let result = self.invalidate(component, report_id, invalidation).await;
                 respond(respond_to, result, "invalidate");
             }
             Command::Len { respond_to } => respond(respond_to, self.uploader.len(), "len"),
@@ -260,16 +289,20 @@ impl Uploader {
         .await?
     }
 
-    /// Mark the latest entry for `report_id` invalid and queue the
-    /// invalidation's upload, unless the entry already is invalid, and return
-    /// the entry. Not found unless an entry has that `report_id`; a full queue
-    /// is the 507 [`CalibrationsErr::QueueFullErr`].
+    /// Mark `component`'s latest entry invalid and queue the invalidation's
+    /// upload, unless the entry already is invalid, and return the entry. With
+    /// `report_id`, that report must still be the latest. Otherwise, or when
+    /// the component has no entry, it is the 404
+    /// [`CalibrationsErr::LatestNotFoundErr`]; a full queue is the 507
+    /// [`CalibrationsErr::QueueFullErr`].
     pub async fn invalidate(
         &self,
-        report_id: Uuid,
+        component: String,
+        report_id: Option<Uuid>,
         invalidation: Invalidation,
     ) -> Result<ReportMetadata, CalibrationsErr> {
         self.send_command("invalidate", |respond_to| Command::Invalidate {
+            component,
             report_id,
             invalidation,
             respond_to,

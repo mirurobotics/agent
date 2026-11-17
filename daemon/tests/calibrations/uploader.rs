@@ -222,6 +222,22 @@ fn invalidation(reason: &str) -> Invalidation {
     }
 }
 
+/// Invalidate `component`'s latest calibration for `reason`, if it is
+/// `report_id` when that is set.
+async fn invalidate(
+    h: &Harness,
+    component: &str,
+    report_id: Option<Uuid>,
+    reason: &str,
+) -> Result<ReportMetadata, CalibrationsErr> {
+    let invalidation = invalidation(reason);
+    guard(
+        h.uploader()
+            .invalidate(component.to_string(), report_id, invalidation),
+    )
+    .await
+}
+
 #[tokio::test]
 async fn startup_prunes_orphaned_report_files() {
     let mut h = Harness::new();
@@ -346,12 +362,7 @@ async fn an_invalidation_is_stored_and_uploaded() {
     h.await_drained(&["a"]).await;
     let report_id = report("a").metadata.report_id;
 
-    let invalidated = guard(
-        h.uploader()
-            .invalidate(report_id, invalidation("power cycle")),
-    )
-    .await
-    .unwrap();
+    let invalidated = invalidate(&h, "a", None, "power cycle").await.unwrap();
 
     let invalidated_at = invalidation("power cycle").invalidated_at;
     assert_eq!(invalidated.invalidated_at, Some(invalidated_at));
@@ -374,14 +385,9 @@ async fn an_invalid_entry_is_returned_unchanged_and_not_queued_again() {
     h.report("a").await;
     h.await_drained(&["a"]).await;
     let report_id = report("a").metadata.report_id;
-    let first = guard(
-        h.uploader()
-            .invalidate(report_id, invalidation("power cycle")),
-    )
-    .await
-    .unwrap();
+    let first = invalidate(&h, "a", None, "power cycle").await.unwrap();
 
-    let again = guard(h.uploader().invalidate(report_id, invalidation("dropped")))
+    let again = invalidate(&h, "a", Some(report_id), "dropped")
         .await
         .unwrap();
 
@@ -390,20 +396,21 @@ async fn an_invalid_entry_is_returned_unchanged_and_not_queued_again() {
 }
 
 #[tokio::test]
-async fn invalidating_an_unknown_report_queues_nothing() {
+async fn invalidating_an_unknown_component_or_a_stale_report_queues_nothing() {
     let mut h = Harness::new();
     h.spawn().await;
-    let report_id = Uuid::new_v4();
+    h.report("a").await;
+    h.await_drained(&["a"]).await;
 
-    let err = guard(
-        h.uploader()
-            .invalidate(report_id, invalidation("power cycle")),
-    )
-    .await
-    .unwrap_err();
+    for (component, report_id) in [("b", None), ("a", Some(Uuid::new_v4()))] {
+        let err = invalidate(&h, component, report_id, "power cycle")
+            .await
+            .unwrap_err();
 
-    assert!(matches!(err, CalibrationsErr::NotFoundErr(_)), "{err:?}");
+        assert!(matches!(err, CalibrationsErr::LatestNotFoundErr(_)), "{err:?}");
+    }
     assert_eq!(h.num_queued_uploads().await, 0);
+    assert_eq!(h.latest_entries().await, [report("a").metadata]);
 }
 
 #[tokio::test]
@@ -417,14 +424,8 @@ async fn a_full_queue_leaves_the_entry_valid() {
     };
     h.spawn_with(options).await;
     h.report("a").await;
-    let report_id = report("a").metadata.report_id;
 
-    let err = guard(
-        h.uploader()
-            .invalidate(report_id, invalidation("power cycle")),
-    )
-    .await
-    .unwrap_err();
+    let err = invalidate(&h, "a", None, "power cycle").await.unwrap_err();
 
     assert!(matches!(err, CalibrationsErr::QueueFullErr(_)), "{err:?}");
     assert_eq!(h.latest_entries().await, [report("a").metadata]);
@@ -436,15 +437,9 @@ async fn a_failed_store_write_removes_the_queued_invalidation() {
     h.spawn().await;
     h.report("a").await;
     h.await_drained(&["a"]).await;
-    let report_id = report("a").metadata.report_id;
     let _read_only = make_read_only(&h.latest_layout.root);
 
-    let err = guard(
-        h.uploader()
-            .invalidate(report_id, invalidation("power cycle")),
-    )
-    .await
-    .unwrap_err();
+    let err = invalidate(&h, "a", None, "power cycle").await.unwrap_err();
 
     assert!(matches!(err, CalibrationsErr::FileSysErr(_)), "{err:?}");
     assert_eq!(h.num_queued_uploads().await, 0);
