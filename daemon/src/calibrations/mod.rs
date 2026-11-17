@@ -21,7 +21,7 @@ pub use self::latest::LatestStore;
 pub use self::latest_impl::Filter;
 pub use self::pull::{pull_latest, pull_latest_until_success};
 pub use self::queue::{Queue, QueueEntry, QueueSnapshot, QueueSnapshotFile};
-pub use self::report::{Invalidation, Report, ReportMetadata};
+pub use self::report::{Report, ReportMetadata};
 pub use self::sender::{HttpSender, Sender};
 pub use self::uploader::{Uploader, UploaderArgs};
 pub use self::uploader_impl::UploaderOptions;

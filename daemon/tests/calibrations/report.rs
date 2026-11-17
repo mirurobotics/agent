@@ -3,26 +3,10 @@
 // internal crates
 use crate::test_utils::calibrations::{full_metadata, report_id};
 use backend_api::models::{self as backend_client, BaseExternalUser};
-use miru_daemon::calibrations::{Invalidation, ReportMetadata};
+use miru_daemon::calibrations::ReportMetadata;
 
 // external crates
 use chrono::{DateTime, Utc};
-
-/// An invalidation made an hour after a `full_metadata` report was received.
-fn invalidation() -> Invalidation {
-    Invalidation {
-        invalidated_at: DateTime::from_timestamp(4600, 0).unwrap(),
-        reason: "sensor was bumped".to_string(),
-    }
-}
-
-/// `full_metadata(name)` marked invalid.
-fn invalidated(name: &str) -> ReportMetadata {
-    ReportMetadata {
-        invalidation: Some(invalidation()),
-        ..full_metadata(name)
-    }
-}
 
 mod from_backend {
     use super::*;
@@ -64,49 +48,26 @@ mod from_backend {
     }
 
     #[test]
-    fn maps_an_invalidation() {
+    fn maps_invalidated_at() {
         let found = ReportMetadata::from(backend_client::Calibration {
             invalidated_at: Some("1970-01-01T01:16:40Z".to_string()),
             invalidation_reason: Some("sensor was bumped".to_string()),
             ..calibration()
         });
-        assert_eq!(found, invalidated("arm"));
-    }
-
-    #[test]
-    fn a_missing_invalidation_reason_is_empty() {
-        let found = ReportMetadata::from(backend_client::Calibration {
-            invalidated_at: Some("1970-01-01T01:16:40Z".to_string()),
-            ..calibration()
-        });
-        let expected = Invalidation {
-            reason: String::new(),
-            ..invalidation()
+        let expected = ReportMetadata {
+            invalidated_at: Some(DateTime::from_timestamp(4600, 0).unwrap()),
+            ..full_metadata("arm")
         };
-        assert_eq!(found.invalidation, Some(expected));
-    }
-
-    #[test]
-    fn a_reason_without_invalidated_at_is_valid() {
-        let found = ReportMetadata::from(backend_client::Calibration {
-            invalidation_reason: Some("sensor was bumped".to_string()),
-            ..calibration()
-        });
-        assert_eq!(found.invalidation, None);
+        assert_eq!(found, expected);
     }
 
     #[test]
     fn an_unparseable_invalidated_at_is_the_epoch() {
         let found = ReportMetadata::from(backend_client::Calibration {
             invalidated_at: Some("not a time".to_string()),
-            invalidation_reason: Some("sensor was bumped".to_string()),
             ..calibration()
         });
-        let expected = Invalidation {
-            invalidated_at: DateTime::<Utc>::UNIX_EPOCH,
-            ..invalidation()
-        };
-        assert_eq!(found.invalidation, Some(expected));
+        assert_eq!(found.invalidated_at, Some(DateTime::<Utc>::UNIX_EPOCH));
     }
 
     #[test]

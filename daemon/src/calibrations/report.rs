@@ -22,7 +22,7 @@ pub struct Report {
     pub data: String,
 }
 
-/// A report's metadata. Everything but the invalidation is captured at
+/// A report's metadata. Everything but `invalidated_at` is captured at
 /// intake, so an upload hours later still reports the deployment and time the
 /// calibration was taken under.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -47,17 +47,11 @@ pub struct ReportMetadata {
     pub deployment_id: Option<String>,
     /// When the agent received the calibration.
     pub reported_at: DateTime<Utc>,
-    /// Set when a device app marks the latest calibration invalid, and never
-    /// on intake; a newer report for the key replaces the entry.
+    /// When a device app marked the calibration invalid, or `None` while it
+    /// is valid. Never set at intake; a newer report for the key replaces the
+    /// entry.
     #[serde(default)]
-    pub invalidation: Option<Invalidation>,
-}
-
-/// When and why a device app marked a calibration invalid.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Invalidation {
-    pub invalidated_at: DateTime<Utc>,
-    pub reason: String,
+    pub invalidated_at: Option<DateTime<Utc>>,
 }
 
 impl ReportMetadata {
@@ -96,20 +90,11 @@ impl From<backend_client::Calibration> for ReportMetadata {
             reported_by: calibration.reported_by.flatten().map(|u| u.identifier),
             deployment_id: calibration.deployment_id,
             reported_at: parse_time(&calibration.reported_at, "reported_at"),
-            invalidation: to_invalidation(
-                calibration.invalidated_at,
-                calibration.invalidation_reason,
-            ),
+            invalidated_at: calibration
+                .invalidated_at
+                .map(|time| parse_time(&time, "invalidated_at")),
         }
     }
-}
-
-/// The control plane's invalidation, which it sets whole or not at all.
-fn to_invalidation(invalidated_at: Option<String>, reason: Option<String>) -> Option<Invalidation> {
-    Some(Invalidation {
-        invalidated_at: parse_time(&invalidated_at?, "invalidated_at"),
-        reason: reason.unwrap_or_default(),
-    })
 }
 
 fn parse_time(value: &str, field: &str) -> DateTime<Utc> {

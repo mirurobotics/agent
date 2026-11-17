@@ -5,7 +5,7 @@
 use crate::test_utils::calibrations::{latest_cals_layout, latest_store, received_at, reported};
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_daemon::calibrations::{
-    latest, CalibrationsErr, Filter, Invalidation, LatestStore, Report, ReportMetadata,
+    latest, CalibrationsErr, Filter, LatestStore, Report, ReportMetadata,
 };
 use miru_daemon::disk::layout::LatestCalsLayout;
 use miru_daemon::filesys::{dirs, files, File, PathExt, WriteOptions};
@@ -528,31 +528,25 @@ async fn list_reads_back_an_invalidated_entry() {
     let valid = reported("arm", None, None);
     let invalidated_at = received_at() + TimeDelta::hours(1);
     let mut entry = serde_json::to_value(&valid).unwrap();
-    entry["invalidation"] = serde_json::json!({
-        "invalidated_at": invalidated_at.to_rfc3339(),
-        "reason": "power cycle",
-    });
+    entry["invalidated_at"] = serde_json::json!(invalidated_at.to_rfc3339());
     let index = serde_json::json!({ "entries": [entry] });
     files::write_json(&f.layout.index(), &index, WriteOptions::OVERWRITE_ATOMIC)
         .await
         .unwrap();
 
     let invalidated = ReportMetadata {
-        invalidation: Some(Invalidation {
-            invalidated_at,
-            reason: "power cycle".to_string(),
-        }),
+        invalidated_at: Some(invalidated_at),
         ..valid
     };
     assert_eq!(f.entries().await, [invalidated]);
 }
 
 #[tokio::test]
-async fn an_entry_written_without_an_invalidation_reads_as_valid() {
+async fn an_entry_written_without_invalidated_at_reads_as_valid() {
     let f = Fixture::new().await;
     let arm = reported("arm", None, None);
     let mut entry = serde_json::to_value(&arm).unwrap();
-    entry.as_object_mut().unwrap().remove("invalidation");
+    entry.as_object_mut().unwrap().remove("invalidated_at");
     let index = serde_json::json!({ "entries": [entry] });
     files::write_json(&f.layout.index(), &index, WriteOptions::OVERWRITE_ATOMIC)
         .await
