@@ -1,17 +1,15 @@
 # Architecture
 
-This document describes the high-level architecture of the Miru Agent. If you want to familiarize yourself with the codebase, you are in the right place.
+This document describes the high-level architecture of the Miru Agent. If you want to familiarize yourself with the codebase, you are in the right place. It says what each part does and how the parts fit together; the details live in the code.
 
 ## Bird's Eye View
 
-The agent is a Rust binary that runs on customer devices (robots). It solves one core problem: keeping device configurations in sync with what the user defined in the Miru platform. It pulls configuration deployments from the Miru backend, applies them to a target directory on disk, and reports status back. It also exposes a local Unix socket server so that on-device applications can query the device state.
+The agent is a Rust binary that runs on customer devices (robots). It solves one core problem: keeping device configurations in sync with what the user defined in the Miru platform. It pulls configuration deployments from the control plane, applies them to a target directory on disk, and reports status back. It also serves a local Device API so that on-device applications can query and act on the device state.
 
 The binary has two mutually exclusive modes, selected at startup:
 
-- **Provision mode** (`--provision`): activates a new device by reading a provisioning token from the environment, registering with the backend, and writing device identity and auth files to disk. Adding `--check` short-circuits into a local, offline, read-only probe that reports provisioning state through the exit code instead — `0` provisioned, `3` not provisioned, `1` state could not be determined (message on stderr).
-- **Agent runtime mode** (default): reads settings from disk, initializes shared state (AppState), starts background workers (MQTT subscriber, poller, token refresh), serves a local HTTP server, and waits for a shutdown signal. On Windows it runs as service `miru-agent` under the Service Control Manager, as virtual account `NT SERVICE\miru-agent`, unless `--console` is passed, which keeps it in the foreground with ctrl-c shutdown; `--console` is accepted and ignored on Unix. Ctrl-c and SCM STOP share one `Latch` and abort startup upgrade between attempts (never mid-reset).
-
-These modes do not share runtime state.
+- **Provision mode** (`--provision`): activates a new device by registering it with the control plane and writing its identity and auth files to disk. `--check` instead reports, offline, whether the device is provisioned.
+- **Agent runtime mode** (default): loads settings and shared state (`AppState`), starts the background workers and the Device API server, and runs until a shutdown signal. On Windows it runs as a service unless `--console` is passed.
 
 ## Codemap
 
@@ -19,59 +17,57 @@ All source lives under `daemon/src/`. The binary entry point is `main.rs`.
 
 ### Core infrastructure
 
-`cli` — command-line argument parsing. Determines provision vs runtime mode and parses `--console` (foreground instead of Windows service).
+`cli` — command-line argument parsing.
 
-`errors` — custom Error trait with `code()`, `http_status()`, `params()`, `is_network_conn_err()` methods. All error types derive `thiserror::Error`. Aggregating enums use the `impl_error!` macro defined here.
+`errors` — the shared `Error` trait and the `impl_error!` macro.
 
-`filesys` — file, directory, and path abstractions. Types `Dir`, `File`, and the `PathExt` trait.
+`filesys` — file, directory, and path abstractions.
 
-`logs` — tracing-subscriber setup with file rotation. Configured via `logs::Options`.
+`logs` — tracing setup with file rotation.
 
 `models` — shared data types (Device, Deployment, Release, etc.).
 
-`platform` — per-OS defaults (data root, log dir). OS-specific functions compile on every target so they are testable from any host.
+`platform` — per-OS defaults, such as the data root and log directory.
 
-`shutdown` — process-wide stop latch (`Latch`) and agent-body outcome (`RunOutcome`). Used on every OS; the Windows SCM maps `RunOutcome` to a service exit code.
+`shutdown` — the process-wide stop latch and the agent's run outcome.
 
-`windows` — Windows Service Control Manager integration. `windows::scm` exposes `dispatch` and `run` (`cfg(windows)`); the binary owns `ServiceMain` next to the agent body. `windows::errors` compiles everywhere so Linux can test `NotLaunchedByScm`.
+`windows` — Windows Service Control Manager integration.
 
-`version` — build-time version string. Embedded by `build.rs` from git commit hash and build date.
+`version` — build-time version string.
 
 ### Networking
 
-`http` — reqwest-based HTTP client with configurable retry and backoff. Type `http::Client`. All backend API calls go through this; it handles auth headers automatically.
+`http` — the HTTP client for the control plane, with retry, backoff, and auth headers.
 
-`mqtt` — rumqttc-based MQTT subscriber. Listens for real-time events from the backend (e.g., new deployment available) so the agent can react immediately instead of waiting for the next poll.
+`mqtt` — MQTT subscriber for real-time events from the control plane, so the agent reacts without waiting for the next poll.
 
-`server` — axum HTTP server exposing device state, health, and action endpoints for on-device applications, the CLI, and the frontend. One router (`server/routes.rs`) is served over two transports: a Unix socket (`/run/miru/miru.sock`, `server/unix.rs`, unix only; on by default via `settings.enable_socket_server`) and, when `settings.enable_tcp_server` is set, IPv4 loopback TCP (`127.0.0.1:<port>`, `server/tcp.rs`, all platforms; on by default only on Windows; the default port is 6478, and port `0` is OS-assigned). A failed TCP bind is logged and the agent runs without the listener. Nothing is ever bound on a non-loopback interface. The TCP transport returns 403 unless the request host is `127.0.0.1:<port>` or `localhost:<port>`, and when an Origin header is present it must be that same loopback URL, which blocks DNS rebinding and cross-site requests from browsers on the device. After the loopback check, every TCP request (including `/v0.2/health` and `/v0.2/events`) must carry `Authorization: Bearer <token>`, else the agent returns 401 with `WWW-Authenticate: Bearer` (`server/auth.rs`, constant-time compare). The token is 32 random bytes encoded as 43 base64url characters, regenerated at every start, and kept out of `Debug` output and logs (Authorization headers are marked sensitive before request tracing on both transports). The app layer (`app/run.rs`) owns the token and the discovery file: after binding it mints the token, writes `{port, token}` atomically to the discovery file (`disk/device_api.rs`), and passes the token to `tcp::serve`, which only enforces it. The file is `/run/miru/device-api.json` on Linux (mode 0640, beside the socket, so clients do not read the private data root) and `C:\ProgramData\Miru\device-api\device-api.json` on Windows (readable through the installer-set directory ACL by SYSTEM, Administrators, the service, and members of the local `Miru Agent Users` group). The shutdown manager removes the file after the TCP server stops, and startup removes any stale copy, so no file means TCP is not being served. Clients read the port and token from the file and close it right away; they treat a missing file or a refused connection as not serving, and re-read the file on a 401, since the token rotates on restart. On Windows the agent retries the discovery write and removal briefly, because a reader holding the file open without delete sharing blocks both. A token or discovery-file failure is logged and the agent runs without the TCP listener. The Unix socket stays unauthenticated (file mode 0660, group `miru`). On Linux, systemd's `miru.socket` unit owns the Unix socket and hands it to the agent through socket activation (`LISTEN_FDS`); the agent binds the TCP listener itself. Each Device API version is a module (`server/v02/`, `server/v03/`) holding its route table, handlers and wire conversions over one generated crate, which nothing outside the module imports, and `server/routes.rs` merges the versions and applies the shared middleware. Code that builds no wire type, such as the event stream (`server/sse.rs`, which takes the version's event conversion) and request rejections (`server/request.rs`), lives in `server/` and is shared by the versions. Route handlers live in each version's `handlers.rs`. `/v0.3` reports the device's last sync, connection and disconnection, and the sync cooldown, as whole seconds measured against the system wall clock when it builds the response (`GET /v0.3/device`, `POST /v0.3/sync`). A time still at the epoch it defaults to is null, since it never happened. The device file keeps its times across restarts, so `GET /v0.3/device` can report the previous run's. The wall clock can be wrong at boot, and a clock that NTP steps can make a duration wrong until the next event.
+`server` — the local Device API for on-device applications, the CLI, and the frontend. One router is served over a Unix socket (Unix only, unauthenticated and protected by its file permissions) and a loopback-only TCP listener (on by default only on Windows) that requires a bearer token published in a discovery file. Each Device API version (`v02`, `v03`) is its own module over its generated crate, which nothing outside that module imports; code that builds no wire type lives in `server/` and is shared by the versions.
 
 ### Security
 
-`authn` — JWT token lifecycle. Type `TokenManager` handles background refresh and persistence via `TokenFile`. Spawns as a background task; communicates via channels.
+`authn` — JWT lifecycle: background refresh and persistence of the device token.
 
-`crypt` — RSA key handling and JWT creation/parsing. Types `jwt::Claims`, RSA key loading functions.
+`crypt` — RSA key handling and JWT creation and parsing.
 
 ### Business logic
 
-`sync` — orchestrates full state synchronization with the backend. Type `Syncer` is the main coordination point; it fetches device state, identifies needed deployments, and drives the deploy pipeline.
+`sync` — orchestrates synchronization with the control plane: fetches device state, finds the deployments needed, and drives the deploy pipeline.
 
-`deploy` — deployment state machine. The FSM in `deploy/fsm` manages the lifecycle: download artifacts to a staging directory, apply to the target config directory, report status. `deploy/apply` handles the actual file operations.
+`deploy` — deployment state machine: downloads artifacts to staging, applies them to the target config directory, and reports status.
 
-`data_uploads/` — parent module for the file-upload pipeline. Submodule `scan` watches rule-configured directories and emits stable files to sinks (the `StableFileSink` seam in `scan/sink.rs`); submodule `upload` queues and executes uploads to object storage; submodule `retention` queues files for deletion and deletes each once its TTL passes. In `retention`, the single-threaded queue state and sweep logic live in `DeleterImpl` (`deleter_impl.rs`), and `deleter.rs` wraps it with the actor worker and the `Deleter` handle. In `upload`, a non-terminal failure after an attempt of `LONG_ATTEMPT` or more, most likely from storage credentials that expired mid-transfer, is retried without counting as an attempt (`queue::RetryPolicy::on_uncounted_failure`). The drivers that schedule the scanner live in `workers/` (`scan.rs`, `sync_scan_bridge.rs`), not here.
+`data_uploads` — the file-upload pipeline: scans configured directories for stable files, uploads them to object storage, and deletes them once their retention expires.
 
-`queue` — the generic persisted job queue. Type `FileQueue<J: QueueJob>` (`queue/file.rs`) is a FIFO with entry ids, attempt counts, `next_attempt_at` backoff and a capacity limit, kept in memory and saved as one atomically written JSON snapshot file. The upload and retention workers in `data_uploads/` each instantiate it with their own job type, and the calibration uploader uses a durable one. `FileQueue::next_attempt` gives a worker the ready entry, `Empty`, or how long to wait for the earliest deadline, after pulling in any deadline past a horizon. `queue::RetryPolicy` (`queue/retry.rs`) is a retry rule for uploaders, used by `data_uploads::upload` and `calibrations`: a network error isn't counted and waits a flat `base_secs`, while any other failure counts, backs off exponentially, and drops the job when terminal or out of attempts. Any failing job older than `max_age` is dropped. `on_failure` returns the `Verdict`; the uploader does its own logging and side effects.
+`queue` — a generic, persisted job queue with backoff and a shared retry policy, used by the uploaders and the retention deleter.
 
-`calibrations/` — calibration reports accepted from the Device API. `POST /v0.2/calibrations` (`server/v02/handlers.rs`) checks only the request's shape and the reserved `null` role and aspect (else 422 `invalid_request`) and body size (a body over `routes::MAX_REQUEST_BYTES`, about 2 MiB and the limit for every route, is 413 `calibration_too_large`), then hands it to `services::calibration` and returns the report's `report_id` and `reported_at` without waiting on the control plane. `POST /v0.3/calibrations` (`server/v03/handlers.rs`) takes a flat `component` with no role or aspect, and queues the report without them; a non-null `role` or `aspect` in the body, or one in `GET /v0.3/calibrations/latest`'s query, is 422 `invalid_request`, so a client that only changed the version fails. Each report's metadata (`ReportMetadata`, including the data's `InstanceFormat`) is queued in a durable `calibrations::Queue` (a `FileQueue`) at `calibrations/queue.json`, and its data is its own file, `calibrations/reports/<entry id>`, kept exactly as given, so large data is never rewritten with the queue. At most 1,000 reports of up to 1 MiB of data each (`UploaderOptions`). The queue entry is written before the report file and removed before it, so a crash leaves either an entry without a file, which the uploader drops when it reaches it, or a file without an entry, which `prune_orphans` deletes at startup. A report file that isn't UTF-8 is dropped like a report the control plane rejects. `CalibrationsErr` maps a full queue to 507 `calibration_buffer_full` and an oversized report to 413 `calibration_too_large`. `calibrations::Uploader` is an actor that owns the buffer: callers send it reports, and it uploads them to the control plane one at a time, oldest due first, serving new reports during an upload or a backoff so callers never wait on the network. Its single-threaded queue state, retry logic and `Sender` live in `UploaderImpl` (`uploader_impl.rs`), which the actor's worker runs. A failed report is retried at the tail of the queue after its own backoff, as in `data_uploads::upload`, so one failing report never blocks the others. Retries follow the default `queue::RetryPolicy` (10 s doubling to 1 h, at most 30 attempts, with network errors waiting a flat 10 s and not counted), except that a report is dropped only once it is still failing 90 days after `reported_at`, not 7: a calibration is costly to redo, and the queue cap already bounds its storage. Reports the control plane permanently rejects are dropped with an error log. Without a queue file (`UploaderArgs::snapshot_file` is `None`) the queue lives in memory, so reports queued during that run are lost at a restart, and `prune_orphans` deletes nothing, so the report files that `queue.json` still names survive until a boot can open it; a corrupt `queue.json` is copied aside and started empty, as for every state file, and `prune_orphans` then deletes the report files it named. `HttpSender` (behind the `Sender` seam) sends one report as a single `POST /calibrations`. Each report's metadata carries a `report_id` minted at intake, sent on every retry and after a restart, so the control plane records the calibration once; a token failure is never terminal, and a 2xx whose body cannot be parsed counts as sent. `AppState` spawns the calibration uploader at startup with an `HttpSender`, falling back to an in-memory queue if `queue.json` cannot be opened, and shuts it down first.
+`calibrations` — calibration reports from the Device API. Reports are buffered on disk and uploaded to the control plane in the background, so callers never wait on the network. A local store keeps the latest calibration for each component, so apps can read it, or mark it invalid, offline; at startup it pulls any newer calibrations from the control plane.
 
-The calibration uploader's worker also writes the latest calibrations store (`calibrations::LatestStore`) beside `UploaderImpl`, and keeps the two in step itself, so `UploaderImpl` knows nothing of the store. The store is its own actor: its single-threaded logic lives in `LatestStoreImpl` (`latest_impl.rs`), and `latest.rs` wraps it with the worker and the cloneable `LatestStore` handle, as `uploader.rs` does for `UploaderImpl`. Reads go to the store directly, from `AppState::latest_cals`: `GET /v0.2/calibrations/latest` lists the entries its `component`, `role` and `aspect` filters match, and `GET /v0.2/calibrations/latest/{report_id}/content` returns an entry's data with its format's `Content-Type`, neither calling the control plane. `GET /v0.3/calibrations/latest` lists each entry under its flat component, its key, with its `invalidated_at`, and its `component` filter matches the key; `/v0.3` serves the same content route. `POST /v0.3/calibrations/latest/invalidate` returns the entry through `services::calibration::invalidate`, which sets `invalidated_at` on a component's entry, its latest calibration, and queues an `Invalidation`, the entry's `report_id` with that time and the app's reason, for upload. Given a `report_id`, it acts only if that report is still the entry, so an app never invalidates a newer report than the one it checked; otherwise, or when the component has no entry, it is 404 `resource_not_found`. The reason must not be blank or over 512 characters, as the control plane requires, or it is 422 `invalid_request` and nothing is queued. The service reads the entry from the store, and returns an entry that is already invalid as it is, queueing nothing. Otherwise it hands the `Invalidation` to the calibration uploader, whose worker queues it for upload, then marks the entry with that `report_id` in the store. The upload is what counts, so the job stays queued whatever the store write does: if a newer report replaced the entry since the read, the write is skipped and the call succeeds; any other failed write fails the call, and the app can retry. Overlapping calls or a retry can queue more than one upload; the store keeps the first invalidation it writes, so after a retry its `invalidated_at` can differ from the control plane's. A newer report for the key replaces the invalidated entry. The queue holds `calibrations::Job`s, each a report or an invalidation. A queued invalidation is just the `Invalidation`, the report's `report_id` with the time and reason, and has no report file. A report is still queued as its bare metadata, so a `queue.json` from an older agent loads after an upgrade. `HttpSender` sends it as one `POST /calibrations/invalidate`. A 404 means the control plane hasn't recorded the report yet, as when the report is still queued, so it is retried like any other failure. The store holds the newest report for each flat component, its key, in its own files, not the shared caches: `calibrations/latest/index.json` lists one entry per key under `entries`, an object as `queue.json` is, and `contents/` holds each entry's data in a file named by its `report_id`. It reads the index from disk on every call, retrying a failed read with a state file's delays unless the file is missing or unparseable. The worker is the store's only writer and serves one command at a time, and a put writes the content before the index. Intake writes a report through to the store before `POST` returns: the queue first, the store second, and a failed store write removes the queued report. An entry is the report's metadata; it does not track the upload. A report's flat component is its component, role and aspect joined with `-`, skipping empty ones, as the control plane names a component, and the store lists entries in key order. A newer report for the key replaces the entry and deletes its content, even when reported under another split: `arm` with role `left` and `arm-left` are one key, so the list has one entry for them, under the parts it was last reported with. An index from an agent that keyed the store by component, role and aspect can hold more than one entry for a key: every read keeps the newest, and the others keep their content until a put writes the index without them and the worker next starts, so an agent rolled back to never lists content that is gone. The store holds at most 1,000 keys (`calibrations::latest::DEFAULT_CAPACITY`); a report for a new key past that is 507 `calibration_store_full`, and its queued report is removed. When the store's worker starts, before it serves a command, it deletes the content no entry names, which a crash or a failed write or delete leaves; if the index can't be read, it deletes nothing. `AppState` spawns the store at startup and shuts it down after the calibration uploader. The store sits beside the upload queue, outside `resources/`, so `reset` keeps it and an upgrade leaves it as it is; its on-disk format must stay readable by newer agents, as `queue.json`'s must, and change only by adding fields, so an agent rolled back to still reads it. `null` is a reserved role and aspect, because the filters use it to match a missing one. Reports are created only on the device, but the store can still miss some: an agent that doesn't write it takes reports that only the control plane then has. So at startup the agent runs `calibrations::pull_latest_until_success` in the background, which also covers an upgrade, since an upgrade restarts the agent. A pull lists the control plane's latest calibration for every key (`GET /calibrations/latest`), skips the keys whose entry was reported at the same time or later, downloads the rest's content, and puts each with `LatestStore::put_if_newer`, which the worker skips by the same rule, so a pull never replaces a report with an older one. A pull keeps the control plane's `invalidated_at` on the entries it puts. It pulls with the token manager's token, and tries again after a failure, with the uploaders' waits: a network error isn't counted and waits a flat 10 s, and any other failure is logged and waits 10 s doubling to an hour. A pull stops at the first failed download, so a key whose download keeps failing holds back the keys listed after it. Shutdown stops it midway, before `AppState` shuts the store down. Until a pull succeeds, the store can lack reports that only the control plane has. A report an older agent queued but hadn't uploaded usually uploads after this run's pull, so it reaches the store at the next start. Provision assumes a new device has no data, so it neither loads nor clears the store. Reprovision (`provisioning::reprovision`), after `bootstrap` installs the new keys, deletes `calibrations/`, upload queue included, so reports not yet uploaded are dropped and the previous device's calibrations never survive; a failed delete fails reprovision. It doesn't pull: like provisioning, it expects the agent stopped, as the install scripts' activation step does, because a running uploader would write its in-memory queue back, so the agent's next start pulls the new device's calibrations.
+`services` — domain service layer between the server and the stores (calibration, device, deployment, file rule, git commit, release).
 
-`services/` — domain service layer. Submodules: `calibration` (calibration intake and the latest calibrations: stamps a report with the time and deployed deployment and queues it with the calibration uploader, and reads the latest store and marks its entries invalid), `device` (device status sync), `deployment` (deployment management), `file_rule` (cached file-rule lookup), `git_commit` (commit tracking), `release` (release management).
+`cache` — file-system-backed cache with TTL for control-plane responses.
 
-`cache` — file-system-backed cache with TTL. Used for caching backend responses.
+`cooldown` — exponential backoff.
 
-`cooldown` — exponential backoff. Type `Backoff` with configurable base, growth factor, and max.
-
-`clock` — time sources that do not trust the robot's system clock. `Clock` gives monotonic elapsed time, server time anchored to the `Date` header of backend responses (`server_now`; `http::Client` parses the header with `http::date` and records it), and the system clock as-is for logs (`system_now`).
+`clock` — time sources that don't trust the robot's system clock: monotonic time and server time from control-plane responses.
 
 ### Observability
 
@@ -79,42 +75,40 @@ The calibration uploader's worker also writes the latest calibrations store (`ca
 
 ### Persistence
 
-`disk` — on-disk state management. `disk::Layout` defines the directory structure. `disk::Storage` wraps per-entity stores with capacity limits. Key files on disk: `settings.json`, `device.json`, `auth/` (private key and token). The TCP discovery file (port and bearer token) is `/run/miru/device-api.json` on Linux and `%ProgramData%\Miru\device-api\device-api.json` on Windows.
+`disk` — on-disk state: the directory layout and typed stores with capacity limits.
 
 ### Background workers
 
-`workers/` — three long-running tasks:
-- `mqtt` — subscribes to MQTT topics, triggers sync on events.
-- `poller` — periodic backend sync on a timer.
-- `token_refresh` — rotates JWT before expiry.
-
-All workers receive a broadcast shutdown signal and clean up gracefully.
+`workers` — long-running tasks, such as the MQTT subscriber, the periodic poller, and token refresh. It also drives the `data_uploads` scanner and deleter, which don't schedule themselves. All of them stop on the shared shutdown signal.
 
 ### Device setup
 
-`provision` — interactive provisioning flow. Reads activation token from environment, calls backend to register the device, writes device identity and auth credentials to disk. Display helpers in `provision/display`.
+`provisioning` — registers the device with the control plane and writes its identity and credentials to disk.
 
 ### Generated code (workspace siblings)
 
-`libs/backend-api` and the `libs/device-api-vNN` crates (one per Device API version) are auto-generated from OpenAPI specs in `api/specs/`. Never edit these by hand. The specs themselves are sourced from [`mirurobotics/openapi`](https://github.com/mirurobotics/openapi) — to change schemas, modify the source repo, regenerate the bundle there, then copy the updated spec here and run `api/regen.sh`. The vendored specs are the openapi release-stamped artifacts (they carry `x-release-version` and `x-git-commit`), not raw bundles.
+`libs/backend-api` and the `libs/device-api-vNN` crates are generated from the OpenAPI specs in `api/specs/`, which are vendored from [`mirurobotics/openapi`](https://github.com/mirurobotics/openapi). Change the specs there, copy them here, and run `api/regen.sh`.
 
 ## Architectural Invariants
 
-- **Provision and runtime are mutually exclusive.** `main.rs` picks one path at startup. They share no runtime state; provision writes the files that runtime later reads.
-- **All backend HTTP goes through `http::Client`.** No module uses raw reqwest. The client handles retry logic and attaches auth headers.
-- **Shutdown ordering matters.** Syncer shuts down before storage (it writes during sync). The latest calibrations store shuts down after the calibration uploader, whose worker writes it. Token manager shuts down last. This is enforced in `AppState::shutdown()`.
-- **Generated code is never hand-edited.** `libs/backend-api` and each `libs/device-api-vNN` are overwritten on regeneration.
-- **Tests exercise ordinary production behavior.** `cargo test` needs no custom feature or logging environment; production algorithms and client construction are identical in normal and test builds, and tests control dependencies and time. Test layout conventions live in `AGENTS.md` § Testing.
-- **The agent has no direct database.** All persistence is file-based via `disk::Layout`. The backend owns the database.
-- **The agent always runs persistently.** It exits only on a shutdown signal or a fatal startup error. A `settings.json` that still contains `is_persistent` loads normally; the key is ignored.
-- **Windows has no Unix socket.** On Windows the local device API is the TCP listener, which is on by default (`enable_tcp_server`), and `enable_socket_server` is off by default. Startup warns when `enable_socket_server` is set, and warns and nothing listens when `enable_tcp_server` is turned off.
+- **Provision and runtime are mutually exclusive.** They share no runtime state; provision writes the files that runtime later reads.
+- **All control-plane HTTP goes through `http::Client`.** No module uses raw reqwest.
+- **Shutdown ordering matters.** `AppState::shutdown()` stops each component before the ones it depends on, with one tolerated exception: the scanner's sinks may write into an uploader or deleter that has already stopped, and they log a warning instead of failing.
+- **Generated code is never hand-edited.**
+- **Tests exercise ordinary production behavior.** Production algorithms and client construction are identical in normal and test builds; tests control dependencies and time. See `AGENTS.md` § Testing.
+- **The agent has no direct database.** All persistence is file-based; the control plane owns the database.
+- **The agent always runs persistently.** It exits only on a shutdown signal or a fatal startup error.
+- **The Device API never listens beyond the device.** TCP binds only to loopback.
+- **State that survives an upgrade changes only by adding fields.** Files that `reset` keeps, such as the calibration queue and latest store, stay readable by newer agents and by an agent rolled back to.
 
 ## Cross-Cutting Concerns
 
-**Error handling.** Every module defines its errors in an `errors.rs` file. Leaf errors derive `thiserror::Error` and implement the custom `crate::errors::Error` trait (which provides default implementations for the common case). Aggregating enums use `impl_error!` to forward trait methods to inner variants.
+**Error handling.** Each module defines its errors in an `errors.rs` file, implementing the shared `Error` trait; aggregating enums use `impl_error!`.
 
-**Graceful shutdown.** `app/run.rs` creates a `tokio::sync::broadcast` channel. All workers and the HTTP server subscribe to it. SIGTERM/SIGINT/ctrl-c on Unix, ctrl-c in Windows console mode, and `SERVICE_CONTROL_STOP`/`SERVICE_CONTROL_SHUTDOWN` in Windows service mode (relayed through `shutdown::Latch`) all resolve the shutdown future `app/run.rs` awaits; the channel then fires and each component drains in-flight work before exiting. AppState components shut down in dependency order.
+**Actors.** Stateful components such as the syncer, token manager, caches and uploaders are actors: a single-threaded `*_impl` module holds the logic, a worker task runs it, and callers talk to it through a shared handle.
 
-**Authentication.** JWT-based. The `TokenManager` runs as a background task, refreshing the token before expiry using the device's RSA private key. `http::Client` reads the current token from `TokenManager` for every request. Token persistence is via `TokenFile` (atomic writes to disk).
+**Graceful shutdown.** OS signals, and the service stop on Windows, resolve one shutdown future; a broadcast channel then tells every worker and server to drain in-flight work and exit.
 
-**Storage.** `disk::Layout` defines where everything lives on disk (default: `/var/lib/miru/`; `%ProgramData%\Miru\Agent` on Windows, with logs in `Agent\logs`). On Linux the data root is `0700` and `/var/log/miru` is `0750`; the folders, not per-file modes, keep state and logs private (see `build/debian/README.md`). The TCP discovery file is `/run/miru/device-api.json` on Linux and `%ProgramData%\Miru\device-api\device-api.json` on Windows, a sibling of the private data root. `disk::Storage` provides typed stores for devices, deployments, releases, and settings, each with configurable capacity limits.
+**Authentication.** The device signs in with its RSA key and gets a JWT, which `authn` refreshes in the background and `http::Client` attaches to every request.
+
+**Storage.** `disk::Layout` defines where state lives (`/var/lib/miru/` on Linux, `%ProgramData%\Miru\Agent` on Windows). Directory permissions, not per-file modes, keep state and logs private.
