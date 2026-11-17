@@ -2,6 +2,7 @@
 use crate::calibrations::ReportMetadata;
 use crate::events::{self, errors::EventsErr, model::EventPayload};
 use crate::models;
+use crate::server::response::{secs_ago, secs_ago_since_start, secs_until};
 use crate::services::{calibration, device::SyncOutcome};
 use device_api_v03::models as device_server;
 
@@ -42,30 +43,6 @@ pub fn sync(
         in_cooldown: cooldown_ends_in_secs > 0,
         cooldown_ends_in_secs,
     }
-}
-
-// None for a time before the agent last started, such as one the device file
-// kept from the previous run or the syncer's never-synced epoch.
-fn secs_ago_since_start(
-    at: DateTime<Utc>,
-    now: DateTime<Utc>,
-    started_at: DateTime<Utc>,
-) -> Option<i64> {
-    (at >= started_at).then(|| secs_ago(at, now))
-}
-
-// Rounded down, and 0 if the clock has moved back past `at`.
-fn secs_ago(at: DateTime<Utc>, now: DateTime<Utc>) -> i64 {
-    (now - at).num_seconds().max(0)
-}
-
-// Rounded up, so it is 0 only once `at` has passed.
-fn secs_until(at: DateTime<Utc>, now: DateTime<Utc>) -> i64 {
-    if at <= now {
-        return 0;
-    }
-    let remaining = at - now;
-    remaining.num_seconds() + i64::from(remaining.subsec_nanos() > 0)
 }
 
 impl From<&models::Deployment> for device_server::Deployment {
