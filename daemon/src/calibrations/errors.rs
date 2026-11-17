@@ -103,25 +103,6 @@ impl crate::errors::Error for CalibrationNotFoundErr {
     }
 }
 
-/// The component has no latest calibration, or `report_id` is not its latest:
-/// 404 `resource_not_found`.
-#[derive(Debug, thiserror::Error)]
-#[error("no latest calibration of {component} matches")]
-pub struct LatestCalibrationNotFoundErr {
-    pub component: String,
-    pub trace: Box<Trace>,
-}
-
-impl crate::errors::Error for LatestCalibrationNotFoundErr {
-    fn code(&self) -> Code {
-        Code::ResourceNotFound
-    }
-
-    fn http_status(&self) -> HTTPCode {
-        HTTPCode::NOT_FOUND
-    }
-}
-
 /// A buffered report that can never be sent, because its file is missing or
 /// not UTF-8.
 /// Terminal, so the worker drops it instead of retrying.
@@ -174,8 +155,6 @@ pub enum CalibrationsErr {
     #[error(transparent)]
     NotFoundErr(CalibrationNotFoundErr),
     #[error(transparent)]
-    LatestNotFoundErr(LatestCalibrationNotFoundErr),
-    #[error(transparent)]
     FileSysErr(FileSysErr),
     #[error(transparent)]
     InvalidReportErr(InvalidReportErr),
@@ -225,12 +204,6 @@ impl From<CalibrationNotFoundErr> for CalibrationsErr {
     }
 }
 
-impl From<LatestCalibrationNotFoundErr> for CalibrationsErr {
-    fn from(e: LatestCalibrationNotFoundErr) -> Self {
-        Self::LatestNotFoundErr(e)
-    }
-}
-
 impl From<ReportNotRecordedErr> for CalibrationsErr {
     fn from(e: ReportNotRecordedErr) -> Self {
         Self::ReportNotRecordedErr(e)
@@ -254,7 +227,6 @@ crate::impl_error!(CalibrationsErr {
     TooLargeErr,
     StoreFullErr,
     NotFoundErr,
-    LatestNotFoundErr,
     FileSysErr,
     InvalidReportErr,
     ReportNotRecordedErr,

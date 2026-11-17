@@ -11,7 +11,9 @@ use miru_daemon::http::errors::MockErr as HTTPMockErr;
 use miru_daemon::http::HTTPErr;
 use miru_daemon::models::errors::DateTimeParseErr;
 use miru_daemon::models::ModelsErr;
-use miru_daemon::services::errors::{FileRulesNotExpandedErr, InvalidReasonErr};
+use miru_daemon::services::errors::{
+    FileRulesNotExpandedErr, InvalidReasonErr, LatestCalibrationNotFoundErr,
+};
 use miru_daemon::services::ServiceErr;
 use miru_daemon::sync::errors::MockErr as SyncMockErr;
 use miru_daemon::sync::SyncErr;
@@ -75,6 +77,13 @@ fn invalid_reason_err() -> InvalidReasonErr {
     }
 }
 
+fn latest_calibration_not_found_err() -> LatestCalibrationNotFoundErr {
+    LatestCalibrationNotFoundErr {
+        component: "arm".to_string(),
+        trace: miru_daemon::trace!(),
+    }
+}
+
 #[test]
 fn an_invalid_reason_is_422() {
     let err = ServiceErr::from(invalid_reason_err());
@@ -85,6 +94,17 @@ fn an_invalid_reason_is_422() {
     );
     let want = "an invalidation reason must not be blank or over 512 characters";
     assert_eq!(err.to_string(), want);
+}
+
+#[test]
+fn a_component_without_a_matching_latest_calibration_is_404() {
+    let err = ServiceErr::from(latest_calibration_not_found_err());
+
+    assert_error(
+        &err,
+        Expected::new(Code::ResourceNotFound, HTTPCode::NOT_FOUND),
+    );
+    assert_eq!(err.to_string(), "no latest calibration of arm matches");
 }
 
 mod from_conversions {
@@ -142,5 +162,11 @@ mod from_conversions {
     fn invalid_reason_err_maps_to_service_invalid_reason_err() {
         let err: ServiceErr = invalid_reason_err().into();
         assert!(matches!(err, ServiceErr::InvalidReasonErr(_)));
+    }
+
+    #[test]
+    fn latest_calibration_not_found_err_maps_to_its_service_variant() {
+        let err: ServiceErr = latest_calibration_not_found_err().into();
+        assert!(matches!(err, ServiceErr::LatestCalibrationNotFoundErr(_)));
     }
 }

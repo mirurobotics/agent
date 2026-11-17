@@ -15,8 +15,7 @@ mod uploader_impl;
 
 pub use self::errors::{
     CalibrationBufferFullErr, CalibrationNotFoundErr, CalibrationStoreFullErr,
-    CalibrationTooLargeErr, CalibrationsErr, InvalidReportErr, LatestCalibrationNotFoundErr,
-    ReportNotRecordedErr, TokenErr,
+    CalibrationTooLargeErr, CalibrationsErr, InvalidReportErr, ReportNotRecordedErr, TokenErr,
 };
 pub use self::invalidation::Invalidation;
 pub use self::job::Job;

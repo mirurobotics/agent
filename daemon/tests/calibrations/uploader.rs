@@ -14,7 +14,6 @@ use crate::mocks::error::SleepController;
 use crate::test_utils::calibrations::{
     latest_cals_layout, latest_store, layout, received_at, report,
 };
-use crate::test_utils::filesys::access::make_read_only;
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_daemon::calibrations::{
     latest, CalibrationsErr, Filter, Invalidation, Job, LatestStore, Queue, QueueSnapshotFile,
@@ -229,7 +228,7 @@ fn invalidation(report_id: Uuid) -> Invalidation {
     }
 }
 
-async fn invalidate(h: &Harness, report_id: Uuid) -> Result<ReportMetadata, CalibrationsErr> {
+async fn invalidate(h: &Harness, report_id: Uuid) -> Result<(), CalibrationsErr> {
     guard(h.uploader().invalidate(invalidation(report_id))).await
 }
 
@@ -357,9 +356,12 @@ async fn an_invalidation_is_stored_and_uploaded() {
     h.await_drained(&["a"]).await;
     let report_id = report("a").metadata.report_id;
 
-    let invalidated = invalidate(&h, report_id).await.unwrap();
+    invalidate(&h, report_id).await.unwrap();
 
-    assert_eq!(invalidated.invalidated_at, Some(invalidated_at()));
+    let invalidated = ReportMetadata {
+        invalidated_at: Some(invalidated_at()),
+        ..report("a").metadata
+    };
     assert_eq!(h.latest_entries().await, [invalidated]);
     eventually(|| async {
         h.sender.invalidations() == [invalidation(report_id)] && h.num_queued_uploads().await == 0
@@ -368,17 +370,17 @@ async fn an_invalidation_is_stored_and_uploaded() {
 }
 
 #[tokio::test]
-async fn invalidating_a_report_that_isnt_an_entry_removes_the_queued_job() {
+async fn an_invalidation_of_a_report_that_isnt_an_entry_is_still_uploaded() {
     let mut h = Harness::new();
     h.spawn().await;
     h.report("a").await;
     h.await_drained(&["a"]).await;
+    let report_id = Uuid::new_v4();
 
-    let err = invalidate(&h, Uuid::new_v4()).await.unwrap_err();
+    invalidate(&h, report_id).await.unwrap();
 
-    assert!(matches!(err, CalibrationsErr::NotFoundErr(_)), "{err:?}");
-    assert_eq!(h.num_queued_uploads().await, 0);
     assert_eq!(h.latest_entries().await, [report("a").metadata]);
+    eventually(|| async { h.sender.invalidations() == [invalidation(report_id)] }).await;
 }
 
 #[tokio::test]
@@ -399,25 +401,6 @@ async fn a_full_queue_leaves_the_entry_valid() {
 
     assert!(matches!(err, CalibrationsErr::QueueFullErr(_)), "{err:?}");
     assert_eq!(h.latest_entries().await, [report("a").metadata]);
-}
-
-#[tokio::test]
-async fn a_failed_store_write_removes_the_queued_invalidation() {
-    let mut h = Harness::new();
-    h.spawn().await;
-    h.report("a").await;
-    h.await_drained(&["a"]).await;
-    let _read_only = make_read_only(&h.latest_layout.root);
-
-    let err = invalidate(&h, report("a").metadata.report_id)
-        .await
-        .unwrap_err();
-
-    assert!(matches!(err, CalibrationsErr::FileSysErr(_)), "{err:?}");
-    assert_eq!(h.num_queued_uploads().await, 0);
-    assert_eq!(h.queued_on_disk().await, 0);
-    assert_eq!(h.latest_entries().await, [report("a").metadata]);
-    assert!(h.sender.invalidations().is_empty());
 }
 
 #[tokio::test]

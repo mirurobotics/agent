@@ -5,7 +5,7 @@
 use crate::mocks::calibration_sender::Step;
 use crate::services::calibration::helpers::{params, Fixture};
 use crate::test_utils::calibrations::received_at;
-use miru_daemon::calibrations::{latest, CalibrationsErr, Invalidation, UploaderOptions};
+use miru_daemon::calibrations::{latest, CalibrationsErr, Filter, Invalidation, UploaderOptions};
 use miru_daemon::services::calibration::InvalidateParams;
 use miru_daemon::services::ServiceErr;
 
@@ -41,6 +41,8 @@ async fn invalidate_stamps_the_latest_and_uploads_the_invalidation() {
 
         assert_eq!(invalidated.report_id, created.report_id);
         assert_eq!(invalidated.invalidated_at, Some(now));
+        let entries = f.latest.list(&Filter::default()).await.unwrap();
+        assert_eq!(entries, [invalidated]);
         let expected = Invalidation {
             report_id: created.report_id,
             invalidated_at: now,
@@ -91,10 +93,7 @@ async fn invalidate_of_an_unknown_component_or_a_stale_report_is_not_found() {
             .unwrap_err();
 
         assert!(
-            matches!(
-                err,
-                ServiceErr::CalibrationsErr(CalibrationsErr::LatestNotFoundErr(_))
-            ),
+            matches!(err, ServiceErr::LatestCalibrationNotFoundErr(_)),
             "{component}: {err:?}"
         );
     }
@@ -156,4 +155,7 @@ async fn a_full_upload_queue_fails_invalidate() {
         ),
         "{err:?}"
     );
+    let entries = f.latest.list(&Filter::default()).await.unwrap();
+    assert_eq!(entries[0].invalidated_at, None);
+    assert_eq!(f.cal_uploader.num_queued_uploads().await.unwrap(), 1);
 }

@@ -9,7 +9,7 @@ use crate::calibrations::{
     invalidation::Invalidation,
     latest::LatestStore,
     queue::{QueueEntry, QueueSnapshotFile},
-    report::{Report, ReportMetadata},
+    report::Report,
     sender::Sender,
     uploader_impl::{NextAttempt, UploaderImpl, UploaderOptions},
 };
@@ -20,7 +20,7 @@ use crate::trace;
 use chrono::{DateTime, Utc};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 pub struct UploaderArgs<S, F, N> {
     /// Where the queue persists; `None` keeps it in memory only.
@@ -44,7 +44,7 @@ enum Command {
     },
     Invalidate {
         invalidation: Invalidation,
-        respond_to: oneshot::Sender<Result<ReportMetadata, CalibrationsErr>>,
+        respond_to: oneshot::Sender<Result<(), CalibrationsErr>>,
     },
     Len {
         respond_to: oneshot::Sender<usize>,
@@ -112,20 +112,14 @@ where
     }
 
     /// Queue the upload of `invalidation`, then mark its report's entry invalid.
-    /// A failed store write removes the queued upload.
-    async fn invalidate(
-        &mut self,
-        invalidation: Invalidation,
-    ) -> Result<ReportMetadata, CalibrationsErr> {
+    /// The store write is best effort, since the upload is what counts.
+    async fn invalidate(&mut self, invalidation: Invalidation) -> Result<(), CalibrationsErr> {
         let (report_id, invalidated_at) = (invalidation.report_id, invalidation.invalidated_at);
-        let id = self.uploader.enqueue_invalidation(invalidation).await?;
-        match self.latest.invalidate(report_id, invalidated_at).await {
-            Ok(entry) => Ok(entry),
-            Err(e) => {
-                self.uploader.remove(id).await;
-                Err(e)
-            }
+        self.uploader.enqueue_invalidation(invalidation).await?;
+        if let Err(e) = self.latest.invalidate(report_id, invalidated_at).await {
+            warn!("calibrations: failed to mark report {report_id} invalid: {e}");
         }
+        Ok(())
     }
 
     /// Drive `fut` to completion while serving commands, so intake never
@@ -247,12 +241,9 @@ impl Uploader {
         .await?
     }
 
-    /// Queue the upload of `invalidation`, mark its report's entry invalid and
-    /// return the entry. Not found unless an entry has its `report_id`.
-    pub async fn invalidate(
-        &self,
-        invalidation: Invalidation,
-    ) -> Result<ReportMetadata, CalibrationsErr> {
+    /// Queue the upload of `invalidation`, then mark its report's entry invalid
+    /// if the latest store can.
+    pub async fn invalidate(&self, invalidation: Invalidation) -> Result<(), CalibrationsErr> {
         self.send_command("invalidate", |respond_to| Command::Invalidate {
             invalidation,
             respond_to,

@@ -38,6 +38,25 @@ impl crate::errors::Error for InvalidReasonErr {
     }
 }
 
+/// The component has no latest calibration, or `report_id` is not its latest:
+/// 404 `resource_not_found`.
+#[derive(Debug, thiserror::Error)]
+#[error("no latest calibration of {component} matches")]
+pub struct LatestCalibrationNotFoundErr {
+    pub component: String,
+    pub trace: Box<Trace>,
+}
+
+impl crate::errors::Error for LatestCalibrationNotFoundErr {
+    fn code(&self) -> Code {
+        Code::ResourceNotFound
+    }
+
+    fn http_status(&self) -> HTTPCode {
+        HTTPCode::NOT_FOUND
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum ServiceErr {
     #[error(transparent)]
@@ -60,6 +79,8 @@ pub enum ServiceErr {
     CalibrationsErr(CalibrationsErr),
     #[error(transparent)]
     InvalidReasonErr(InvalidReasonErr),
+    #[error(transparent)]
+    LatestCalibrationNotFoundErr(LatestCalibrationNotFoundErr),
 }
 
 impl From<cache::CacheErr> for ServiceErr {
@@ -122,6 +143,12 @@ impl From<InvalidReasonErr> for ServiceErr {
     }
 }
 
+impl From<LatestCalibrationNotFoundErr> for ServiceErr {
+    fn from(e: LatestCalibrationNotFoundErr) -> Self {
+        Self::LatestCalibrationNotFoundErr(e)
+    }
+}
+
 crate::impl_error!(ServiceErr {
     CacheErr,
     EventsErr,
@@ -133,4 +160,5 @@ crate::impl_error!(ServiceErr {
     FileRulesNotExpanded,
     CalibrationsErr,
     InvalidReasonErr,
+    LatestCalibrationNotFoundErr,
 });

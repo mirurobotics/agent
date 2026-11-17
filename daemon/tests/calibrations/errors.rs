@@ -2,7 +2,7 @@
 use crate::errors::harnesses::{assert_error, Expected};
 use miru_daemon::calibrations::{
     CalibrationBufferFullErr, CalibrationNotFoundErr, CalibrationStoreFullErr,
-    CalibrationTooLargeErr, CalibrationsErr, LatestCalibrationNotFoundErr, ReportNotRecordedErr,
+    CalibrationTooLargeErr, CalibrationsErr, ReportNotRecordedErr,
 };
 use miru_daemon::errors::{Code, Error, HTTPCode};
 use miru_daemon::http::errors::RequestFailed;
@@ -52,20 +52,6 @@ fn a_full_store_is_507_with_its_cap() {
 fn a_missing_latest_calibration_is_404() {
     let err = CalibrationsErr::from(CalibrationNotFoundErr {
         report_id: "not-a-report".to_string(),
-        trace: miru_daemon::trace!(),
-    });
-
-    assert_error(
-        &err,
-        Expected::new(Code::ResourceNotFound, HTTPCode::NOT_FOUND),
-    );
-    assert!(!err.is_terminal());
-}
-
-#[test]
-fn a_component_without_a_matching_latest_calibration_is_404() {
-    let err = CalibrationsErr::from(LatestCalibrationNotFoundErr {
-        component: "arm".to_string(),
         trace: miru_daemon::trace!(),
     });
 
