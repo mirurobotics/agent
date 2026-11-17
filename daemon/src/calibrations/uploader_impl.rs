@@ -5,7 +5,8 @@ use std::sync::Arc;
 // internal crates
 use crate::calibrations::{
     errors::{CalibrationTooLargeErr, CalibrationsErr},
-    report::{self, Job, Queue, QueueEntry, QueueSnapshotFile, Report},
+    job::{Job, Queue, QueueEntry, QueueSnapshotFile},
+    report::{self, Report},
     sender::Sender,
 };
 use crate::errors::Error;
