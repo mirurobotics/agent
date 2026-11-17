@@ -23,9 +23,9 @@ pub struct Report {
     pub data: String,
 }
 
-/// A queued report's metadata. Everything here is captured at intake, so an
-/// upload hours later still reports the deployment and time the calibration
-/// was taken under.
+/// A report's metadata. Everything but the invalidation is captured at
+/// intake, so an upload hours later still reports the deployment and time the
+/// calibration was taken under.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ReportMetadata {
     /// Minted at intake and sent with every upload, so the control plane
