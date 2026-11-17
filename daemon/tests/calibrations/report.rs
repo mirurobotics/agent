@@ -6,7 +6,9 @@ use crate::queue::file::queue_suite;
 use crate::test_utils::calibrations::report_id;
 use crate::test_utils::filesys::dirs as test_dirs;
 use backend_api::models::{self as backend_client, BaseExternalUser};
-use miru_daemon::calibrations::{Queue, QueueSnapshot, QueueSnapshotFile, ReportMetadata};
+use miru_daemon::calibrations::{
+    Invalidation, Queue, QueueSnapshot, QueueSnapshotFile, ReportMetadata,
+};
 use miru_daemon::filesys::{files, File, WriteOptions};
 use miru_daemon::models::InstanceFormat;
 use miru_daemon::queue::{Persistence, QueueJob};
@@ -27,6 +29,18 @@ fn metadata(name: &str) -> ReportMetadata {
         reported_by: Some("Ada Lovelace".to_string()),
         deployment_id: Some("dpl_1".to_string()),
         reported_at: DateTime::from_timestamp(1000, 0).unwrap(),
+        invalidation: None,
+    }
+}
+
+/// `metadata(name)` marked invalid an hour after it was received.
+fn invalidated(name: &str) -> ReportMetadata {
+    ReportMetadata {
+        invalidation: Some(Invalidation {
+            invalidated_at: DateTime::from_timestamp(4600, 0).unwrap(),
+            reason: "sensor was bumped".to_string(),
+        }),
+        ..metadata(name)
     }
 }
 
@@ -59,6 +73,15 @@ fn name_leaves_out_a_missing_role_and_aspect() {
     assert_eq!(
         "calibration of arm received at 1970-01-01T00:16:40+00:00",
         QueueJob::name(&report)
+    );
+}
+
+#[test]
+fn name_of_an_invalidation_says_when_it_was_made() {
+    assert_eq!(
+        "invalidation of calibration of arm (role aligner-1) (aspect pose) received at \
+         1970-01-01T00:16:40+00:00, made at 1970-01-01T01:16:40+00:00",
+        QueueJob::name(&invalidated("arm"))
     );
 }
 
@@ -100,6 +123,33 @@ mod wire {
         let entry = queue.next_ready(Utc::now()).unwrap();
         assert_eq!(entry.id, id);
         assert_eq!(entry.job, metadata("arm"));
+    }
+
+    /// A queued invalidation carries the invalidation on the report's metadata.
+    #[tokio::test]
+    async fn an_invalidation_loads() {
+        let dir = test_dirs::temp("calibration_queue_test").unwrap();
+        let path = dir.to_dir().file("queue.json");
+        let raw = format!(
+            concat!(
+                r#"{{"entries":[{{"job":{{"#,
+                r#""report_id":"{report_id}","component":"arm","format":"yaml","#,
+                r#""role":"aligner-1","aspect":"pose","serial_number":"SN-1","#,
+                r#""reported_by":"Ada Lovelace","#,
+                r#""deployment_id":"dpl_1","reported_at":"1970-01-01T00:16:40Z","#,
+                r#""invalidation":{{"invalidated_at":"1970-01-01T01:16:40Z","#,
+                r#""reason":"sensor was bumped"}}}}}}]}}"#,
+            ),
+            report_id = report_id("arm"),
+        );
+        files::write_string(&path, &raw, WriteOptions::OVERWRITE_ATOMIC)
+            .await
+            .unwrap();
+
+        let queue = Queue::from_snapshot(8, open(&path).await, Persistence::BestEffort);
+
+        let found = queue.next_ready(Utc::now()).unwrap().job;
+        assert_eq!(found, invalidated("arm"));
     }
 
     /// The optional fields may be absent, as for a calibration taken with no
@@ -199,6 +249,16 @@ mod from_backend {
             });
             assert_eq!(found.reported_by, None);
         }
+    }
+
+    #[test]
+    fn maps_an_invalidation() {
+        let found = ReportMetadata::from(backend_client::Calibration {
+            invalidated_at: Some("1970-01-01T01:16:40Z".to_string()),
+            invalidation_reason: Some("sensor was bumped".to_string()),
+            ..calibration()
+        });
+        assert_eq!(found, invalidated("arm"));
     }
 
     #[test]

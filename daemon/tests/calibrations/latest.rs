@@ -1,11 +1,12 @@
 //! The latest calibrations store: its keys and capacity, write order, merging,
-//! listing, content, the prune when its worker starts, and shutdown.
+//! listing, content, invalidation, the prune when its worker starts, and
+//! shutdown.
 
 // internal crates
-use crate::test_utils::calibrations::{latest_cals_layout, latest_store, reported};
+use crate::test_utils::calibrations::{latest_cals_layout, latest_store, received_at, reported};
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_daemon::calibrations::{
-    latest, CalibrationsErr, Filter, LatestStore, Report, ReportMetadata,
+    latest, CalibrationsErr, Filter, Invalidation, LatestStore, Report, ReportMetadata,
 };
 use miru_daemon::disk::layout::LatestCalsLayout;
 use miru_daemon::filesys::{dirs, files, File, PathExt, WriteOptions};
@@ -571,6 +572,84 @@ async fn get_is_not_found_when_its_content_file_is_missing() {
     assert!(matches!(err, CalibrationsErr::NotFoundErr(_)), "{err:?}");
 }
 
+// ============================== INVALIDATE ============================== //
+/// An invalidation for `reason`, after every fixture report.
+fn invalidation(reason: &str) -> Invalidation {
+    Invalidation {
+        invalidated_at: received_at() + TimeDelta::hours(1),
+        reason: reason.to_string(),
+    }
+}
+
+#[tokio::test]
+async fn invalidate_marks_the_entry_and_returns_it() {
+    let f = Fixture::new().await;
+    let arm = reported("arm", None, None);
+    put_all(&f.store, &[&arm]).await;
+
+    let invalidated = f
+        .store
+        .invalidate(arm.report_id, invalidation("power cycle"))
+        .await
+        .unwrap();
+
+    let expected = ReportMetadata {
+        invalidation: Some(invalidation("power cycle")),
+        ..arm
+    };
+    assert_eq!(invalidated, expected);
+    assert_eq!(
+        f.reopen().await.list(&Filter::default()).await.unwrap(),
+        [expected]
+    );
+}
+
+#[tokio::test]
+async fn invalidate_is_not_found_for_a_replaced_or_unknown_report() {
+    let f = Fixture::new().await;
+    let arm = reported("arm", None, None);
+    put_all(&f.store, &[&arm, &newer(&arm)]).await;
+
+    for report_id in [arm.report_id, Uuid::new_v4()] {
+        let err = f
+            .store
+            .invalidate(report_id, invalidation("power cycle"))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CalibrationsErr::NotFoundErr(_)), "{err:?}");
+    }
+}
+
+#[tokio::test]
+async fn a_newer_report_replaces_an_invalidated_entry() {
+    let f = Fixture::new().await;
+    let arm = reported("arm", None, None);
+    put_all(&f.store, &[&arm]).await;
+    f.store
+        .invalidate(arm.report_id, invalidation("power cycle"))
+        .await
+        .unwrap();
+    let replacement = newer(&arm);
+
+    put_all(&f.store, &[&replacement]).await;
+
+    assert_eq!(f.entries().await, [replacement]);
+}
+
+#[tokio::test]
+async fn an_entry_written_without_an_invalidation_reads_as_valid() {
+    let f = Fixture::new().await;
+    let arm = reported("arm", None, None);
+    let mut entry = serde_json::to_value(&arm).unwrap();
+    entry.as_object_mut().unwrap().remove("invalidation");
+    let index = serde_json::json!({ "entries": [entry] });
+    files::write_json(&f.layout.index(), &index, WriteOptions::OVERWRITE_ATOMIC)
+        .await
+        .unwrap();
+
+    assert_eq!(f.entries().await, [arm]);
+}
+
 // ================================ ERRORS ================================ //
 #[tokio::test]
 async fn a_corrupt_index_fails_every_call() {
@@ -584,6 +663,10 @@ async fn a_corrupt_index_fails_every_call() {
         f.store.put_if_newer(arm.clone(), DATA).await.unwrap_err(),
         f.store.list(&Filter::default()).await.unwrap_err(),
         f.store.get(arm.report_id).await.unwrap_err(),
+        f.store
+            .invalidate(arm.report_id, invalidation("power cycle"))
+            .await
+            .unwrap_err(),
     ];
 
     for err in errs {

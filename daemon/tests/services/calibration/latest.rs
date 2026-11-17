@@ -28,6 +28,7 @@ async fn list_latest_includes_a_created_report() {
         reported_by: Some("Ada Lovelace".to_string()),
         deployment_id: None,
         reported_at: received_at(),
+        invalidation: None,
     };
     assert_eq!(latest.unwrap(), [metadata]);
 }

@@ -16,20 +16,24 @@ pub struct Content {
     pub data: String,
 }
 
-/// The content of the latest calibration with `report_id`. An id that is not a
-/// UUID is not found, like any other id that is not a latest entry.
+/// The content of the latest calibration with `report_id`.
 pub async fn get_content(store: &LatestStore, report_id: &str) -> Result<Content, ServiceErr> {
-    let Ok(id) = Uuid::parse_str(report_id) else {
-        let err = CalibrationNotFoundErr {
-            report_id: report_id.to_string(),
-            trace: trace!(),
-        };
-        return Err(CalibrationsErr::from(err).into());
-    };
-    let report = store.get(id).await?;
+    let report = store.get(parse_report_id(report_id)?).await?;
     Ok(Content {
         report_id: report.metadata.report_id,
         format: report.metadata.format,
         data: report.data,
+    })
+}
+
+/// `report_id` as a UUID. An id that is not a UUID is not found, like any
+/// other id that is not a latest entry.
+pub(super) fn parse_report_id(report_id: &str) -> Result<Uuid, CalibrationsErr> {
+    Uuid::parse_str(report_id).map_err(|_| {
+        let err = CalibrationNotFoundErr {
+            report_id: report_id.to_string(),
+            trace: trace!(),
+        };
+        err.into()
     })
 }

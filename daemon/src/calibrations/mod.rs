@@ -12,13 +12,13 @@ mod uploader_impl;
 
 pub use self::errors::{
     CalibrationBufferFullErr, CalibrationNotFoundErr, CalibrationStoreFullErr,
-    CalibrationTooLargeErr, CalibrationsErr, InvalidReportErr, TokenErr,
+    CalibrationTooLargeErr, CalibrationsErr, InvalidReportErr, ReportNotRecordedErr, TokenErr,
 };
 pub use self::latest::LatestStore;
 pub use self::latest_impl::Filter;
 pub use self::pull::{pull_latest, pull_latest_until_success};
 pub use self::report::{
-    Queue, QueueEntry, QueueSnapshot, QueueSnapshotFile, Report, ReportMetadata,
+    Invalidation, Queue, QueueEntry, QueueSnapshot, QueueSnapshotFile, Report, ReportMetadata,
 };
 pub use self::sender::{HttpSender, Sender};
 pub use self::uploader::{Uploader, UploaderArgs};

@@ -29,6 +29,7 @@ async fn queues_the_report_stamped_with_its_id_and_the_time() {
             reported_by: Some("Ada Lovelace".to_string()),
             deployment_id: None,
             reported_at: received_at(),
+            invalidation: None,
         },
         data: params().data,
     };

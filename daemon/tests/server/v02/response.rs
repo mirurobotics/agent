@@ -684,6 +684,7 @@ pub mod latest_calibrations_response {
             reported_by: Some("Ada Lovelace".into()),
             deployment_id: Some("dpl_1".into()),
             reported_at: fixed_time(),
+            invalidation: None,
         }
     }
 

@@ -2,7 +2,7 @@
 use crate::calibrations::{
     errors::{CalibrationsErr, ReceiveActorMessageErr, SendActorMessageErr},
     latest_impl::{Filter, LatestStoreImpl},
-    report::{Report, ReportMetadata},
+    report::{Invalidation, Report, ReportMetadata},
 };
 use crate::disk::layout::LatestCalsLayout;
 use crate::trace;
@@ -35,6 +35,11 @@ enum Command {
     Get {
         report_id: Uuid,
         respond_to: oneshot::Sender<Result<Report, CalibrationsErr>>,
+    },
+    Invalidate {
+        report_id: Uuid,
+        invalidation: Invalidation,
+        respond_to: oneshot::Sender<Result<ReportMetadata, CalibrationsErr>>,
     },
     Shutdown {
         respond_to: oneshot::Sender<()>,
@@ -79,6 +84,14 @@ impl Worker {
                 } => {
                     let result = self.store.get(report_id).await;
                     respond(respond_to, result, "get");
+                }
+                Command::Invalidate {
+                    report_id,
+                    invalidation,
+                    respond_to,
+                } => {
+                    let result = self.store.invalidate(report_id, invalidation).await;
+                    respond(respond_to, result, "invalidate");
                 }
                 Command::Shutdown { respond_to } => {
                     respond(respond_to, (), "shutdown");
@@ -162,6 +175,23 @@ impl LatestStore {
     pub async fn get(&self, report_id: Uuid) -> Result<Report, CalibrationsErr> {
         self.send_command("get", |respond_to| Command::Get {
             report_id,
+            respond_to,
+        })
+        .await?
+    }
+
+    /// Mark the entry for `report_id` invalid with `invalidation` and return
+    /// the entry. Not found unless an entry has that `report_id`, so a report a
+    /// newer one replaced can't be invalidated. The calibration uploader keeps
+    /// an entry's first invalidation.
+    pub async fn invalidate(
+        &self,
+        report_id: Uuid,
+        invalidation: Invalidation,
+    ) -> Result<ReportMetadata, CalibrationsErr> {
+        self.send_command("invalidate", |respond_to| Command::Invalidate {
+            report_id,
+            invalidation,
             respond_to,
         })
         .await?
