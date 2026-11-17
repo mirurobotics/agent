@@ -109,7 +109,6 @@ impl crate::errors::Error for CalibrationNotFoundErr {
 #[error("no latest calibration of {component} matches")]
 pub struct LatestCalibrationNotFoundErr {
     pub component: String,
-    pub report_id: Option<Uuid>,
     pub trace: Box<Trace>,
 }
 

@@ -160,7 +160,6 @@ where
             Some(entry) if report_id.is_none_or(|id| id == entry.report_id) => Ok(entry),
             _ => Err(LatestCalibrationNotFoundErr {
                 component,
-                report_id,
                 trace: trace!(),
             }
             .into()),

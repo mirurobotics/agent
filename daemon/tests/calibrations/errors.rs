@@ -66,7 +66,6 @@ fn a_missing_latest_calibration_is_404() {
 fn a_component_without_a_matching_latest_calibration_is_404() {
     let err = CalibrationsErr::from(LatestCalibrationNotFoundErr {
         component: "arm".to_string(),
-        report_id: Some(Uuid::from_u128(1)),
         trace: miru_daemon::trace!(),
     });
 
