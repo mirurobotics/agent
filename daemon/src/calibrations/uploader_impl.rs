@@ -617,7 +617,10 @@ mod tests {
                 ..invalidation_at(received_at())
             };
             let err = u.enqueue_invalidation(invalidation).await.unwrap_err();
-            assert!(matches!(err, CalibrationsErr::InvalidReasonErr(_)), "{err:?}");
+            assert!(
+                matches!(err, CalibrationsErr::InvalidReasonErr(_)),
+                "{err:?}"
+            );
         }
         let longest = Invalidation {
             reason: "é".repeat(512),
