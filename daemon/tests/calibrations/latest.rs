@@ -598,6 +598,27 @@ async fn invalidate_marks_the_entry_and_returns_it() {
 }
 
 #[tokio::test]
+async fn invalidate_keeps_the_first_invalidation() {
+    let f = Fixture::new().await;
+    let arm = reported("arm", None, None);
+    put_all(&f.store, &[&arm]).await;
+    let first = f
+        .store
+        .invalidate(arm.report_id, received_at())
+        .await
+        .unwrap();
+
+    let second = f
+        .store
+        .invalidate(arm.report_id, received_at() + TimeDelta::hours(1))
+        .await
+        .unwrap();
+
+    assert_eq!(second, first);
+    assert_eq!(f.entries().await, [first]);
+}
+
+#[tokio::test]
 async fn invalidate_is_not_found_for_a_replaced_or_unknown_report() {
     let f = Fixture::new().await;
     let arm = reported("arm", None, None);

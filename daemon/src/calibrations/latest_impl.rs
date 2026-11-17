@@ -143,8 +143,8 @@ impl LatestStoreImpl {
         }
     }
 
-    /// Mark the entry for `report_id` invalid at `invalidated_at` and return
-    /// the entry.
+    /// Mark the entry for `report_id` invalid at `invalidated_at`, unless it
+    /// already is, and return the entry.
     pub(crate) async fn invalidate(
         &self,
         report_id: Uuid,
@@ -154,6 +154,9 @@ impl LatestStoreImpl {
         let Some(entry) = index.iter_mut().find(|m| m.report_id == report_id) else {
             return Err(not_found(report_id));
         };
+        if entry.invalidated_at.is_some() {
+            return Ok(entry.clone());
+        }
         entry.invalidated_at = Some(invalidated_at);
         let entry = entry.clone();
         self.write_index(index).await?;

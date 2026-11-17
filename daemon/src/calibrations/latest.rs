@@ -181,8 +181,8 @@ impl LatestStore {
         .await?
     }
 
-    /// Mark the entry for `report_id` invalid at `invalidated_at` and return it.
-    /// Not found unless an entry has that `report_id`.
+    /// Mark the entry for `report_id` invalid at `invalidated_at`, unless it
+    /// already is, and return it. Not found unless an entry has that `report_id`.
     pub async fn invalidate(
         &self,
         report_id: Uuid,
