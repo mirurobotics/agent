@@ -126,7 +126,7 @@ where
         }
         let id = self
             .uploader
-            .enqueue_invalidation(entry, invalidation.clone())
+            .enqueue_invalidation(report_id, invalidation.clone())
             .await?;
         match self.latest.invalidate(report_id, invalidation).await {
             Ok(entry) => Ok(entry),

@@ -5,9 +5,7 @@ use std::sync::Arc;
 // internal crates
 use crate::calibrations::{
     errors::{CalibrationTooLargeErr, CalibrationsErr},
-    report::{
-        self, Invalidation, Job, Queue, QueueEntry, QueueSnapshotFile, Report, ReportMetadata,
-    },
+    report::{self, Invalidation, Job, Queue, QueueEntry, QueueSnapshotFile, Report},
     sender::Sender,
 };
 use crate::errors::Error;
@@ -134,15 +132,15 @@ where
         Ok(id)
     }
 
-    /// Queue the upload of `invalidation` for `entry`, a latest entry. The job
-    /// has no report file. On error nothing is queued.
+    /// Queue the upload of `invalidation` for the report with `report_id`. The
+    /// job has no report file. On error nothing is queued.
     pub(crate) async fn enqueue_invalidation(
         &mut self,
-        entry: ReportMetadata,
+        report_id: Uuid,
         invalidation: Invalidation,
     ) -> Result<Uuid, CalibrationsErr> {
         let job = Job::Invalidation {
-            report: entry,
+            report_id,
             invalidation,
         };
         Ok(self.queue.enqueue(job).await?)
@@ -178,9 +176,9 @@ where
                     sender.send(Report { metadata, data }).await
                 }
                 Job::Invalidation {
-                    report,
+                    report_id,
                     invalidation,
-                } => sender.invalidate(report.report_id, invalidation).await,
+                } => sender.invalidate(report_id, invalidation).await,
             }
         }
     }
@@ -310,7 +308,7 @@ mod tests {
     // internal crates
     use super::{NextAttempt, QueueEntry, UploaderImpl, UploaderOptions};
     use crate::test_utils::calibration_sender::{MockCalibrationSender, Step};
-    use crate::test_utils::calibrations::{layout, received_at, report};
+    use crate::test_utils::calibrations::{layout, received_at, report, report_id};
     use crate::test_utils::filesys::dirs as test_dirs;
     use miru_daemon::calibrations::{CalibrationsErr, Invalidation, Job, Queue, QueueSnapshotFile};
     use miru_daemon::disk::layout::CalibrationsLayout;
@@ -557,12 +555,12 @@ mod tests {
         let invalidation = invalidation_at(received_at());
 
         let id = u
-            .enqueue_invalidation(report("a").metadata, invalidation.clone())
+            .enqueue_invalidation(report_id("a"), invalidation.clone())
             .await
             .unwrap();
 
         let job = Job::Invalidation {
-            report: report("a").metadata,
+            report_id: report_id("a"),
             invalidation,
         };
         let entry = QueueEntry {
@@ -728,13 +726,13 @@ mod tests {
         let f = Fixture::new();
         let mut u = f.uploader().await;
         let invalidation = invalidation_at(received_at());
-        u.enqueue_invalidation(report("a").metadata, invalidation.clone())
+        u.enqueue_invalidation(report_id("a"), invalidation.clone())
             .await
             .unwrap();
 
         run_next_attempt(&mut u).await;
 
-        let want = (report("a").metadata.report_id, invalidation);
+        let want = (report_id("a"), invalidation);
         assert_eq!(f.sender.invalidations(), [want]);
         assert!(f.sent().is_empty());
         assert_empty(&mut u).await;
@@ -745,7 +743,7 @@ mod tests {
         let f = Fixture::new();
         f.sender.push(Step::NotRecorded);
         let mut u = f.uploader().await;
-        u.enqueue_invalidation(report("a").metadata, invalidation_at(received_at()))
+        u.enqueue_invalidation(report_id("a"), invalidation_at(received_at()))
             .await
             .unwrap();
 
@@ -955,7 +953,7 @@ mod tests {
         f.advance(TimeDelta::days(100));
         let mut u = f.uploader().await;
         let invalidation = invalidation_at(received_at() + TimeDelta::days(99));
-        u.enqueue_invalidation(report("a").metadata, invalidation)
+        u.enqueue_invalidation(report_id("a"), invalidation)
             .await
             .unwrap();
 

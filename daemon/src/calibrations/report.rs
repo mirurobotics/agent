@@ -120,18 +120,17 @@ fn parse_time(value: &str, field: &str) -> DateTime<Utc> {
     })
 }
 
-/// A queued upload. In `queue.json` it is the report's metadata, with
-/// `invalidation` set for an invalidation, so an older agent reads the queue
-/// as reports.
+/// A queued upload. A report is stored as its bare metadata, as before
+/// invalidations, so a `queue.json` from an older agent still loads.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(from = "ReportMetadata", into = "ReportMetadata")]
+#[serde(untagged)]
 pub enum Job {
-    /// Upload the report, whose data is in its report file. Its metadata has
-    /// no `invalidation`, or it would load as an invalidation.
+    /// Upload the report, whose data is in its report file.
     Report(ReportMetadata),
-    /// Upload the invalidation of `report`. It has no report file.
+    /// Upload the invalidation of the report with `report_id`. It has no
+    /// report file.
     Invalidation {
-        report: ReportMetadata,
+        report_id: Uuid,
         invalidation: Invalidation,
     },
 }
@@ -143,33 +142,6 @@ impl Job {
         match self {
             Job::Report(report) => report.reported_at,
             Job::Invalidation { invalidation, .. } => invalidation.invalidated_at,
-        }
-    }
-}
-
-impl From<ReportMetadata> for Job {
-    fn from(mut metadata: ReportMetadata) -> Self {
-        match metadata.invalidation.take() {
-            Some(invalidation) => Job::Invalidation {
-                report: metadata,
-                invalidation,
-            },
-            None => Job::Report(metadata),
-        }
-    }
-}
-
-impl From<Job> for ReportMetadata {
-    fn from(job: Job) -> Self {
-        match job {
-            Job::Report(metadata) => metadata,
-            Job::Invalidation {
-                report,
-                invalidation,
-            } => ReportMetadata {
-                invalidation: Some(invalidation),
-                ..report
-            },
         }
     }
 }
@@ -186,11 +158,11 @@ impl queue::QueueJob for Job {
         match self {
             Job::Report(report) => report_name(report),
             Job::Invalidation {
-                report,
+                report_id,
                 invalidation,
             } => {
                 let at = invalidation.invalidated_at.to_rfc3339();
-                format!("invalidation of {}, made at {at}", report_name(report))
+                format!("invalidation of calibration {report_id}, made at {at}")
             }
         }
     }

@@ -57,7 +57,7 @@ fn report_job(name: &str) -> Job {
 /// The upload of `metadata(name)`'s invalidation.
 fn invalidation_job(name: &str) -> Job {
     Job::Invalidation {
-        report: metadata(name),
+        report_id: report_id(name),
         invalidation: invalidation(),
     }
 }
@@ -95,12 +95,12 @@ fn name_leaves_out_a_missing_role_and_aspect() {
 }
 
 #[test]
-fn name_of_an_invalidation_says_when_it_was_made() {
-    assert_eq!(
-        "invalidation of calibration of arm (role aligner-1) (aspect pose) received at \
-         1970-01-01T00:16:40+00:00, made at 1970-01-01T01:16:40+00:00",
-        QueueJob::name(&invalidation_job("arm"))
+fn name_of_an_invalidation_is_its_report_id_and_time() {
+    let want = format!(
+        "invalidation of calibration {}, made at 1970-01-01T01:16:40+00:00",
+        report_id("arm")
     );
+    assert_eq!(want, QueueJob::name(&invalidation_job("arm")));
 }
 
 async fn open(path: &File) -> QueueSnapshotFile {
@@ -143,28 +143,14 @@ mod wire {
         assert_eq!(entry.job, report_job("arm"));
     }
 
-    /// A queued invalidation is written as its report's metadata with the
-    /// invalidation set, so an older agent still reads the queue.
-    #[test]
-    fn an_invalidation_is_written_as_report_metadata() {
-        let job = serde_json::to_value(invalidation_job("arm")).unwrap();
-        let metadata = serde_json::to_value(invalidated("arm")).unwrap();
-
-        assert_eq!(job, metadata);
-    }
-
-    /// Report metadata with the invalidation set loads as an invalidation.
+    /// A queued invalidation holds only its report's id and the invalidation.
     #[tokio::test]
     async fn an_invalidation_loads() {
         let dir = test_dirs::temp("calibration_queue_test").unwrap();
         let path = dir.to_dir().file("queue.json");
         let raw = format!(
             concat!(
-                r#"{{"entries":[{{"job":{{"#,
-                r#""report_id":"{report_id}","component":"arm","format":"yaml","#,
-                r#""role":"aligner-1","aspect":"pose","serial_number":"SN-1","#,
-                r#""reported_by":"Ada Lovelace","#,
-                r#""deployment_id":"dpl_1","reported_at":"1970-01-01T00:16:40Z","#,
+                r#"{{"entries":[{{"job":{{"report_id":"{report_id}","#,
                 r#""invalidation":{{"invalidated_at":"1970-01-01T01:16:40Z","#,
                 r#""reason":"sensor was bumped"}}}}}}]}}"#,
             ),
