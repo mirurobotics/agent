@@ -41,7 +41,7 @@ All source lives under `daemon/src/`. The binary entry point is `main.rs`.
 
 `mqtt` — MQTT subscriber for real-time events from the control plane, so the agent reacts without waiting for the next poll.
 
-`server` — the local Device API for on-device applications, the CLI, and the frontend. One router is served over a Unix socket and, on Windows by default, a loopback-only TCP listener that requires a bearer token published in a discovery file. Each Device API version (`v02`, `v03`) is its own module over its generated crate.
+`server` — the local Device API for on-device applications, the CLI, and the frontend. One router is served over a Unix socket and, on Windows by default, a loopback-only TCP listener that requires a bearer token published in a discovery file. Each Device API version (`v02`, `v03`) is its own module over its generated crate, which nothing outside that module imports; code that builds no wire type lives in `server/` and is shared by the versions.
 
 ### Security
 
