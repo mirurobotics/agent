@@ -2,6 +2,7 @@
 //! they reach Miru.
 
 pub mod errors;
+pub mod invalidation;
 pub mod job;
 pub mod latest;
 mod latest_impl;
@@ -14,8 +15,9 @@ mod uploader_impl;
 
 pub use self::errors::{
     CalibrationBufferFullErr, CalibrationNotFoundErr, CalibrationStoreFullErr,
-    CalibrationTooLargeErr, CalibrationsErr, InvalidReportErr, TokenErr,
+    CalibrationTooLargeErr, CalibrationsErr, InvalidReportErr, ReportNotRecordedErr, TokenErr,
 };
+pub use self::invalidation::Invalidation;
 pub use self::job::Job;
 pub use self::latest::LatestStore;
 pub use self::latest_impl::Filter;
