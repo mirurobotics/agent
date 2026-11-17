@@ -16,7 +16,7 @@ use crate::test_utils::calibrations::{
 };
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_daemon::calibrations::{
-    latest, CalibrationsErr, Filter, LatestStore, Queue, QueueSnapshotFile, ReportMetadata,
+    latest, CalibrationsErr, Filter, Job, LatestStore, Queue, QueueSnapshotFile, ReportMetadata,
     Uploader, UploaderArgs, UploaderOptions,
 };
 use miru_daemon::disk::layout::{CalibrationsLayout, LatestCalsLayout};
@@ -180,7 +180,7 @@ async fn preloaded(h: &Harness, slugs: &[&str]) -> Vec<Uuid> {
     let mut ids = Vec::with_capacity(slugs.len());
     for slug in slugs {
         let report = report(slug);
-        let id = queue.enqueue(report.metadata).await.unwrap();
+        let id = queue.enqueue(Job::Report(report.metadata)).await.unwrap();
         let file = h.report_file(id);
         files::write_string(&file, &report.data, WriteOptions::OVERWRITE_ATOMIC)
             .await

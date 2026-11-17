@@ -2,7 +2,6 @@
 use crate::calibrations::errors::{CalibrationsErr, InvalidReportErr};
 use crate::filesys::{files, Dir, File, FileSysErr};
 use crate::models::InstanceFormat;
-use crate::queue;
 use crate::trace;
 use backend_api::models as backend_client;
 
@@ -120,26 +119,6 @@ fn parse_time(value: &str, field: &str) -> DateTime<Utc> {
     })
 }
 
-impl queue::QueueJob for ReportMetadata {
-    const LABEL: &'static str = "calibration";
-
-    /// A calibration is uploadable the moment it is queued.
-    fn ready_at(&self) -> DateTime<Utc> {
-        DateTime::<Utc>::MIN_UTC
-    }
-
-    fn name(&self) -> String {
-        let mut name = format!("calibration of {}", self.component);
-        if let Some(role) = &self.role {
-            name.push_str(&format!(" (role {role})"));
-        }
-        if let Some(aspect) = &self.aspect {
-            name.push_str(&format!(" (aspect {aspect})"));
-        }
-        format!("{name} received at {}", self.reported_at.to_rfc3339())
-    }
-}
-
 /// The file holding the data of the report queued as `entry_id`.
 pub(crate) fn report_file(reports: &Dir, entry_id: Uuid) -> File {
     reports.file(&report_file_name(entry_id))
@@ -170,14 +149,6 @@ fn invalid(reason: &str) -> CalibrationsErr {
         trace: trace!(),
     })
 }
-
-pub type Queue = queue::FileQueue<ReportMetadata>;
-
-pub type QueueEntry = queue::QueueEntry<ReportMetadata>;
-
-pub type QueueSnapshot = queue::QueueSnapshot<ReportMetadata>;
-
-pub type QueueSnapshotFile = queue::QueueSnapshotFile<ReportMetadata>;
 
 #[cfg(test)]
 mod tests {

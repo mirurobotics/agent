@@ -7,7 +7,8 @@ use std::time::Duration;
 use crate::calibrations::{
     errors::{CalibrationsErr, ReceiveActorMessageErr, SendActorMessageErr},
     latest::LatestStore,
-    report::{QueueEntry, QueueSnapshotFile, Report},
+    queue::{QueueEntry, QueueSnapshotFile},
+    report::Report,
     sender::Sender,
     uploader_impl::{NextAttempt, UploaderImpl, UploaderOptions},
 };
@@ -36,7 +37,7 @@ pub struct UploaderArgs<S, F, N> {
 
 // ================================== WORKER ======================================= //
 enum Command {
-    Enqueue {
+    EnqueueReport {
         report: Box<Report>,
         respond_to: oneshot::Sender<Result<(), CalibrationsErr>>,
     },
@@ -96,8 +97,8 @@ where
     /// Queue `report`, then write it to the latest store. A failed store
     /// write removes the queued report, so on error nothing is queued or
     /// stored.
-    async fn enqueue(&mut self, report: Report) -> Result<(), CalibrationsErr> {
-        let id = self.uploader.enqueue(&report).await?;
+    async fn enqueue_report(&mut self, report: Report) -> Result<(), CalibrationsErr> {
+        let id = self.uploader.enqueue_report(&report).await?;
         if let Err(e) = self.latest.put(report.metadata, &report.data).await {
             self.uploader.remove(id).await;
             return Err(e);
@@ -147,9 +148,9 @@ where
             return Flow::Shutdown;
         };
         match cmd {
-            Command::Enqueue { report, respond_to } => {
-                let result = self.enqueue(*report).await;
-                respond(respond_to, result, "enqueue");
+            Command::EnqueueReport { report, respond_to } => {
+                let result = self.enqueue_report(*report).await;
+                respond(respond_to, result, "enqueue_report");
             }
             Command::Len { respond_to } => respond(respond_to, self.uploader.len(), "len"),
             Command::Shutdown { respond_to } => {
@@ -210,7 +211,7 @@ impl Uploader {
     /// [`CalibrationsErr::StoreFullErr`], and a report over the size cap the
     /// 413 [`CalibrationsErr::TooLargeErr`].
     pub async fn report(&self, report: Report) -> Result<(), CalibrationsErr> {
-        self.send_command("enqueue", |respond_to| Command::Enqueue {
+        self.send_command("enqueue_report", |respond_to| Command::EnqueueReport {
             report: Box::new(report),
             respond_to,
         })
