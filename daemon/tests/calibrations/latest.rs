@@ -571,6 +571,21 @@ async fn get_is_not_found_when_its_content_file_is_missing() {
     assert!(matches!(err, CalibrationsErr::NotFoundErr(_)), "{err:?}");
 }
 
+// ============================== INVALIDATE ============================== //
+#[tokio::test]
+async fn an_entry_written_without_an_invalidation_reads_as_valid() {
+    let f = Fixture::new().await;
+    let arm = reported("arm", None, None);
+    let mut entry = serde_json::to_value(&arm).unwrap();
+    entry.as_object_mut().unwrap().remove("invalidation");
+    let index = serde_json::json!({ "entries": [entry] });
+    files::write_json(&f.layout.index(), &index, WriteOptions::OVERWRITE_ATOMIC)
+        .await
+        .unwrap();
+
+    assert_eq!(f.entries().await, [arm]);
+}
+
 // ================================ ERRORS ================================ //
 #[tokio::test]
 async fn a_corrupt_index_fails_every_call() {

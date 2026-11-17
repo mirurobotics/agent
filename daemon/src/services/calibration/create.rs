@@ -55,6 +55,7 @@ pub async fn create(
             reported_by: params.reported_by,
             deployment_id,
             reported_at: now,
+            invalidation: None,
         },
         data: params.data,
     };

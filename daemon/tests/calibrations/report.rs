@@ -6,7 +6,9 @@ use crate::queue::file::queue_suite;
 use crate::test_utils::calibrations::report_id;
 use crate::test_utils::filesys::dirs as test_dirs;
 use backend_api::models::{self as backend_client, BaseExternalUser};
-use miru_daemon::calibrations::{Queue, QueueSnapshot, QueueSnapshotFile, ReportMetadata};
+use miru_daemon::calibrations::{
+    Invalidation, Queue, QueueSnapshot, QueueSnapshotFile, ReportMetadata,
+};
 use miru_daemon::filesys::{files, File, WriteOptions};
 use miru_daemon::models::InstanceFormat;
 use miru_daemon::queue::{Persistence, QueueJob};
@@ -27,6 +29,23 @@ fn metadata(name: &str) -> ReportMetadata {
         reported_by: Some("Ada Lovelace".to_string()),
         deployment_id: Some("dpl_1".to_string()),
         reported_at: DateTime::from_timestamp(1000, 0).unwrap(),
+        invalidation: None,
+    }
+}
+
+/// An invalidation made an hour after a `metadata` report was received.
+fn invalidation() -> Invalidation {
+    Invalidation {
+        invalidated_at: DateTime::from_timestamp(4600, 0).unwrap(),
+        reason: "sensor was bumped".to_string(),
+    }
+}
+
+/// `metadata(name)` marked invalid.
+fn invalidated(name: &str) -> ReportMetadata {
+    ReportMetadata {
+        invalidation: Some(invalidation()),
+        ..metadata(name)
     }
 }
 
@@ -199,6 +218,16 @@ mod from_backend {
             });
             assert_eq!(found.reported_by, None);
         }
+    }
+
+    #[test]
+    fn maps_an_invalidation() {
+        let found = ReportMetadata::from(backend_client::Calibration {
+            invalidated_at: Some("1970-01-01T01:16:40Z".to_string()),
+            invalidation_reason: Some("sensor was bumped".to_string()),
+            ..calibration()
+        });
+        assert_eq!(found, invalidated("arm"));
     }
 
     #[test]

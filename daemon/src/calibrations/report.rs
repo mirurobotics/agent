@@ -48,6 +48,17 @@ pub struct ReportMetadata {
     pub deployment_id: Option<String>,
     /// When the agent received the calibration.
     pub reported_at: DateTime<Utc>,
+    /// Set when a device app marks the latest calibration invalid, and never
+    /// on intake; a newer report for the key replaces the entry.
+    #[serde(default)]
+    pub invalidation: Option<Invalidation>,
+}
+
+/// When and why a device app marked a calibration invalid.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Invalidation {
+    pub invalidated_at: DateTime<Utc>,
+    pub reason: String,
 }
 
 impl ReportMetadata {
@@ -85,15 +96,28 @@ impl From<backend_client::Calibration> for ReportMetadata {
             serial_number: calibration.serial_number,
             reported_by: calibration.reported_by.flatten().map(|u| u.identifier),
             deployment_id: calibration.deployment_id,
-            reported_at: calibration
-                .reported_at
-                .parse::<DateTime<Utc>>()
-                .unwrap_or_else(|e| {
-                    error!("Error parsing reported_at: {e}");
-                    DateTime::<Utc>::UNIX_EPOCH
-                }),
+            reported_at: parse_time(&calibration.reported_at, "reported_at"),
+            invalidation: to_invalidation(
+                calibration.invalidated_at,
+                calibration.invalidation_reason,
+            ),
         }
     }
+}
+
+/// The control plane's invalidation, which it sets whole or not at all.
+fn to_invalidation(invalidated_at: Option<String>, reason: Option<String>) -> Option<Invalidation> {
+    Some(Invalidation {
+        invalidated_at: parse_time(&invalidated_at?, "invalidated_at"),
+        reason: reason.unwrap_or_default(),
+    })
+}
+
+fn parse_time(value: &str, field: &str) -> DateTime<Utc> {
+    value.parse::<DateTime<Utc>>().unwrap_or_else(|e| {
+        error!("Error parsing {field}: {e}");
+        DateTime::<Utc>::UNIX_EPOCH
+    })
 }
 
 impl queue::QueueJob for ReportMetadata {
