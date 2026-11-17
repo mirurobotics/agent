@@ -98,7 +98,7 @@ where
     /// write removes the queued report, so on error nothing is queued or
     /// stored.
     async fn enqueue(&mut self, report: Report) -> Result<(), CalibrationsErr> {
-        let id = self.uploader.enqueue(&report).await?;
+        let id = self.uploader.enqueue_report(&report).await?;
         if let Err(e) = self.latest.put(report.metadata, &report.data).await {
             self.uploader.remove(id).await;
             return Err(e);

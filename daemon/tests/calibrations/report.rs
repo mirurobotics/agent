@@ -1,33 +1,17 @@
 //! Report metadata: its conversion from the control plane's calibration.
 
 // internal crates
-use crate::test_utils::calibrations::report_id;
+use crate::test_utils::calibrations::{full_metadata, report_id};
 use backend_api::models::{self as backend_client, BaseExternalUser};
 use miru_daemon::calibrations::ReportMetadata;
-use miru_daemon::models::InstanceFormat;
 
 // external crates
 use chrono::{DateTime, Utc};
 
-/// Deterministic report metadata, ready the moment it arrives.
-pub fn metadata(name: &str) -> ReportMetadata {
-    ReportMetadata {
-        report_id: report_id(name),
-        component: name.to_string(),
-        format: InstanceFormat::Yaml,
-        role: Some("aligner-1".to_string()),
-        aspect: Some("pose".to_string()),
-        serial_number: Some("SN-1".to_string()),
-        reported_by: Some("Ada Lovelace".to_string()),
-        deployment_id: Some("dpl_1".to_string()),
-        reported_at: DateTime::from_timestamp(1000, 0).unwrap(),
-    }
-}
-
 mod from_backend {
     use super::*;
 
-    /// Miru's calibration for `metadata("arm")`.
+    /// The control plane's calibration for `full_metadata("arm")`.
     fn calibration() -> backend_client::Calibration {
         backend_client::Calibration {
             id: "cal_1".to_string(),
@@ -49,7 +33,7 @@ mod from_backend {
 
     #[test]
     fn maps_every_field() {
-        assert_eq!(ReportMetadata::from(calibration()), metadata("arm"));
+        assert_eq!(ReportMetadata::from(calibration()), full_metadata("arm"));
     }
 
     #[test]

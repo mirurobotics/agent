@@ -2,9 +2,8 @@
 //! plus the on-disk wire pin for `calibrations/queue.json`.
 
 // internal crates
-use crate::calibrations::report::metadata;
 use crate::queue::file::queue_suite;
-use crate::test_utils::calibrations::report_id;
+use crate::test_utils::calibrations::{full_metadata, report_id};
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_daemon::calibrations::{Job, Queue, QueueSnapshot, QueueSnapshotFile, ReportMetadata};
 use miru_daemon::filesys::{files, File, WriteOptions};
@@ -14,9 +13,9 @@ use miru_daemon::queue::{Persistence, QueueJob};
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-/// The upload of `metadata(name)`.
+/// The upload of `full_metadata(name)`.
 fn report_job(name: &str) -> Job {
-    Job::Report(metadata(name))
+    Job::Report(full_metadata(name))
 }
 
 queue_suite!(report_job, "calibration-generic-queue-test");
@@ -42,7 +41,7 @@ fn name_leaves_out_a_missing_role_and_aspect() {
     let report = ReportMetadata {
         role: None,
         aspect: None,
-        ..metadata("arm")
+        ..full_metadata("arm")
     };
 
     assert_eq!(
@@ -118,7 +117,7 @@ mod wire {
             serial_number: None,
             reported_by: None,
             deployment_id: None,
-            ..metadata("arm")
+            ..full_metadata("arm")
         };
         assert_eq!(found, Job::Report(expected));
     }
@@ -145,7 +144,7 @@ mod wire {
         assert!(!found.report_id.is_nil());
         let expected = ReportMetadata {
             report_id: found.report_id,
-            ..metadata("arm")
+            ..full_metadata("arm")
         };
         assert_eq!(found, expected);
     }
