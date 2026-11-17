@@ -2,10 +2,10 @@
 //! listing, content, the prune when its worker starts, and shutdown.
 
 // internal crates
-use crate::test_utils::calibrations::{latest_cals_layout, latest_store, reported};
+use crate::test_utils::calibrations::{latest_cals_layout, latest_store, received_at, reported};
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_daemon::calibrations::{
-    latest, CalibrationsErr, Filter, LatestStore, Report, ReportMetadata,
+    latest, CalibrationsErr, Filter, Invalidation, LatestStore, Report, ReportMetadata,
 };
 use miru_daemon::disk::layout::LatestCalsLayout;
 use miru_daemon::filesys::{dirs, files, File, PathExt, WriteOptions};
@@ -521,6 +521,37 @@ async fn list_filters_by_component() {
     }
 }
 
+#[tokio::test]
+async fn list_reads_back_an_invalidated_entry() {
+    let f = Fixture::new().await;
+    let arm = ReportMetadata {
+        invalidation: Some(Invalidation {
+            invalidated_at: received_at() + TimeDelta::hours(1),
+            reason: "power cycle".to_string(),
+        }),
+        ..reported("arm", None, None)
+    };
+    put_all(&f.store, &[&arm]).await;
+
+    let entries = f.reopen().await.list(&Filter::default()).await.unwrap();
+
+    assert_eq!(entries, [arm]);
+}
+
+#[tokio::test]
+async fn an_entry_written_without_an_invalidation_reads_as_valid() {
+    let f = Fixture::new().await;
+    let arm = reported("arm", None, None);
+    let mut entry = serde_json::to_value(&arm).unwrap();
+    entry.as_object_mut().unwrap().remove("invalidation");
+    let index = serde_json::json!({ "entries": [entry] });
+    files::write_json(&f.layout.index(), &index, WriteOptions::OVERWRITE_ATOMIC)
+        .await
+        .unwrap();
+
+    assert_eq!(f.entries().await, [arm]);
+}
+
 // ================================= GET ================================== //
 #[tokio::test]
 async fn get_returns_the_report() {
@@ -569,21 +600,6 @@ async fn get_is_not_found_when_its_content_file_is_missing() {
     let err = f.store.get(arm.report_id).await.unwrap_err();
 
     assert!(matches!(err, CalibrationsErr::NotFoundErr(_)), "{err:?}");
-}
-
-// ============================== INVALIDATE ============================== //
-#[tokio::test]
-async fn an_entry_written_without_an_invalidation_reads_as_valid() {
-    let f = Fixture::new().await;
-    let arm = reported("arm", None, None);
-    let mut entry = serde_json::to_value(&arm).unwrap();
-    entry.as_object_mut().unwrap().remove("invalidation");
-    let index = serde_json::json!({ "entries": [entry] });
-    files::write_json(&f.layout.index(), &index, WriteOptions::OVERWRITE_ATOMIC)
-        .await
-        .unwrap();
-
-    assert_eq!(f.entries().await, [arm]);
 }
 
 // ================================ ERRORS ================================ //
