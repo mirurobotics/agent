@@ -26,8 +26,8 @@ pub fn calibration_content(content: calibration::Content) -> Response {
     (StatusCode::OK, headers, content.data).into_response()
 }
 
-/// Whole seconds since `at`, or None when `at` is from before the agent last
-/// started, so belongs to an earlier run or was never set.
+/// Whole seconds since `at`, or None when `at` is before the agent last
+/// started: a time from an earlier run, or one never set.
 pub(crate) fn secs_ago_since_start(
     at: DateTime<Utc>,
     now: DateTime<Utc>,
