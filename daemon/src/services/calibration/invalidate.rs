@@ -23,7 +23,8 @@ pub struct InvalidateParams {
 /// Queue the invalidation of the component's latest calibration at `now` for
 /// the control plane and mark it invalid, unless it already is, and return it.
 /// Not found when the component has no latest calibration, or `report_id` is
-/// set and isn't it. Nothing here waits on the control plane.
+/// set and isn't it. A failed store write still leaves the upload queued.
+/// Nothing here waits on the control plane.
 pub async fn invalidate(
     cal_uploader: &Uploader,
     latest_cals: &LatestStore,

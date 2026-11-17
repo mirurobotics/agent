@@ -246,7 +246,8 @@ impl Uploader {
     }
 
     /// Queue the upload of `invalidation`, then mark its report's entry invalid
-    /// unless a newer report replaced it.
+    /// unless a newer report replaced it. A failed store write still leaves the
+    /// upload queued.
     pub async fn invalidate(&self, invalidation: Invalidation) -> Result<(), CalibrationsErr> {
         self.send_command("invalidate", |respond_to| Command::Invalidate {
             invalidation,
