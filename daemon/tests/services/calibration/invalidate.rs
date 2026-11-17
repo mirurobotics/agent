@@ -2,14 +2,16 @@
 //! invalidation's upload.
 
 // internal crates
+use crate::mocks::calibration_sender::Step;
 use crate::services::calibration::helpers::{params, Fixture};
 use crate::test_utils::calibrations::received_at;
 use miru_daemon::calibrations::{CalibrationsErr, Invalidation};
-use miru_daemon::services::calibration::{self, InvalidateParams};
+use miru_daemon::services::calibration::InvalidateParams;
 use miru_daemon::services::ServiceErr;
 
 // external crates
 use chrono::TimeDelta;
+use tokio::sync::oneshot;
 use uuid::Uuid;
 
 /// The flat component `params()` is reported under.
@@ -32,13 +34,10 @@ async fn invalidate_stamps_the_latest_and_uploads_the_invalidation() {
         let report_id = with_report_id.then_some(created.report_id);
         let now = received_at() + TimeDelta::hours(1);
 
-        let invalidated = calibration::invalidate(
-            &f.cal_uploader,
-            invalidate_params(COMPONENT, report_id),
-            now,
-        )
-        .await
-        .unwrap();
+        let invalidated = f
+            .invalidate(invalidate_params(COMPONENT, report_id), now)
+            .await
+            .unwrap();
 
         assert_eq!(invalidated.report_id, created.report_id);
         assert_eq!(invalidated.invalidated_at, Some(now));
@@ -53,20 +52,44 @@ async fn invalidate_stamps_the_latest_and_uploads_the_invalidation() {
 }
 
 #[tokio::test]
+async fn invalidate_of_an_invalid_calibration_returns_it_and_queues_nothing() {
+    let mut f = Fixture::new().await;
+    // the first invalidation's upload hangs, so it stays queued
+    let (_hold, hang) = oneshot::channel();
+    f.sender.push(Step::Ok);
+    f.sender.push(Step::Hang(hang));
+    f.create(params()).await.unwrap();
+    let first = f
+        .invalidate(invalidate_params(COMPONENT, None), received_at())
+        .await
+        .unwrap();
+    f.uploaded_invalidation().await;
+    let params = InvalidateParams {
+        reason: "dropped".to_string(),
+        ..invalidate_params(COMPONENT, None)
+    };
+
+    let again = f
+        .invalidate(params, received_at() + TimeDelta::hours(1))
+        .await
+        .unwrap();
+
+    assert_eq!(again, first);
+    assert_eq!(f.cal_uploader.num_queued_uploads().await.unwrap(), 1);
+}
+
+#[tokio::test]
 async fn invalidate_of_an_unknown_component_or_a_stale_report_is_not_found() {
     let f = Fixture::new().await;
     f.create(params()).await.unwrap();
 
     let cases = [("leg", None), (COMPONENT, Some(Uuid::new_v4()))];
     for (component, report_id) in cases {
-        let result = calibration::invalidate(
-            &f.cal_uploader,
-            invalidate_params(component, report_id),
-            received_at(),
-        )
-        .await;
+        let err = f
+            .invalidate(invalidate_params(component, report_id), received_at())
+            .await
+            .unwrap_err();
 
-        let err = result.unwrap_err();
         assert!(
             matches!(
                 err,
@@ -75,4 +98,17 @@ async fn invalidate_of_an_unknown_component_or_a_stale_report_is_not_found() {
             "{component}: {err:?}"
         );
     }
+}
+
+#[tokio::test]
+async fn invalidate_with_a_refused_reason_is_rejected_before_the_lookup() {
+    let f = Fixture::new().await;
+    let params = InvalidateParams {
+        reason: " ".to_string(),
+        ..invalidate_params("leg", None)
+    };
+
+    let err = f.invalidate(params, received_at()).await.unwrap_err();
+
+    assert!(matches!(err, ServiceErr::InvalidReasonErr(_)), "{err:?}");
 }

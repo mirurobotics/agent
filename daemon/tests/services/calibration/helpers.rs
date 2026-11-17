@@ -10,17 +10,17 @@ use crate::mocks::calibration_sender::MockCalibrationSender;
 use crate::test_utils::calibrations::{latest_cals_layout, latest_store, layout, received_at};
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_daemon::calibrations::{
-    latest, Invalidation, LatestStore, QueueSnapshotFile, Report, Uploader, UploaderArgs,
-    UploaderOptions,
+    latest, Invalidation, LatestStore, QueueSnapshotFile, Report, ReportMetadata, Uploader,
+    UploaderArgs, UploaderOptions,
 };
 use miru_daemon::disk::{self, Layout};
 use miru_daemon::filesys::{files, WriteOptions};
 use miru_daemon::models::{Deployment, DplActivity, InstanceFormat};
-use miru_daemon::services::calibration::{self, CreateParams, Created};
+use miru_daemon::services::calibration::{self, CreateParams, Created, InvalidateParams};
 use miru_daemon::services::ServiceErr;
 
 // external crates
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use tokio::sync::mpsc;
 
 pub struct Fixture {
@@ -87,6 +87,14 @@ impl Fixture {
 
     pub async fn create(&self, params: CreateParams) -> Result<Created, ServiceErr> {
         calibration::create(&self.cal_uploader, &self.deployments, params, received_at()).await
+    }
+
+    pub async fn invalidate(
+        &self,
+        params: InvalidateParams,
+        now: DateTime<Utc>,
+    ) -> Result<ReportMetadata, ServiceErr> {
+        calibration::invalidate(&self.cal_uploader, &self.latest, params, now).await
     }
 
     /// Makes the latest store's index unreadable.

@@ -220,20 +220,17 @@ fn invalidated_at() -> DateTime<Utc> {
     received_at() + TimeDelta::hours(1)
 }
 
-/// Invalidate `component`'s latest calibration for `reason`, if it is
-/// `report_id` when that is set.
-async fn invalidate(
-    h: &Harness,
-    component: &str,
-    report_id: Option<Uuid>,
-    reason: &str,
-) -> Result<ReportMetadata, CalibrationsErr> {
-    let (component, reason) = (component.to_string(), reason.to_string());
-    guard(
-        h.uploader()
-            .invalidate(component, report_id, reason, invalidated_at()),
-    )
-    .await
+/// The invalidation of `report_id` made at [`invalidated_at`].
+fn invalidation(report_id: Uuid) -> Invalidation {
+    Invalidation {
+        report_id,
+        invalidated_at: invalidated_at(),
+        reason: "power cycle".to_string(),
+    }
+}
+
+async fn invalidate(h: &Harness, report_id: Uuid) -> Result<ReportMetadata, CalibrationsErr> {
+    guard(h.uploader().invalidate(invalidation(report_id))).await
 }
 
 #[tokio::test]
@@ -360,77 +357,28 @@ async fn an_invalidation_is_stored_and_uploaded() {
     h.await_drained(&["a"]).await;
     let report_id = report("a").metadata.report_id;
 
-    let invalidated = invalidate(&h, "a", None, "power cycle").await.unwrap();
+    let invalidated = invalidate(&h, report_id).await.unwrap();
 
     assert_eq!(invalidated.invalidated_at, Some(invalidated_at()));
     assert_eq!(h.latest_entries().await, [invalidated]);
-    let uploaded = Invalidation {
-        report_id,
-        invalidated_at: invalidated_at(),
-        reason: "power cycle".to_string(),
-    };
     eventually(|| async {
-        h.sender.invalidations() == [uploaded.clone()] && h.num_queued_uploads().await == 0
+        h.sender.invalidations() == [invalidation(report_id)] && h.num_queued_uploads().await == 0
     })
     .await;
 }
 
 #[tokio::test]
-async fn an_invalid_entry_is_returned_unchanged_and_not_queued_again() {
-    let mut h = Harness::new();
-    // the first invalidation stays queued
-    let (_hold, hang) = oneshot::channel();
-    h.sender.push(Step::Ok);
-    h.sender.push(Step::Hang(hang));
-    h.spawn().await;
-    h.report("a").await;
-    h.await_drained(&["a"]).await;
-    let report_id = report("a").metadata.report_id;
-    let first = invalidate(&h, "a", None, "power cycle").await.unwrap();
-
-    let again = invalidate(&h, "a", Some(report_id), "dropped")
-        .await
-        .unwrap();
-
-    assert_eq!(again, first);
-    assert_eq!(h.num_queued_uploads().await, 1);
-}
-
-#[tokio::test]
-async fn invalidating_an_unknown_component_or_a_stale_report_queues_nothing() {
+async fn invalidating_a_report_that_isnt_an_entry_removes_the_queued_job() {
     let mut h = Harness::new();
     h.spawn().await;
     h.report("a").await;
     h.await_drained(&["a"]).await;
 
-    for (component, report_id) in [("b", None), ("a", Some(Uuid::new_v4()))] {
-        let err = invalidate(&h, component, report_id, "power cycle")
-            .await
-            .unwrap_err();
+    let err = invalidate(&h, Uuid::new_v4()).await.unwrap_err();
 
-        assert!(
-            matches!(err, CalibrationsErr::LatestNotFoundErr(_)),
-            "{err:?}"
-        );
-    }
+    assert!(matches!(err, CalibrationsErr::NotFoundErr(_)), "{err:?}");
     assert_eq!(h.num_queued_uploads().await, 0);
     assert_eq!(h.latest_entries().await, [report("a").metadata]);
-}
-
-#[tokio::test]
-async fn a_reason_the_control_plane_refuses_is_rejected_before_the_lookup() {
-    let mut h = Harness::new();
-    h.spawn().await;
-    h.report("a").await;
-    h.await_drained(&["a"]).await;
-
-    let err = invalidate(&h, "b", None, " ").await.unwrap_err();
-
-    assert!(
-        matches!(err, CalibrationsErr::InvalidReasonErr(_)),
-        "{err:?}"
-    );
-    assert_eq!(h.num_queued_uploads().await, 0);
 }
 
 #[tokio::test]
@@ -445,7 +393,9 @@ async fn a_full_queue_leaves_the_entry_valid() {
     h.spawn_with(options).await;
     h.report("a").await;
 
-    let err = invalidate(&h, "a", None, "power cycle").await.unwrap_err();
+    let err = invalidate(&h, report("a").metadata.report_id)
+        .await
+        .unwrap_err();
 
     assert!(matches!(err, CalibrationsErr::QueueFullErr(_)), "{err:?}");
     assert_eq!(h.latest_entries().await, [report("a").metadata]);
@@ -459,7 +409,9 @@ async fn a_failed_store_write_removes_the_queued_invalidation() {
     h.await_drained(&["a"]).await;
     let _read_only = make_read_only(&h.latest_layout.root);
 
-    let err = invalidate(&h, "a", None, "power cycle").await.unwrap_err();
+    let err = invalidate(&h, report("a").metadata.report_id)
+        .await
+        .unwrap_err();
 
     assert!(matches!(err, CalibrationsErr::FileSysErr(_)), "{err:?}");
     assert_eq!(h.num_queued_uploads().await, 0);

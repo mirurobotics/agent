@@ -5,16 +5,13 @@ use std::time::Duration;
 
 // internal crates
 use crate::calibrations::{
-    errors::{
-        CalibrationsErr, LatestCalibrationNotFoundErr, ReceiveActorMessageErr, SendActorMessageErr,
-    },
-    invalidation::{self, Invalidation},
+    errors::{CalibrationsErr, ReceiveActorMessageErr, SendActorMessageErr},
+    invalidation::Invalidation,
     latest::LatestStore,
     queue::{QueueEntry, QueueSnapshotFile},
     report::{Report, ReportMetadata},
     sender::Sender,
     uploader_impl::{NextAttempt, UploaderImpl, UploaderOptions},
-    Filter,
 };
 use crate::filesys::Dir;
 use crate::trace;
@@ -24,7 +21,6 @@ use chrono::{DateTime, Utc};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{error, info};
-use uuid::Uuid;
 
 pub struct UploaderArgs<S, F, N> {
     /// Where the queue persists; `None` keeps it in memory only.
@@ -47,10 +43,7 @@ enum Command {
         respond_to: oneshot::Sender<Result<(), CalibrationsErr>>,
     },
     Invalidate {
-        component: String,
-        report_id: Option<Uuid>,
-        reason: String,
-        invalidated_at: DateTime<Utc>,
+        invalidation: Invalidation,
         respond_to: oneshot::Sender<Result<ReportMetadata, CalibrationsErr>>,
     },
     Len {
@@ -118,26 +111,13 @@ where
         Ok(())
     }
 
-    /// Queue the upload of an invalidation of `component`'s latest entry, then
-    /// mark the entry invalid. A failed store write removes the queued upload.
+    /// Queue the upload of `invalidation`, then mark its report's entry invalid.
+    /// A failed store write removes the queued upload.
     async fn invalidate(
         &mut self,
-        component: String,
-        report_id: Option<Uuid>,
-        reason: String,
-        invalidated_at: DateTime<Utc>,
+        invalidation: Invalidation,
     ) -> Result<ReportMetadata, CalibrationsErr> {
-        invalidation::verify_reason(&reason)?;
-        let entry = self.latest_entry(component, report_id).await?;
-        if entry.invalidated_at.is_some() {
-            return Ok(entry);
-        }
-        let report_id = entry.report_id;
-        let invalidation = Invalidation {
-            report_id,
-            invalidated_at,
-            reason,
-        };
+        let (report_id, invalidated_at) = (invalidation.report_id, invalidation.invalidated_at);
         let id = self.uploader.enqueue_invalidation(invalidation).await?;
         match self.latest.invalidate(report_id, invalidated_at).await {
             Ok(entry) => Ok(entry),
@@ -145,27 +125,6 @@ where
                 self.uploader.remove(id).await;
                 Err(e)
             }
-        }
-    }
-
-    /// `component`'s latest entry, if `report_id` is unset or names it.
-    async fn latest_entry(
-        &mut self,
-        component: String,
-        report_id: Option<Uuid>,
-    ) -> Result<ReportMetadata, CalibrationsErr> {
-        let filter = Filter {
-            component: vec![component.clone()],
-            ..Filter::default()
-        };
-        // a key has at most one entry
-        match self.latest.list(&filter).await?.pop() {
-            Some(entry) if report_id.is_none_or(|id| id == entry.report_id) => Ok(entry),
-            _ => Err(LatestCalibrationNotFoundErr {
-                component,
-                trace: trace!(),
-            }
-            .into()),
         }
     }
 
@@ -216,15 +175,10 @@ where
                 respond(respond_to, result, "enqueue_report");
             }
             Command::Invalidate {
-                component,
-                report_id,
-                reason,
-                invalidated_at,
+                invalidation,
                 respond_to,
             } => {
-                let result = self
-                    .invalidate(component, report_id, reason, invalidated_at)
-                    .await;
+                let result = self.invalidate(invalidation).await;
                 respond(respond_to, result, "invalidate");
             }
             Command::Len { respond_to } => respond(respond_to, self.uploader.len(), "len"),
@@ -293,21 +247,14 @@ impl Uploader {
         .await?
     }
 
-    /// Mark `component`'s latest entry invalid and queue its upload, unless it
-    /// already is invalid, and return it. Not found unless `report_id`, when
-    /// set, is still the latest.
+    /// Queue the upload of `invalidation`, mark its report's entry invalid and
+    /// return the entry. Not found unless an entry has its `report_id`.
     pub async fn invalidate(
         &self,
-        component: String,
-        report_id: Option<Uuid>,
-        reason: String,
-        invalidated_at: DateTime<Utc>,
+        invalidation: Invalidation,
     ) -> Result<ReportMetadata, CalibrationsErr> {
         self.send_command("invalidate", |respond_to| Command::Invalidate {
-            component,
-            report_id,
-            reason,
-            invalidated_at,
+            invalidation,
             respond_to,
         })
         .await?

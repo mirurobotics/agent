@@ -1,15 +1,17 @@
 // internal crates
+use crate::errors::harnesses::{assert_error, Expected};
 use miru_daemon::cache::errors::CacheElementNotFound;
 use miru_daemon::cache::CacheErr;
 use miru_daemon::calibrations::{CalibrationTooLargeErr, CalibrationsErr};
 use miru_daemon::disk::DiskErr;
+use miru_daemon::errors::{Code, HTTPCode};
 use miru_daemon::filesys::errors::InvalidDirNameErr;
 use miru_daemon::filesys::FileSysErr;
 use miru_daemon::http::errors::MockErr as HTTPMockErr;
 use miru_daemon::http::HTTPErr;
 use miru_daemon::models::errors::DateTimeParseErr;
 use miru_daemon::models::ModelsErr;
-use miru_daemon::services::errors::FileRulesNotExpandedErr;
+use miru_daemon::services::errors::{FileRulesNotExpandedErr, InvalidReasonErr};
 use miru_daemon::services::ServiceErr;
 use miru_daemon::sync::errors::MockErr as SyncMockErr;
 use miru_daemon::sync::SyncErr;
@@ -66,6 +68,25 @@ fn file_rules_not_expanded_err() -> FileRulesNotExpandedErr {
     }
 }
 
+fn invalid_reason_err() -> InvalidReasonErr {
+    InvalidReasonErr {
+        max_chars: 512,
+        trace: miru_daemon::trace!(),
+    }
+}
+
+#[test]
+fn an_invalid_reason_is_422() {
+    let err = ServiceErr::from(invalid_reason_err());
+
+    assert_error(
+        &err,
+        Expected::new(Code::InvalidRequest, HTTPCode::UNPROCESSABLE_ENTITY),
+    );
+    let want = "an invalidation reason must not be blank or over 512 characters";
+    assert_eq!(err.to_string(), want);
+}
+
 mod from_conversions {
     use super::*;
 
@@ -115,5 +136,11 @@ mod from_conversions {
     fn calibrations_err_maps_to_service_calibrations_err() {
         let err: ServiceErr = calibrations_err().into();
         assert!(matches!(err, ServiceErr::CalibrationsErr(_)));
+    }
+
+    #[test]
+    fn invalid_reason_err_maps_to_service_invalid_reason_err() {
+        let err: ServiceErr = invalid_reason_err().into();
+        assert!(matches!(err, ServiceErr::InvalidReasonErr(_)));
     }
 }

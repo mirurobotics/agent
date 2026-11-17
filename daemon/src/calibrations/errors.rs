@@ -163,25 +163,6 @@ impl crate::errors::Error for TokenErr {
     }
 }
 
-/// An invalidation's reason is blank or longer than the control plane
-/// accepts: 422 `invalid_request`. Nothing was queued.
-#[derive(Debug, thiserror::Error)]
-#[error("an invalidation reason must not be blank or over {max_chars} characters")]
-pub struct InvalidReasonErr {
-    pub max_chars: usize,
-    pub trace: Box<Trace>,
-}
-
-impl crate::errors::Error for InvalidReasonErr {
-    fn code(&self) -> Code {
-        Code::InvalidRequest
-    }
-
-    fn http_status(&self) -> HTTPCode {
-        HTTPCode::UNPROCESSABLE_ENTITY
-    }
-}
-
 #[derive(Debug, thiserror::Error)]
 pub enum CalibrationsErr {
     #[error(transparent)]
@@ -194,8 +175,6 @@ pub enum CalibrationsErr {
     NotFoundErr(CalibrationNotFoundErr),
     #[error(transparent)]
     LatestNotFoundErr(LatestCalibrationNotFoundErr),
-    #[error(transparent)]
-    InvalidReasonErr(InvalidReasonErr),
     #[error(transparent)]
     FileSysErr(FileSysErr),
     #[error(transparent)]
@@ -252,12 +231,6 @@ impl From<LatestCalibrationNotFoundErr> for CalibrationsErr {
     }
 }
 
-impl From<InvalidReasonErr> for CalibrationsErr {
-    fn from(e: InvalidReasonErr) -> Self {
-        Self::InvalidReasonErr(e)
-    }
-}
-
 impl From<ReportNotRecordedErr> for CalibrationsErr {
     fn from(e: ReportNotRecordedErr) -> Self {
         Self::ReportNotRecordedErr(e)
@@ -282,7 +255,6 @@ crate::impl_error!(CalibrationsErr {
     StoreFullErr,
     NotFoundErr,
     LatestNotFoundErr,
-    InvalidReasonErr,
     FileSysErr,
     InvalidReportErr,
     ReportNotRecordedErr,
