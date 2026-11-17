@@ -72,8 +72,7 @@ pub fn reported(component: &str, role: Option<&str>, aspect: Option<&str>) -> Re
     }
 }
 
-/// The fixture report's metadata for `slug` with every field set, as a wire
-/// pin spells it.
+/// Metadata for `slug` with every field set and the YAML format.
 pub fn full_metadata(slug: &str) -> ReportMetadata {
     ReportMetadata {
         report_id: report_id(slug),
