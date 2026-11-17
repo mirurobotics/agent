@@ -30,6 +30,7 @@ pub enum Step {
 pub struct MockCalibrationSender {
     script: Mutex<VecDeque<Step>>,
     sent: Mutex<Vec<Report>>,
+    invalidated: Mutex<Vec<(Uuid, Invalidation)>>,
     started_tx: mpsc::UnboundedSender<()>,
 }
 
@@ -41,6 +42,7 @@ impl MockCalibrationSender {
         let mock = Self {
             script: Mutex::new(VecDeque::new()),
             sent: Mutex::new(Vec::new()),
+            invalidated: Mutex::new(Vec::new()),
             started_tx,
         };
         (Arc::new(mock), started_rx)
@@ -65,6 +67,12 @@ impl MockCalibrationSender {
     /// Every report `send` was called with, in order.
     pub fn reports(&self) -> Vec<Report> {
         self.sent.lock().unwrap().clone()
+    }
+
+    /// Every `(report_id, invalidation)` `invalidate` was called with, in
+    /// order.
+    pub fn invalidations(&self) -> Vec<(Uuid, Invalidation)> {
+        self.invalidated.lock().unwrap().clone()
     }
 
     /// Signal the call's start, then play the next step.
@@ -104,9 +112,13 @@ impl Sender for MockCalibrationSender {
 
     async fn invalidate(
         &self,
-        _report_id: Uuid,
-        _invalidation: Invalidation,
+        report_id: Uuid,
+        invalidation: Invalidation,
     ) -> Result<(), CalibrationsErr> {
+        self.invalidated
+            .lock()
+            .unwrap()
+            .push((report_id, invalidation));
         self.play_next_step().await
     }
 }
