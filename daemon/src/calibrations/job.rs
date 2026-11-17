@@ -1,5 +1,5 @@
 // internal crates
-use crate::calibrations::report::ReportMetadata;
+use crate::calibrations::{invalidation::Invalidation, report::ReportMetadata};
 
 // external crates
 use chrono::{DateTime, Utc};
@@ -12,6 +12,8 @@ use serde::{Deserialize, Serialize};
 pub enum Job {
     /// Upload the report, whose data is in its report file.
     Report(ReportMetadata),
+    /// Upload the invalidation, which has no report file.
+    Invalidation(Invalidation),
 }
 
 impl Job {
@@ -19,6 +21,7 @@ impl Job {
     pub(crate) fn queued_at(&self) -> DateTime<Utc> {
         match self {
             Job::Report(report) => report.reported_at,
+            Job::Invalidation(invalidation) => invalidation.invalidated_at,
         }
     }
 }

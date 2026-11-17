@@ -3,19 +3,30 @@
 
 // internal crates
 use crate::queue::file::queue_suite;
-use crate::test_utils::calibrations::{full_metadata, report_id};
+use crate::test_utils::calibrations::{full_metadata, received_at, report_id};
 use crate::test_utils::filesys::dirs as test_dirs;
-use miru_daemon::calibrations::{Job, Queue, QueueSnapshot, QueueSnapshotFile, ReportMetadata};
+use miru_daemon::calibrations::{
+    Invalidation, Job, Queue, QueueSnapshot, QueueSnapshotFile, ReportMetadata,
+};
 use miru_daemon::filesys::{files, File, WriteOptions};
 use miru_daemon::queue::{Persistence, QueueJob};
 
 // external crates
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeDelta, Utc};
 use uuid::Uuid;
 
 /// The upload of `full_metadata(name)`.
 fn report_job(name: &str) -> Job {
     Job::Report(full_metadata(name))
+}
+
+/// The upload of the invalidation of `full_metadata(name)`.
+fn invalidation_job(name: &str) -> Job {
+    Job::Invalidation(Invalidation {
+        report_id: report_id(name),
+        invalidated_at: received_at() + TimeDelta::hours(1),
+        reason: "sensor was bumped".to_string(),
+    })
 }
 
 queue_suite!(report_job, "calibration-generic-queue-test");
@@ -48,6 +59,15 @@ fn name_leaves_out_a_missing_role_and_aspect() {
         "calibration of arm received at 1970-01-01T00:16:40+00:00",
         QueueJob::name(&Job::Report(report))
     );
+}
+
+#[test]
+fn name_of_an_invalidation_is_its_report_id_and_time() {
+    let want = format!(
+        "invalidation of calibration {}, made at 1970-01-01T01:16:40+00:00",
+        report_id("arm")
+    );
+    assert_eq!(want, QueueJob::name(&invalidation_job("arm")));
 }
 
 async fn open(path: &File) -> QueueSnapshotFile {
@@ -88,6 +108,29 @@ mod wire {
         let entry = queue.next_ready(Utc::now()).unwrap();
         assert_eq!(entry.id, id);
         assert_eq!(entry.job, report_job("arm"));
+    }
+
+    /// A queued invalidation holds only its report's id, when and why.
+    #[tokio::test]
+    async fn an_invalidation_loads() {
+        let dir = test_dirs::temp("calibration_queue_test").unwrap();
+        let path = dir.to_dir().file("queue.json");
+        let raw = format!(
+            concat!(
+                r#"{{"entries":[{{"job":{{"report_id":"{report_id}","#,
+                r#""invalidated_at":"1970-01-01T01:16:40Z","#,
+                r#""reason":"sensor was bumped"}}}}]}}"#,
+            ),
+            report_id = report_id("arm"),
+        );
+        files::write_string(&path, &raw, WriteOptions::OVERWRITE_ATOMIC)
+            .await
+            .unwrap();
+
+        let queue = Queue::from_snapshot(8, open(&path).await, Persistence::BestEffort);
+
+        let found = queue.next_ready(Utc::now()).unwrap().job;
+        assert_eq!(found, invalidation_job("arm"));
     }
 
     /// The optional fields may be absent, as for a calibration taken with no
@@ -140,7 +183,9 @@ mod wire {
 
         let queue = Queue::from_snapshot(8, open(&path).await, Persistence::BestEffort);
 
-        let Job::Report(found) = queue.next_ready(Utc::now()).unwrap().job;
+        let Job::Report(found) = queue.next_ready(Utc::now()).unwrap().job else {
+            panic!("expected a report");
+        };
         assert!(!found.report_id.is_nil());
         let expected = ReportMetadata {
             report_id: found.report_id,

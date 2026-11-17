@@ -3,7 +3,9 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 // internal crates
-use miru_daemon::calibrations::{CalibrationsErr, Invalidation, Report, Sender};
+use miru_daemon::calibrations::{
+    CalibrationsErr, Invalidation, Report, ReportNotRecordedErr, Sender,
+};
 use miru_daemon::http::errors::{HTTPErr, MockErr, RequestFailed};
 use miru_daemon::http::request::Params;
 
@@ -16,6 +18,9 @@ pub enum Step {
     Ok,
     /// Miru rejects the report for good (HTTP 422).
     Terminal,
+    /// The control plane hasn't recorded the report an invalidation names
+    /// (HTTP 404).
+    NotRecorded,
     /// Miru fails (HTTP 500).
     Server,
     /// Miru can't be reached.
@@ -30,7 +35,7 @@ pub enum Step {
 pub struct MockCalibrationSender {
     script: Mutex<VecDeque<Step>>,
     sent: Mutex<Vec<Report>>,
-    invalidated: Mutex<Vec<(Uuid, Invalidation)>>,
+    invalidated: Mutex<Vec<Invalidation>>,
     started_tx: mpsc::UnboundedSender<()>,
 }
 
@@ -69,9 +74,8 @@ impl MockCalibrationSender {
         self.sent.lock().unwrap().clone()
     }
 
-    /// Every `(report_id, invalidation)` `invalidate` was called with, in
-    /// order.
-    pub fn invalidations(&self) -> Vec<(Uuid, Invalidation)> {
+    /// Every invalidation `invalidate` was called with, in order.
+    pub fn invalidations(&self) -> Vec<Invalidation> {
         self.invalidated.lock().unwrap().clone()
     }
 
@@ -83,6 +87,10 @@ impl MockCalibrationSender {
         match step {
             None | Some(Step::Ok) => Ok(()),
             Some(Step::Terminal) => Err(request_failed(422)),
+            Some(Step::NotRecorded) => Err(CalibrationsErr::from(ReportNotRecordedErr {
+                report_id: Uuid::nil(),
+                source: failed_request(404),
+            })),
             Some(Step::Server) => Err(request_failed(500)),
             Some(Step::Network) => Err(CalibrationsErr::HTTPErr(HTTPErr::MockErr(MockErr {
                 is_network_conn_err: true,
@@ -96,12 +104,16 @@ impl MockCalibrationSender {
 }
 
 fn request_failed(status: u16) -> CalibrationsErr {
-    CalibrationsErr::HTTPErr(HTTPErr::RequestFailed(RequestFailed {
+    CalibrationsErr::HTTPErr(HTTPErr::RequestFailed(failed_request(status)))
+}
+
+fn failed_request(status: u16) -> RequestFailed {
+    RequestFailed {
         request: Params::get("http://mock/calibrations").meta().unwrap(),
         status: reqwest::StatusCode::from_u16(status).unwrap(),
         error: None,
         trace: miru_daemon::trace!(),
-    }))
+    }
 }
 
 impl Sender for MockCalibrationSender {
@@ -110,15 +122,8 @@ impl Sender for MockCalibrationSender {
         self.play_next_step().await
     }
 
-    async fn invalidate(
-        &self,
-        report_id: Uuid,
-        invalidation: Invalidation,
-    ) -> Result<(), CalibrationsErr> {
-        self.invalidated
-            .lock()
-            .unwrap()
-            .push((report_id, invalidation));
+    async fn invalidate(&self, invalidation: Invalidation) -> Result<(), CalibrationsErr> {
+        self.invalidated.lock().unwrap().push(invalidation);
         self.play_next_step().await
     }
 }

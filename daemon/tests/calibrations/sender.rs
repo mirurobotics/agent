@@ -211,6 +211,7 @@ pub mod invalidate {
 
     fn invalidation() -> Invalidation {
         Invalidation {
+            report_id: report_id("arm"),
             invalidated_at: received_at() + TimeDelta::hours(1),
             reason: "sensor was bumped".to_string(),
         }
@@ -218,7 +219,7 @@ pub mod invalidate {
 
     async fn invalidate(client: &Arc<MockClient>) -> Result<(), CalibrationsErr> {
         sender(client, StubTokenManager::ok("tok"))
-            .invalidate(report_id("arm"), invalidation())
+            .invalidate(invalidation())
             .await
     }
 
@@ -291,7 +292,7 @@ pub mod invalidate {
         let tokens = StubTokenManager::err(AuthnErr::HTTPErr(request_failed(403)));
 
         let err = sender(&client, tokens)
-            .invalidate(report_id("arm"), invalidation())
+            .invalidate(invalidation())
             .await
             .unwrap_err();
 

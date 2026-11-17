@@ -17,7 +17,6 @@ use backend_api::models::{
 // external crates
 use reqwest::StatusCode;
 use tracing::warn;
-use uuid::Uuid;
 
 /// The seam between the upload worker and Miru.
 ///
@@ -32,7 +31,6 @@ pub trait Sender: Send + Sync {
 
     fn invalidate(
         &self,
-        report_id: Uuid,
         invalidation: Invalidation,
     ) -> impl Future<Output = Result<(), CalibrationsErr>> + Send;
 }
@@ -74,11 +72,8 @@ impl<C: ClientI, T: TokenManagerExt> Sender for HttpSender<C, T> {
         }
     }
 
-    async fn invalidate(
-        &self,
-        report_id: Uuid,
-        invalidation: Invalidation,
-    ) -> Result<(), CalibrationsErr> {
+    async fn invalidate(&self, invalidation: Invalidation) -> Result<(), CalibrationsErr> {
+        let report_id = invalidation.report_id;
         let payload = InvalidateCalibrationRequest {
             report_id,
             invalidated_at: invalidation.invalidated_at.to_rfc3339(),

@@ -8,6 +8,7 @@ use crate::disk::layout::LatestCalsLayout;
 use crate::trace;
 
 // external crates
+use chrono::{DateTime, Utc};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{error, info};
@@ -35,6 +36,11 @@ enum Command {
     Get {
         report_id: Uuid,
         respond_to: oneshot::Sender<Result<Report, CalibrationsErr>>,
+    },
+    Invalidate {
+        report_id: Uuid,
+        invalidated_at: DateTime<Utc>,
+        respond_to: oneshot::Sender<Result<ReportMetadata, CalibrationsErr>>,
     },
     Shutdown {
         respond_to: oneshot::Sender<()>,
@@ -79,6 +85,14 @@ impl Worker {
                 } => {
                     let result = self.store.get(report_id).await;
                     respond(respond_to, result, "get");
+                }
+                Command::Invalidate {
+                    report_id,
+                    invalidated_at,
+                    respond_to,
+                } => {
+                    let result = self.store.invalidate(report_id, invalidated_at).await;
+                    respond(respond_to, result, "invalidate");
                 }
                 Command::Shutdown { respond_to } => {
                     respond(respond_to, (), "shutdown");
@@ -162,6 +176,21 @@ impl LatestStore {
     pub async fn get(&self, report_id: Uuid) -> Result<Report, CalibrationsErr> {
         self.send_command("get", |respond_to| Command::Get {
             report_id,
+            respond_to,
+        })
+        .await?
+    }
+
+    /// Mark the entry for `report_id` invalid at `invalidated_at`, unless it
+    /// already is, and return it. Not found unless an entry has that `report_id`.
+    pub async fn invalidate(
+        &self,
+        report_id: Uuid,
+        invalidated_at: DateTime<Utc>,
+    ) -> Result<ReportMetadata, CalibrationsErr> {
+        self.send_command("invalidate", |respond_to| Command::Invalidate {
+            report_id,
+            invalidated_at,
             respond_to,
         })
         .await?
