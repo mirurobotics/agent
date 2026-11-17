@@ -156,6 +156,7 @@ pub mod routes {
                 cal_uploader: Arc::new(cal_uploader),
                 latest_cals,
                 shutdown_tx,
+                started_at: Utc::now(),
             });
 
             let app = routes::router(state.clone());

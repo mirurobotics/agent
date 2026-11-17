@@ -28,17 +28,14 @@ fn converts_each_sync_code() {
     assert_converts_each(
         SyncCode::variants(),
         &[
-            (
-                SyncCode::Success,
-                openapi::SyncDeviceResult::SYNC_DEVICE_RESULT_SUCCESS,
-            ),
+            (SyncCode::Success, openapi::SyncResult::SYNC_RESULT_SUCCESS),
             (
                 SyncCode::InCooldown,
-                openapi::SyncDeviceResult::SYNC_DEVICE_RESULT_IN_COOLDOWN,
+                openapi::SyncResult::SYNC_RESULT_IN_COOLDOWN,
             ),
             (
                 SyncCode::NetworkConnectionError,
-                openapi::SyncDeviceResult::SYNC_DEVICE_RESULT_NETWORK_CONNECTION_ERROR,
+                openapi::SyncResult::SYNC_RESULT_NETWORK_CONNECTION_ERROR,
             ),
         ],
     );

@@ -70,6 +70,7 @@ impl Fixture {
             cal_uploader: Arc::new(cal_uploader),
             latest_cals,
             shutdown_tx: shutdown_tx.clone(),
+            started_at: Utc::now(),
         });
 
         let app = routes::router(state.clone());
