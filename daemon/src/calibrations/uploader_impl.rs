@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 // internal crates
 use crate::calibrations::{
-    errors::{CalibrationTooLargeErr, CalibrationsErr},
+    errors::{CalibrationTooLargeErr, CalibrationsErr, InvalidReasonErr},
     invalidation::Invalidation,
     job::Job,
     queue::{Queue, QueueEntry, QueueSnapshotFile},
@@ -13,7 +13,7 @@ use crate::calibrations::{
 };
 use crate::errors::Error;
 use crate::filesys::{dirs, files, Dir, File, WriteOptions};
-use crate::queue::{self, Persistence, RetryPolicy, Verdict};
+use crate::queue::{self, Persistence, QueueJob, RetryPolicy, Verdict};
 use crate::trace;
 
 // external crates
@@ -28,8 +28,8 @@ pub struct UploaderOptions {
     pub capacity: usize,
     /// The largest report data accepted, in bytes.
     pub max_report_bytes: u64,
-    /// When a failed report is retried and when it is dropped. Its age is
-    /// measured from `reported_at`.
+    /// When a failed job is retried and when it is dropped. Its age counts
+    /// from when it was queued.
     pub retry: RetryPolicy,
 }
 
@@ -144,6 +144,7 @@ where
         &mut self,
         invalidation: Invalidation,
     ) -> Result<Uuid, CalibrationsErr> {
+        verify_reason(&invalidation.reason)?;
         let job = Job::Invalidation(invalidation);
         Ok(self.queue.enqueue(job).await?)
     }
@@ -269,33 +270,53 @@ where
     }
 
     fn log_network_conn_err(entry: &QueueEntry, err: &CalibrationsErr) {
-        let id = entry.id;
-        debug!("calibrations: failed to reach Miru with report {id}; will retry: {err}");
+        let (id, name) = (entry.id, entry.job.name());
+        debug!("calibrations: failed to reach the control plane with {name} ({id}): {err}");
     }
 
     fn log_counted_failure(entry: &QueueEntry, err: &CalibrationsErr) {
-        let (id, attempts) = (entry.id, entry.attempts);
-        warn!("calibrations: attempt {attempts} to upload report {id} failed; will retry: {err}");
+        let (id, name, attempts) = (entry.id, entry.job.name(), entry.attempts);
+        warn!("calibrations: attempt {attempts} to upload {name} ({id}) failed; will retry: {err}");
     }
 
     fn log_success(entry: &QueueEntry) {
-        info!("calibrations: uploaded report {}", entry.id);
+        let (id, name) = (entry.id, entry.job.name());
+        info!("calibrations: uploaded {name} ({id})");
     }
 
     fn log_dropped(entry: &QueueEntry, err: &CalibrationsErr) {
-        let (id, attempts) = (entry.id, entry.attempts);
-        error!("calibrations: dropping report {id} after {attempts} attempts: {err}");
+        let (id, name, attempts) = (entry.id, entry.job.name(), entry.attempts);
+        error!("calibrations: dropping {name} ({id}) after {attempts} attempts: {err}");
     }
 
     fn log_age_drop(entry: &QueueEntry, age: TimeDelta, err: &CalibrationsErr) {
-        let (id, days) = (entry.id, age.num_days());
-        error!("calibrations: dropping report {id}, still unsent after {days} days: {err}");
+        let (id, name, days) = (entry.id, entry.job.name(), age.num_days());
+        error!("calibrations: dropping {name} ({id}), still unsent after {days} days: {err}");
     }
 
     fn log_terminal_drop(entry: &QueueEntry, err: &CalibrationsErr) {
-        let id = entry.id;
-        error!("calibrations: dropping report {id}, which can never be uploaded: {err}");
+        let (id, name) = (entry.id, entry.job.name());
+        error!("calibrations: dropping {name} ({id}), which can never be uploaded: {err}");
     }
+}
+
+/// The longest reason the control plane accepts, in characters.
+const MAX_REASON_CHARS: usize = 512;
+
+/// Reject a reason the control plane would refuse, so the device never keeps
+/// an invalidation that can't be uploaded.
+fn verify_reason(reason: &str) -> Result<(), InvalidReasonErr> {
+    let chars = reason.chars().count();
+    if (1..=MAX_REASON_CHARS).contains(&chars) {
+        return Ok(());
+    }
+    let err = InvalidReasonErr {
+        chars,
+        max_chars: MAX_REASON_CHARS,
+        trace: trace!(),
+    };
+    warn!("calibrations: rejecting invalidation: {err}");
+    Err(err)
 }
 
 #[cfg(test)]
@@ -586,6 +607,27 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn an_invalidation_reason_must_be_1_to_512_chars() {
+        let f = Fixture::new();
+        let mut u = f.uploader().await;
+
+        for reason in [String::new(), "é".repeat(513)] {
+            let invalidation = Invalidation {
+                reason,
+                ..invalidation_at(received_at())
+            };
+            let err = u.enqueue_invalidation(invalidation).await.unwrap_err();
+            assert!(matches!(err, CalibrationsErr::InvalidReasonErr(_)), "{err:?}");
+        }
+        let longest = Invalidation {
+            reason: "é".repeat(512),
+            ..invalidation_at(received_at())
+        };
+        u.enqueue_invalidation(longest).await.unwrap();
+        assert_eq!(u.len(), 1);
+    }
+
+    #[tokio::test]
     async fn a_full_queue_rejects_a_report_and_keeps_what_it_holds() {
         let f = Fixture::new();
         let options = UploaderOptions {
@@ -731,7 +773,9 @@ mod tests {
 
     #[tokio::test]
     async fn an_invalidation_of_an_unrecorded_report_is_retried() {
+        // the second wait doubles, so the 404 counts as an attempt
         let f = Fixture::new();
+        f.sender.push(Step::NotRecorded);
         f.sender.push(Step::NotRecorded);
         let mut u = f.uploader().await;
         u.enqueue_invalidation(invalidation_at(received_at()))
@@ -739,8 +783,10 @@ mod tests {
             .unwrap();
 
         run_next_attempt(&mut u).await;
+        f.advance_secs(10);
+        run_next_attempt(&mut u).await;
 
-        assert_backoff(&mut u, 10).await;
+        assert_backoff(&mut u, 20).await;
     }
 
     // ============================ FINISH ATTEMPT ============================ //

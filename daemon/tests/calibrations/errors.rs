@@ -2,7 +2,8 @@
 use crate::errors::harnesses::{assert_error, Expected};
 use miru_daemon::calibrations::{
     CalibrationBufferFullErr, CalibrationNotFoundErr, CalibrationStoreFullErr,
-    CalibrationTooLargeErr, CalibrationsErr, LatestCalibrationNotFoundErr, ReportNotRecordedErr,
+    CalibrationTooLargeErr, CalibrationsErr, InvalidReasonErr, LatestCalibrationNotFoundErr,
+    ReportNotRecordedErr,
 };
 use miru_daemon::errors::{Code, Error, HTTPCode};
 use miru_daemon::http::errors::RequestFailed;
@@ -74,6 +75,20 @@ fn a_component_without_a_matching_latest_calibration_is_404() {
         Expected::new(Code::ResourceNotFound, HTTPCode::NOT_FOUND),
     );
     assert!(!err.is_terminal());
+}
+
+#[test]
+fn an_invalid_reason_is_422() {
+    let err = CalibrationsErr::from(InvalidReasonErr {
+        chars: 0,
+        max_chars: 512,
+        trace: miru_daemon::trace!(),
+    });
+
+    assert_error(
+        &err,
+        Expected::new(Code::InvalidRequest, HTTPCode::UNPROCESSABLE_ENTITY),
+    );
 }
 
 #[test]

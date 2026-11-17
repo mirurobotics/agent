@@ -318,7 +318,7 @@ impl Uploader {
         .await?
     }
 
-    /// The number of queued reports, including one being uploaded.
+    /// The number of queued jobs, including one being uploaded.
     pub async fn num_queued_uploads(&self) -> Result<usize, CalibrationsErr> {
         self.send_command("len", |respond_to| Command::Len { respond_to })
             .await
