@@ -6,8 +6,7 @@ use std::time::Duration;
 // internal crates
 use crate::calibrations::{
     errors::{
-        CalibrationsErr, LatestCalibrationNotFoundErr, ReceiveActorMessageErr,
-        SendActorMessageErr,
+        CalibrationsErr, LatestCalibrationNotFoundErr, ReceiveActorMessageErr, SendActorMessageErr,
     },
     invalidation::Invalidation,
     latest::LatestStore,
@@ -148,7 +147,7 @@ where
 
     /// `component`'s latest entry, if `report_id` is unset or names it.
     async fn latest_entry(
-        &self,
+        &mut self,
         component: String,
         report_id: Option<Uuid>,
     ) -> Result<ReportMetadata, CalibrationsErr> {

@@ -407,7 +407,10 @@ async fn invalidating_an_unknown_component_or_a_stale_report_queues_nothing() {
             .await
             .unwrap_err();
 
-        assert!(matches!(err, CalibrationsErr::LatestNotFoundErr(_)), "{err:?}");
+        assert!(
+            matches!(err, CalibrationsErr::LatestNotFoundErr(_)),
+            "{err:?}"
+        );
     }
     assert_eq!(h.num_queued_uploads().await, 0);
     assert_eq!(h.latest_entries().await, [report("a").metadata]);
