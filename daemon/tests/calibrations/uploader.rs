@@ -424,16 +424,13 @@ async fn a_reason_the_control_plane_refuses_is_rejected_before_the_lookup() {
     h.report("a").await;
     h.await_drained(&["a"]).await;
 
-    for reason in [String::new(), " \n".to_string(), "é".repeat(513)] {
-        let err = invalidate(&h, "b", None, &reason).await.unwrap_err();
+    let err = invalidate(&h, "b", None, " ").await.unwrap_err();
 
-        assert!(
-            matches!(err, CalibrationsErr::InvalidReasonErr(_)),
-            "{err:?}"
-        );
-    }
+    assert!(
+        matches!(err, CalibrationsErr::InvalidReasonErr(_)),
+        "{err:?}"
+    );
     assert_eq!(h.num_queued_uploads().await, 0);
-    invalidate(&h, "a", None, &"é".repeat(512)).await.unwrap();
 }
 
 #[tokio::test]

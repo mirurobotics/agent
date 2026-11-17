@@ -32,3 +32,19 @@ pub(crate) fn verify_reason(reason: &str) -> Result<(), InvalidReasonErr> {
     warn!("calibrations: rejecting invalidation: {err}");
     Err(err)
 }
+
+#[cfg(test)]
+mod tests {
+    // internal crates
+    use super::verify_reason;
+
+    #[test]
+    fn a_reason_must_not_be_blank_or_over_512_chars() {
+        for reason in [String::new(), " \n".to_string(), "é".repeat(513)] {
+            assert!(verify_reason(&reason).is_err(), "{reason:?}");
+        }
+        for reason in ["power cycle".to_string(), "é".repeat(512)] {
+            assert!(verify_reason(&reason).is_ok(), "{reason:?}");
+        }
+    }
+}
