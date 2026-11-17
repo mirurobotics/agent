@@ -12,7 +12,7 @@ mod uploader_impl;
 
 pub use self::errors::{
     CalibrationBufferFullErr, CalibrationNotFoundErr, CalibrationStoreFullErr,
-    CalibrationTooLargeErr, CalibrationsErr, InvalidReportErr, TokenErr,
+    CalibrationTooLargeErr, CalibrationsErr, InvalidReportErr, ReportNotRecordedErr, TokenErr,
 };
 pub use self::latest::LatestStore;
 pub use self::latest_impl::Filter;

@@ -2,13 +2,14 @@
 use crate::errors::harnesses::{assert_error, Expected};
 use miru_daemon::calibrations::{
     CalibrationBufferFullErr, CalibrationNotFoundErr, CalibrationStoreFullErr,
-    CalibrationTooLargeErr, CalibrationsErr,
+    CalibrationTooLargeErr, CalibrationsErr, ReportNotRecordedErr,
 };
 use miru_daemon::errors::{Code, Error, HTTPCode};
 use miru_daemon::queue::QueueFullErr;
 
 // external crates
 use serde_json::json;
+use uuid::Uuid;
 
 #[test]
 fn a_full_buffer_is_507_with_its_cap() {
@@ -57,4 +58,23 @@ fn a_missing_latest_calibration_is_404() {
         Expected::new(Code::ResourceNotFound, HTTPCode::NOT_FOUND),
     );
     assert!(!err.is_terminal());
+}
+
+#[test]
+fn an_unrecorded_report_is_retried() {
+    let report_id = Uuid::from_u128(1);
+    let err = CalibrationsErr::from(ReportNotRecordedErr {
+        report_id,
+        trace: miru_daemon::trace!(),
+    });
+
+    assert_error(
+        &err,
+        Expected::new(Code::InternalServerError, HTTPCode::INTERNAL_SERVER_ERROR),
+    );
+    assert!(!err.is_terminal());
+    assert_eq!(
+        err.to_string(),
+        format!("the control plane has not recorded report {report_id} yet")
+    );
 }

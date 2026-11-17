@@ -1,4 +1,4 @@
-//! Mapping a buffered report to Miru's `POST /calibrations` and sending it.
+//! Sending a buffered report or invalidation to the control plane.
 
 // standard crates
 use std::sync::Arc;
@@ -9,13 +9,19 @@ use crate::mocks::stub_token_manager::StubTokenManager;
 use crate::test_utils::calibrations::{received_at, report, report_id};
 use backend_api::models::{
     Calibration, CreateCalibrationRequest, InstanceContent, InstanceFormat as BackendFormat,
+    InvalidateCalibrationRequest,
 };
 use miru_daemon::authn::{errors::MockError as AuthnMockErr, AuthnErr};
-use miru_daemon::calibrations::{sender::new_request, CalibrationsErr, HttpSender, Report, Sender};
+use miru_daemon::calibrations::{
+    sender::new_request, CalibrationsErr, HttpSender, Invalidation, Report, Sender,
+};
 use miru_daemon::errors::Error;
 use miru_daemon::http::errors::{HTTPErr, MockErr, RequestFailed, UnmarshalJSONErr};
 use miru_daemon::http::request::Params;
 use miru_daemon::models::InstanceFormat;
+
+// external crates
+use chrono::TimeDelta;
 
 fn full_report() -> Report {
     let mut report = report("arm");
@@ -197,5 +203,81 @@ pub mod send {
             .unwrap_err();
 
         assert!(!err.is_terminal());
+    }
+}
+
+pub mod invalidate {
+    use super::*;
+
+    fn invalidation() -> Invalidation {
+        Invalidation {
+            invalidated_at: received_at() + TimeDelta::hours(1),
+            reason: "sensor was bumped".to_string(),
+        }
+    }
+
+    async fn invalidate(client: &Arc<MockClient>) -> Result<(), CalibrationsErr> {
+        sender(client, StubTokenManager::ok("tok"))
+            .invalidate(report_id("arm"), invalidation())
+            .await
+    }
+
+    #[tokio::test]
+    async fn posts_one_request_with_the_token() {
+        let client = Arc::new(MockClient::default());
+
+        invalidate(&client).await.unwrap();
+
+        let requests = client.requests();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].call, Call::InvalidateCalibration);
+        assert_eq!(requests[0].token.as_deref(), Some("tok"));
+        let body = requests[0].body.as_deref().unwrap();
+        let sent: InvalidateCalibrationRequest = serde_json::from_str(body).unwrap();
+        let expected = InvalidateCalibrationRequest {
+            report_id: report_id("arm"),
+            invalidated_at: invalidation().invalidated_at.to_rfc3339(),
+            reason: "sensor was bumped".to_string(),
+        };
+        assert_eq!(sent, expected);
+    }
+
+    #[tokio::test]
+    async fn a_404_is_an_unrecorded_report_and_retried() {
+        let client = Arc::new(MockClient::default());
+        client.set_invalidate_calibration(|| Err(request_failed(404)));
+
+        let err = invalidate(&client).await.unwrap_err();
+
+        assert!(
+            matches!(err, CalibrationsErr::ReportNotRecordedErr(_)),
+            "{err:?}"
+        );
+        assert!(!err.is_terminal());
+    }
+
+    #[tokio::test]
+    async fn passes_a_422_through_as_terminal() {
+        let client = Arc::new(MockClient::default());
+        client.set_invalidate_calibration(|| Err(request_failed(422)));
+
+        let err = invalidate(&client).await.unwrap_err();
+
+        assert!(matches!(err, CalibrationsErr::HTTPErr(_)), "{err:?}");
+        assert!(err.is_terminal());
+    }
+
+    #[tokio::test]
+    async fn returns_a_token_error() {
+        let client = Arc::new(MockClient::default());
+        let tokens = StubTokenManager::err(AuthnErr::HTTPErr(request_failed(403)));
+
+        let err = sender(&client, tokens)
+            .invalidate(report_id("arm"), invalidation())
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, CalibrationsErr::TokenErr(_)), "{err:?}");
+        assert!(client.requests().is_empty());
     }
 }
