@@ -105,6 +105,8 @@ All source lives under `daemon/src/`. The binary entry point is `main.rs`.
 
 **Error handling.** Each module defines its errors in an `errors.rs` file, implementing the shared `Error` trait; aggregating enums use `impl_error!`.
 
+**Actors.** Stateful components such as the syncer, token manager, caches and uploaders are actors: a single-threaded `*_impl` module holds the logic, a worker task runs it, and callers talk to it through a cloneable handle.
+
 **Graceful shutdown.** OS signals, and the service stop on Windows, resolve one shutdown future; a broadcast channel then tells every worker and server to drain in-flight work and exit.
 
 **Authentication.** The device signs in with its RSA key and gets a JWT, which `authn` refreshes in the background and `http::Client` attaches to every request.
