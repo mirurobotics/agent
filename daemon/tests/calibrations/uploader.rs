@@ -215,11 +215,9 @@ fn strings(names: &[&str]) -> Vec<String> {
     names.iter().map(|name| name.to_string()).collect()
 }
 
-fn invalidation(reason: &str) -> Invalidation {
-    Invalidation {
-        invalidated_at: received_at() + TimeDelta::hours(1),
-        reason: reason.to_string(),
-    }
+/// When every invalidation is made: after every fixture report.
+fn invalidated_at() -> DateTime<Utc> {
+    received_at() + TimeDelta::hours(1)
 }
 
 /// Invalidate `component`'s latest calibration for `reason`, if it is
@@ -230,10 +228,10 @@ async fn invalidate(
     report_id: Option<Uuid>,
     reason: &str,
 ) -> Result<ReportMetadata, CalibrationsErr> {
-    let invalidation = invalidation(reason);
+    let (component, reason) = (component.to_string(), reason.to_string());
     guard(
         h.uploader()
-            .invalidate(component.to_string(), report_id, invalidation),
+            .invalidate(component, report_id, reason, invalidated_at()),
     )
     .await
 }
@@ -364,12 +362,15 @@ async fn an_invalidation_is_stored_and_uploaded() {
 
     let invalidated = invalidate(&h, "a", None, "power cycle").await.unwrap();
 
-    let invalidated_at = invalidation("power cycle").invalidated_at;
-    assert_eq!(invalidated.invalidated_at, Some(invalidated_at));
+    assert_eq!(invalidated.invalidated_at, Some(invalidated_at()));
     assert_eq!(h.latest_entries().await, [invalidated]);
+    let uploaded = Invalidation {
+        report_id,
+        invalidated_at: invalidated_at(),
+        reason: "power cycle".to_string(),
+    };
     eventually(|| async {
-        h.sender.invalidations() == [(report_id, invalidation("power cycle"))]
-            && h.num_queued_uploads().await == 0
+        h.sender.invalidations() == [uploaded.clone()] && h.num_queued_uploads().await == 0
     })
     .await;
 }

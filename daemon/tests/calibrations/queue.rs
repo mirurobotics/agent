@@ -22,13 +22,11 @@ fn report_job(name: &str) -> Job {
 
 /// The upload of the invalidation of `full_metadata(name)`.
 fn invalidation_job(name: &str) -> Job {
-    Job::Invalidation {
+    Job::Invalidation(Invalidation {
         report_id: report_id(name),
-        invalidation: Invalidation {
-            invalidated_at: received_at() + TimeDelta::hours(1),
-            reason: "sensor was bumped".to_string(),
-        },
-    }
+        invalidated_at: received_at() + TimeDelta::hours(1),
+        reason: "sensor was bumped".to_string(),
+    })
 }
 
 queue_suite!(report_job, "calibration-generic-queue-test");
@@ -112,7 +110,7 @@ mod wire {
         assert_eq!(entry.job, report_job("arm"));
     }
 
-    /// A queued invalidation holds only its report's id and the invalidation.
+    /// A queued invalidation holds only its report's id, when and why.
     #[tokio::test]
     async fn an_invalidation_loads() {
         let dir = test_dirs::temp("calibration_queue_test").unwrap();
@@ -120,8 +118,8 @@ mod wire {
         let raw = format!(
             concat!(
                 r#"{{"entries":[{{"job":{{"report_id":"{report_id}","#,
-                r#""invalidation":{{"invalidated_at":"1970-01-01T01:16:40Z","#,
-                r#""reason":"sensor was bumped"}}}}}}]}}"#,
+                r#""invalidated_at":"1970-01-01T01:16:40Z","#,
+                r#""reason":"sensor was bumped"}}}}]}}"#,
             ),
             report_id = report_id("arm"),
         );

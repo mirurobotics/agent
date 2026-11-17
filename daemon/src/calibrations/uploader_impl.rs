@@ -138,17 +138,13 @@ where
         Ok(id)
     }
 
-    /// Queue the upload of `invalidation` for the report with `report_id`. The
-    /// job has no report file. On error nothing is queued.
+    /// Queue the upload of `invalidation`. The job has no report file. On
+    /// error nothing is queued.
     pub(crate) async fn enqueue_invalidation(
         &mut self,
-        report_id: Uuid,
         invalidation: Invalidation,
     ) -> Result<Uuid, CalibrationsErr> {
-        let job = Job::Invalidation {
-            report_id,
-            invalidation,
-        };
+        let job = Job::Invalidation(invalidation);
         Ok(self.queue.enqueue(job).await?)
     }
 
@@ -181,10 +177,7 @@ where
                     let data = report::read_data(&file).await?;
                     sender.send(Report { metadata, data }).await
                 }
-                Job::Invalidation {
-                    report_id,
-                    invalidation,
-                } => sender.invalidate(report_id, invalidation).await,
+                Job::Invalidation(invalidation) => sender.invalidate(invalidation).await,
             }
         }
     }
@@ -462,9 +455,10 @@ mod tests {
         names.iter().map(|name| name.to_string()).collect()
     }
 
-    /// An invalidation made at `at`.
+    /// An invalidation of report `a` made at `at`.
     fn invalidation_at(at: DateTime<Utc>) -> Invalidation {
         Invalidation {
+            report_id: report_id("a"),
             invalidated_at: at,
             reason: "power cycle".to_string(),
         }
@@ -571,15 +565,9 @@ mod tests {
         let mut u = f.uploader().await;
         let invalidation = invalidation_at(received_at());
 
-        let id = u
-            .enqueue_invalidation(report_id("a"), invalidation.clone())
-            .await
-            .unwrap();
+        let id = u.enqueue_invalidation(invalidation.clone()).await.unwrap();
 
-        let job = Job::Invalidation {
-            report_id: report_id("a"),
-            invalidation,
-        };
+        let job = Job::Invalidation(invalidation);
         let entry = QueueEntry {
             id,
             job,
@@ -743,14 +731,11 @@ mod tests {
         let f = Fixture::new();
         let mut u = f.uploader().await;
         let invalidation = invalidation_at(received_at());
-        u.enqueue_invalidation(report_id("a"), invalidation.clone())
-            .await
-            .unwrap();
+        u.enqueue_invalidation(invalidation.clone()).await.unwrap();
 
         run_next_attempt(&mut u).await;
 
-        let want = (report_id("a"), invalidation);
-        assert_eq!(f.sender.invalidations(), [want]);
+        assert_eq!(f.sender.invalidations(), [invalidation]);
         assert!(f.sent().is_empty());
         assert_empty(&mut u).await;
     }
@@ -760,7 +745,7 @@ mod tests {
         let f = Fixture::new();
         f.sender.push(Step::NotRecorded);
         let mut u = f.uploader().await;
-        u.enqueue_invalidation(report_id("a"), invalidation_at(received_at()))
+        u.enqueue_invalidation(invalidation_at(received_at()))
             .await
             .unwrap();
 
@@ -937,7 +922,7 @@ mod tests {
             ..UploaderOptions::default()
         };
         let mut u = f.uploader_with(options).await;
-        u.enqueue_invalidation(report_id("a"), invalidation_at(received_at()))
+        u.enqueue_invalidation(invalidation_at(received_at()))
             .await
             .unwrap();
 
@@ -992,9 +977,7 @@ mod tests {
         f.advance(TimeDelta::days(100));
         let mut u = f.uploader().await;
         let invalidation = invalidation_at(received_at() + TimeDelta::days(99));
-        u.enqueue_invalidation(report_id("a"), invalidation)
-            .await
-            .unwrap();
+        u.enqueue_invalidation(invalidation).await.unwrap();
 
         run_next_attempt(&mut u).await;
 

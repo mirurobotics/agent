@@ -43,11 +43,12 @@ async fn invalidate_stamps_the_latest_and_uploads_the_invalidation() {
         assert_eq!(invalidated.report_id, created.report_id);
         assert_eq!(invalidated.invalidated_at, Some(now));
         let expected = Invalidation {
+            report_id: created.report_id,
             invalidated_at: now,
             reason: "power cycle".to_string(),
         };
         let uploaded = f.uploaded_invalidation().await;
-        assert_eq!(uploaded, (created.report_id, expected));
+        assert_eq!(uploaded, expected);
     }
 }
 

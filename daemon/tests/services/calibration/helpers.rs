@@ -22,7 +22,6 @@ use miru_daemon::services::ServiceErr;
 // external crates
 use chrono::Utc;
 use tokio::sync::mpsc;
-use uuid::Uuid;
 
 pub struct Fixture {
     dir: test_dirs::TempDir,
@@ -106,7 +105,7 @@ impl Fixture {
 
     /// The first invalidation the calibration uploader sends, once it has sent
     /// one.
-    pub async fn uploaded_invalidation(&mut self) -> (Uuid, Invalidation) {
+    pub async fn uploaded_invalidation(&mut self) -> Invalidation {
         while self.sender.invalidations().is_empty() {
             self.await_started().await;
         }

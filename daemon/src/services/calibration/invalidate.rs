@@ -1,5 +1,5 @@
 // internal crates
-use crate::calibrations::{Invalidation, ReportMetadata, Uploader};
+use crate::calibrations::{ReportMetadata, Uploader};
 use crate::services::errors::ServiceErr;
 
 // external crates
@@ -25,12 +25,8 @@ pub async fn invalidate(
     params: InvalidateParams,
     now: DateTime<Utc>,
 ) -> Result<ReportMetadata, ServiceErr> {
-    let invalidation = Invalidation {
-        invalidated_at: now,
-        reason: params.reason,
-    };
     let invalidated = cal_uploader
-        .invalidate(params.component, params.report_id, invalidation)
+        .invalidate(params.component, params.report_id, params.reason, now)
         .await?;
     Ok(invalidated)
 }

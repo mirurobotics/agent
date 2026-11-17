@@ -49,7 +49,8 @@ enum Command {
     Invalidate {
         component: String,
         report_id: Option<Uuid>,
-        invalidation: Invalidation,
+        reason: String,
+        invalidated_at: DateTime<Utc>,
         respond_to: oneshot::Sender<Result<ReportMetadata, CalibrationsErr>>,
     },
     Len {
@@ -117,7 +118,7 @@ where
         Ok(())
     }
 
-    /// Queue the upload of `invalidation` for `component`'s latest entry, then
+    /// Queue the upload of an invalidation of `component`'s latest entry, then
     /// mark the entry invalid. An entry that is already invalid is returned
     /// unchanged and nothing is queued. A failed store write removes the
     /// queued invalidation, so on error nothing changes.
@@ -125,17 +126,20 @@ where
         &mut self,
         component: String,
         report_id: Option<Uuid>,
-        invalidation: Invalidation,
+        reason: String,
+        invalidated_at: DateTime<Utc>,
     ) -> Result<ReportMetadata, CalibrationsErr> {
         let entry = self.latest_entry(component, report_id).await?;
         if entry.invalidated_at.is_some() {
             return Ok(entry);
         }
-        let (report_id, invalidated_at) = (entry.report_id, invalidation.invalidated_at);
-        let id = self
-            .uploader
-            .enqueue_invalidation(report_id, invalidation)
-            .await?;
+        let report_id = entry.report_id;
+        let invalidation = Invalidation {
+            report_id,
+            invalidated_at,
+            reason,
+        };
+        let id = self.uploader.enqueue_invalidation(invalidation).await?;
         match self.latest.invalidate(report_id, invalidated_at).await {
             Ok(entry) => Ok(entry),
             Err(e) => {
@@ -215,10 +219,13 @@ where
             Command::Invalidate {
                 component,
                 report_id,
-                invalidation,
+                reason,
+                invalidated_at,
                 respond_to,
             } => {
-                let result = self.invalidate(component, report_id, invalidation).await;
+                let result = self
+                    .invalidate(component, report_id, reason, invalidated_at)
+                    .await;
                 respond(respond_to, result, "invalidate");
             }
             Command::Len { respond_to } => respond(respond_to, self.uploader.len(), "len"),
@@ -287,8 +294,9 @@ impl Uploader {
         .await?
     }
 
-    /// Mark `component`'s latest entry invalid and queue the invalidation's
-    /// upload, unless the entry already is invalid, and return the entry. With
+    /// Mark `component`'s latest entry invalid at `invalidated_at` for `reason`
+    /// and queue the invalidation's upload, unless the entry already is
+    /// invalid, and return the entry. With
     /// `report_id`, that report must still be the latest. Otherwise, or when
     /// the component has no entry, it is the 404
     /// [`CalibrationsErr::LatestNotFoundErr`]; a full queue is the 507
@@ -297,12 +305,14 @@ impl Uploader {
         &self,
         component: String,
         report_id: Option<Uuid>,
-        invalidation: Invalidation,
+        reason: String,
+        invalidated_at: DateTime<Utc>,
     ) -> Result<ReportMetadata, CalibrationsErr> {
         self.send_command("invalidate", |respond_to| Command::Invalidate {
             component,
             report_id,
-            invalidation,
+            reason,
+            invalidated_at,
             respond_to,
         })
         .await?

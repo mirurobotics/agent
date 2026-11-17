@@ -16,12 +16,9 @@ impl queue::QueueJob for Job {
     fn name(&self) -> String {
         match self {
             Job::Report(report) => report_name(report),
-            Job::Invalidation {
-                report_id,
-                invalidation,
-            } => {
-                let at = invalidation.invalidated_at.to_rfc3339();
-                format!("invalidation of calibration {report_id}, made at {at}")
+            Job::Invalidation(invalidation) => {
+                let (report_id, at) = (invalidation.report_id, invalidation.invalidated_at);
+                format!("invalidation of calibration {report_id}, made at {}", at.to_rfc3339())
             }
         }
     }
