@@ -22,9 +22,9 @@ pub struct Report {
     pub data: String,
 }
 
-/// A queued report's metadata. Everything here is captured at intake, so an
-/// upload hours later still reports the deployment and time the calibration
-/// was taken under.
+/// A report's metadata. Everything but `invalidated_at` is captured at
+/// intake, so an upload hours later still reports the deployment and time the
+/// calibration was taken under.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ReportMetadata {
     /// Minted at intake and sent with every upload, so the control plane
@@ -42,11 +42,11 @@ pub struct ReportMetadata {
     pub serial_number: Option<String>,
     #[serde(default)]
     pub reported_by: Option<String>,
-    /// The deployment active at intake, or `None` when there was none.
     #[serde(default)]
     pub deployment_id: Option<String>,
-    /// When the agent received the calibration.
     pub reported_at: DateTime<Utc>,
+    #[serde(default)]
+    pub invalidated_at: Option<DateTime<Utc>>,
 }
 
 impl ReportMetadata {
@@ -84,15 +84,19 @@ impl From<backend_client::Calibration> for ReportMetadata {
             serial_number: calibration.serial_number,
             reported_by: calibration.reported_by.flatten().map(|u| u.identifier),
             deployment_id: calibration.deployment_id,
-            reported_at: calibration
-                .reported_at
-                .parse::<DateTime<Utc>>()
-                .unwrap_or_else(|e| {
-                    error!("Error parsing reported_at: {e}");
-                    DateTime::<Utc>::UNIX_EPOCH
-                }),
+            reported_at: parse_time(&calibration.reported_at, "reported_at"),
+            invalidated_at: calibration
+                .invalidated_at
+                .map(|time| parse_time(&time, "invalidated_at")),
         }
     }
+}
+
+fn parse_time(value: &str, field: &str) -> DateTime<Utc> {
+    value.parse::<DateTime<Utc>>().unwrap_or_else(|e| {
+        error!("Error parsing {field}: {e}");
+        DateTime::<Utc>::UNIX_EPOCH
+    })
 }
 
 /// The file holding the data of the report queued as `entry_id`.

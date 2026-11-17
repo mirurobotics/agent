@@ -48,6 +48,28 @@ mod from_backend {
     }
 
     #[test]
+    fn maps_invalidated_at() {
+        let found = ReportMetadata::from(backend_client::Calibration {
+            invalidated_at: Some("1970-01-01T01:16:40Z".to_string()),
+            ..calibration()
+        });
+        let expected = ReportMetadata {
+            invalidated_at: Some(DateTime::from_timestamp(4600, 0).unwrap()),
+            ..full_metadata("arm")
+        };
+        assert_eq!(found, expected);
+    }
+
+    #[test]
+    fn an_unparseable_invalidated_at_is_the_epoch() {
+        let found = ReportMetadata::from(backend_client::Calibration {
+            invalidated_at: Some("not a time".to_string()),
+            ..calibration()
+        });
+        assert_eq!(found.invalidated_at, Some(DateTime::<Utc>::UNIX_EPOCH));
+    }
+
+    #[test]
     fn an_unparseable_reported_at_is_the_epoch() {
         let found = ReportMetadata::from(backend_client::Calibration {
             reported_at: "not a time".to_string(),

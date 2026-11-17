@@ -43,6 +43,7 @@ pub fn report(slug: &str) -> Report {
             reported_by: None,
             deployment_id: None,
             reported_at: received_at(),
+            invalidated_at: None,
         },
         data: r#"{"offset":[1,2,3]}"#.to_string(),
     }
@@ -84,6 +85,7 @@ pub fn full_metadata(slug: &str) -> ReportMetadata {
         reported_by: Some("Ada Lovelace".to_string()),
         deployment_id: Some("dpl_1".to_string()),
         reported_at: received_at(),
+        invalidated_at: None,
     }
 }
 
