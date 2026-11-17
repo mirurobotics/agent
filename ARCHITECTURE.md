@@ -41,7 +41,7 @@ All source lives under `daemon/src/`. The binary entry point is `main.rs`.
 
 `mqtt` — MQTT subscriber for real-time events from the control plane, so the agent reacts without waiting for the next poll.
 
-`server` — the local Device API for on-device applications, the CLI, and the frontend. One router is served over a Unix socket and, on Windows by default, a loopback-only TCP listener that requires a bearer token published in a discovery file. Each Device API version (`v02`, `v03`) is its own module over its generated crate, which nothing outside that module imports; code that builds no wire type lives in `server/` and is shared by the versions.
+`server` — the local Device API for on-device applications, the CLI, and the frontend. One router is served over a Unix socket (Unix only, unauthenticated and protected by its file permissions) and a loopback-only TCP listener (on by default only on Windows) that requires a bearer token published in a discovery file. Each Device API version (`v02`, `v03`) is its own module over its generated crate, which nothing outside that module imports; code that builds no wire type lives in `server/` and is shared by the versions.
 
 ### Security
 
@@ -57,7 +57,7 @@ All source lives under `daemon/src/`. The binary entry point is `main.rs`.
 
 `data_uploads` — the file-upload pipeline: scans configured directories for stable files, uploads them to object storage, and deletes them once their retention expires.
 
-`queue` — a generic, persisted job queue with backoff and a shared retry policy, used by the uploaders.
+`queue` — a generic, persisted job queue with backoff and a shared retry policy, used by the uploaders and the retention deleter.
 
 `calibrations` — calibration reports from the Device API. Reports are buffered on disk and uploaded to the control plane in the background, so callers never wait on the network. A local store keeps the latest calibration for each component, so apps can read it, or mark it invalid, offline; at startup it pulls any newer calibrations from the control plane.
 
@@ -95,7 +95,7 @@ All source lives under `daemon/src/`. The binary entry point is `main.rs`.
 - **All control-plane HTTP goes through `http::Client`.** No module uses raw reqwest.
 - **Shutdown ordering matters.** `AppState::shutdown()` stops each component before the ones it depends on, with one tolerated exception: the scanner's sinks may write into an uploader or deleter that has already stopped, and they log a warning instead of failing.
 - **Generated code is never hand-edited.**
-- **Tests exercise ordinary production behavior.** Production code is identical in normal and test builds; tests control dependencies and time. See `AGENTS.md` § Testing.
+- **Tests exercise ordinary production behavior.** Production algorithms and client construction are identical in normal and test builds; tests control dependencies and time. See `AGENTS.md` § Testing.
 - **The agent has no direct database.** All persistence is file-based; the control plane owns the database.
 - **The agent always runs persistently.** It exits only on a shutdown signal or a fatal startup error.
 - **The Device API never listens beyond the device.** TCP binds only to loopback.
@@ -105,7 +105,7 @@ All source lives under `daemon/src/`. The binary entry point is `main.rs`.
 
 **Error handling.** Each module defines its errors in an `errors.rs` file, implementing the shared `Error` trait; aggregating enums use `impl_error!`.
 
-**Actors.** Stateful components such as the syncer, token manager, caches and uploaders are actors: a single-threaded `*_impl` module holds the logic, a worker task runs it, and callers talk to it through a cloneable handle.
+**Actors.** Stateful components such as the syncer, token manager, caches and uploaders are actors: a single-threaded `*_impl` module holds the logic, a worker task runs it, and callers talk to it through a shared handle.
 
 **Graceful shutdown.** OS signals, and the service stop on Windows, resolve one shutdown future; a broadcast channel then tells every worker and server to drain in-flight work and exit.
 
