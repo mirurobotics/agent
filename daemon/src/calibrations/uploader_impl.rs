@@ -5,7 +5,9 @@ use std::sync::Arc;
 // internal crates
 use crate::calibrations::{
     errors::{CalibrationTooLargeErr, CalibrationsErr},
-    report::{self, Invalidation, Queue, QueueEntry, QueueSnapshotFile, Report, ReportMetadata},
+    report::{
+        self, Invalidation, Job, Queue, QueueEntry, QueueSnapshotFile, Report, ReportMetadata,
+    },
     sender::Sender,
 };
 use crate::errors::Error;
@@ -48,7 +50,7 @@ impl Default for UploaderOptions {
 }
 
 /// What the queue holds for the worker to do next.
-pub(crate) type NextAttempt = queue::NextAttempt<ReportMetadata>;
+pub(crate) type NextAttempt = queue::NextAttempt<Job>;
 
 /// Single-threaded calibration uploader state and logic: the queue of report
 /// metadata, the directory of report files, and the sender that uploads them.
@@ -122,7 +124,8 @@ where
     pub(crate) async fn enqueue(&mut self, report: &Report) -> Result<Uuid, CalibrationsErr> {
         let bytes = report.data.as_bytes();
         self.verify_size(bytes.len() as u64)?;
-        let id = self.queue.enqueue(report.metadata.clone()).await?;
+        let job = Job::Report(report.metadata.clone());
+        let id = self.queue.enqueue(job).await?;
         let file = self.report_file(id);
         if let Err(e) = files::write_bytes(&file, bytes, WriteOptions::OVERWRITE_ATOMIC).await {
             self.queue.ack(id).await;
@@ -138,9 +141,9 @@ where
         entry: ReportMetadata,
         invalidation: Invalidation,
     ) -> Result<Uuid, CalibrationsErr> {
-        let job = ReportMetadata {
-            invalidation: Some(invalidation),
-            ..entry
+        let job = Job::Invalidation {
+            report: entry,
+            invalidation,
         };
         Ok(self.queue.enqueue(job).await?)
     }
@@ -159,7 +162,7 @@ where
     /// Upload the job queued as `entry`: send its invalidation, or read its
     /// report file and send the report. The future owns what it needs and
     /// borrows nothing from `self`, so the worker can serve commands while it
-    /// runs. The metadata is cloned into the future, which is cheap: the data
+    /// runs. The job is cloned into the future, which is cheap: the data
     /// is read from disk inside it.
     pub(crate) fn attempt(
         &self,
@@ -167,13 +170,18 @@ where
     ) -> impl Future<Output = Result<(), CalibrationsErr>> {
         let sender = self.sender.clone();
         let file = self.report_file(entry.id);
-        let metadata = entry.job.clone();
+        let job = entry.job.clone();
         async move {
-            if let Some(invalidation) = metadata.invalidation {
-                return sender.invalidate(metadata.report_id, invalidation).await;
+            match job {
+                Job::Report(metadata) => {
+                    let data = report::read_data(&file).await?;
+                    sender.send(Report { metadata, data }).await
+                }
+                Job::Invalidation {
+                    report,
+                    invalidation,
+                } => sender.invalidate(report.report_id, invalidation).await,
             }
-            let data = report::read_data(&file).await?;
-            sender.send(Report { metadata, data }).await
         }
     }
 
@@ -304,9 +312,7 @@ mod tests {
     use crate::test_utils::calibration_sender::{MockCalibrationSender, Step};
     use crate::test_utils::calibrations::{layout, received_at, report};
     use crate::test_utils::filesys::dirs as test_dirs;
-    use miru_daemon::calibrations::{
-        CalibrationsErr, Invalidation, Queue, QueueSnapshotFile, ReportMetadata,
-    };
+    use miru_daemon::calibrations::{CalibrationsErr, Invalidation, Job, Queue, QueueSnapshotFile};
     use miru_daemon::disk::layout::CalibrationsLayout;
     use miru_daemon::filesys::{dirs, files, File, PathExt, WriteOptions};
     use miru_daemon::queue::{Persistence, RetryPolicy};
@@ -403,7 +409,7 @@ mod tests {
         let mut ids = Vec::with_capacity(slugs.len());
         for slug in slugs {
             let report = report(slug);
-            let id = queue.enqueue(report.metadata).await.unwrap();
+            let id = queue.enqueue(Job::Report(report.metadata)).await.unwrap();
             files::write_string(
                 &f.report_file(id),
                 &report.data,
@@ -535,7 +541,7 @@ mod tests {
 
         let entry = QueueEntry {
             id,
-            job: report("a").metadata,
+            job: Job::Report(report("a").metadata),
             attempts: 0,
             next_attempt_at: None,
         };
@@ -555,9 +561,9 @@ mod tests {
             .await
             .unwrap();
 
-        let job = ReportMetadata {
-            invalidation: Some(invalidation),
-            ..report("a").metadata
+        let job = Job::Invalidation {
+            report: report("a").metadata,
+            invalidation,
         };
         let entry = QueueEntry {
             id,
@@ -770,7 +776,7 @@ mod tests {
         let mut u = f.uploader().await;
         let entry = QueueEntry {
             id: ids[0],
-            job: report("a").metadata,
+            job: Job::Report(report("a").metadata),
             attempts: 0,
             next_attempt_at: None,
         };

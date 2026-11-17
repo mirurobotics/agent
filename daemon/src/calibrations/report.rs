@@ -49,8 +49,7 @@ pub struct ReportMetadata {
     /// When the agent received the calibration.
     pub reported_at: DateTime<Utc>,
     /// Set when a device app marks the latest calibration invalid, and never
-    /// on intake; a newer report for the key replaces the entry. A queued job
-    /// with it set uploads the invalidation, not the report, and has no data.
+    /// on intake; a newer report for the key replaces the entry.
     #[serde(default)]
     pub invalidation: Option<Invalidation>,
 }
@@ -83,14 +82,6 @@ impl ReportMetadata {
     /// or later, so a merge keeps it over `other`.
     pub(crate) fn is_as_new_as(&self, other: &ReportMetadata) -> bool {
         self.key() == other.key() && self.reported_at >= other.reported_at
-    }
-
-    /// When the job was queued: the invalidation's time for an invalidation,
-    /// otherwise when the agent received the report. Its age counts from here.
-    pub(crate) fn queued_at(&self) -> DateTime<Utc> {
-        self.invalidation
-            .as_ref()
-            .map_or(self.reported_at, |invalidation| invalidation.invalidated_at)
     }
 }
 
@@ -129,7 +120,60 @@ fn parse_time(value: &str, field: &str) -> DateTime<Utc> {
     })
 }
 
-impl queue::QueueJob for ReportMetadata {
+/// A queued upload. In `queue.json` it is the report's metadata, with
+/// `invalidation` set for an invalidation, so an older agent reads the queue
+/// as reports.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(from = "ReportMetadata", into = "ReportMetadata")]
+pub enum Job {
+    /// Upload the report, whose data is in its report file.
+    Report(ReportMetadata),
+    /// Upload the invalidation of `report`. It has no report file.
+    Invalidation {
+        report: ReportMetadata,
+        invalidation: Invalidation,
+    },
+}
+
+impl Job {
+    /// When the job was queued: when the agent received the report, or when
+    /// the invalidation was made. Its age counts from here.
+    pub(crate) fn queued_at(&self) -> DateTime<Utc> {
+        match self {
+            Job::Report(report) => report.reported_at,
+            Job::Invalidation { invalidation, .. } => invalidation.invalidated_at,
+        }
+    }
+}
+
+impl From<ReportMetadata> for Job {
+    fn from(mut metadata: ReportMetadata) -> Self {
+        match metadata.invalidation.take() {
+            Some(invalidation) => Job::Invalidation {
+                report: metadata,
+                invalidation,
+            },
+            None => Job::Report(metadata),
+        }
+    }
+}
+
+impl From<Job> for ReportMetadata {
+    fn from(job: Job) -> Self {
+        match job {
+            Job::Report(metadata) => metadata,
+            Job::Invalidation {
+                report,
+                invalidation,
+            } => ReportMetadata {
+                invalidation: Some(invalidation),
+                ..report
+            },
+        }
+    }
+}
+
+impl queue::QueueJob for Job {
     const LABEL: &'static str = "calibration";
 
     /// A calibration is uploadable the moment it is queued.
@@ -138,22 +182,28 @@ impl queue::QueueJob for ReportMetadata {
     }
 
     fn name(&self) -> String {
-        let mut name = format!("calibration of {}", self.component);
-        if let Some(role) = &self.role {
-            name.push_str(&format!(" (role {role})"));
-        }
-        if let Some(aspect) = &self.aspect {
-            name.push_str(&format!(" (aspect {aspect})"));
-        }
-        let name = format!("{name} received at {}", self.reported_at.to_rfc3339());
-        match &self.invalidation {
-            Some(invalidation) => {
+        match self {
+            Job::Report(report) => report_name(report),
+            Job::Invalidation {
+                report,
+                invalidation,
+            } => {
                 let at = invalidation.invalidated_at.to_rfc3339();
-                format!("invalidation of {name}, made at {at}")
+                format!("invalidation of {}, made at {at}", report_name(report))
             }
-            None => name,
         }
     }
+}
+
+fn report_name(report: &ReportMetadata) -> String {
+    let mut name = format!("calibration of {}", report.component);
+    if let Some(role) = &report.role {
+        name.push_str(&format!(" (role {role})"));
+    }
+    if let Some(aspect) = &report.aspect {
+        name.push_str(&format!(" (aspect {aspect})"));
+    }
+    format!("{name} received at {}", report.reported_at.to_rfc3339())
 }
 
 /// The file holding the data of the report queued as `entry_id`.
@@ -187,13 +237,13 @@ fn invalid(reason: &str) -> CalibrationsErr {
     })
 }
 
-pub type Queue = queue::FileQueue<ReportMetadata>;
+pub type Queue = queue::FileQueue<Job>;
 
-pub type QueueEntry = queue::QueueEntry<ReportMetadata>;
+pub type QueueEntry = queue::QueueEntry<Job>;
 
-pub type QueueSnapshot = queue::QueueSnapshot<ReportMetadata>;
+pub type QueueSnapshot = queue::QueueSnapshot<Job>;
 
-pub type QueueSnapshotFile = queue::QueueSnapshotFile<ReportMetadata>;
+pub type QueueSnapshotFile = queue::QueueSnapshotFile<Job>;
 
 #[cfg(test)]
 mod tests {

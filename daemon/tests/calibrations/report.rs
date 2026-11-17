@@ -1,4 +1,4 @@
-//! The calibration queue: the generic suite instantiated for `ReportMetadata`,
+//! The calibration queue: the generic suite instantiated for `Job`,
 //! plus the on-disk wire pin for `calibrations/queue.json`.
 
 // internal crates
@@ -7,7 +7,7 @@ use crate::test_utils::calibrations::report_id;
 use crate::test_utils::filesys::dirs as test_dirs;
 use backend_api::models::{self as backend_client, BaseExternalUser};
 use miru_daemon::calibrations::{
-    Invalidation, Queue, QueueSnapshot, QueueSnapshotFile, ReportMetadata,
+    Invalidation, Job, Queue, QueueSnapshot, QueueSnapshotFile, ReportMetadata,
 };
 use miru_daemon::filesys::{files, File, WriteOptions};
 use miru_daemon::models::InstanceFormat;
@@ -33,23 +33,41 @@ fn metadata(name: &str) -> ReportMetadata {
     }
 }
 
-/// `metadata(name)` marked invalid an hour after it was received.
+/// An invalidation made an hour after a `metadata` report was received.
+fn invalidation() -> Invalidation {
+    Invalidation {
+        invalidated_at: DateTime::from_timestamp(4600, 0).unwrap(),
+        reason: "sensor was bumped".to_string(),
+    }
+}
+
+/// `metadata(name)` marked invalid.
 fn invalidated(name: &str) -> ReportMetadata {
     ReportMetadata {
-        invalidation: Some(Invalidation {
-            invalidated_at: DateTime::from_timestamp(4600, 0).unwrap(),
-            reason: "sensor was bumped".to_string(),
-        }),
+        invalidation: Some(invalidation()),
         ..metadata(name)
     }
 }
 
-queue_suite!(metadata, "calibration-generic-queue-test");
+/// The upload of `metadata(name)`.
+fn report_job(name: &str) -> Job {
+    Job::Report(metadata(name))
+}
+
+/// The upload of `metadata(name)`'s invalidation.
+fn invalidation_job(name: &str) -> Job {
+    Job::Invalidation {
+        report: metadata(name),
+        invalidation: invalidation(),
+    }
+}
+
+queue_suite!(report_job, "calibration-generic-queue-test");
 
 #[test]
 fn ready_at_is_min_utc() {
     assert_eq!(
-        QueueJob::ready_at(&metadata("arm")),
+        QueueJob::ready_at(&report_job("arm")),
         DateTime::<Utc>::MIN_UTC
     );
 }
@@ -58,7 +76,7 @@ fn ready_at_is_min_utc() {
 fn name_is_the_component_role_aspect_and_time() {
     assert_eq!(
         "calibration of arm (role aligner-1) (aspect pose) received at 1970-01-01T00:16:40+00:00",
-        QueueJob::name(&metadata("arm"))
+        QueueJob::name(&report_job("arm"))
     );
 }
 
@@ -72,7 +90,7 @@ fn name_leaves_out_a_missing_role_and_aspect() {
 
     assert_eq!(
         "calibration of arm received at 1970-01-01T00:16:40+00:00",
-        QueueJob::name(&report)
+        QueueJob::name(&Job::Report(report))
     );
 }
 
@@ -81,7 +99,7 @@ fn name_of_an_invalidation_says_when_it_was_made() {
     assert_eq!(
         "invalidation of calibration of arm (role aligner-1) (aspect pose) received at \
          1970-01-01T00:16:40+00:00, made at 1970-01-01T01:16:40+00:00",
-        QueueJob::name(&invalidated("arm"))
+        QueueJob::name(&invalidation_job("arm"))
     );
 }
 
@@ -122,10 +140,20 @@ mod wire {
 
         let entry = queue.next_ready(Utc::now()).unwrap();
         assert_eq!(entry.id, id);
-        assert_eq!(entry.job, metadata("arm"));
+        assert_eq!(entry.job, report_job("arm"));
     }
 
-    /// A queued invalidation carries the invalidation on the report's metadata.
+    /// A queued invalidation is written as its report's metadata with the
+    /// invalidation set, so an older agent still reads the queue.
+    #[test]
+    fn an_invalidation_is_written_as_report_metadata() {
+        let job = serde_json::to_value(invalidation_job("arm")).unwrap();
+        let metadata = serde_json::to_value(invalidated("arm")).unwrap();
+
+        assert_eq!(job, metadata);
+    }
+
+    /// Report metadata with the invalidation set loads as an invalidation.
     #[tokio::test]
     async fn an_invalidation_loads() {
         let dir = test_dirs::temp("calibration_queue_test").unwrap();
@@ -149,7 +177,7 @@ mod wire {
         let queue = Queue::from_snapshot(8, open(&path).await, Persistence::BestEffort);
 
         let found = queue.next_ready(Utc::now()).unwrap().job;
-        assert_eq!(found, invalidated("arm"));
+        assert_eq!(found, invalidation_job("arm"));
     }
 
     /// The optional fields may be absent, as for a calibration taken with no
@@ -181,7 +209,7 @@ mod wire {
             deployment_id: None,
             ..metadata("arm")
         };
-        assert_eq!(found, expected);
+        assert_eq!(found, Job::Report(expected));
     }
 
     /// Reports queued before `report_id` was part of the metadata are minted
@@ -202,7 +230,9 @@ mod wire {
 
         let queue = Queue::from_snapshot(8, open(&path).await, Persistence::BestEffort);
 
-        let found = queue.next_ready(Utc::now()).unwrap().job;
+        let Job::Report(found) = queue.next_ready(Utc::now()).unwrap().job else {
+            panic!("expected a report");
+        };
         assert!(!found.report_id.is_nil());
         let expected = ReportMetadata {
             report_id: found.report_id,
