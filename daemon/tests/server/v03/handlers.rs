@@ -865,7 +865,10 @@ pub mod routes {
             assert_eq!(actual.report_id, created.report_id);
             let invalidated_at = actual.invalidated_at.unwrap();
             let invalidated_at = DateTime::parse_from_rfc3339(&invalidated_at).unwrap();
-            assert!((before..=after).contains(&invalidated_at), "{invalidated_at}");
+            assert!(
+                (before..=after).contains(&invalidated_at),
+                "{invalidated_at}"
+            );
         }
 
         #[tokio::test]
