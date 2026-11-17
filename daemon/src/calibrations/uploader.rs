@@ -293,8 +293,9 @@ impl Uploader {
         .await?
     }
 
-    /// Mark `component`'s latest entry invalid, queue its upload, and return
-    /// it. Not found unless `report_id`, when set, is still the latest.
+    /// Mark `component`'s latest entry invalid and queue its upload, unless it
+    /// already is invalid, and return it. Not found unless `report_id`, when
+    /// set, is still the latest.
     pub async fn invalidate(
         &self,
         component: String,
