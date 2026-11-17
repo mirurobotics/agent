@@ -91,6 +91,7 @@ pub mod routes {
     use chrono::{DateTime, TimeZone, Utc};
     use serde_json::json;
     use tokio::sync::{broadcast, mpsc};
+    use uuid::Uuid;
 
     fn fixed_time() -> DateTime<Utc> {
         Utc.with_ymd_and_hms(2025, 6, 15, 12, 0, 0).unwrap()
@@ -799,6 +800,52 @@ pub mod routes {
             let (status, bytes) = f.get(uri).await;
             assert_eq!(status, StatusCode::NOT_FOUND);
             assert_eq!(error_code(&bytes), "resource_not_found");
+        }
+
+        fn invalidate_uri(report_id: impl std::fmt::Display) -> String {
+            format!("{URI}/latest/{report_id}/invalidate")
+        }
+
+        #[tokio::test]
+        async fn invalidate_latest_calibration_returns_200_with_the_invalidated_calibration() {
+            let f = Fixture::new("handler_invalidate_latest_calibration").await;
+            let created = report(&f).await;
+            let uri = invalidate_uri(created.report_id);
+            let body = json!({ "reason": "power cycle" }).to_string();
+
+            let (status, bytes) = f.post_json(&uri, body).await;
+            assert_eq!(status, StatusCode::OK);
+
+            let actual: openapi::Calibration = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(actual.report_id, created.report_id);
+            let invalidated_at = actual.invalidated_at.unwrap();
+            assert!(DateTime::parse_from_rfc3339(&invalidated_at).is_ok());
+        }
+
+        #[tokio::test]
+        async fn invalidate_latest_calibration_returns_404_for_an_unknown_report_id() {
+            let f = Fixture::new("handler_invalidate_latest_calibration_404").await;
+            let body = json!({ "reason": "power cycle" }).to_string();
+
+            for report_id in [Uuid::new_v4().to_string(), "not-a-report".to_string()] {
+                let uri = invalidate_uri(&report_id);
+                let (status, bytes) = f.post_json(&uri, body.clone()).await;
+                assert_eq!(status, StatusCode::NOT_FOUND, "{report_id}");
+                assert_eq!(error_code(&bytes), "resource_not_found", "{report_id}");
+            }
+        }
+
+        #[tokio::test]
+        async fn invalidate_latest_calibration_returns_422_for_a_blank_or_missing_reason() {
+            let f = Fixture::new("handler_invalidate_latest_calibration_422").await;
+            let created = report(&f).await;
+            let uri = invalidate_uri(created.report_id);
+
+            for body in [json!({ "reason": " " }), json!({})] {
+                let (status, bytes) = f.post_json(&uri, body.to_string()).await;
+                assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+                assert_eq!(error_code(&bytes), "invalid_request", "{body}");
+            }
         }
     }
 }

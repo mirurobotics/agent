@@ -197,6 +197,10 @@ impl From<&ReportMetadata> for device_server::Calibration {
             serial_number: metadata.serial_number.clone(),
             reported_by: metadata.reported_by.clone(),
             reported_at: metadata.reported_at.to_rfc3339(),
+            invalidated_at: metadata
+                .invalidation
+                .as_ref()
+                .map(|invalidation| invalidation.invalidated_at.to_rfc3339()),
         }
     }
 }
