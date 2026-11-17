@@ -525,15 +525,9 @@ async fn list_filters_by_component() {
 #[tokio::test]
 async fn list_reads_back_an_invalidated_entry() {
     let f = Fixture::new().await;
+    let valid = reported("arm", None, None);
     let invalidated_at = received_at() + TimeDelta::hours(1);
-    let arm = ReportMetadata {
-        invalidation: Some(Invalidation {
-            invalidated_at,
-            reason: "power cycle".to_string(),
-        }),
-        ..reported("arm", None, None)
-    };
-    let mut entry = serde_json::to_value(&arm).unwrap();
+    let mut entry = serde_json::to_value(&valid).unwrap();
     entry["invalidation"] = serde_json::json!({
         "invalidated_at": invalidated_at.to_rfc3339(),
         "reason": "power cycle",
@@ -543,7 +537,14 @@ async fn list_reads_back_an_invalidated_entry() {
         .await
         .unwrap();
 
-    assert_eq!(f.entries().await, [arm]);
+    let invalidated = ReportMetadata {
+        invalidation: Some(Invalidation {
+            invalidated_at,
+            reason: "power cycle".to_string(),
+        }),
+        ..valid
+    };
+    assert_eq!(f.entries().await, [invalidated]);
 }
 
 #[tokio::test]
