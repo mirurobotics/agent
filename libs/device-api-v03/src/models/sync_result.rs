@@ -9,38 +9,38 @@
 use crate::models;
 use serde::{Deserialize, Serialize};
 
-/// SyncDeviceResult : The result of attempting to sync the device.
+/// SyncResult : The result of attempting to sync the device.
 /// The result of attempting to sync the device.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-pub enum SyncDeviceResult {
+pub enum SyncResult {
     #[serde(rename = "success")]
-    SYNC_DEVICE_RESULT_SUCCESS,
+    SYNC_RESULT_SUCCESS,
     #[serde(rename = "network_connection_error")]
-    SYNC_DEVICE_RESULT_NETWORK_CONNECTION_ERROR,
+    SYNC_RESULT_NETWORK_CONNECTION_ERROR,
     #[serde(rename = "in_cooldown")]
-    SYNC_DEVICE_RESULT_IN_COOLDOWN,
+    SYNC_RESULT_IN_COOLDOWN,
 
     /// Catch-all for values added by the API after this client was
     /// generated. `#[serde(other)]` makes unrecognized strings
     /// deserialize here instead of failing the whole payload.
     #[serde(other)]
-    SyncDeviceResultUnknown,
+    SyncResultUnknown,
 }
 
-impl std::fmt::Display for SyncDeviceResult {
+impl std::fmt::Display for SyncResult {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Self::SYNC_DEVICE_RESULT_SUCCESS => write!(f, "success"),
-            Self::SYNC_DEVICE_RESULT_NETWORK_CONNECTION_ERROR => write!(f, "network_connection_error"),
-            Self::SYNC_DEVICE_RESULT_IN_COOLDOWN => write!(f, "in_cooldown"),
-            Self::SyncDeviceResultUnknown => write!(f, "unknown"),
+            Self::SYNC_RESULT_SUCCESS => write!(f, "success"),
+            Self::SYNC_RESULT_NETWORK_CONNECTION_ERROR => write!(f, "network_connection_error"),
+            Self::SYNC_RESULT_IN_COOLDOWN => write!(f, "in_cooldown"),
+            Self::SyncResultUnknown => write!(f, "unknown"),
         }
     }
 }
 
-impl Default for SyncDeviceResult {
-    fn default() -> SyncDeviceResult {
-        Self::SYNC_DEVICE_RESULT_SUCCESS
+impl Default for SyncResult {
+    fn default() -> SyncResult {
+        Self::SYNC_RESULT_SUCCESS
     }
 }
 
