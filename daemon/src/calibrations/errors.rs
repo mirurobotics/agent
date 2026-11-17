@@ -162,12 +162,11 @@ impl crate::errors::Error for TokenErr {
         self.0.is_network_conn_err()
     }
 }
-/// An invalidation's reason is empty or longer than the control plane
+/// An invalidation's reason is blank or longer than the control plane
 /// accepts: 422 `invalid_request`. Nothing was queued.
 #[derive(Debug, thiserror::Error)]
-#[error("an invalidation reason must be 1 to {max_chars} characters, not {chars}")]
+#[error("an invalidation reason must not be blank or over {max_chars} characters")]
 pub struct InvalidReasonErr {
-    pub chars: usize,
     pub max_chars: usize,
     pub trace: Box<Trace>,
 }

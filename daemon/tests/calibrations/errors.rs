@@ -80,7 +80,6 @@ fn a_component_without_a_matching_latest_calibration_is_404() {
 #[test]
 fn an_invalid_reason_is_422() {
     let err = CalibrationsErr::from(InvalidReasonErr {
-        chars: 0,
         max_chars: 512,
         trace: miru_daemon::trace!(),
     });
@@ -89,6 +88,8 @@ fn an_invalid_reason_is_422() {
         &err,
         Expected::new(Code::InvalidRequest, HTTPCode::UNPROCESSABLE_ENTITY),
     );
+    let want = "an invalidation reason must not be blank or over 512 characters";
+    assert_eq!(err.to_string(), want);
 }
 
 #[test]

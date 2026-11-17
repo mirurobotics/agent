@@ -306,12 +306,10 @@ const MAX_REASON_CHARS: usize = 512;
 /// Reject a reason the control plane would refuse, so the device never keeps
 /// an invalidation that can't be uploaded.
 fn verify_reason(reason: &str) -> Result<(), InvalidReasonErr> {
-    let chars = reason.chars().count();
-    if (1..=MAX_REASON_CHARS).contains(&chars) {
+    if !reason.trim().is_empty() && reason.chars().count() <= MAX_REASON_CHARS {
         return Ok(());
     }
     let err = InvalidReasonErr {
-        chars,
         max_chars: MAX_REASON_CHARS,
         trace: trace!(),
     };
@@ -607,11 +605,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_invalidation_reason_must_be_1_to_512_chars() {
+    async fn an_invalidation_reason_must_not_be_blank_or_over_512_chars() {
         let f = Fixture::new();
         let mut u = f.uploader().await;
 
-        for reason in [String::new(), "é".repeat(513)] {
+        for reason in [String::new(), " \n".to_string(), "é".repeat(513)] {
             let invalidation = Invalidation {
                 reason,
                 ..invalidation_at(received_at())
