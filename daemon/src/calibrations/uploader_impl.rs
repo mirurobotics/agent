@@ -200,24 +200,10 @@ where
 
     /// Settle a failed attempt as the retry policy says. Network connection
     /// errors are expected and don't count toward the attempt budget; any
-    /// other failure does. An invalidation of a report the control plane
-    /// hasn't recorded yet waits for the report's upload, so once its attempts
-    /// run out it keeps the wait it reached, the longest backoff, until it is
-    /// too old.
+    /// other failure does.
     async fn handle_failure(&mut self, mut entry: QueueEntry, err: CalibrationsErr) {
         let age = (self.now_fn)() - entry.job.queued_at();
-        let verdict = match self.options.retry.on_failure(&err, entry.attempts, age) {
-            Verdict::OutOfAttempts { attempts }
-                if matches!(err, CalibrationsErr::ReportNotRecordedErr(_)) =>
-            {
-                Verdict::Retry {
-                    attempts,
-                    wait_secs: self.options.retry.backoff.max_secs,
-                }
-            }
-            verdict => verdict,
-        };
-        match verdict {
+        match self.options.retry.on_failure(&err, entry.attempts, age) {
             Verdict::Retry {
                 attempts,
                 wait_secs,
@@ -910,28 +896,6 @@ mod tests {
 
         assert_eq!(f.sent(), strings(&["a"; 3]));
         assert_empty(&mut u).await;
-    }
-
-    #[tokio::test]
-    async fn an_unrecorded_report_invalidation_outlasts_its_attempts() {
-        // the report may still be queued behind it, so it waits for it
-        let f = Fixture::new();
-        f.sender.push(Step::NotRecorded);
-        let options = UploaderOptions {
-            retry: RetryPolicy {
-                attempts: 1,
-                ..RetryPolicy::default()
-            },
-            ..UploaderOptions::default()
-        };
-        let mut u = f.uploader_with(options).await;
-        u.enqueue_invalidation(invalidation_at(received_at()))
-            .await
-            .unwrap();
-
-        run_next_attempt(&mut u).await;
-
-        assert_backoff(&mut u, 3600).await;
     }
 
     #[tokio::test]
