@@ -6,8 +6,8 @@ use std::time::Duration;
 // internal crates
 use crate::calibrations::{
     errors::{CalibrationsErr, ReceiveActorMessageErr, SendActorMessageErr},
-    job::{QueueEntry, QueueSnapshotFile},
     latest::LatestStore,
+    queue::{QueueEntry, QueueSnapshotFile},
     report::Report,
     sender::Sender,
     uploader_impl::{NextAttempt, UploaderImpl, UploaderOptions},
