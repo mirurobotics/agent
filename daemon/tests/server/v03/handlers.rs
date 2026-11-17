@@ -76,7 +76,7 @@ pub mod routes {
     use miru_daemon::events::hub::{EventHub, SpawnOptions};
     use miru_daemon::filesys::Overwrite;
     use miru_daemon::models::{
-        Deployment, DplActivity, DplErrStatus, DplTarget, FileRule, FileRuleRetention,
+        Deployment, Device, DplActivity, DplErrStatus, DplTarget, FileRule, FileRuleRetention,
         FileRuleUpload, GitCommit, Release, UploadTimezone,
     };
     use miru_daemon::server::{routes, State};
@@ -279,6 +279,22 @@ pub mod routes {
                 actual.last_disconnected_secs_ago,
             );
             assert_eq!(times, (None, None, None));
+        }
+
+        #[tokio::test]
+        async fn get_device_returns_secs_ago_for_times_since_start() {
+            let f = Fixture::new("handler_get_device_since_start").await;
+            let device = Device {
+                last_connected_at: Utc::now(),
+                ..Device::default()
+            };
+            f.state.storage.device.write(device).await.unwrap();
+
+            let (status, bytes) = f.get("/v0.3/device").await;
+            assert_eq!(status, StatusCode::OK);
+
+            let actual: openapi::Device = serde_json::from_slice(&bytes).unwrap();
+            assert!(actual.last_connected_secs_ago.is_some());
         }
     }
 

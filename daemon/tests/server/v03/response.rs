@@ -37,7 +37,7 @@ pub mod device_response {
         }
     }
 
-    fn secs_ago(device: &openapi::Device) -> (Option<i64>, Option<i64>, Option<i64>) {
+    fn device_times(device: &openapi::Device) -> (Option<i64>, Option<i64>, Option<i64>) {
         (
             device.last_synced_secs_ago,
             device.last_connected_secs_ago,
@@ -82,7 +82,7 @@ pub mod device_response {
         let device = device_at(DeviceStatus::Online, DateTime::<Utc>::UNIX_EPOCH);
 
         let actual = response::device(&device, fixed_time(), started_at());
-        assert_eq!(secs_ago(&actual), (None, None, None));
+        assert_eq!(device_times(&actual), (None, None, None));
     }
 
     #[test]
@@ -90,7 +90,8 @@ pub mod device_response {
         let device = device_at(DeviceStatus::Online, started_at());
 
         let actual = response::device(&device, fixed_time(), started_at());
-        assert_eq!(secs_ago(&actual), (Some(3600), Some(3600), Some(3600)));
+        let hour = Some(3600);
+        assert_eq!(device_times(&actual), (hour, hour, hour));
     }
 
     #[test]
@@ -100,7 +101,7 @@ pub mod device_response {
         let device = device_at(DeviceStatus::Online, at);
 
         let actual = response::device(&device, now, started_at());
-        assert_eq!(secs_ago(&actual), (Some(90), Some(90), Some(90)));
+        assert_eq!(device_times(&actual), (Some(90), Some(90), Some(90)));
     }
 
     #[test]
@@ -109,7 +110,7 @@ pub mod device_response {
         let device = device_at(DeviceStatus::Online, now + Duration::seconds(5));
 
         let actual = response::device(&device, now, started_at());
-        assert_eq!(secs_ago(&actual), (Some(0), Some(0), Some(0)));
+        assert_eq!(device_times(&actual), (Some(0), Some(0), Some(0)));
     }
 }
 
