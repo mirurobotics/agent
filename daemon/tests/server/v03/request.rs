@@ -3,7 +3,10 @@ use device_api_v03::models as openapi;
 use miru_daemon::calibrations::Filter;
 use miru_daemon::models::InstanceFormat;
 use miru_daemon::server::v03::request::{CreateCalibrationBody, LatestCalibrationsQuery};
-use miru_daemon::services::calibration::CreateParams;
+use miru_daemon::services::calibration::{CreateParams, InvalidateParams};
+
+// external crates
+use uuid::Uuid;
 
 fn calibration_body(format: openapi::InstanceFormat) -> CreateCalibrationBody {
     CreateCalibrationBody {
@@ -92,6 +95,27 @@ pub mod create_calibration_body {
 
         assert!(CreateParams::try_from(role).is_err());
         assert!(CreateParams::try_from(aspect).is_err());
+    }
+}
+
+pub mod invalidate_calibration_request {
+    use super::*;
+
+    #[test]
+    fn converts_every_field() {
+        let report_id = Uuid::new_v4();
+        let request = openapi::InvalidateCalibrationRequest {
+            component: "arm-left".into(),
+            report_id: Some(report_id),
+            reason: "power cycle".into(),
+        };
+
+        let expected = InvalidateParams {
+            component: "arm-left".into(),
+            report_id: Some(report_id),
+            reason: "power cycle".into(),
+        };
+        assert_eq!(InvalidateParams::from(request), expected);
     }
 }
 

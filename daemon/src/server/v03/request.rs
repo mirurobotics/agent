@@ -60,6 +60,16 @@ fn to_instance_format(format: device_server::InstanceFormat) -> Option<InstanceF
     }
 }
 
+impl From<device_server::InvalidateCalibrationRequest> for calibration::InvalidateParams {
+    fn from(request: device_server::InvalidateCalibrationRequest) -> Self {
+        calibration::InvalidateParams {
+            component: request.component,
+            report_id: request.report_id,
+            reason: request.reason,
+        }
+    }
+}
+
 /// The `GET /calibrations/latest` query. The filter is a comma-separated
 /// list, as the spec's `explode: false` sends it.
 /// `role` and `aspect` are the v0.2 filters, read only to reject them.
