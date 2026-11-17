@@ -17,8 +17,7 @@ pub enum Job {
 }
 
 impl Job {
-    /// When the job was queued: when the agent received the report, or when
-    /// the invalidation was made. Its age counts from here.
+    /// When the job was queued. Its age counts from here.
     pub(crate) fn queued_at(&self) -> DateTime<Utc> {
         match self {
             Job::Report(report) => report.reported_at,
