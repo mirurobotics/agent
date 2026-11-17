@@ -34,7 +34,7 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use tracing::error;
 
-// ================================= AGENT INFO ==================================== //
+// =================================== AGENT ======================================= //
 pub async fn health() -> impl IntoResponse {
     (
         StatusCode::OK,
@@ -61,25 +61,25 @@ pub async fn version() -> impl IntoResponse {
     )
 }
 
+pub async fn sync(AxumState(state): AxumState<Arc<State>>) -> impl IntoResponse {
+    handle(
+        async move {
+            let outcome = dvc_svc::sync(state.syncer.as_ref()).await?;
+            Ok::<_, ServerErr>(response::sync(&outcome, Utc::now(), state.started_at))
+        },
+        "Error syncing device",
+    )
+    .await
+}
+
 // ================================= DEVICE ======================================== //
 pub async fn get_device(AxumState(state): AxumState<Arc<State>>) -> impl IntoResponse {
     handle(
         async move {
             let device = dvc_svc::get(&state.storage.device).await?;
-            Ok::<_, ServerErr>(device_server::Device::from(&device))
+            Ok::<_, ServerErr>(response::device(&device, Utc::now(), state.started_at))
         },
         "Error getting device",
-    )
-    .await
-}
-
-pub async fn sync_device(AxumState(state): AxumState<Arc<State>>) -> impl IntoResponse {
-    handle(
-        async move {
-            let outcome = dvc_svc::sync(state.syncer.as_ref()).await?;
-            Ok::<_, ServerErr>(device_server::SyncDeviceResponse::from(&outcome))
-        },
-        "Error syncing device",
     )
     .await
 }

@@ -5,31 +5,67 @@ use crate::models;
 use crate::services::{calibration, device::SyncOutcome};
 use device_api_v03::models as device_server;
 
-impl From<&models::Device> for device_server::Device {
-    fn from(device: &models::Device) -> Self {
-        device_server::Device {
-            object: device_server::device::Object::Device,
-            id: device.id.clone(),
-            name: device.name.clone(),
-            status: (&device.status).into(),
-            last_synced_at: device.last_synced_at.to_rfc3339(),
-            last_connected_at: device.last_connected_at.to_rfc3339(),
-            last_disconnected_at: device.last_disconnected_at.to_rfc3339(),
-        }
+// external crates
+use chrono::{DateTime, Utc};
+
+/// The device route's response.
+pub fn device(
+    device: &models::Device,
+    now: DateTime<Utc>,
+    started_at: DateTime<Utc>,
+) -> device_server::Device {
+    let since_start = |at| secs_ago_since_start(at, now, started_at);
+    device_server::Device {
+        object: device_server::device::Object::Device,
+        id: device.id.clone(),
+        name: device.name.clone(),
+        status: (&device.status).into(),
+        last_synced_secs_ago: since_start(device.last_synced_at),
+        last_connected_secs_ago: since_start(device.last_connected_at),
+        last_disconnected_secs_ago: since_start(device.last_disconnected_at),
     }
 }
 
-impl From<&SyncOutcome> for device_server::SyncDeviceResponse {
-    fn from(outcome: &SyncOutcome) -> Self {
-        device_server::SyncDeviceResponse {
-            code: (&outcome.code).into(),
-            message: outcome.message.clone(),
-            last_synced_at: outcome.state.last_synced_at.to_rfc3339(),
-            last_attempted_sync_at: outcome.state.last_attempted_sync_at.to_rfc3339(),
-            in_cooldown: outcome.state.is_in_cooldown(),
-            cooldown_ends_at: outcome.state.cooldown_ends_at.to_rfc3339(),
-        }
+/// The sync route's response.
+pub fn sync(
+    outcome: &SyncOutcome,
+    now: DateTime<Utc>,
+    started_at: DateTime<Utc>,
+) -> device_server::SyncResponse {
+    let state = &outcome.state;
+    let cooldown_ends_in_secs = secs_until(state.cooldown_ends_at, now);
+    device_server::SyncResponse {
+        code: (&outcome.code).into(),
+        message: outcome.message.clone(),
+        last_synced_secs_ago: secs_ago_since_start(state.last_synced_at, now, started_at),
+        last_attempted_sync_secs_ago: secs_ago(state.last_attempted_sync_at, now),
+        in_cooldown: cooldown_ends_in_secs > 0,
+        cooldown_ends_in_secs,
     }
+}
+
+// None for a time before the agent last started, such as one the device file
+// kept from the previous run or the syncer's never-synced epoch.
+fn secs_ago_since_start(
+    at: DateTime<Utc>,
+    now: DateTime<Utc>,
+    started_at: DateTime<Utc>,
+) -> Option<i64> {
+    (at >= started_at).then(|| secs_ago(at, now))
+}
+
+// Rounded down, and 0 if the clock has moved back past `at`.
+fn secs_ago(at: DateTime<Utc>, now: DateTime<Utc>) -> i64 {
+    (now - at).num_seconds().max(0)
+}
+
+// Rounded up, so it is 0 only once `at` has passed.
+fn secs_until(at: DateTime<Utc>, now: DateTime<Utc>) -> i64 {
+    if at <= now {
+        return 0;
+    }
+    let remaining = at - now;
+    remaining.num_seconds() + i64::from(remaining.subsec_nanos() > 0)
 }
 
 impl From<&models::Deployment> for device_server::Deployment {
@@ -197,6 +233,7 @@ impl From<&ReportMetadata> for device_server::Calibration {
             serial_number: metadata.serial_number.clone(),
             reported_by: metadata.reported_by.clone(),
             reported_at: metadata.reported_at.to_rfc3339(),
+            invalidated_at: metadata.invalidated_at.map(|at| at.to_rfc3339()),
         }
     }
 }

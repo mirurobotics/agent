@@ -10,6 +10,7 @@ use crate::http;
 use crate::sync;
 
 // external crates
+use chrono::{DateTime, Utc};
 use tokio::sync::broadcast;
 
 #[derive(Clone, Debug)]
@@ -22,4 +23,5 @@ pub struct State {
     pub cal_uploader: Arc<calibrations::Uploader>,
     pub latest_cals: calibrations::LatestStore,
     pub shutdown_tx: broadcast::Sender<()>,
+    pub started_at: DateTime<Utc>,
 }

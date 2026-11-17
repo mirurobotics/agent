@@ -12,12 +12,12 @@ impl From<&models::DeviceStatus> for device_server::DeviceStatus {
     }
 }
 
-impl From<&SyncCode> for device_server::SyncDeviceResult {
+impl From<&SyncCode> for device_server::SyncResult {
     fn from(code: &SyncCode) -> Self {
         match code {
-            SyncCode::Success => Self::SYNC_DEVICE_RESULT_SUCCESS,
-            SyncCode::InCooldown => Self::SYNC_DEVICE_RESULT_IN_COOLDOWN,
-            SyncCode::NetworkConnectionError => Self::SYNC_DEVICE_RESULT_NETWORK_CONNECTION_ERROR,
+            SyncCode::Success => Self::SYNC_RESULT_SUCCESS,
+            SyncCode::InCooldown => Self::SYNC_RESULT_IN_COOLDOWN,
+            SyncCode::NetworkConnectionError => Self::SYNC_RESULT_NETWORK_CONNECTION_ERROR,
         }
     }
 }
