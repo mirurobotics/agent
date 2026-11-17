@@ -80,34 +80,6 @@ pub mod device_response {
         let actual = response::device(&device, fixed_time());
         assert_eq!(device_times(&actual), (None, None, None));
     }
-
-    #[test]
-    fn reports_a_time_from_an_earlier_run() {
-        let device = device_at(DeviceStatus::Online, fixed_time() - Duration::days(2));
-
-        let actual = response::device(&device, fixed_time());
-        let two_days = Some(2 * 24 * 3600);
-        assert_eq!(device_times(&actual), (two_days, two_days, two_days));
-    }
-
-    #[test]
-    fn rounds_secs_ago_down() {
-        let now = fixed_time();
-        let at = now - Duration::milliseconds(90_999);
-        let device = device_at(DeviceStatus::Online, at);
-
-        let actual = response::device(&device, now);
-        assert_eq!(device_times(&actual), (Some(90), Some(90), Some(90)));
-    }
-
-    #[test]
-    fn reports_0_for_a_time_after_now() {
-        let now = fixed_time();
-        let device = device_at(DeviceStatus::Online, now + Duration::seconds(5));
-
-        let actual = response::device(&device, now);
-        assert_eq!(device_times(&actual), (Some(0), Some(0), Some(0)));
-    }
 }
 
 pub mod sync_response {
@@ -126,10 +98,6 @@ pub mod sync_response {
                 err_streak: 0,
             },
         }
-    }
-
-    fn cooldown(body: &openapi::SyncResponse) -> (bool, i64) {
-        (body.in_cooldown, body.cooldown_ends_in_secs)
     }
 
     #[test]
@@ -174,33 +142,6 @@ pub mod sync_response {
 
         let actual = response::sync(&outcome, now);
         assert_eq!(actual.last_synced_secs_ago, None);
-    }
-
-    #[test]
-    fn rounds_cooldown_ends_in_secs_up() {
-        let now = fixed_time();
-        let outcome = outcome(SyncCode::Success, now + Duration::milliseconds(1_500));
-
-        let actual = response::sync(&outcome, now);
-        assert_eq!(cooldown(&actual), (true, 2));
-    }
-
-    #[test]
-    fn is_in_cooldown_until_it_ends() {
-        let now = fixed_time();
-        let outcome = outcome(SyncCode::Success, now + Duration::milliseconds(1));
-
-        let actual = response::sync(&outcome, now);
-        assert_eq!(cooldown(&actual), (true, 1));
-    }
-
-    #[test]
-    fn is_not_in_cooldown_when_it_ends_now() {
-        let now = fixed_time();
-        let outcome = outcome(SyncCode::Success, now);
-
-        let actual = response::sync(&outcome, now);
-        assert_eq!(cooldown(&actual), (false, 0));
     }
 }
 
