@@ -127,13 +127,21 @@ fn parse_time(value: &str, field: &str) -> DateTime<Utc> {
 pub enum Job {
     /// Upload the report, whose data is in its report file.
     Report(ReportMetadata),
+    /// Upload the invalidation of the report with `report_id`. It has no
+    /// report file.
+    Invalidation {
+        report_id: Uuid,
+        invalidation: Invalidation,
+    },
 }
 
 impl Job {
-    /// When the job was queued. Its age counts from here.
+    /// When the job was queued: when the agent received the report, or when
+    /// the invalidation was made. Its age counts from here.
     pub(crate) fn queued_at(&self) -> DateTime<Utc> {
         match self {
             Job::Report(report) => report.reported_at,
+            Job::Invalidation { invalidation, .. } => invalidation.invalidated_at,
         }
     }
 }
@@ -149,6 +157,13 @@ impl queue::QueueJob for Job {
     fn name(&self) -> String {
         match self {
             Job::Report(report) => report_name(report),
+            Job::Invalidation {
+                report_id,
+                invalidation,
+            } => {
+                let at = invalidation.invalidated_at.to_rfc3339();
+                format!("invalidation of calibration {report_id}, made at {at}")
+            }
         }
     }
 }

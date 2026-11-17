@@ -1,7 +1,7 @@
 //! The calibration uploader actor: drain order, serving intake while busy
-//! or backing off, keeping the latest store in step with the queue, and
-//! shutdown. `UploaderImpl`'s queue, storage and retry rules are unit-tested in
-//! `uploader_impl.rs`.
+//! or backing off, keeping the latest store in step with the queue for
+//! reports and invalidations, and shutdown. `UploaderImpl`'s queue, storage
+//! and retry rules are unit-tested in `uploader_impl.rs`.
 
 // standard crates
 use std::future::Future;
@@ -14,10 +14,11 @@ use crate::mocks::error::SleepController;
 use crate::test_utils::calibrations::{
     latest_cals_layout, latest_store, layout, received_at, report,
 };
+use crate::test_utils::filesys::access::make_read_only;
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_daemon::calibrations::{
-    latest, CalibrationsErr, Filter, Job, LatestStore, Queue, QueueSnapshotFile, ReportMetadata,
-    Uploader, UploaderArgs, UploaderOptions,
+    latest, CalibrationsErr, Filter, Invalidation, Job, LatestStore, Queue, QueueSnapshotFile,
+    ReportMetadata, Uploader, UploaderArgs, UploaderOptions,
 };
 use miru_daemon::disk::layout::{CalibrationsLayout, LatestCalsLayout};
 use miru_daemon::filesys::{dirs, files, File, PathExt, WriteOptions};
@@ -214,6 +215,13 @@ fn strings(names: &[&str]) -> Vec<String> {
     names.iter().map(|name| name.to_string()).collect()
 }
 
+fn invalidation(reason: &str) -> Invalidation {
+    Invalidation {
+        invalidated_at: received_at() + TimeDelta::hours(1),
+        reason: reason.to_string(),
+    }
+}
+
 #[tokio::test]
 async fn startup_prunes_orphaned_report_files() {
     let mut h = Harness::new();
@@ -328,6 +336,120 @@ async fn an_oversized_report_is_not_stored() {
     assert!(matches!(err, CalibrationsErr::TooLargeErr(_)), "{err:?}");
     assert_eq!(h.num_queued_uploads().await, 0);
     assert!(h.latest_entries().await.is_empty());
+}
+
+#[tokio::test]
+async fn an_invalidation_is_stored_and_uploaded() {
+    let mut h = Harness::new();
+    h.spawn().await;
+    h.report("a").await;
+    h.await_drained(&["a"]).await;
+    let report_id = report("a").metadata.report_id;
+
+    let invalidated = guard(
+        h.uploader()
+            .invalidate(report_id, invalidation("power cycle")),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(invalidated.invalidation, Some(invalidation("power cycle")));
+    assert_eq!(h.latest_entries().await, [invalidated]);
+    eventually(|| async {
+        h.sender.invalidations() == [(report_id, invalidation("power cycle"))]
+            && h.num_queued_uploads().await == 0
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn an_invalid_entry_is_returned_unchanged_and_not_queued_again() {
+    let mut h = Harness::new();
+    // the first invalidation stays queued
+    let (_hold, hang) = oneshot::channel();
+    h.sender.push(Step::Ok);
+    h.sender.push(Step::Hang(hang));
+    h.spawn().await;
+    h.report("a").await;
+    h.await_drained(&["a"]).await;
+    let report_id = report("a").metadata.report_id;
+    let first = guard(
+        h.uploader()
+            .invalidate(report_id, invalidation("power cycle")),
+    )
+    .await
+    .unwrap();
+
+    let again = guard(h.uploader().invalidate(report_id, invalidation("dropped")))
+        .await
+        .unwrap();
+
+    assert_eq!(again, first);
+    assert_eq!(h.num_queued_uploads().await, 1);
+}
+
+#[tokio::test]
+async fn invalidating_an_unknown_report_queues_nothing() {
+    let mut h = Harness::new();
+    h.spawn().await;
+    let report_id = Uuid::new_v4();
+
+    let err = guard(
+        h.uploader()
+            .invalidate(report_id, invalidation("power cycle")),
+    )
+    .await
+    .unwrap_err();
+
+    assert!(matches!(err, CalibrationsErr::NotFoundErr(_)), "{err:?}");
+    assert_eq!(h.num_queued_uploads().await, 0);
+}
+
+#[tokio::test]
+async fn a_full_queue_leaves_the_entry_valid() {
+    let mut h = Harness::new();
+    let (_hold, hang) = oneshot::channel();
+    h.sender.push(Step::Hang(hang));
+    let options = UploaderOptions {
+        capacity: 1,
+        ..UploaderOptions::default()
+    };
+    h.spawn_with(options).await;
+    h.report("a").await;
+    let report_id = report("a").metadata.report_id;
+
+    let err = guard(
+        h.uploader()
+            .invalidate(report_id, invalidation("power cycle")),
+    )
+    .await
+    .unwrap_err();
+
+    assert!(matches!(err, CalibrationsErr::QueueFullErr(_)), "{err:?}");
+    assert_eq!(h.latest_entries().await, [report("a").metadata]);
+}
+
+#[tokio::test]
+async fn a_failed_store_write_removes_the_queued_invalidation() {
+    let mut h = Harness::new();
+    h.spawn().await;
+    h.report("a").await;
+    h.await_drained(&["a"]).await;
+    let report_id = report("a").metadata.report_id;
+    let _read_only = make_read_only(&h.latest_layout.root);
+
+    let err = guard(
+        h.uploader()
+            .invalidate(report_id, invalidation("power cycle")),
+    )
+    .await
+    .unwrap_err();
+
+    assert!(matches!(err, CalibrationsErr::FileSysErr(_)), "{err:?}");
+    assert_eq!(h.num_queued_uploads().await, 0);
+    assert_eq!(h.queued_on_disk().await, 0);
+    assert_eq!(h.latest_entries().await, [report("a").metadata]);
+    assert!(h.sender.invalidations().is_empty());
 }
 
 #[tokio::test]

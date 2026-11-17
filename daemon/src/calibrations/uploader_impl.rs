@@ -5,7 +5,7 @@ use std::sync::Arc;
 // internal crates
 use crate::calibrations::{
     errors::{CalibrationTooLargeErr, CalibrationsErr},
-    report::{self, Job, Queue, QueueEntry, QueueSnapshotFile, Report},
+    report::{self, Invalidation, Job, Queue, QueueEntry, QueueSnapshotFile, Report},
     sender::Sender,
 };
 use crate::errors::Error;
@@ -20,7 +20,8 @@ use uuid::Uuid;
 
 #[derive(Debug, Clone)]
 pub struct UploaderOptions {
-    /// The most reports queued at once; intake is rejected beyond it.
+    /// The most reports and invalidations queued at once; intake is rejected
+    /// beyond it.
     pub capacity: usize,
     /// The largest report data accepted, in bytes.
     pub max_report_bytes: u64,
@@ -131,6 +132,20 @@ where
         Ok(id)
     }
 
+    /// Queue the upload of `invalidation` for the report with `report_id`. The
+    /// job has no report file. On error nothing is queued.
+    pub(crate) async fn enqueue_invalidation(
+        &mut self,
+        report_id: Uuid,
+        invalidation: Invalidation,
+    ) -> Result<Uuid, CalibrationsErr> {
+        let job = Job::Invalidation {
+            report_id,
+            invalidation,
+        };
+        Ok(self.queue.enqueue(job).await?)
+    }
+
     pub(crate) fn len(&self) -> usize {
         self.queue.len()
     }
@@ -142,10 +157,11 @@ where
         self.queue.next_attempt(now, horizon).await
     }
 
-    /// Upload the report queued as `entry`: read its file, then send it. The
-    /// future owns what it needs and borrows nothing from `self`, so the
-    /// worker can serve commands while it runs. The job is cloned into the
-    /// future, which is cheap: the data is read from disk inside it.
+    /// Upload the job queued as `entry`: send its invalidation, or read its
+    /// report file and send the report. The future owns what it needs and
+    /// borrows nothing from `self`, so the worker can serve commands while it
+    /// runs. The job is cloned into the future, which is cheap: the data
+    /// is read from disk inside it.
     pub(crate) fn attempt(
         &self,
         entry: &QueueEntry,
@@ -159,6 +175,10 @@ where
                     let data = report::read_data(&file).await?;
                     sender.send(Report { metadata, data }).await
                 }
+                Job::Invalidation {
+                    report_id,
+                    invalidation,
+                } => sender.invalidate(report_id, invalidation).await,
             }
         }
     }
@@ -288,9 +308,9 @@ mod tests {
     // internal crates
     use super::{NextAttempt, QueueEntry, UploaderImpl, UploaderOptions};
     use crate::test_utils::calibration_sender::{MockCalibrationSender, Step};
-    use crate::test_utils::calibrations::{layout, received_at, report};
+    use crate::test_utils::calibrations::{layout, received_at, report, report_id};
     use crate::test_utils::filesys::dirs as test_dirs;
-    use miru_daemon::calibrations::{CalibrationsErr, Job, Queue, QueueSnapshotFile};
+    use miru_daemon::calibrations::{CalibrationsErr, Invalidation, Job, Queue, QueueSnapshotFile};
     use miru_daemon::disk::layout::CalibrationsLayout;
     use miru_daemon::filesys::{dirs, files, File, PathExt, WriteOptions};
     use miru_daemon::queue::{Persistence, RetryPolicy};
@@ -425,6 +445,14 @@ mod tests {
         names.iter().map(|name| name.to_string()).collect()
     }
 
+    /// An invalidation made at `at`.
+    fn invalidation_at(at: DateTime<Utc>) -> Invalidation {
+        Invalidation {
+            invalidated_at: at,
+            reason: "power cycle".to_string(),
+        }
+    }
+
     // =============================== OPTIONS ================================ //
     #[test]
     fn default_options_are_1000_reports_of_1_mib() {
@@ -518,6 +546,31 @@ mod tests {
         assert_eq!(f.queued_on_disk().await, [entry]);
         let data = files::read_string(&f.report_file(id)).await.unwrap();
         assert_eq!(data, report("a").data);
+    }
+
+    #[tokio::test]
+    async fn queues_an_invalidation_without_a_report_file() {
+        let f = Fixture::new();
+        let mut u = f.uploader().await;
+        let invalidation = invalidation_at(received_at());
+
+        let id = u
+            .enqueue_invalidation(report_id("a"), invalidation.clone())
+            .await
+            .unwrap();
+
+        let job = Job::Invalidation {
+            report_id: report_id("a"),
+            invalidation,
+        };
+        let entry = QueueEntry {
+            id,
+            job,
+            attempts: 0,
+            next_attempt_at: None,
+        };
+        assert_eq!(f.queued_on_disk().await, [entry]);
+        assert!(!f.report_file(id).exists());
     }
 
     #[tokio::test]
@@ -665,6 +718,37 @@ mod tests {
         run_next_attempt(&mut u).await;
 
         assert!(f.sent().is_empty());
+        assert_backoff(&mut u, 10).await;
+    }
+
+    #[tokio::test]
+    async fn an_invalidation_is_sent_as_one_and_dequeued() {
+        let f = Fixture::new();
+        let mut u = f.uploader().await;
+        let invalidation = invalidation_at(received_at());
+        u.enqueue_invalidation(report_id("a"), invalidation.clone())
+            .await
+            .unwrap();
+
+        run_next_attempt(&mut u).await;
+
+        let want = (report_id("a"), invalidation);
+        assert_eq!(f.sender.invalidations(), [want]);
+        assert!(f.sent().is_empty());
+        assert_empty(&mut u).await;
+    }
+
+    #[tokio::test]
+    async fn an_invalidation_of_an_unrecorded_report_is_retried() {
+        let f = Fixture::new();
+        f.sender.push(Step::NotRecorded);
+        let mut u = f.uploader().await;
+        u.enqueue_invalidation(report_id("a"), invalidation_at(received_at()))
+            .await
+            .unwrap();
+
+        run_next_attempt(&mut u).await;
+
         assert_backoff(&mut u, 10).await;
     }
 
@@ -860,5 +944,21 @@ mod tests {
         run_next_attempt(&mut u).await;
 
         assert_empty(&mut u).await;
+    }
+
+    #[tokio::test]
+    async fn an_invalidation_ages_from_when_it_was_made() {
+        let f = Fixture::new();
+        f.sender.push(Step::Network);
+        f.advance(TimeDelta::days(100));
+        let mut u = f.uploader().await;
+        let invalidation = invalidation_at(received_at() + TimeDelta::days(99));
+        u.enqueue_invalidation(report_id("a"), invalidation)
+            .await
+            .unwrap();
+
+        run_next_attempt(&mut u).await;
+
+        assert_backoff(&mut u, 10).await;
     }
 }

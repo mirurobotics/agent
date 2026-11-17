@@ -10,7 +10,8 @@ use crate::mocks::calibration_sender::MockCalibrationSender;
 use crate::test_utils::calibrations::{latest_cals_layout, latest_store, layout, received_at};
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_daemon::calibrations::{
-    latest, LatestStore, QueueSnapshotFile, Report, Uploader, UploaderArgs, UploaderOptions,
+    latest, Invalidation, LatestStore, QueueSnapshotFile, Report, Uploader, UploaderArgs,
+    UploaderOptions,
 };
 use miru_daemon::disk::{self, Layout};
 use miru_daemon::filesys::{files, WriteOptions};
@@ -21,6 +22,7 @@ use miru_daemon::services::ServiceErr;
 // external crates
 use chrono::Utc;
 use tokio::sync::mpsc;
+use uuid::Uuid;
 
 pub struct Fixture {
     dir: test_dirs::TempDir,
@@ -98,11 +100,24 @@ impl Fixture {
 
     /// The first report the calibration uploader sends.
     pub async fn uploaded(&mut self) -> Report {
+        self.await_started().await;
+        self.sender.reports().remove(0)
+    }
+
+    /// The first invalidation the calibration uploader sends, once it has sent
+    /// one.
+    pub async fn uploaded_invalidation(&mut self) -> (Uuid, Invalidation) {
+        while self.sender.invalidations().is_empty() {
+            self.await_started().await;
+        }
+        self.sender.invalidations().remove(0)
+    }
+
+    async fn await_started(&mut self) {
         tokio::time::timeout(Duration::from_secs(60), self.started.recv())
             .await
             .unwrap()
             .unwrap();
-        self.sender.reports().remove(0)
     }
 }
 

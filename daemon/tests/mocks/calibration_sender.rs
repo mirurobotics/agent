@@ -3,7 +3,9 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 // internal crates
-use miru_daemon::calibrations::{CalibrationsErr, Invalidation, Report, Sender};
+use miru_daemon::calibrations::{
+    CalibrationsErr, Invalidation, Report, ReportNotRecordedErr, Sender,
+};
 use miru_daemon::http::errors::{HTTPErr, MockErr, RequestFailed};
 use miru_daemon::http::request::Params;
 
@@ -16,6 +18,8 @@ pub enum Step {
     Ok,
     /// Miru rejects the report for good (HTTP 422).
     Terminal,
+    /// Miru hasn't recorded the report an invalidation names.
+    NotRecorded,
     /// Miru fails (HTTP 500).
     Server,
     /// Miru can't be reached.
@@ -30,6 +34,7 @@ pub enum Step {
 pub struct MockCalibrationSender {
     script: Mutex<VecDeque<Step>>,
     sent: Mutex<Vec<Report>>,
+    invalidated: Mutex<Vec<(Uuid, Invalidation)>>,
     started_tx: mpsc::UnboundedSender<()>,
 }
 
@@ -41,6 +46,7 @@ impl MockCalibrationSender {
         let mock = Self {
             script: Mutex::new(VecDeque::new()),
             sent: Mutex::new(Vec::new()),
+            invalidated: Mutex::new(Vec::new()),
             started_tx,
         };
         (Arc::new(mock), started_rx)
@@ -67,6 +73,11 @@ impl MockCalibrationSender {
         self.sent.lock().unwrap().clone()
     }
 
+    /// The `report_id` and invalidation of every `invalidate` call, in order.
+    pub fn invalidations(&self) -> Vec<(Uuid, Invalidation)> {
+        self.invalidated.lock().unwrap().clone()
+    }
+
     /// Signal the call's start, then play the next step.
     async fn play_next_step(&self) -> Result<(), CalibrationsErr> {
         let step = self.script.lock().unwrap().pop_front();
@@ -75,6 +86,10 @@ impl MockCalibrationSender {
         match step {
             None | Some(Step::Ok) => Ok(()),
             Some(Step::Terminal) => Err(request_failed(422)),
+            Some(Step::NotRecorded) => Err(CalibrationsErr::from(ReportNotRecordedErr {
+                report_id: Uuid::nil(),
+                trace: miru_daemon::trace!(),
+            })),
             Some(Step::Server) => Err(request_failed(500)),
             Some(Step::Network) => Err(CalibrationsErr::HTTPErr(HTTPErr::MockErr(MockErr {
                 is_network_conn_err: true,
@@ -104,9 +119,11 @@ impl Sender for MockCalibrationSender {
 
     async fn invalidate(
         &self,
-        _report_id: Uuid,
-        _invalidation: Invalidation,
+        report_id: Uuid,
+        invalidation: Invalidation,
     ) -> Result<(), CalibrationsErr> {
+        let call = (report_id, invalidation);
+        self.invalidated.lock().unwrap().push(call);
         self.play_next_step().await
     }
 }
