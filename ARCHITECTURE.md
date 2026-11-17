@@ -93,7 +93,7 @@ All source lives under `daemon/src/`. The binary entry point is `main.rs`.
 
 - **Provision and runtime are mutually exclusive.** They share no runtime state; provision writes the files that runtime later reads.
 - **All control-plane HTTP goes through `http::Client`.** No module uses raw reqwest.
-- **Shutdown ordering matters.** `AppState::shutdown()` stops each component before the ones it depends on.
+- **Shutdown ordering matters.** `AppState::shutdown()` stops each component before the ones it depends on, with one tolerated exception: the scanner's sinks may write into an uploader or deleter that has already stopped, and they log a warning instead of failing.
 - **Generated code is never hand-edited.**
 - **Tests exercise ordinary production behavior.** Production code is identical in normal and test builds; tests control dependencies and time. See `AGENTS.md` § Testing.
 - **The agent has no direct database.** All persistence is file-based; the control plane owns the database.
