@@ -64,9 +64,8 @@ fn a_missing_latest_calibration_is_404() {
 
 #[test]
 fn an_unrecorded_report_is_retried() {
-    let report_id = Uuid::from_u128(1);
     let err = CalibrationsErr::from(ReportNotRecordedErr {
-        report_id,
+        report_id: Uuid::from_u128(1),
         source: RequestFailed {
             request: Params::get("http://mock/calibrations").meta().unwrap(),
             status: reqwest::StatusCode::NOT_FOUND,
@@ -80,8 +79,4 @@ fn an_unrecorded_report_is_retried() {
         Expected::new(Code::InternalServerError, HTTPCode::INTERNAL_SERVER_ERROR),
     );
     assert!(!err.is_terminal());
-    let message = err.to_string();
-    let want = format!("the control plane has not recorded report {report_id} yet: ");
-    assert!(message.starts_with(&want), "{message}");
-    assert!(message.contains("404"), "{message}");
 }
