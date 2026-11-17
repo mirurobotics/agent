@@ -126,7 +126,8 @@ fn parse_time(value: &str, field: &str) -> DateTime<Utc> {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(from = "ReportMetadata", into = "ReportMetadata")]
 pub enum Job {
-    /// Upload the report, whose data is in its report file.
+    /// Upload the report, whose data is in its report file. Its metadata has
+    /// no `invalidation`, or it would load as an invalidation.
     Report(ReportMetadata),
     /// Upload the invalidation of `report`. It has no report file.
     Invalidation {
