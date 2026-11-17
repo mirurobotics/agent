@@ -1,6 +1,5 @@
 // internal crates
-use crate::calibrations::job::Job;
-use crate::calibrations::report::ReportMetadata;
+use crate::calibrations::{job::Job, report::ReportMetadata};
 use crate::queue;
 
 // external crates
