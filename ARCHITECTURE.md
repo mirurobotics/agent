@@ -99,6 +99,7 @@ All source lives under `daemon/src/`. The binary entry point is `main.rs`.
 - **The agent has no direct database.** All persistence is file-based; the control plane owns the database.
 - **The agent always runs persistently.** It exits only on a shutdown signal or a fatal startup error.
 - **The Device API never listens beyond the device.** TCP binds only to loopback.
+- **State that survives an upgrade changes only by adding fields.** Files that `reset` keeps, such as the calibration queue and latest store, stay readable by newer agents and by an agent rolled back to.
 
 ## Cross-Cutting Concerns
 
