@@ -72,6 +72,21 @@ pub fn reported(component: &str, role: Option<&str>, aspect: Option<&str>) -> Re
     }
 }
 
+/// Metadata for `slug` with every field set and the YAML format.
+pub fn full_metadata(slug: &str) -> ReportMetadata {
+    ReportMetadata {
+        report_id: report_id(slug),
+        component: slug.to_string(),
+        format: InstanceFormat::Yaml,
+        role: Some("aligner-1".to_string()),
+        aspect: Some("pose".to_string()),
+        serial_number: Some("SN-1".to_string()),
+        reported_by: Some("Ada Lovelace".to_string()),
+        deployment_id: Some("dpl_1".to_string()),
+        reported_at: received_at(),
+    }
+}
+
 /// The calibrations layout under `dir`.
 pub fn layout(dir: &TempDir) -> CalibrationsLayout {
     CalibrationsLayout::new(dir.to_dir().subdir("calibrations"))
