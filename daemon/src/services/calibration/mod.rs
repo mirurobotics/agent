@@ -11,3 +11,22 @@ pub use content::*;
 pub use create::*;
 pub use invalidate::*;
 pub use latest::*;
+
+// internal crates
+use crate::calibrations::{CalibrationNotFoundErr, CalibrationsErr};
+use crate::trace;
+
+// external crates
+use uuid::Uuid;
+
+/// `report_id` as a UUID. An id that is not a UUID is not found, like any
+/// other id that is not a latest entry.
+fn parse_report_id(report_id: &str) -> Result<Uuid, CalibrationsErr> {
+    Uuid::parse_str(report_id).map_err(|_| {
+        let err = CalibrationNotFoundErr {
+            report_id: report_id.to_string(),
+            trace: trace!(),
+        };
+        err.into()
+    })
+}

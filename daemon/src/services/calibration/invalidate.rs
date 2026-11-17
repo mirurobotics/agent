@@ -1,6 +1,6 @@
 // internal crates
 use crate::calibrations::{Invalidation, ReportMetadata, Uploader};
-use crate::services::{calibration::content::parse_report_id, errors::ServiceErr};
+use crate::services::{calibration::parse_report_id, errors::ServiceErr};
 
 // external crates
 use chrono::{DateTime, Utc};
