@@ -79,7 +79,7 @@ All source lives under `daemon/src/`. The binary entry point is `main.rs`.
 
 ### Background workers
 
-`workers` — long-running tasks, such as the MQTT subscriber, the periodic poller, and token refresh. All of them stop on the shared shutdown signal.
+`workers` — long-running tasks, such as the MQTT subscriber, the periodic poller, and token refresh. It also drives the `data_uploads` scanner and deleter, which don't schedule themselves. All of them stop on the shared shutdown signal.
 
 ### Device setup
 
