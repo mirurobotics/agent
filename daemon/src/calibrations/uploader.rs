@@ -6,8 +6,10 @@ use std::time::Duration;
 // internal crates
 use crate::calibrations::{
     errors::{CalibrationsErr, ReceiveActorMessageErr, SendActorMessageErr},
+    invalidation::Invalidation,
     latest::LatestStore,
-    report::{Invalidation, QueueEntry, QueueSnapshotFile, Report, ReportMetadata},
+    queue::{QueueEntry, QueueSnapshotFile},
+    report::{Report, ReportMetadata},
     sender::Sender,
     uploader_impl::{NextAttempt, UploaderImpl, UploaderOptions},
 };
@@ -37,7 +39,7 @@ pub struct UploaderArgs<S, F, N> {
 
 // ================================== WORKER ======================================= //
 enum Command {
-    Enqueue {
+    EnqueueReport {
         report: Box<Report>,
         respond_to: oneshot::Sender<Result<(), CalibrationsErr>>,
     },
@@ -102,8 +104,8 @@ where
     /// Queue `report`, then write it to the latest store. A failed store
     /// write removes the queued report, so on error nothing is queued or
     /// stored.
-    async fn enqueue(&mut self, report: Report) -> Result<(), CalibrationsErr> {
-        let id = self.uploader.enqueue(&report).await?;
+    async fn enqueue_report(&mut self, report: Report) -> Result<(), CalibrationsErr> {
+        let id = self.uploader.enqueue_report(&report).await?;
         if let Err(e) = self.latest.put(report.metadata, &report.data).await {
             self.uploader.remove(id).await;
             return Err(e);
@@ -121,14 +123,15 @@ where
         invalidation: Invalidation,
     ) -> Result<ReportMetadata, CalibrationsErr> {
         let entry = self.latest.get(report_id).await?.metadata;
-        if entry.invalidation.is_some() {
+        if entry.invalidated_at.is_some() {
             return Ok(entry);
         }
+        let invalidated_at = invalidation.invalidated_at;
         let id = self
             .uploader
-            .enqueue_invalidation(report_id, invalidation.clone())
+            .enqueue_invalidation(report_id, invalidation)
             .await?;
-        match self.latest.invalidate(report_id, invalidation).await {
+        match self.latest.invalidate(report_id, invalidated_at).await {
             Ok(entry) => Ok(entry),
             Err(e) => {
                 self.uploader.remove(id).await;
@@ -179,9 +182,9 @@ where
             return Flow::Shutdown;
         };
         match cmd {
-            Command::Enqueue { report, respond_to } => {
-                let result = self.enqueue(*report).await;
-                respond(respond_to, result, "enqueue");
+            Command::EnqueueReport { report, respond_to } => {
+                let result = self.enqueue_report(*report).await;
+                respond(respond_to, result, "enqueue_report");
             }
             Command::Invalidate {
                 report_id,
@@ -250,7 +253,7 @@ impl Uploader {
     /// [`CalibrationsErr::StoreFullErr`], and a report over the size cap the
     /// 413 [`CalibrationsErr::TooLargeErr`].
     pub async fn report(&self, report: Report) -> Result<(), CalibrationsErr> {
-        self.send_command("enqueue", |respond_to| Command::Enqueue {
+        self.send_command("enqueue_report", |respond_to| Command::EnqueueReport {
             report: Box::new(report),
             respond_to,
         })

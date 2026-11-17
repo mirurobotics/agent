@@ -5,13 +5,14 @@ use std::collections::HashSet;
 // internal crates
 use crate::calibrations::{
     errors::{CalibrationNotFoundErr, CalibrationStoreFullErr, CalibrationsErr},
-    report::{Invalidation, Report, ReportMetadata},
+    report::{Report, ReportMetadata},
 };
 use crate::disk::layout::LatestCalsLayout;
 use crate::filesys::{dirs, files, Dir, File, FileSysErr, WriteOptions};
 use crate::trace;
 
 // external crates
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tracing::{error, warn};
 use uuid::Uuid;
@@ -142,18 +143,18 @@ impl LatestStoreImpl {
         }
     }
 
-    /// Mark the entry for `report_id` invalid with `invalidation` and return
+    /// Mark the entry for `report_id` invalid at `invalidated_at` and return
     /// the entry.
     pub(crate) async fn invalidate(
         &self,
         report_id: Uuid,
-        invalidation: Invalidation,
+        invalidated_at: DateTime<Utc>,
     ) -> Result<ReportMetadata, CalibrationsErr> {
         let mut index = self.read_index().await?;
         let Some(entry) = index.iter_mut().find(|m| m.report_id == report_id) else {
             return Err(not_found(report_id));
         };
-        entry.invalidation = Some(invalidation);
+        entry.invalidated_at = Some(invalidated_at);
         let entry = entry.clone();
         self.write_index(index).await?;
         Ok(entry)

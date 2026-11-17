@@ -6,10 +6,10 @@ use std::sync::Arc;
 use crate::authn::TokenManagerExt;
 use crate::calibrations::{
     errors::{CalibrationsErr, ReportNotRecordedErr},
-    report::{Invalidation, Report},
+    invalidation::Invalidation,
+    report::Report,
 };
 use crate::http::{self, ClientI, HTTPErr};
-use crate::trace;
 use backend_api::models::{
     CreateCalibrationRequest, InstanceContent, InvalidateCalibrationRequest,
 };
@@ -96,7 +96,7 @@ impl<C: ClientI, T: TokenManagerExt> Sender for HttpSender<C, T> {
             Err(HTTPErr::RequestFailed(e)) if e.status == StatusCode::NOT_FOUND => {
                 Err(ReportNotRecordedErr {
                     report_id,
-                    trace: trace!(),
+                    source: e,
                 }
                 .into())
             }

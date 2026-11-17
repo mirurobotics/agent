@@ -2,7 +2,7 @@
 use crate::authn::AuthnErr;
 use crate::errors::{Code, HTTPCode, Trace};
 use crate::filesys::FileSysErr;
-use crate::http::HTTPErr;
+use crate::http::{errors::RequestFailed, HTTPErr};
 use crate::queue::{EnqueueErr, QueueFullErr};
 
 // external crates
@@ -123,10 +123,10 @@ impl crate::errors::Error for InvalidReportErr {
 /// usually because the report is still queued. Not terminal, so the worker
 /// retries the invalidation.
 #[derive(Debug, thiserror::Error)]
-#[error("the control plane has not recorded report {report_id} yet")]
+#[error("the control plane has not recorded report {report_id} yet: {source}")]
 pub struct ReportNotRecordedErr {
     pub report_id: Uuid,
-    pub trace: Box<Trace>,
+    pub source: RequestFailed,
 }
 
 impl crate::errors::Error for ReportNotRecordedErr {}

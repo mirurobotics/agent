@@ -27,7 +27,7 @@ async fn invalidate_stamps_the_entry_and_uploads_the_invalidation() {
         invalidated_at: now,
         reason: "power cycle".to_string(),
     };
-    assert_eq!(invalidated.unwrap().invalidation, Some(expected.clone()));
+    assert_eq!(invalidated.unwrap().invalidated_at, Some(now));
     let uploaded = f.uploaded_invalidation().await;
     assert_eq!(uploaded, (created.report_id, expected));
 }

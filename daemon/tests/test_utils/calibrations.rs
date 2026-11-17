@@ -43,7 +43,7 @@ pub fn report(slug: &str) -> Report {
             reported_by: None,
             deployment_id: None,
             reported_at: received_at(),
-            invalidation: None,
+            invalidated_at: None,
         },
         data: r#"{"offset":[1,2,3]}"#.to_string(),
     }
@@ -70,6 +70,22 @@ pub fn reported(component: &str, role: Option<&str>, aspect: Option<&str>) -> Re
         role: role.map(str::to_string),
         aspect: aspect.map(str::to_string),
         ..report(component).metadata
+    }
+}
+
+/// Metadata for `slug` with every field set and the YAML format.
+pub fn full_metadata(slug: &str) -> ReportMetadata {
+    ReportMetadata {
+        report_id: report_id(slug),
+        component: slug.to_string(),
+        format: InstanceFormat::Yaml,
+        role: Some("aligner-1".to_string()),
+        aspect: Some("pose".to_string()),
+        serial_number: Some("SN-1".to_string()),
+        reported_by: Some("Ada Lovelace".to_string()),
+        deployment_id: Some("dpl_1".to_string()),
+        reported_at: received_at(),
+        invalidated_at: None,
     }
 }
 

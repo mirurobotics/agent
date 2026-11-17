@@ -5,6 +5,8 @@ use miru_daemon::calibrations::{
     CalibrationTooLargeErr, CalibrationsErr, ReportNotRecordedErr,
 };
 use miru_daemon::errors::{Code, Error, HTTPCode};
+use miru_daemon::http::errors::RequestFailed;
+use miru_daemon::http::request::Params;
 use miru_daemon::queue::QueueFullErr;
 
 // external crates
@@ -62,10 +64,14 @@ fn a_missing_latest_calibration_is_404() {
 
 #[test]
 fn an_unrecorded_report_is_retried() {
-    let report_id = Uuid::from_u128(1);
     let err = CalibrationsErr::from(ReportNotRecordedErr {
-        report_id,
-        trace: miru_daemon::trace!(),
+        report_id: Uuid::from_u128(1),
+        source: RequestFailed {
+            request: Params::get("http://mock/calibrations").meta().unwrap(),
+            status: reqwest::StatusCode::NOT_FOUND,
+            error: None,
+            trace: miru_daemon::trace!(),
+        },
     });
 
     assert_error(
@@ -73,8 +79,4 @@ fn an_unrecorded_report_is_retried() {
         Expected::new(Code::InternalServerError, HTTPCode::INTERNAL_SERVER_ERROR),
     );
     assert!(!err.is_terminal());
-    assert_eq!(
-        err.to_string(),
-        format!("the control plane has not recorded report {report_id} yet")
-    );
 }

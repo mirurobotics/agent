@@ -249,10 +249,28 @@ pub mod invalidate {
 
         let err = invalidate(&client).await.unwrap_err();
 
-        assert!(
-            matches!(err, CalibrationsErr::ReportNotRecordedErr(_)),
-            "{err:?}"
-        );
+        let CalibrationsErr::ReportNotRecordedErr(e) = &err else {
+            panic!("{err:?}");
+        };
+        assert_eq!(e.report_id, report_id("arm"));
+        assert_eq!(e.source.status, reqwest::StatusCode::NOT_FOUND);
+        assert!(!err.is_terminal());
+    }
+
+    #[tokio::test]
+    async fn an_accepted_invalidation_with_an_unparseable_response_is_retried() {
+        let client = Arc::new(MockClient::default());
+        client.set_invalidate_calibration(|| {
+            Err(HTTPErr::UnmarshalJSONErr(UnmarshalJSONErr {
+                request: Params::get("http://mock/calibrations").meta().unwrap(),
+                source: serde_json::from_str::<Calibration>("{}").unwrap_err(),
+                trace: miru_daemon::trace!(),
+            }))
+        });
+
+        let err = invalidate(&client).await.unwrap_err();
+
+        assert!(matches!(err, CalibrationsErr::HTTPErr(_)), "{err:?}");
         assert!(!err.is_terminal());
     }
 

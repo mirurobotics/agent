@@ -353,7 +353,8 @@ async fn an_invalidation_is_stored_and_uploaded() {
     .await
     .unwrap();
 
-    assert_eq!(invalidated.invalidation, Some(invalidation("power cycle")));
+    let invalidated_at = invalidation("power cycle").invalidated_at;
+    assert_eq!(invalidated.invalidated_at, Some(invalidated_at));
     assert_eq!(h.latest_entries().await, [invalidated]);
     eventually(|| async {
         h.sender.invalidations() == [(report_id, invalidation("power cycle"))]

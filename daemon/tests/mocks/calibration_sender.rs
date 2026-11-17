@@ -18,7 +18,8 @@ pub enum Step {
     Ok,
     /// Miru rejects the report for good (HTTP 422).
     Terminal,
-    /// Miru hasn't recorded the report an invalidation names.
+    /// The control plane hasn't recorded the report an invalidation names
+    /// (HTTP 404).
     NotRecorded,
     /// Miru fails (HTTP 500).
     Server,
@@ -73,7 +74,8 @@ impl MockCalibrationSender {
         self.sent.lock().unwrap().clone()
     }
 
-    /// The `report_id` and invalidation of every `invalidate` call, in order.
+    /// Every `(report_id, invalidation)` `invalidate` was called with, in
+    /// order.
     pub fn invalidations(&self) -> Vec<(Uuid, Invalidation)> {
         self.invalidated.lock().unwrap().clone()
     }
@@ -88,7 +90,7 @@ impl MockCalibrationSender {
             Some(Step::Terminal) => Err(request_failed(422)),
             Some(Step::NotRecorded) => Err(CalibrationsErr::from(ReportNotRecordedErr {
                 report_id: Uuid::nil(),
-                trace: miru_daemon::trace!(),
+                source: failed_request(404),
             })),
             Some(Step::Server) => Err(request_failed(500)),
             Some(Step::Network) => Err(CalibrationsErr::HTTPErr(HTTPErr::MockErr(MockErr {
@@ -103,12 +105,16 @@ impl MockCalibrationSender {
 }
 
 fn request_failed(status: u16) -> CalibrationsErr {
-    CalibrationsErr::HTTPErr(HTTPErr::RequestFailed(RequestFailed {
+    CalibrationsErr::HTTPErr(HTTPErr::RequestFailed(failed_request(status)))
+}
+
+fn failed_request(status: u16) -> RequestFailed {
+    RequestFailed {
         request: Params::get("http://mock/calibrations").meta().unwrap(),
         status: reqwest::StatusCode::from_u16(status).unwrap(),
         error: None,
         trace: miru_daemon::trace!(),
-    }))
+    }
 }
 
 impl Sender for MockCalibrationSender {
@@ -122,8 +128,10 @@ impl Sender for MockCalibrationSender {
         report_id: Uuid,
         invalidation: Invalidation,
     ) -> Result<(), CalibrationsErr> {
-        let call = (report_id, invalidation);
-        self.invalidated.lock().unwrap().push(call);
+        self.invalidated
+            .lock()
+            .unwrap()
+            .push((report_id, invalidation));
         self.play_next_step().await
     }
 }

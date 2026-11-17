@@ -2,12 +2,13 @@
 use crate::calibrations::{
     errors::{CalibrationsErr, ReceiveActorMessageErr, SendActorMessageErr},
     latest_impl::{Filter, LatestStoreImpl},
-    report::{Invalidation, Report, ReportMetadata},
+    report::{Report, ReportMetadata},
 };
 use crate::disk::layout::LatestCalsLayout;
 use crate::trace;
 
 // external crates
+use chrono::{DateTime, Utc};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{error, info};
@@ -38,7 +39,7 @@ enum Command {
     },
     Invalidate {
         report_id: Uuid,
-        invalidation: Invalidation,
+        invalidated_at: DateTime<Utc>,
         respond_to: oneshot::Sender<Result<ReportMetadata, CalibrationsErr>>,
     },
     Shutdown {
@@ -87,10 +88,10 @@ impl Worker {
                 }
                 Command::Invalidate {
                     report_id,
-                    invalidation,
+                    invalidated_at,
                     respond_to,
                 } => {
-                    let result = self.store.invalidate(report_id, invalidation).await;
+                    let result = self.store.invalidate(report_id, invalidated_at).await;
                     respond(respond_to, result, "invalidate");
                 }
                 Command::Shutdown { respond_to } => {
@@ -180,18 +181,18 @@ impl LatestStore {
         .await?
     }
 
-    /// Mark the entry for `report_id` invalid with `invalidation` and return
+    /// Mark the entry for `report_id` invalid at `invalidated_at` and return
     /// the entry. Not found unless an entry has that `report_id`, so a report a
     /// newer one replaced can't be invalidated. The calibration uploader keeps
     /// an entry's first invalidation.
     pub async fn invalidate(
         &self,
         report_id: Uuid,
-        invalidation: Invalidation,
+        invalidated_at: DateTime<Utc>,
     ) -> Result<ReportMetadata, CalibrationsErr> {
         self.send_command("invalidate", |respond_to| Command::Invalidate {
             report_id,
-            invalidation,
+            invalidated_at,
             respond_to,
         })
         .await?
