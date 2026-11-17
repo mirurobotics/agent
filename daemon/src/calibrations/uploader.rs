@@ -119,10 +119,7 @@ where
     }
 
     /// Queue the upload of an invalidation of `component`'s latest entry, then
-    /// mark the entry invalid. A reason the control plane would refuse is
-    /// rejected first, whatever the store holds. An entry that is already
-    /// invalid is returned unchanged and nothing is queued. A failed store
-    /// write removes the queued invalidation, so on error nothing changes.
+    /// mark the entry invalid. A failed store write removes the queued upload.
     async fn invalidate(
         &mut self,
         component: String,
@@ -296,13 +293,8 @@ impl Uploader {
         .await?
     }
 
-    /// Mark `component`'s latest entry invalid at `invalidated_at` for `reason`
-    /// and queue the invalidation's upload, unless the entry already is
-    /// invalid, and return the entry. With
-    /// `report_id`, that report must still be the latest. Otherwise, or when
-    /// the component has no entry, it is the 404
-    /// [`CalibrationsErr::LatestNotFoundErr`]; a full queue is the 507
-    /// [`CalibrationsErr::QueueFullErr`].
+    /// Mark `component`'s latest entry invalid, queue its upload, and return
+    /// it. Not found unless `report_id`, when set, is still the latest.
     pub async fn invalidate(
         &self,
         component: String,
