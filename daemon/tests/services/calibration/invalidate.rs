@@ -10,6 +10,7 @@ use miru_daemon::services::ServiceErr;
 
 // external crates
 use chrono::TimeDelta;
+use uuid::Uuid;
 
 #[tokio::test]
 async fn invalidate_stamps_the_entry_and_uploads_the_invalidation() {
@@ -32,19 +33,21 @@ async fn invalidate_stamps_the_entry_and_uploads_the_invalidation() {
 }
 
 #[tokio::test]
-async fn invalidate_of_an_invalid_report_id_is_not_found() {
+async fn invalidate_of_an_invalid_or_unknown_report_id_is_not_found() {
     let f = Fixture::new().await;
-    let reason = "power cycle".to_string();
 
-    let result =
-        calibration::invalidate(&f.cal_uploader, "not-a-uuid", reason, received_at()).await;
+    for report_id in ["not-a-uuid".to_string(), Uuid::new_v4().to_string()] {
+        let reason = "power cycle".to_string();
+        let result =
+            calibration::invalidate(&f.cal_uploader, &report_id, reason, received_at()).await;
 
-    let err = result.unwrap_err();
-    assert!(
-        matches!(
-            err,
-            ServiceErr::CalibrationsErr(CalibrationsErr::NotFoundErr(_))
-        ),
-        "{err:?}"
-    );
+        let err = result.unwrap_err();
+        assert!(
+            matches!(
+                err,
+                ServiceErr::CalibrationsErr(CalibrationsErr::NotFoundErr(_))
+            ),
+            "{report_id}: {err:?}"
+        );
+    }
 }
