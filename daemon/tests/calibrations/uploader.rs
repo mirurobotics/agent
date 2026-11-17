@@ -418,6 +418,25 @@ async fn invalidating_an_unknown_component_or_a_stale_report_queues_nothing() {
 }
 
 #[tokio::test]
+async fn a_reason_the_control_plane_refuses_is_rejected_before_the_lookup() {
+    let mut h = Harness::new();
+    h.spawn().await;
+    h.report("a").await;
+    h.await_drained(&["a"]).await;
+
+    for reason in [String::new(), " \n".to_string(), "é".repeat(513)] {
+        let err = invalidate(&h, "b", None, &reason).await.unwrap_err();
+
+        assert!(
+            matches!(err, CalibrationsErr::InvalidReasonErr(_)),
+            "{err:?}"
+        );
+    }
+    assert_eq!(h.num_queued_uploads().await, 0);
+    invalidate(&h, "a", None, &"é".repeat(512)).await.unwrap();
+}
+
+#[tokio::test]
 async fn a_full_queue_leaves_the_entry_valid() {
     let mut h = Harness::new();
     let (_hold, hang) = oneshot::channel();

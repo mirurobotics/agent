@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 // internal crates
 use crate::calibrations::{
-    errors::{CalibrationTooLargeErr, CalibrationsErr, InvalidReasonErr},
+    errors::{CalibrationTooLargeErr, CalibrationsErr},
     invalidation::Invalidation,
     job::Job,
     queue::{Queue, QueueEntry, QueueSnapshotFile},
@@ -144,7 +144,6 @@ where
         &mut self,
         invalidation: Invalidation,
     ) -> Result<Uuid, CalibrationsErr> {
-        verify_reason(&invalidation.reason)?;
         let job = Job::Invalidation(invalidation);
         Ok(self.queue.enqueue(job).await?)
     }
@@ -298,23 +297,6 @@ where
         let (id, name) = (entry.id, entry.job.name());
         error!("calibrations: dropping {name} ({id}), which can never be uploaded: {err}");
     }
-}
-
-/// The longest reason the control plane accepts, in characters.
-const MAX_REASON_CHARS: usize = 512;
-
-/// Reject a reason the control plane would refuse, so the device never keeps
-/// an invalidation that can't be uploaded.
-fn verify_reason(reason: &str) -> Result<(), InvalidReasonErr> {
-    if !reason.trim().is_empty() && reason.chars().count() <= MAX_REASON_CHARS {
-        return Ok(());
-    }
-    let err = InvalidReasonErr {
-        max_chars: MAX_REASON_CHARS,
-        trace: trace!(),
-    };
-    warn!("calibrations: rejecting invalidation: {err}");
-    Err(err)
 }
 
 #[cfg(test)]
@@ -602,30 +584,6 @@ mod tests {
         assert!(matches!(err, CalibrationsErr::TooLargeErr(_)), "{err:?}");
         assert_eq!(u.len(), 0);
         assert!(!f.layout.reports().exists());
-    }
-
-    #[tokio::test]
-    async fn an_invalidation_reason_must_not_be_blank_or_over_512_chars() {
-        let f = Fixture::new();
-        let mut u = f.uploader().await;
-
-        for reason in [String::new(), " \n".to_string(), "é".repeat(513)] {
-            let invalidation = Invalidation {
-                reason,
-                ..invalidation_at(received_at())
-            };
-            let err = u.enqueue_invalidation(invalidation).await.unwrap_err();
-            assert!(
-                matches!(err, CalibrationsErr::InvalidReasonErr(_)),
-                "{err:?}"
-            );
-        }
-        let longest = Invalidation {
-            reason: "é".repeat(512),
-            ..invalidation_at(received_at())
-        };
-        u.enqueue_invalidation(longest).await.unwrap();
-        assert_eq!(u.len(), 1);
     }
 
     #[tokio::test]

@@ -162,6 +162,7 @@ impl crate::errors::Error for TokenErr {
         self.0.is_network_conn_err()
     }
 }
+
 /// An invalidation's reason is blank or longer than the control plane
 /// accepts: 422 `invalid_request`. Nothing was queued.
 #[derive(Debug, thiserror::Error)]

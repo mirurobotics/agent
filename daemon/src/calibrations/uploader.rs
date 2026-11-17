@@ -8,7 +8,7 @@ use crate::calibrations::{
     errors::{
         CalibrationsErr, LatestCalibrationNotFoundErr, ReceiveActorMessageErr, SendActorMessageErr,
     },
-    invalidation::Invalidation,
+    invalidation::{self, Invalidation},
     latest::LatestStore,
     queue::{QueueEntry, QueueSnapshotFile},
     report::{Report, ReportMetadata},
@@ -119,9 +119,10 @@ where
     }
 
     /// Queue the upload of an invalidation of `component`'s latest entry, then
-    /// mark the entry invalid. An entry that is already invalid is returned
-    /// unchanged and nothing is queued. A failed store write removes the
-    /// queued invalidation, so on error nothing changes.
+    /// mark the entry invalid. A reason the control plane would refuse is
+    /// rejected first, whatever the store holds. An entry that is already
+    /// invalid is returned unchanged and nothing is queued. A failed store
+    /// write removes the queued invalidation, so on error nothing changes.
     async fn invalidate(
         &mut self,
         component: String,
@@ -129,6 +130,7 @@ where
         reason: String,
         invalidated_at: DateTime<Utc>,
     ) -> Result<ReportMetadata, CalibrationsErr> {
+        invalidation::verify_reason(&reason)?;
         let entry = self.latest_entry(component, report_id).await?;
         if entry.invalidated_at.is_some() {
             return Ok(entry);
