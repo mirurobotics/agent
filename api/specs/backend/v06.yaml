@@ -6,16 +6,16 @@ info:
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
-  x-release-version: v0.6.0-beta.1
+  x-release-version: v0.6.0
   x-git-commit:
-    sha: dcf7e1bd6b8ca022af9591454618fe70bfe488d8
-    url: https://github.com/mirurobotics/openapi/commit/dcf7e1bd6b8ca022af9591454618fe70bfe488d8
-    message: 'ci: bump the workflows pin to 1eab2d1 (#510)'
+    sha: 7b784bb8abf1a58d5b57a44c28fc08845919420f
+    url: https://github.com/mirurobotics/openapi/commit/7b784bb8abf1a58d5b57a44c28fc08845919420f
+    message: 'feat(device)!: report sync times as durations, move sync to /sync (#511)'
     author: Ben's Agent
     branch: HEAD
     dirty: false
   x-build:
-    built_at: '2026-11-16T23:33:19.399191+00:00'
+    built_at: '2026-11-17T00:11:14.618375+00:00'
 servers:
 - url: https://staging.api.mirurobotics.com/agent/v1
   description: Staging
@@ -657,14 +657,14 @@ components:
     ReleaseVersion:
       type: string
       enum:
-      - v0.6.0-beta.1
+      - v0.6.0
       x-enum-varnames:
       - RELEASE_VERSION
       x-stainless-const: true
     APIGitCommit:
       type: string
       enum:
-      - dcf7e1bd6b8ca022af9591454618fe70bfe488d8
+      - 7b784bb8abf1a58d5b57a44c28fc08845919420f
       x-enum-varnames:
       - API_GIT_COMMIT
       x-stainless-const: true
