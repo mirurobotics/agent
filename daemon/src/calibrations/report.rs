@@ -42,10 +42,8 @@ pub struct ReportMetadata {
     pub serial_number: Option<String>,
     #[serde(default)]
     pub reported_by: Option<String>,
-    /// The deployment active at intake, or `None` when there was none.
     #[serde(default)]
     pub deployment_id: Option<String>,
-    /// When the agent received the calibration.
     pub reported_at: DateTime<Utc>,
     #[serde(default)]
     pub invalidated_at: Option<DateTime<Utc>>,
