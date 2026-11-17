@@ -18,19 +18,37 @@ fn fixed_time() -> DateTime<Utc> {
 
 pub mod device_response {
     use super::*;
+    use miru_daemon::server::v03::response;
 
-    #[test]
-    fn converts_offline_device() {
-        let t = fixed_time();
-        let device = Device {
+    fn device_at(status: DeviceStatus, at: DateTime<Utc>) -> Device {
+        Device {
             id: "dev-1".into(),
             session_id: "sess-1".into(),
             name: "robot-1".into(),
-            activated: false,
-            status: DeviceStatus::Offline,
-            last_synced_at: t,
-            last_connected_at: t,
-            last_disconnected_at: t,
+            activated: true,
+            status,
+            last_synced_at: at,
+            last_connected_at: at,
+            last_disconnected_at: at,
+        }
+    }
+
+    fn device_times(device: &openapi::Device) -> (Option<i64>, Option<i64>, Option<i64>) {
+        (
+            device.last_synced_secs_ago,
+            device.last_connected_secs_ago,
+            device.last_disconnected_secs_ago,
+        )
+    }
+
+    #[test]
+    fn converts_offline_device() {
+        let now = fixed_time();
+        let device = Device {
+            last_synced_at: now - Duration::seconds(10),
+            last_connected_at: now - Duration::seconds(20),
+            last_disconnected_at: now - Duration::seconds(30),
+            ..device_at(DeviceStatus::Offline, now)
         };
 
         let expected = openapi::Device {
@@ -38,94 +56,92 @@ pub mod device_response {
             id: "dev-1".into(),
             name: "robot-1".into(),
             status: openapi::DeviceStatus::DEVICE_STATUS_OFFLINE,
-            last_synced_at: t.to_rfc3339(),
-            last_connected_at: t.to_rfc3339(),
-            last_disconnected_at: t.to_rfc3339(),
+            last_synced_secs_ago: Some(10),
+            last_connected_secs_ago: Some(20),
+            last_disconnected_secs_ago: Some(30),
         };
 
-        let sdk: openapi::Device = (&device).into();
-        assert_eq!(sdk, expected);
+        assert_eq!(response::device(&device, now), expected);
     }
 
     #[test]
     fn converts_online_device() {
-        let t = fixed_time();
-        let device = Device {
-            id: "dev-2".into(),
-            session_id: "sess-2".into(),
-            name: "robot-2".into(),
-            activated: true,
-            status: DeviceStatus::Online,
-            last_synced_at: t,
-            last_connected_at: t,
-            last_disconnected_at: t,
-        };
+        let now = fixed_time();
+        let device = device_at(DeviceStatus::Online, now);
 
-        let expected = openapi::Device {
-            object: openapi::device::Object::Device,
-            id: "dev-2".into(),
-            name: "robot-2".into(),
-            status: openapi::DeviceStatus::DEVICE_STATUS_ONLINE,
-            last_synced_at: t.to_rfc3339(),
-            last_connected_at: t.to_rfc3339(),
-            last_disconnected_at: t.to_rfc3339(),
-        };
+        let actual = response::device(&device, now);
+        assert_eq!(actual.status, openapi::DeviceStatus::DEVICE_STATUS_ONLINE);
+    }
 
-        let sdk: openapi::Device = (&device).into();
-        assert_eq!(sdk, expected);
+    #[test]
+    fn reports_null_for_times_never_set() {
+        let device = device_at(DeviceStatus::Online, DateTime::<Utc>::UNIX_EPOCH);
+
+        let actual = response::device(&device, fixed_time());
+        assert_eq!(device_times(&actual), (None, None, None));
     }
 }
 
-pub mod sync_device_response {
+pub mod sync_response {
     use super::*;
+    use miru_daemon::server::v03::response;
 
     fn outcome(code: SyncCode, cooldown_ends_at: DateTime<Utc>) -> SyncOutcome {
-        let t = fixed_time();
+        let now = fixed_time();
         SyncOutcome {
             code,
             message: "sync message".into(),
             state: State {
-                last_attempted_sync_at: t,
-                last_synced_at: t - Duration::minutes(5),
+                last_attempted_sync_at: now - Duration::seconds(10),
+                last_synced_at: now - Duration::minutes(5),
                 cooldown_ends_at,
                 err_streak: 0,
             },
         }
     }
 
-    fn expected(
-        code: openapi::SyncDeviceResult,
-        cooldown_ends_at: DateTime<Utc>,
-        in_cooldown: bool,
-    ) -> openapi::SyncDeviceResponse {
-        let t = fixed_time();
-        openapi::SyncDeviceResponse {
-            code,
+    #[test]
+    fn converts_outcome_in_cooldown() {
+        let now = fixed_time();
+        let outcome = outcome(SyncCode::InCooldown, now + Duration::seconds(15));
+
+        let expected = openapi::SyncResponse {
+            code: openapi::SyncResult::SYNC_RESULT_IN_COOLDOWN,
             message: "sync message".into(),
-            last_synced_at: (t - Duration::minutes(5)).to_rfc3339(),
-            last_attempted_sync_at: t.to_rfc3339(),
-            in_cooldown,
-            cooldown_ends_at: cooldown_ends_at.to_rfc3339(),
-        }
+            last_synced_secs_ago: Some(300),
+            last_attempted_sync_secs_ago: 10,
+            in_cooldown: true,
+            cooldown_ends_in_secs: 15,
+        };
+
+        assert_eq!(response::sync(&outcome, now), expected);
     }
 
     #[test]
-    fn converts_state_not_in_cooldown() {
-        let epoch = DateTime::<Utc>::UNIX_EPOCH;
-        let wire_code = openapi::SyncDeviceResult::SYNC_DEVICE_RESULT_SUCCESS;
+    fn converts_outcome_after_cooldown() {
+        let now = fixed_time();
+        let outcome = outcome(SyncCode::Success, now - Duration::seconds(1));
 
-        let sdk: openapi::SyncDeviceResponse = (&outcome(SyncCode::Success, epoch)).into();
-        assert_eq!(sdk, expected(wire_code, epoch, false));
+        let expected = openapi::SyncResponse {
+            code: openapi::SyncResult::SYNC_RESULT_SUCCESS,
+            message: "sync message".into(),
+            last_synced_secs_ago: Some(300),
+            last_attempted_sync_secs_ago: 10,
+            in_cooldown: false,
+            cooldown_ends_in_secs: 0,
+        };
+
+        assert_eq!(response::sync(&outcome, now), expected);
     }
 
     #[test]
-    fn converts_state_in_cooldown() {
-        let cooldown_ends_at = Utc::now() + Duration::days(1);
-        let wire_code = openapi::SyncDeviceResult::SYNC_DEVICE_RESULT_IN_COOLDOWN;
+    fn reports_null_last_synced_never_set() {
+        let now = fixed_time();
+        let mut outcome = outcome(SyncCode::Success, now);
+        outcome.state.last_synced_at = DateTime::<Utc>::UNIX_EPOCH;
 
-        let sdk: openapi::SyncDeviceResponse =
-            (&outcome(SyncCode::InCooldown, cooldown_ends_at)).into();
-        assert_eq!(sdk, expected(wire_code, cooldown_ends_at, true));
+        let actual = response::sync(&outcome, now);
+        assert_eq!(actual.last_synced_secs_ago, None);
     }
 }
 
@@ -700,10 +716,23 @@ pub mod latest_calibrations_response {
             serial_number: Some("SN-1".into()),
             reported_by: Some("Ada Lovelace".into()),
             reported_at: fixed_time().to_rfc3339(),
+            invalidated_at: None,
         };
 
         let sdk: openapi::Calibration = (&metadata).into();
         assert_eq!(sdk, expected);
+    }
+
+    #[test]
+    fn converts_invalidated_at() {
+        let invalidated_at = fixed_time() + Duration::hours(1);
+        let metadata = ReportMetadata {
+            invalidated_at: Some(invalidated_at),
+            ..metadata(Uuid::new_v4())
+        };
+
+        let sdk: openapi::Calibration = (&metadata).into();
+        assert_eq!(sdk.invalidated_at, Some(invalidated_at.to_rfc3339()));
     }
 
     #[test]

@@ -16,7 +16,7 @@ use axum::{
 pub fn table() -> Router<Arc<State>> {
     let api_version = device_api_v03::models::ApiVersion::API_VERSION.to_string();
     Router::new()
-        .merge(agent_info(&api_version))
+        .merge(agent(&api_version))
         .merge(device(&api_version))
         .merge(deployments(&api_version))
         .merge(releases(&api_version))
@@ -26,7 +26,7 @@ pub fn table() -> Router<Arc<State>> {
         .merge(events(&api_version))
 }
 
-fn agent_info(api_version: &str) -> Router<Arc<State>> {
+fn agent(api_version: &str) -> Router<Arc<State>> {
     Router::new()
         .route(
             format!("/{api_version}/health").as_str(),
@@ -36,18 +36,17 @@ fn agent_info(api_version: &str) -> Router<Arc<State>> {
             format!("/{api_version}/version").as_str(),
             get(handlers::version),
         )
+        .route(
+            format!("/{api_version}/sync").as_str(),
+            post(handlers::sync),
+        )
 }
 
 fn device(api_version: &str) -> Router<Arc<State>> {
-    Router::new()
-        .route(
-            format!("/{api_version}/device").as_str(),
-            get(handlers::get_device),
-        )
-        .route(
-            format!("/{api_version}/device/sync").as_str(),
-            post(handlers::sync_device),
-        )
+    Router::new().route(
+        format!("/{api_version}/device").as_str(),
+        get(handlers::get_device),
+    )
 }
 
 fn deployments(api_version: &str) -> Router<Arc<State>> {

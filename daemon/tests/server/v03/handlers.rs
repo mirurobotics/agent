@@ -76,7 +76,7 @@ pub mod routes {
     use miru_daemon::events::hub::{EventHub, SpawnOptions};
     use miru_daemon::filesys::Overwrite;
     use miru_daemon::models::{
-        Deployment, DplActivity, DplErrStatus, DplTarget, FileRule, FileRuleRetention,
+        Deployment, Device, DplActivity, DplErrStatus, DplTarget, FileRule, FileRuleRetention,
         FileRuleUpload, GitCommit, Release, UploadTimezone,
     };
     use miru_daemon::server::{routes, State};
@@ -224,6 +224,30 @@ pub mod routes {
         }
     }
 
+    mod sync {
+        use super::*;
+
+        #[tokio::test]
+        async fn sync_returns_500_when_syncer_channel_closed() {
+            let f = Fixture::new("handler_sync").await;
+
+            // The syncer's receiver is dropped in the fixture, so sync will fail
+            let (status, bytes) = f.post("/v0.3/sync").await;
+            assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+
+            let actual: openapi::ErrorResponse = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(actual.error.code, "internal_server_error");
+        }
+
+        #[tokio::test]
+        async fn device_sync_returns_404() {
+            let f = Fixture::new("handler_device_sync_removed").await;
+
+            let (status, _) = f.post("/v0.3/device/sync").await;
+            assert_eq!(status, StatusCode::NOT_FOUND);
+        }
+    }
+
     mod device {
         use super::*;
 
@@ -240,15 +264,36 @@ pub mod routes {
         }
 
         #[tokio::test]
-        async fn sync_device_returns_500_when_syncer_channel_closed() {
-            let f = Fixture::new("handler_sync_device").await;
+        async fn get_device_returns_null_for_times_never_set() {
+            let f = Fixture::new("handler_get_device_never_set").await;
 
-            // The syncer's receiver is dropped in the fixture, so sync will fail
-            let (status, bytes) = f.post("/v0.3/device/sync").await;
-            assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+            let (status, bytes) = f.get("/v0.3/device").await;
+            assert_eq!(status, StatusCode::OK);
 
-            let actual: openapi::ErrorResponse = serde_json::from_slice(&bytes).unwrap();
-            assert_eq!(actual.error.code, "internal_server_error");
+            // the default device's times are the epoch, so never set
+            let actual: openapi::Device = serde_json::from_slice(&bytes).unwrap();
+            let times = (
+                actual.last_synced_secs_ago,
+                actual.last_connected_secs_ago,
+                actual.last_disconnected_secs_ago,
+            );
+            assert_eq!(times, (None, None, None));
+        }
+
+        #[tokio::test]
+        async fn get_device_returns_secs_ago_for_times_set() {
+            let f = Fixture::new("handler_get_device_times_set").await;
+            let device = Device {
+                last_connected_at: Utc::now(),
+                ..Device::default()
+            };
+            f.state.storage.device.write(device).await.unwrap();
+
+            let (status, bytes) = f.get("/v0.3/device").await;
+            assert_eq!(status, StatusCode::OK);
+
+            let actual: openapi::Device = serde_json::from_slice(&bytes).unwrap();
+            assert!(actual.last_connected_secs_ago.is_some());
         }
     }
 
@@ -753,6 +798,29 @@ pub mod routes {
                 serde_json::from_slice(&bytes).unwrap();
             let ids: Vec<_> = actual.calibrations.iter().map(|c| c.report_id).collect();
             assert_eq!(ids, [created.report_id]);
+        }
+
+        #[tokio::test]
+        async fn list_latest_calibrations_returns_200_with_invalidated_at() {
+            let f = Fixture::new("handler_list_latest_calibrations_invalidated").await;
+            let created = report(&f).await;
+            let invalidated_at = fixed_time();
+            f.state
+                .latest_cals
+                .invalidate(created.report_id, invalidated_at)
+                .await
+                .unwrap();
+
+            let (status, bytes) = f.get("/v0.3/calibrations/latest").await;
+            assert_eq!(status, StatusCode::OK);
+
+            let actual: openapi::LatestCalibrationsResponse =
+                serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(actual.calibrations.len(), 1);
+            assert_eq!(
+                actual.calibrations[0].invalidated_at,
+                Some(invalidated_at.to_rfc3339())
+            );
         }
 
         #[tokio::test]
