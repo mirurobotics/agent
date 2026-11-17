@@ -20,7 +20,7 @@ use crate::trace;
 use chrono::{DateTime, Utc};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 pub struct UploaderArgs<S, F, N> {
     /// Where the queue persists; `None` keeps it in memory only.
@@ -112,14 +112,18 @@ where
     }
 
     /// Queue the upload of `invalidation`, then mark its report's entry invalid.
-    /// The store write is best effort, since the upload is what counts.
+    /// The upload is what counts, so a failed store write keeps it queued, and
+    /// an entry a newer report replaced is skipped.
     async fn invalidate(&mut self, invalidation: Invalidation) -> Result<(), CalibrationsErr> {
         let (report_id, invalidated_at) = (invalidation.report_id, invalidation.invalidated_at);
         self.uploader.enqueue_invalidation(invalidation).await?;
-        if let Err(e) = self.latest.invalidate(report_id, invalidated_at).await {
-            warn!("calibrations: failed to mark report {report_id} invalid: {e}");
+        match self.latest.invalidate(report_id, invalidated_at).await {
+            Err(CalibrationsErr::NotFoundErr(_)) => {
+                info!("calibrations: skipped marking replaced report {report_id} invalid");
+                Ok(())
+            }
+            result => result.map(|_| ()),
         }
-        Ok(())
     }
 
     /// Drive `fut` to completion while serving commands, so intake never
@@ -242,7 +246,7 @@ impl Uploader {
     }
 
     /// Queue the upload of `invalidation`, then mark its report's entry invalid
-    /// if the latest store can.
+    /// unless a newer report replaced it.
     pub async fn invalidate(&self, invalidation: Invalidation) -> Result<(), CalibrationsErr> {
         self.send_command("invalidate", |respond_to| Command::Invalidate {
             invalidation,
