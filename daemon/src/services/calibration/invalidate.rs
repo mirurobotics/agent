@@ -85,7 +85,6 @@ mod tests {
     // internal crates
     use super::{resolve_latest_entry, verify_reason};
     use crate::calibrations::latest;
-    use crate::services::ServiceErr;
     use crate::test_utils::calibrations::{latest_store, report};
     use crate::test_utils::filesys::dirs as test_dirs;
 
@@ -119,10 +118,8 @@ mod tests {
             let err = resolve_latest_entry(&store, component.to_string(), report_id)
                 .await
                 .unwrap_err();
-            assert!(
-                matches!(err, ServiceErr::LatestCalibrationNotFoundErr(_)),
-                "{component}: {err:?}"
-            );
+            let want = format!("no latest calibration of {component} matches");
+            assert_eq!(err.to_string(), want);
         }
     }
 }
