@@ -201,9 +201,9 @@ where
     /// Settle a failed attempt as the retry policy says. Network connection
     /// errors are expected and don't count toward the attempt budget; any
     /// other failure does. An invalidation of a report the control plane
-    /// hasn't recorded yet waits for the report's upload, so it keeps retrying
-    /// at the longest backoff until it is too old, not until its attempts run
-    /// out.
+    /// hasn't recorded yet waits for the report's upload, so once its attempts
+    /// run out it keeps the wait it reached, the longest backoff, until it is
+    /// too old.
     async fn handle_failure(&mut self, mut entry: QueueEntry, err: CalibrationsErr) {
         let age = (self.now_fn)() - entry.job.queued_at();
         match self.options.retry.on_failure(&err, entry.attempts, age) {
