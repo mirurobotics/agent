@@ -106,18 +106,11 @@ impl crate::errors::Error for CalibrationNotFoundErr {
 /// The component has no latest calibration, or `report_id` is not its latest:
 /// 404 `resource_not_found`.
 #[derive(Debug, thiserror::Error)]
-#[error("no latest calibration of {component}{}", with_report_id(.report_id))]
+#[error("no latest calibration of {component} matches")]
 pub struct LatestCalibrationNotFoundErr {
     pub component: String,
     pub report_id: Option<Uuid>,
     pub trace: Box<Trace>,
-}
-
-fn with_report_id(report_id: &Option<Uuid>) -> String {
-    match report_id {
-        Some(report_id) => format!(" has report id {report_id}"),
-        None => String::new(),
-    }
 }
 
 impl crate::errors::Error for LatestCalibrationNotFoundErr {
