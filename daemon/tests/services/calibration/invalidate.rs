@@ -5,7 +5,7 @@
 use crate::mocks::calibration_sender::Step;
 use crate::services::calibration::helpers::{params, Fixture};
 use crate::test_utils::calibrations::received_at;
-use miru_daemon::calibrations::{CalibrationsErr, Invalidation};
+use miru_daemon::calibrations::{latest, CalibrationsErr, Invalidation, UploaderOptions};
 use miru_daemon::services::calibration::InvalidateParams;
 use miru_daemon::services::ServiceErr;
 
@@ -111,4 +111,49 @@ async fn invalidate_with_a_refused_reason_is_rejected_before_the_lookup() {
     let err = f.invalidate(params, received_at()).await.unwrap_err();
 
     assert!(matches!(err, ServiceErr::InvalidReasonErr(_)), "{err:?}");
+}
+
+#[tokio::test]
+async fn an_unreadable_latest_store_fails_invalidate() {
+    let f = Fixture::new().await;
+    f.corrupt_latest_index().await;
+
+    let err = f
+        .invalidate(invalidate_params(COMPONENT, None), received_at())
+        .await
+        .unwrap_err();
+
+    assert!(
+        matches!(
+            err,
+            ServiceErr::CalibrationsErr(CalibrationsErr::FileSysErr(_))
+        ),
+        "{err:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_full_upload_queue_fails_invalidate() {
+    let options = UploaderOptions {
+        capacity: 1,
+        ..UploaderOptions::default()
+    };
+    let f = Fixture::with_options(options, latest::DEFAULT_CAPACITY).await;
+    // the report's upload hangs, so it fills the queue
+    let (_hold, hang) = oneshot::channel();
+    f.sender.push(Step::Hang(hang));
+    f.create(params()).await.unwrap();
+
+    let err = f
+        .invalidate(invalidate_params(COMPONENT, None), received_at())
+        .await
+        .unwrap_err();
+
+    assert!(
+        matches!(
+            err,
+            ServiceErr::CalibrationsErr(CalibrationsErr::QueueFullErr(_))
+        ),
+        "{err:?}"
+    );
 }
