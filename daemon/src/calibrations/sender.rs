@@ -91,10 +91,6 @@ impl<C: ClientI, T: TokenManagerExt> Sender for HttpSender<C, T> {
         };
         match http::calibrations::invalidate(self.http_client.as_ref(), params).await {
             Ok(_) => Ok(()),
-            Err(HTTPErr::UnmarshalJSONErr(e)) => {
-                warn!("calibrations: the control plane accepted an invalidation but its response could not be parsed: {e}");
-                Ok(())
-            }
             // the control plane hasn't recorded the report yet, so this is
             // retried rather than dropped like other client errors
             Err(HTTPErr::RequestFailed(e)) if e.status == StatusCode::NOT_FOUND => {

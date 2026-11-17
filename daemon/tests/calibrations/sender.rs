@@ -268,22 +268,6 @@ pub mod invalidate {
     }
 
     #[tokio::test]
-    async fn an_accepted_invalidation_with_an_unparseable_response_is_sent() {
-        let client = Arc::new(MockClient::default());
-        client.set_invalidate_calibration(|| {
-            Err(HTTPErr::UnmarshalJSONErr(UnmarshalJSONErr {
-                request: Params::get("http://mock/calibrations").meta().unwrap(),
-                source: serde_json::from_str::<Calibration>("{}").unwrap_err(),
-                trace: miru_daemon::trace!(),
-            }))
-        });
-
-        invalidate(&client).await.unwrap();
-
-        assert_eq!(client.call_count(Call::InvalidateCalibration), 1);
-    }
-
-    #[tokio::test]
     async fn returns_a_token_error() {
         let client = Arc::new(MockClient::default());
         let tokens = StubTokenManager::err(AuthnErr::HTTPErr(request_failed(403)));
