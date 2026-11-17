@@ -16,7 +16,6 @@ use miru_daemon::sync::Syncer;
 // external crates
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use chrono::Utc;
 use tokio::sync::{broadcast, mpsc};
 use tower::ServiceExt;
 
@@ -56,7 +55,6 @@ impl Fixture {
             cal_uploader: Arc::new(cal_uploader),
             latest_cals,
             shutdown_tx,
-            started_at: Utc::now(),
         });
         Self { state, _dir: dir }
     }

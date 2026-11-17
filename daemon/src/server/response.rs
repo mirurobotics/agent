@@ -26,14 +26,10 @@ pub fn calibration_content(content: calibration::Content) -> Response {
     (StatusCode::OK, headers, content.data).into_response()
 }
 
-/// Whole seconds since `at`, or None when `at` is before the agent last
-/// started: a time from an earlier run, or one never set.
-pub(crate) fn secs_ago_since_start(
-    at: DateTime<Utc>,
-    now: DateTime<Utc>,
-    started_at: DateTime<Utc>,
-) -> Option<i64> {
-    (at >= started_at).then(|| secs_ago(at, now))
+/// Whole seconds since `at`, or None when `at` is still the epoch it
+/// defaults to, so it never happened.
+pub(crate) fn secs_ago_if_set(at: DateTime<Utc>, now: DateTime<Utc>) -> Option<i64> {
+    (at != DateTime::<Utc>::UNIX_EPOCH).then(|| secs_ago(at, now))
 }
 
 /// Whole seconds since `at`, rounded down, and 0 if the clock has moved back

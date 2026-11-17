@@ -65,7 +65,7 @@ pub async fn sync(AxumState(state): AxumState<Arc<State>>) -> impl IntoResponse 
     handle(
         async move {
             let outcome = dvc_svc::sync(state.syncer.as_ref()).await?;
-            Ok::<_, ServerErr>(response::sync(&outcome, Utc::now(), state.started_at))
+            Ok::<_, ServerErr>(response::sync(&outcome, Utc::now()))
         },
         "Error syncing device",
     )
@@ -77,7 +77,7 @@ pub async fn get_device(AxumState(state): AxumState<Arc<State>>) -> impl IntoRes
     handle(
         async move {
             let device = dvc_svc::get(&state.storage.device).await?;
-            Ok::<_, ServerErr>(response::device(&device, Utc::now(), state.started_at))
+            Ok::<_, ServerErr>(response::device(&device, Utc::now()))
         },
         "Error getting device",
     )

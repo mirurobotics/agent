@@ -2,7 +2,7 @@
 use crate::calibrations::ReportMetadata;
 use crate::events::{self, errors::EventsErr, model::EventPayload};
 use crate::models;
-use crate::server::response::{secs_ago, secs_ago_since_start, secs_until};
+use crate::server::response::{secs_ago, secs_ago_if_set, secs_until};
 use crate::services::{calibration, device::SyncOutcome};
 use device_api_v03::models as device_server;
 
@@ -10,35 +10,26 @@ use device_api_v03::models as device_server;
 use chrono::{DateTime, Utc};
 
 /// The device route's response.
-pub fn device(
-    device: &models::Device,
-    now: DateTime<Utc>,
-    started_at: DateTime<Utc>,
-) -> device_server::Device {
-    let since_start = |at| secs_ago_since_start(at, now, started_at);
+pub fn device(device: &models::Device, now: DateTime<Utc>) -> device_server::Device {
     device_server::Device {
         object: device_server::device::Object::Device,
         id: device.id.clone(),
         name: device.name.clone(),
         status: (&device.status).into(),
-        last_synced_secs_ago: since_start(device.last_synced_at),
-        last_connected_secs_ago: since_start(device.last_connected_at),
-        last_disconnected_secs_ago: since_start(device.last_disconnected_at),
+        last_synced_secs_ago: secs_ago_if_set(device.last_synced_at, now),
+        last_connected_secs_ago: secs_ago_if_set(device.last_connected_at, now),
+        last_disconnected_secs_ago: secs_ago_if_set(device.last_disconnected_at, now),
     }
 }
 
 /// The sync route's response.
-pub fn sync(
-    outcome: &SyncOutcome,
-    now: DateTime<Utc>,
-    started_at: DateTime<Utc>,
-) -> device_server::SyncResponse {
+pub fn sync(outcome: &SyncOutcome, now: DateTime<Utc>) -> device_server::SyncResponse {
     let state = &outcome.state;
     let cooldown_ends_in_secs = secs_until(state.cooldown_ends_at, now);
     device_server::SyncResponse {
         code: (&outcome.code).into(),
         message: outcome.message.clone(),
-        last_synced_secs_ago: secs_ago_since_start(state.last_synced_at, now, started_at),
+        last_synced_secs_ago: secs_ago_if_set(state.last_synced_at, now),
         last_attempted_sync_secs_ago: secs_ago(state.last_attempted_sync_at, now),
         in_cooldown: cooldown_ends_in_secs > 0,
         cooldown_ends_in_secs,

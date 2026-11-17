@@ -24,7 +24,6 @@ use crate::workers::{
 };
 
 // external crates
-use chrono::{DateTime, Utc};
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 use tracing::{error, info};
@@ -61,8 +60,6 @@ async fn init(
     shutdown_tx: broadcast::Sender<()>,
     shutdown_manager: &mut ShutdownManager,
 ) -> Result<(), ServerErr> {
-    // before anything that records an event the Device API reports
-    let started_at = Utc::now();
     remove_stale_discovery_file(&options.storage.layout).await;
     let app_state = init_app_state(options, shutdown_manager).await?;
 
@@ -76,14 +73,7 @@ async fn init(
 
     init_calibration_pull_task(app_state.clone(), shutdown_manager, shutdown_tx.subscribe())
         .await?;
-    init_optional_services(
-        options,
-        &app_state,
-        started_at,
-        shutdown_manager,
-        &shutdown_tx,
-    )
-    .await?;
+    init_optional_services(options, &app_state, shutdown_manager, &shutdown_tx).await?;
     init_data_upload_workers(options, &app_state, shutdown_manager, &shutdown_tx).await?;
 
     Ok(())
@@ -93,19 +83,11 @@ async fn init(
 async fn init_optional_services(
     options: &AppOptions,
     app_state: &Arc<AppState>,
-    started_at: DateTime<Utc>,
     shutdown_manager: &mut ShutdownManager,
     shutdown_tx: &broadcast::Sender<()>,
 ) -> Result<(), ServerErr> {
     if options.enable_socket_server || options.enable_tcp_server {
-        init_local_api_servers(
-            options,
-            app_state.clone(),
-            started_at,
-            shutdown_manager,
-            shutdown_tx,
-        )
-        .await?;
+        init_local_api_servers(options, app_state.clone(), shutdown_manager, shutdown_tx).await?;
     }
 
     if options.enable_poller {
@@ -408,7 +390,6 @@ async fn init_delete_worker(
 async fn init_local_api_servers(
     options: &AppOptions,
     app_state: Arc<AppState>,
-    started_at: DateTime<Utc>,
     shutdown_manager: &mut ShutdownManager,
     shutdown_tx: &broadcast::Sender<()>,
 ) -> Result<(), ServerErr> {
@@ -432,7 +413,6 @@ async fn init_local_api_servers(
         cal_uploader: app_state.cal_uploader.clone(),
         latest_cals: app_state.latest_cals.clone(),
         shutdown_tx: shutdown_tx.clone(),
-        started_at,
     });
 
     #[cfg(unix)]

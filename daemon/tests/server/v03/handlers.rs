@@ -156,7 +156,6 @@ pub mod routes {
                 cal_uploader: Arc::new(cal_uploader),
                 latest_cals,
                 shutdown_tx,
-                started_at: Utc::now(),
             });
 
             let app = routes::router(state.clone());
@@ -265,13 +264,13 @@ pub mod routes {
         }
 
         #[tokio::test]
-        async fn get_device_returns_null_for_times_before_start() {
-            let f = Fixture::new("handler_get_device_before_start").await;
+        async fn get_device_returns_null_for_times_never_set() {
+            let f = Fixture::new("handler_get_device_never_set").await;
 
             let (status, bytes) = f.get("/v0.3/device").await;
             assert_eq!(status, StatusCode::OK);
 
-            // the default device's times are the epoch, before the fixture's start
+            // the default device's times are the epoch, so never set
             let actual: openapi::Device = serde_json::from_slice(&bytes).unwrap();
             let times = (
                 actual.last_synced_secs_ago,
@@ -282,8 +281,8 @@ pub mod routes {
         }
 
         #[tokio::test]
-        async fn get_device_returns_secs_ago_for_times_since_start() {
-            let f = Fixture::new("handler_get_device_since_start").await;
+        async fn get_device_returns_secs_ago_for_times_set() {
+            let f = Fixture::new("handler_get_device_times_set").await;
             let device = Device {
                 last_connected_at: Utc::now(),
                 ..Device::default()

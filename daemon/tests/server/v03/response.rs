@@ -16,10 +16,6 @@ fn fixed_time() -> DateTime<Utc> {
     Utc.with_ymd_and_hms(2025, 6, 15, 12, 0, 0).unwrap()
 }
 
-fn started_at() -> DateTime<Utc> {
-    fixed_time() - Duration::hours(1)
-}
-
 pub mod device_response {
     use super::*;
     use miru_daemon::server::v03::response;
@@ -65,7 +61,7 @@ pub mod device_response {
             last_disconnected_secs_ago: Some(30),
         };
 
-        assert_eq!(response::device(&device, now, started_at()), expected);
+        assert_eq!(response::device(&device, now), expected);
     }
 
     #[test]
@@ -73,25 +69,25 @@ pub mod device_response {
         let now = fixed_time();
         let device = device_at(DeviceStatus::Online, now);
 
-        let actual = response::device(&device, now, started_at());
+        let actual = response::device(&device, now);
         assert_eq!(actual.status, openapi::DeviceStatus::DEVICE_STATUS_ONLINE);
     }
 
     #[test]
-    fn reports_null_for_times_before_start() {
+    fn reports_null_for_times_never_set() {
         let device = device_at(DeviceStatus::Online, DateTime::<Utc>::UNIX_EPOCH);
 
-        let actual = response::device(&device, fixed_time(), started_at());
+        let actual = response::device(&device, fixed_time());
         assert_eq!(device_times(&actual), (None, None, None));
     }
 
     #[test]
-    fn reports_a_time_at_start() {
-        let device = device_at(DeviceStatus::Online, started_at());
+    fn reports_a_time_from_an_earlier_run() {
+        let device = device_at(DeviceStatus::Online, fixed_time() - Duration::days(2));
 
-        let actual = response::device(&device, fixed_time(), started_at());
-        let hour = Some(3600);
-        assert_eq!(device_times(&actual), (hour, hour, hour));
+        let actual = response::device(&device, fixed_time());
+        let two_days = Some(2 * 24 * 3600);
+        assert_eq!(device_times(&actual), (two_days, two_days, two_days));
     }
 
     #[test]
@@ -100,7 +96,7 @@ pub mod device_response {
         let at = now - Duration::milliseconds(90_999);
         let device = device_at(DeviceStatus::Online, at);
 
-        let actual = response::device(&device, now, started_at());
+        let actual = response::device(&device, now);
         assert_eq!(device_times(&actual), (Some(90), Some(90), Some(90)));
     }
 
@@ -109,7 +105,7 @@ pub mod device_response {
         let now = fixed_time();
         let device = device_at(DeviceStatus::Online, now + Duration::seconds(5));
 
-        let actual = response::device(&device, now, started_at());
+        let actual = response::device(&device, now);
         assert_eq!(device_times(&actual), (Some(0), Some(0), Some(0)));
     }
 }
@@ -150,7 +146,7 @@ pub mod sync_response {
             cooldown_ends_in_secs: 15,
         };
 
-        assert_eq!(response::sync(&outcome, now, started_at()), expected);
+        assert_eq!(response::sync(&outcome, now), expected);
     }
 
     #[test]
@@ -167,16 +163,16 @@ pub mod sync_response {
             cooldown_ends_in_secs: 0,
         };
 
-        assert_eq!(response::sync(&outcome, now, started_at()), expected);
+        assert_eq!(response::sync(&outcome, now), expected);
     }
 
     #[test]
-    fn reports_null_last_synced_before_start() {
+    fn reports_null_last_synced_never_set() {
         let now = fixed_time();
         let mut outcome = outcome(SyncCode::Success, now);
         outcome.state.last_synced_at = DateTime::<Utc>::UNIX_EPOCH;
 
-        let actual = response::sync(&outcome, now, started_at());
+        let actual = response::sync(&outcome, now);
         assert_eq!(actual.last_synced_secs_ago, None);
     }
 
@@ -185,7 +181,7 @@ pub mod sync_response {
         let now = fixed_time();
         let outcome = outcome(SyncCode::Success, now + Duration::milliseconds(1_500));
 
-        let actual = response::sync(&outcome, now, started_at());
+        let actual = response::sync(&outcome, now);
         assert_eq!(cooldown(&actual), (true, 2));
     }
 
@@ -194,7 +190,7 @@ pub mod sync_response {
         let now = fixed_time();
         let outcome = outcome(SyncCode::Success, now + Duration::milliseconds(1));
 
-        let actual = response::sync(&outcome, now, started_at());
+        let actual = response::sync(&outcome, now);
         assert_eq!(cooldown(&actual), (true, 1));
     }
 
@@ -203,7 +199,7 @@ pub mod sync_response {
         let now = fixed_time();
         let outcome = outcome(SyncCode::Success, now);
 
-        let actual = response::sync(&outcome, now, started_at());
+        let actual = response::sync(&outcome, now);
         assert_eq!(cooldown(&actual), (false, 0));
     }
 }
