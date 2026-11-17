@@ -96,7 +96,25 @@ impl From<backend_client::Calibration> for ReportMetadata {
     }
 }
 
-impl queue::QueueJob for ReportMetadata {
+/// A queued upload. A report is stored as its bare metadata, so a
+/// `queue.json` from an older agent still loads.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum Job {
+    /// Upload the report, whose data is in its report file.
+    Report(ReportMetadata),
+}
+
+impl Job {
+    /// When the job was queued. Its age counts from here.
+    pub(crate) fn queued_at(&self) -> DateTime<Utc> {
+        match self {
+            Job::Report(report) => report.reported_at,
+        }
+    }
+}
+
+impl queue::QueueJob for Job {
     const LABEL: &'static str = "calibration";
 
     /// A calibration is uploadable the moment it is queued.
@@ -105,15 +123,21 @@ impl queue::QueueJob for ReportMetadata {
     }
 
     fn name(&self) -> String {
-        let mut name = format!("calibration of {}", self.component);
-        if let Some(role) = &self.role {
-            name.push_str(&format!(" (role {role})"));
+        match self {
+            Job::Report(report) => report_name(report),
         }
-        if let Some(aspect) = &self.aspect {
-            name.push_str(&format!(" (aspect {aspect})"));
-        }
-        format!("{name} received at {}", self.reported_at.to_rfc3339())
     }
+}
+
+fn report_name(report: &ReportMetadata) -> String {
+    let mut name = format!("calibration of {}", report.component);
+    if let Some(role) = &report.role {
+        name.push_str(&format!(" (role {role})"));
+    }
+    if let Some(aspect) = &report.aspect {
+        name.push_str(&format!(" (aspect {aspect})"));
+    }
+    format!("{name} received at {}", report.reported_at.to_rfc3339())
 }
 
 /// The file holding the data of the report queued as `entry_id`.
@@ -147,13 +171,13 @@ fn invalid(reason: &str) -> CalibrationsErr {
     })
 }
 
-pub type Queue = queue::FileQueue<ReportMetadata>;
+pub type Queue = queue::FileQueue<Job>;
 
-pub type QueueEntry = queue::QueueEntry<ReportMetadata>;
+pub type QueueEntry = queue::QueueEntry<Job>;
 
-pub type QueueSnapshot = queue::QueueSnapshot<ReportMetadata>;
+pub type QueueSnapshot = queue::QueueSnapshot<Job>;
 
-pub type QueueSnapshotFile = queue::QueueSnapshotFile<ReportMetadata>;
+pub type QueueSnapshotFile = queue::QueueSnapshotFile<Job>;
 
 #[cfg(test)]
 mod tests {

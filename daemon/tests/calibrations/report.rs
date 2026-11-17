@@ -1,4 +1,4 @@
-//! The calibration queue: the generic suite instantiated for `ReportMetadata`,
+//! The calibration queue: the generic suite instantiated for `Job`,
 //! plus the on-disk wire pin for `calibrations/queue.json`.
 
 // internal crates
@@ -6,7 +6,7 @@ use crate::queue::file::queue_suite;
 use crate::test_utils::calibrations::report_id;
 use crate::test_utils::filesys::dirs as test_dirs;
 use backend_api::models::{self as backend_client, BaseExternalUser};
-use miru_daemon::calibrations::{Queue, QueueSnapshot, QueueSnapshotFile, ReportMetadata};
+use miru_daemon::calibrations::{Job, Queue, QueueSnapshot, QueueSnapshotFile, ReportMetadata};
 use miru_daemon::filesys::{files, File, WriteOptions};
 use miru_daemon::models::InstanceFormat;
 use miru_daemon::queue::{Persistence, QueueJob};
@@ -30,12 +30,17 @@ fn metadata(name: &str) -> ReportMetadata {
     }
 }
 
-queue_suite!(metadata, "calibration-generic-queue-test");
+/// The upload of `metadata(name)`.
+fn report_job(name: &str) -> Job {
+    Job::Report(metadata(name))
+}
+
+queue_suite!(report_job, "calibration-generic-queue-test");
 
 #[test]
 fn ready_at_is_min_utc() {
     assert_eq!(
-        QueueJob::ready_at(&metadata("arm")),
+        QueueJob::ready_at(&report_job("arm")),
         DateTime::<Utc>::MIN_UTC
     );
 }
@@ -44,7 +49,7 @@ fn ready_at_is_min_utc() {
 fn name_is_the_component_role_aspect_and_time() {
     assert_eq!(
         "calibration of arm (role aligner-1) (aspect pose) received at 1970-01-01T00:16:40+00:00",
-        QueueJob::name(&metadata("arm"))
+        QueueJob::name(&report_job("arm"))
     );
 }
 
@@ -58,7 +63,7 @@ fn name_leaves_out_a_missing_role_and_aspect() {
 
     assert_eq!(
         "calibration of arm received at 1970-01-01T00:16:40+00:00",
-        QueueJob::name(&report)
+        QueueJob::name(&Job::Report(report))
     );
 }
 
@@ -99,7 +104,7 @@ mod wire {
 
         let entry = queue.next_ready(Utc::now()).unwrap();
         assert_eq!(entry.id, id);
-        assert_eq!(entry.job, metadata("arm"));
+        assert_eq!(entry.job, report_job("arm"));
     }
 
     /// The optional fields may be absent, as for a calibration taken with no
@@ -131,7 +136,7 @@ mod wire {
             deployment_id: None,
             ..metadata("arm")
         };
-        assert_eq!(found, expected);
+        assert_eq!(found, Job::Report(expected));
     }
 
     /// Reports queued before `report_id` was part of the metadata are minted
@@ -152,7 +157,7 @@ mod wire {
 
         let queue = Queue::from_snapshot(8, open(&path).await, Persistence::BestEffort);
 
-        let found = queue.next_ready(Utc::now()).unwrap().job;
+        let Job::Report(found) = queue.next_ready(Utc::now()).unwrap().job;
         assert!(!found.report_id.is_nil());
         let expected = ReportMetadata {
             report_id: found.report_id,
