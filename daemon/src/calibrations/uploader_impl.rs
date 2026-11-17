@@ -206,7 +206,18 @@ where
     /// too old.
     async fn handle_failure(&mut self, mut entry: QueueEntry, err: CalibrationsErr) {
         let age = (self.now_fn)() - entry.job.queued_at();
-        match self.options.retry.on_failure(&err, entry.attempts, age) {
+        let verdict = match self.options.retry.on_failure(&err, entry.attempts, age) {
+            Verdict::OutOfAttempts { attempts }
+                if matches!(err, CalibrationsErr::ReportNotRecordedErr(_)) =>
+            {
+                Verdict::Retry {
+                    attempts,
+                    wait_secs: self.options.retry.backoff.max_secs,
+                }
+            }
+            verdict => verdict,
+        };
+        match verdict {
             Verdict::Retry {
                 attempts,
                 wait_secs,
@@ -218,14 +229,6 @@ where
             Verdict::Terminal { .. } => {
                 Self::log_terminal_drop(&entry, &err);
                 self.remove(entry.id).await;
-            }
-            Verdict::OutOfAttempts { attempts }
-                if matches!(err, CalibrationsErr::ReportNotRecordedErr(_)) =>
-            {
-                entry.attempts = attempts;
-                Self::log_failure(&entry, &err);
-                let wait_secs = self.options.retry.backoff.max_secs;
-                self.retry_after(entry.id, attempts, wait_secs).await;
             }
             Verdict::OutOfAttempts { attempts } => {
                 entry.attempts = attempts;
