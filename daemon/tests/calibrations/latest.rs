@@ -521,21 +521,29 @@ async fn list_filters_by_component() {
     }
 }
 
+// newer agents must read this shape
 #[tokio::test]
 async fn list_reads_back_an_invalidated_entry() {
     let f = Fixture::new().await;
+    let invalidated_at = received_at() + TimeDelta::hours(1);
     let arm = ReportMetadata {
         invalidation: Some(Invalidation {
-            invalidated_at: received_at() + TimeDelta::hours(1),
+            invalidated_at,
             reason: "power cycle".to_string(),
         }),
         ..reported("arm", None, None)
     };
-    put_all(&f.store, &[&arm]).await;
+    let mut entry = serde_json::to_value(&arm).unwrap();
+    entry["invalidation"] = serde_json::json!({
+        "invalidated_at": invalidated_at.to_rfc3339(),
+        "reason": "power cycle",
+    });
+    let index = serde_json::json!({ "entries": [entry] });
+    files::write_json(&f.layout.index(), &index, WriteOptions::OVERWRITE_ATOMIC)
+        .await
+        .unwrap();
 
-    let entries = f.reopen().await.list(&Filter::default()).await.unwrap();
-
-    assert_eq!(entries, [arm]);
+    assert_eq!(f.entries().await, [arm]);
 }
 
 #[tokio::test]
