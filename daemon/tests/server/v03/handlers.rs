@@ -644,6 +644,7 @@ pub mod routes {
         use super::*;
 
         const URI: &str = "/v0.3/calibrations";
+        const INVALIDATE_URI: &str = "/v0.3/calibrations/latest/invalidate";
 
         fn request(format: &str, data: &str) -> String {
             json!({
@@ -842,6 +843,57 @@ pub mod routes {
                 let (status, bytes) = f.get(&uri).await;
                 assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{field}");
                 assert_eq!(error_code(&bytes), "invalid_request", "{field}");
+            }
+        }
+
+        #[tokio::test]
+        async fn invalidate_latest_calibration_returns_200_with_the_invalidated_calibration() {
+            let f = Fixture::new("handler_invalidate_latest_calibration").await;
+            let created = report(&f).await;
+            let body = json!({
+                "component": "arm-left",
+                "report_id": created.report_id,
+                "reason": "power cycle",
+            });
+
+            let (status, bytes) = f.post_json(INVALIDATE_URI, body.to_string()).await;
+            assert_eq!(status, StatusCode::OK);
+
+            let actual: openapi::Calibration = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(actual.report_id, created.report_id);
+            let invalidated_at = actual.invalidated_at.unwrap();
+            assert!(DateTime::parse_from_rfc3339(&invalidated_at).is_ok());
+        }
+
+        #[tokio::test]
+        async fn invalidate_latest_calibration_returns_404_when_nothing_matches() {
+            let f = Fixture::new("handler_invalidate_latest_calibration_404").await;
+            report(&f).await;
+            let unknown_component = json!({ "component": "leg", "reason": "power cycle" });
+            let other_report = json!({
+                "component": "arm-left",
+                "report_id": "00000000-0000-0000-0000-000000000000",
+                "reason": "power cycle",
+            });
+
+            for body in [unknown_component, other_report] {
+                let (status, bytes) = f.post_json(INVALIDATE_URI, body.to_string()).await;
+                assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+                assert_eq!(error_code(&bytes), "resource_not_found", "{body}");
+            }
+        }
+
+        #[tokio::test]
+        async fn invalidate_latest_calibration_returns_422_for_a_blank_or_missing_reason() {
+            let f = Fixture::new("handler_invalidate_latest_calibration_422").await;
+            report(&f).await;
+            let blank = json!({ "component": "arm-left", "reason": " " });
+            let missing = json!({ "component": "arm-left" });
+
+            for body in [blank, missing] {
+                let (status, bytes) = f.post_json(INVALIDATE_URI, body.to_string()).await;
+                assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+                assert_eq!(error_code(&bytes), "invalid_request", "{body}");
             }
         }
 

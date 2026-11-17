@@ -224,6 +224,27 @@ pub async fn list_latest_calibrations(
     .await
 }
 
+pub async fn invalidate_latest_calibration(
+    AxumState(state): AxumState<Arc<State>>,
+    request: Result<Json<device_server::InvalidateCalibrationRequest>, JsonRejection>,
+) -> impl IntoResponse {
+    handle(
+        async {
+            let Json(request) = request.map_err(reject_body)?;
+            let invalidated = calibration_svc::invalidate(
+                &state.cal_uploader,
+                &state.latest_cals,
+                calibration_svc::InvalidateParams::from(request),
+                Utc::now(),
+            )
+            .await?;
+            Ok::<_, ServerErr>(device_server::Calibration::from(&invalidated))
+        },
+        "Error invalidating latest calibration",
+    )
+    .await
+}
+
 /// The content's bytes on success, rather than JSON.
 pub async fn get_latest_calibration_content(
     AxumState(state): AxumState<Arc<State>>,
