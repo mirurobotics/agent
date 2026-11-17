@@ -856,13 +856,16 @@ pub mod routes {
                 "reason": "power cycle",
             });
 
+            let before = Utc::now();
             let (status, bytes) = f.post_json(INVALIDATE_URI, body.to_string()).await;
+            let after = Utc::now();
             assert_eq!(status, StatusCode::OK);
 
             let actual: openapi::Calibration = serde_json::from_slice(&bytes).unwrap();
             assert_eq!(actual.report_id, created.report_id);
             let invalidated_at = actual.invalidated_at.unwrap();
-            assert!(DateTime::parse_from_rfc3339(&invalidated_at).is_ok());
+            let invalidated_at = DateTime::parse_from_rfc3339(&invalidated_at).unwrap();
+            assert!((before..=after).contains(&invalidated_at), "{invalidated_at}");
         }
 
         #[tokio::test]
