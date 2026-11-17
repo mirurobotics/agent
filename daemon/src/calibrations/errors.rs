@@ -103,6 +103,25 @@ impl crate::errors::Error for CalibrationNotFoundErr {
     }
 }
 
+/// An invalidation reason the control plane would refuse, blank or too long:
+/// 422 `invalid_request`.
+#[derive(Debug, thiserror::Error)]
+#[error("invalid reason: {msg}")]
+pub struct InvalidReasonErr {
+    pub msg: String,
+    pub trace: Box<Trace>,
+}
+
+impl crate::errors::Error for InvalidReasonErr {
+    fn code(&self) -> Code {
+        Code::InvalidRequest
+    }
+
+    fn http_status(&self) -> HTTPCode {
+        HTTPCode::UNPROCESSABLE_ENTITY
+    }
+}
+
 /// A buffered report that can never be sent, because its file is missing or
 /// not UTF-8.
 /// Terminal, so the worker drops it instead of retrying.
@@ -155,6 +174,8 @@ pub enum CalibrationsErr {
     #[error(transparent)]
     NotFoundErr(CalibrationNotFoundErr),
     #[error(transparent)]
+    InvalidReasonErr(InvalidReasonErr),
+    #[error(transparent)]
     FileSysErr(FileSysErr),
     #[error(transparent)]
     InvalidReportErr(InvalidReportErr),
@@ -204,6 +225,12 @@ impl From<CalibrationNotFoundErr> for CalibrationsErr {
     }
 }
 
+impl From<InvalidReasonErr> for CalibrationsErr {
+    fn from(e: InvalidReasonErr) -> Self {
+        Self::InvalidReasonErr(e)
+    }
+}
+
 impl From<ReportNotRecordedErr> for CalibrationsErr {
     fn from(e: ReportNotRecordedErr) -> Self {
         Self::ReportNotRecordedErr(e)
@@ -227,6 +254,7 @@ crate::impl_error!(CalibrationsErr {
     TooLargeErr,
     StoreFullErr,
     NotFoundErr,
+    InvalidReasonErr,
     FileSysErr,
     InvalidReportErr,
     ReportNotRecordedErr,

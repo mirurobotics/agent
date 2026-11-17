@@ -120,6 +120,7 @@ where
         report_id: Uuid,
         invalidation: Invalidation,
     ) -> Result<ReportMetadata, CalibrationsErr> {
+        invalidation.verify()?;
         let entry = self.latest.get(report_id).await?.metadata;
         if entry.invalidation.is_some() {
             return Ok(entry);
@@ -260,8 +261,9 @@ impl Uploader {
 
     /// Mark the latest entry for `report_id` invalid and queue the
     /// invalidation's upload, unless the entry already is invalid, and return
-    /// the entry. Not found unless an entry has that `report_id`; a full queue
-    /// is the 507 [`CalibrationsErr::QueueFullErr`].
+    /// the entry. Not found unless an entry has that `report_id`; a blank or
+    /// too-long reason is the 422 [`CalibrationsErr::InvalidReasonErr`], and a
+    /// full queue the 507 [`CalibrationsErr::QueueFullErr`].
     pub async fn invalidate(
         &self,
         report_id: Uuid,

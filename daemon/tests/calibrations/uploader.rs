@@ -430,6 +430,44 @@ async fn a_full_queue_leaves_the_entry_valid() {
 }
 
 #[tokio::test]
+async fn a_blank_or_too_long_reason_changes_nothing() {
+    let mut h = Harness::new();
+    h.spawn().await;
+    h.report("a").await;
+    h.await_drained(&["a"]).await;
+    let report_id = report("a").metadata.report_id;
+
+    for reason in ["".to_string(), " \t\n".to_string(), "x".repeat(513)] {
+        let err = guard(h.uploader().invalidate(report_id, invalidation(&reason)))
+            .await
+            .unwrap_err();
+
+        assert!(
+            matches!(err, CalibrationsErr::InvalidReasonErr(_)),
+            "{reason:?}"
+        );
+    }
+    assert_eq!(h.num_queued_uploads().await, 0);
+    assert_eq!(h.latest_entries().await, [report("a").metadata]);
+}
+
+#[tokio::test]
+async fn a_reason_is_kept_as_given() {
+    let mut h = Harness::new();
+    h.spawn().await;
+    h.report("a").await;
+    h.await_drained(&["a"]).await;
+    let report_id = report("a").metadata.report_id;
+    let reason = format!(" {} ", "é".repeat(510));
+
+    let invalidated = guard(h.uploader().invalidate(report_id, invalidation(&reason)))
+        .await
+        .unwrap();
+
+    assert_eq!(invalidated.invalidation, Some(invalidation(&reason)));
+}
+
+#[tokio::test]
 async fn a_failed_store_write_removes_the_queued_invalidation() {
     let mut h = Harness::new();
     h.spawn().await;

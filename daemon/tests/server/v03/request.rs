@@ -2,9 +2,7 @@
 use device_api_v03::models as openapi;
 use miru_daemon::calibrations::Filter;
 use miru_daemon::models::InstanceFormat;
-use miru_daemon::server::v03::request::{
-    invalidation_reason, CreateCalibrationBody, LatestCalibrationsQuery,
-};
+use miru_daemon::server::v03::request::{CreateCalibrationBody, LatestCalibrationsQuery};
 use miru_daemon::services::calibration::CreateParams;
 
 fn calibration_body(format: openapi::InstanceFormat) -> CreateCalibrationBody {
@@ -134,31 +132,5 @@ pub mod latest_calibrations_query {
 
         assert!(Filter::try_from(role).is_err());
         assert!(Filter::try_from(aspect).is_err());
-    }
-}
-
-pub mod invalidation_reason {
-    use super::*;
-
-    fn request(reason: &str) -> openapi::InvalidateCalibrationRequest {
-        openapi::InvalidateCalibrationRequest::new(reason.to_string())
-    }
-
-    #[test]
-    fn keeps_the_reason_as_given() {
-        let reasons = [" power cycle ".to_string(), "é".repeat(512)];
-
-        for reason in reasons {
-            assert_eq!(invalidation_reason(request(&reason)).unwrap(), reason);
-        }
-    }
-
-    #[test]
-    fn rejects_a_blank_or_too_long_reason() {
-        let reasons = ["".to_string(), " \t\n".to_string(), "x".repeat(513)];
-
-        for reason in reasons {
-            assert!(invalidation_reason(request(&reason)).is_err(), "{reason:?}");
-        }
     }
 }

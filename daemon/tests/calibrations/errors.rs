@@ -2,7 +2,7 @@
 use crate::errors::harnesses::{assert_error, Expected};
 use miru_daemon::calibrations::{
     CalibrationBufferFullErr, CalibrationNotFoundErr, CalibrationStoreFullErr,
-    CalibrationTooLargeErr, CalibrationsErr, ReportNotRecordedErr,
+    CalibrationTooLargeErr, CalibrationsErr, InvalidReasonErr, ReportNotRecordedErr,
 };
 use miru_daemon::errors::{Code, Error, HTTPCode};
 use miru_daemon::queue::QueueFullErr;
@@ -77,4 +77,18 @@ fn an_unrecorded_report_is_retried() {
         err.to_string(),
         format!("the control plane has not recorded report {report_id} yet")
     );
+}
+
+#[test]
+fn an_invalid_reason_is_422() {
+    let err = CalibrationsErr::from(InvalidReasonErr {
+        msg: "reason is blank".to_string(),
+        trace: miru_daemon::trace!(),
+    });
+
+    assert_error(
+        &err,
+        Expected::new(Code::InvalidRequest, HTTPCode::UNPROCESSABLE_ENTITY),
+    );
+    assert_eq!(err.to_string(), "invalid reason: reason is blank");
 }

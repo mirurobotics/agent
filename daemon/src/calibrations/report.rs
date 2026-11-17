@@ -1,5 +1,5 @@
 // internal crates
-use crate::calibrations::errors::{CalibrationsErr, InvalidReportErr};
+use crate::calibrations::errors::{CalibrationsErr, InvalidReasonErr, InvalidReportErr};
 use crate::filesys::{files, Dir, File, FileSysErr};
 use crate::models::InstanceFormat;
 use crate::queue;
@@ -60,6 +60,27 @@ pub struct ReportMetadata {
 pub struct Invalidation {
     pub invalidated_at: DateTime<Utc>,
     pub reason: String,
+}
+
+/// The most characters the control plane takes in an invalidation reason.
+const MAX_REASON_CHARS: usize = 512;
+
+impl Invalidation {
+    /// Rejects a blank reason or one over [`MAX_REASON_CHARS`], which the
+    /// control plane would refuse after the agent had stored it.
+    pub(crate) fn verify(&self) -> Result<(), InvalidReasonErr> {
+        let msg = if self.reason.trim().is_empty() {
+            "reason is blank".to_string()
+        } else if self.reason.chars().count() > MAX_REASON_CHARS {
+            format!("reason is longer than {MAX_REASON_CHARS} characters")
+        } else {
+            return Ok(());
+        };
+        Err(InvalidReasonErr {
+            msg,
+            trace: trace!(),
+        })
+    }
 }
 
 impl ReportMetadata {

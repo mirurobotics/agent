@@ -82,28 +82,6 @@ impl TryFrom<LatestCalibrationsQuery> for Filter {
     }
 }
 
-/// The most characters the spec allows in an invalidation reason.
-const MAX_REASON_CHARS: usize = 512;
-
-/// The request's reason, rejected when blank or too long so the control plane
-/// isn't left to refuse it after the agent has stored it.
-pub fn invalidation_reason(
-    request: device_server::InvalidateCalibrationRequest,
-) -> Result<String, InvalidRequestErr> {
-    let reason = request.reason;
-    let msg = if reason.trim().is_empty() {
-        "reason is blank".to_string()
-    } else if reason.chars().count() > MAX_REASON_CHARS {
-        format!("reason is longer than {MAX_REASON_CHARS} characters")
-    } else {
-        return Ok(reason);
-    };
-    Err(InvalidRequestErr {
-        msg,
-        trace: trace!(),
-    })
-}
-
 /// Rejects a `role` or `aspect`, which v0.3 removed, so a client that only
 /// changed the version fails instead of having it ignored.
 fn reject_v02_fields(has_role: bool, has_aspect: bool) -> Result<(), InvalidRequestErr> {
