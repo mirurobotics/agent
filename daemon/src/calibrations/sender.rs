@@ -6,7 +6,8 @@ use std::sync::Arc;
 use crate::authn::TokenManagerExt;
 use crate::calibrations::{
     errors::{CalibrationsErr, ReportNotRecordedErr},
-    report::{Invalidation, Report},
+    invalidation::Invalidation,
+    report::Report,
 };
 use crate::http::{self, ClientI, HTTPErr};
 use crate::trace;
