@@ -80,42 +80,83 @@ async fn resolve_latest_entry(
 mod tests {
     // internal crates
     use super::{resolve_latest_entry, verify_reason};
-    use crate::calibrations::latest;
+    use crate::calibrations::{latest, LatestStore, Report};
     use crate::test_utils::calibrations::{latest_store, report};
     use crate::test_utils::filesys::dirs as test_dirs;
 
     // external crates
     use uuid::Uuid;
 
-    #[test]
-    fn a_reason_must_not_be_blank_or_over_512_chars() {
-        for reason in [String::new(), " \n".to_string(), "é".repeat(513)] {
-            assert!(verify_reason(&reason).is_err(), "{reason:?}");
-        }
-        for reason in ["power cycle".to_string(), "é".repeat(512)] {
-            assert!(verify_reason(&reason).is_ok(), "{reason:?}");
-        }
-    }
-
-    #[tokio::test]
-    async fn the_latest_entry_resolves_when_its_component_and_any_report_id_match() {
+    /// A latest store under its own temp dir holding the `arm` report.
+    async fn store_with_arm() -> (test_dirs::TempDir, LatestStore, Report) {
         let dir = test_dirs::temp("resolve_latest_entry").unwrap();
         let store = latest_store(&dir, latest::DEFAULT_CAPACITY).await;
         let arm = report("arm");
         store.put(arm.metadata.clone(), &arm.data).await.unwrap();
+        (dir, store, arm)
+    }
 
-        for report_id in [None, Some(arm.metadata.report_id)] {
-            let entry = resolve_latest_entry(&store, "arm".to_string(), report_id)
-                .await
-                .unwrap();
-            assert_eq!(entry, arm.metadata);
+    #[test]
+    fn a_blank_reason_is_refused() {
+        for reason in ["", " \n"] {
+            assert!(verify_reason(reason).is_err(), "{reason:?}");
         }
-        for (component, report_id) in [("leg", None), ("arm", Some(Uuid::new_v4()))] {
-            let err = resolve_latest_entry(&store, component.to_string(), report_id)
-                .await
-                .unwrap_err();
-            let want = format!("no latest calibration of {component} matches");
-            assert_eq!(err.to_string(), want);
-        }
+    }
+
+    #[test]
+    fn a_reason_over_512_chars_is_refused() {
+        assert!(verify_reason(&"é".repeat(513)).is_err());
+    }
+
+    #[test]
+    fn a_reason_up_to_512_chars_is_accepted() {
+        assert!(verify_reason("power cycle").is_ok());
+        assert!(verify_reason(&"é".repeat(512)).is_ok());
+    }
+
+    #[tokio::test]
+    async fn the_component_resolves_to_its_entry() {
+        let (_dir, store, arm) = store_with_arm().await;
+
+        let entry = resolve_latest_entry(&store, "arm".to_string(), None)
+            .await
+            .unwrap();
+
+        assert_eq!(entry, arm.metadata);
+    }
+
+    #[tokio::test]
+    async fn the_entry_resolves_when_its_report_id_is_given() {
+        let (_dir, store, arm) = store_with_arm().await;
+        let report_id = Some(arm.metadata.report_id);
+
+        let entry = resolve_latest_entry(&store, "arm".to_string(), report_id)
+            .await
+            .unwrap();
+
+        assert_eq!(entry, arm.metadata);
+    }
+
+    #[tokio::test]
+    async fn a_component_without_an_entry_is_not_found() {
+        let (_dir, store, _) = store_with_arm().await;
+
+        let err = resolve_latest_entry(&store, "leg".to_string(), None)
+            .await
+            .unwrap_err();
+
+        assert_eq!(err.to_string(), "no latest calibration of leg matches");
+    }
+
+    #[tokio::test]
+    async fn a_report_id_that_isnt_the_entry_is_not_found() {
+        let (_dir, store, _) = store_with_arm().await;
+        let report_id = Some(Uuid::new_v4());
+
+        let err = resolve_latest_entry(&store, "arm".to_string(), report_id)
+            .await
+            .unwrap_err();
+
+        assert_eq!(err.to_string(), "no latest calibration of arm matches");
     }
 }
