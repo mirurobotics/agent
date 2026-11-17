@@ -51,7 +51,6 @@ mod from_backend {
     fn maps_invalidated_at() {
         let found = ReportMetadata::from(backend_client::Calibration {
             invalidated_at: Some("1970-01-01T01:16:40Z".to_string()),
-            invalidation_reason: Some("sensor was bumped".to_string()),
             ..calibration()
         });
         let expected = ReportMetadata {
