@@ -98,7 +98,7 @@ impl Fixture {
     }
 
     /// The first report the calibration uploader sends.
-    pub async fn uploaded(&mut self) -> Report {
+    pub async fn uploaded_report(&mut self) -> Report {
         self.await_started().await;
         self.sender.reports().remove(0)
     }

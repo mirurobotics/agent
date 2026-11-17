@@ -28,7 +28,7 @@ async fn invalidate_stamps_the_latest_and_uploads_the_invalidation() {
     for with_report_id in [false, true] {
         let mut f = Fixture::new().await;
         let created = f.create(params()).await.unwrap();
-        f.uploaded().await;
+        f.uploaded_report().await;
         let report_id = with_report_id.then_some(created.report_id);
         let now = received_at() + TimeDelta::hours(1);
 
