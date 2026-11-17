@@ -47,9 +47,6 @@ pub struct ReportMetadata {
     pub deployment_id: Option<String>,
     /// When the agent received the calibration.
     pub reported_at: DateTime<Utc>,
-    /// When a device app marked the calibration invalid, or `None` while it
-    /// is valid. Never set at intake; a newer report for the key replaces the
-    /// entry.
     #[serde(default)]
     pub invalidated_at: Option<DateTime<Utc>>,
 }
