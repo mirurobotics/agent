@@ -5,7 +5,7 @@ use std::sync::Arc;
 // internal crates
 use crate::calibrations::{
     errors::{CalibrationTooLargeErr, CalibrationsErr},
-    report::{self, Queue, QueueEntry, QueueSnapshotFile, Report, ReportMetadata},
+    report::{self, Invalidation, Queue, QueueEntry, QueueSnapshotFile, Report, ReportMetadata},
     sender::Sender,
 };
 use crate::errors::Error;
@@ -131,12 +131,17 @@ where
         Ok(id)
     }
 
-    /// Queue `job`, a latest entry with its invalidation set, to upload that
-    /// invalidation. It has no report file. On error nothing is queued.
+    /// Queue the upload of `invalidation` for `entry`, a latest entry. The job
+    /// has no report file. On error nothing is queued.
     pub(crate) async fn enqueue_invalidation(
         &mut self,
-        job: ReportMetadata,
+        entry: ReportMetadata,
+        invalidation: Invalidation,
     ) -> Result<Uuid, CalibrationsErr> {
+        let job = ReportMetadata {
+            invalidation: Some(invalidation),
+            ..entry
+        };
         Ok(self.queue.enqueue(job).await?)
     }
 
@@ -436,14 +441,11 @@ mod tests {
         names.iter().map(|name| name.to_string()).collect()
     }
 
-    /// `slug`'s report as a job to upload its invalidation, made at `at`.
-    fn invalidation_job(slug: &str, at: DateTime<Utc>) -> ReportMetadata {
-        ReportMetadata {
-            invalidation: Some(Invalidation {
-                invalidated_at: at,
-                reason: "power cycle".to_string(),
-            }),
-            ..report(slug).metadata
+    /// An invalidation made at `at`.
+    fn invalidation_at(at: DateTime<Utc>) -> Invalidation {
+        Invalidation {
+            invalidated_at: at,
+            reason: "power cycle".to_string(),
         }
     }
 
@@ -546,10 +548,17 @@ mod tests {
     async fn queues_an_invalidation_without_a_report_file() {
         let f = Fixture::new();
         let mut u = f.uploader().await;
-        let job = invalidation_job("a", received_at());
+        let invalidation = invalidation_at(received_at());
 
-        let id = u.enqueue_invalidation(job.clone()).await.unwrap();
+        let id = u
+            .enqueue_invalidation(report("a").metadata, invalidation.clone())
+            .await
+            .unwrap();
 
+        let job = ReportMetadata {
+            invalidation: Some(invalidation),
+            ..report("a").metadata
+        };
         let entry = QueueEntry {
             id,
             job,
@@ -712,12 +721,14 @@ mod tests {
     async fn an_invalidation_is_sent_as_one_and_dequeued() {
         let f = Fixture::new();
         let mut u = f.uploader().await;
-        let job = invalidation_job("a", received_at());
-        u.enqueue_invalidation(job.clone()).await.unwrap();
+        let invalidation = invalidation_at(received_at());
+        u.enqueue_invalidation(report("a").metadata, invalidation.clone())
+            .await
+            .unwrap();
 
         run_next_attempt(&mut u).await;
 
-        let want = (job.report_id, job.invalidation.unwrap());
+        let want = (report("a").metadata.report_id, invalidation);
         assert_eq!(f.sender.invalidations(), [want]);
         assert!(f.sent().is_empty());
         assert_empty(&mut u).await;
@@ -728,7 +739,7 @@ mod tests {
         let f = Fixture::new();
         f.sender.push(Step::NotRecorded);
         let mut u = f.uploader().await;
-        u.enqueue_invalidation(invalidation_job("a", received_at()))
+        u.enqueue_invalidation(report("a").metadata, invalidation_at(received_at()))
             .await
             .unwrap();
 
@@ -937,8 +948,10 @@ mod tests {
         f.sender.push(Step::Network);
         f.advance(TimeDelta::days(100));
         let mut u = f.uploader().await;
-        let job = invalidation_job("a", received_at() + TimeDelta::days(99));
-        u.enqueue_invalidation(job).await.unwrap();
+        let invalidation = invalidation_at(received_at() + TimeDelta::days(99));
+        u.enqueue_invalidation(report("a").metadata, invalidation)
+            .await
+            .unwrap();
 
         run_next_attempt(&mut u).await;
 

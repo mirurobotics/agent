@@ -124,11 +124,10 @@ where
         if entry.invalidation.is_some() {
             return Ok(entry);
         }
-        let job = ReportMetadata {
-            invalidation: Some(invalidation.clone()),
-            ..entry
-        };
-        let id = self.uploader.enqueue_invalidation(job).await?;
+        let id = self
+            .uploader
+            .enqueue_invalidation(entry, invalidation.clone())
+            .await?;
         match self.latest.invalidate(report_id, invalidation).await {
             Ok(entry) => Ok(entry),
             Err(e) => {
