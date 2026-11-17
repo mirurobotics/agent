@@ -5,7 +5,7 @@ use std::sync::Arc;
 // internal crates
 use crate::calibrations::{
     errors::{CalibrationTooLargeErr, CalibrationsErr},
-    report::{self, Queue, QueueEntry, QueueSnapshotFile, Report, ReportMetadata},
+    report::{self, Job, Queue, QueueEntry, QueueSnapshotFile, Report},
     sender::Sender,
 };
 use crate::errors::Error;
@@ -47,7 +47,7 @@ impl Default for UploaderOptions {
 }
 
 /// What the queue holds for the worker to do next.
-pub(crate) type NextAttempt = queue::NextAttempt<ReportMetadata>;
+pub(crate) type NextAttempt = queue::NextAttempt<Job>;
 
 /// Single-threaded calibration uploader state and logic: the queue of report
 /// metadata, the directory of report files, and the sender that uploads them.
@@ -121,7 +121,8 @@ where
     pub(crate) async fn enqueue(&mut self, report: &Report) -> Result<Uuid, CalibrationsErr> {
         let bytes = report.data.as_bytes();
         self.verify_size(bytes.len() as u64)?;
-        let id = self.queue.enqueue(report.metadata.clone()).await?;
+        let job = Job::Report(report.metadata.clone());
+        let id = self.queue.enqueue(job).await?;
         let file = self.report_file(id);
         if let Err(e) = files::write_bytes(&file, bytes, WriteOptions::OVERWRITE_ATOMIC).await {
             self.queue.ack(id).await;
@@ -143,18 +144,22 @@ where
 
     /// Upload the report queued as `entry`: read its file, then send it. The
     /// future owns what it needs and borrows nothing from `self`, so the
-    /// worker can serve commands while it runs. The metadata is cloned into
-    /// the future, which is cheap: the data is read from disk inside it.
+    /// worker can serve commands while it runs. The job is cloned into the
+    /// future, which is cheap: the data is read from disk inside it.
     pub(crate) fn attempt(
         &self,
         entry: &QueueEntry,
     ) -> impl Future<Output = Result<(), CalibrationsErr>> {
         let sender = self.sender.clone();
         let file = self.report_file(entry.id);
-        let metadata = entry.job.clone();
+        let job = entry.job.clone();
         async move {
-            let data = report::read_data(&file).await?;
-            sender.send(Report { metadata, data }).await
+            match job {
+                Job::Report(metadata) => {
+                    let data = report::read_data(&file).await?;
+                    sender.send(Report { metadata, data }).await
+                }
+            }
         }
     }
 
@@ -178,7 +183,7 @@ where
     /// errors are expected and don't count toward the attempt budget; any
     /// other failure does.
     async fn handle_failure(&mut self, mut entry: QueueEntry, err: CalibrationsErr) {
-        let age = (self.now_fn)() - entry.job.reported_at;
+        let age = (self.now_fn)() - entry.job.queued_at();
         match self.options.retry.on_failure(&err, entry.attempts, age) {
             Verdict::Retry {
                 attempts,
@@ -285,7 +290,7 @@ mod tests {
     use crate::test_utils::calibration_sender::{MockCalibrationSender, Step};
     use crate::test_utils::calibrations::{layout, received_at, report};
     use crate::test_utils::filesys::dirs as test_dirs;
-    use miru_daemon::calibrations::{CalibrationsErr, Queue, QueueSnapshotFile};
+    use miru_daemon::calibrations::{CalibrationsErr, Job, Queue, QueueSnapshotFile};
     use miru_daemon::disk::layout::CalibrationsLayout;
     use miru_daemon::filesys::{dirs, files, File, PathExt, WriteOptions};
     use miru_daemon::queue::{Persistence, RetryPolicy};
@@ -382,7 +387,7 @@ mod tests {
         let mut ids = Vec::with_capacity(slugs.len());
         for slug in slugs {
             let report = report(slug);
-            let id = queue.enqueue(report.metadata).await.unwrap();
+            let id = queue.enqueue(Job::Report(report.metadata)).await.unwrap();
             files::write_string(
                 &f.report_file(id),
                 &report.data,
@@ -506,7 +511,7 @@ mod tests {
 
         let entry = QueueEntry {
             id,
-            job: report("a").metadata,
+            job: Job::Report(report("a").metadata),
             attempts: 0,
             next_attempt_at: None,
         };
@@ -685,7 +690,7 @@ mod tests {
         let mut u = f.uploader().await;
         let entry = QueueEntry {
             id: ids[0],
-            job: report("a").metadata,
+            job: Job::Report(report("a").metadata),
             attempts: 0,
             next_attempt_at: None,
         };
