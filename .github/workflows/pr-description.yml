@@ -1,0 +1,17 @@
+name: PR Description
+
+on:
+  pull_request:
+    branches: [main, "release/*"]
+    types: [opened, edited, synchronize, reopened]
+  # Lets the check be required: the job skips (passes) in the merge queue.
+  merge_group:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  pr-description:
+    # yamllint disable-line rule:line-length
+    uses: mirurobotics/workflows/.github/workflows/pr-description.yml@e229345e90779951b16e29f2d42f32a2a0ad0866
