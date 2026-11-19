@@ -26,7 +26,7 @@ pub struct CalibrationList {
     /// True if there are more items in the list to return. False if there are no more items to return.
     #[serde(rename = "has_more")]
     pub has_more: bool,
-    /// The newest calibration for each component, role and aspect.
+    /// The newest calibration for each component, where a report's `component`, `role` and `aspect` together name one component.
     #[serde(rename = "data")]
     pub data: Vec<models::Calibration>,
 }

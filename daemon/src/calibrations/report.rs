@@ -2,7 +2,6 @@
 use crate::calibrations::errors::{CalibrationsErr, InvalidReportErr};
 use crate::filesys::{files, Dir, File, FileSysErr};
 use crate::models::InstanceFormat;
-use crate::queue;
 use crate::trace;
 use backend_api::models as backend_client;
 
@@ -23,9 +22,9 @@ pub struct Report {
     pub data: String,
 }
 
-/// A queued report's metadata. Everything here is captured at intake, so an
-/// upload hours later still reports the deployment and time the calibration
-/// was taken under.
+/// A report's metadata. Everything but `invalidated_at` is captured at
+/// intake, so an upload hours later still reports the deployment and time the
+/// calibration was taken under.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ReportMetadata {
     /// Minted at intake and sent with every upload, so the control plane
@@ -43,23 +42,28 @@ pub struct ReportMetadata {
     pub serial_number: Option<String>,
     #[serde(default)]
     pub reported_by: Option<String>,
-    /// The deployment active at intake, or `None` when there was none.
     #[serde(default)]
     pub deployment_id: Option<String>,
-    /// When the agent received the calibration.
     pub reported_at: DateTime<Utc>,
+    #[serde(default)]
+    pub invalidated_at: Option<DateTime<Utc>>,
 }
 
-/// A report's component, role and aspect: the store keeps one entry per key.
-pub(crate) type Key<'a> = (&'a str, Option<&'a str>, Option<&'a str>);
-
 impl ReportMetadata {
-    pub(crate) fn key(&self) -> Key<'_> {
-        (
-            self.component.as_str(),
+    /// The component the control plane files this report under: the
+    /// component, role and aspect joined with `-`, skipping missing or empty ones.
+    pub(crate) fn key(&self) -> String {
+        let parts = [
+            Some(self.component.as_str()),
             self.role.as_deref(),
             self.aspect.as_deref(),
-        )
+        ];
+        let parts: Vec<&str> = parts
+            .into_iter()
+            .flatten()
+            .filter(|part| !part.is_empty())
+            .collect();
+        parts.join("-")
     }
 
     /// Whether `self` is for `other`'s key and was reported at the same time
@@ -80,35 +84,19 @@ impl From<backend_client::Calibration> for ReportMetadata {
             serial_number: calibration.serial_number,
             reported_by: calibration.reported_by.flatten().map(|u| u.identifier),
             deployment_id: calibration.deployment_id,
-            reported_at: calibration
-                .reported_at
-                .parse::<DateTime<Utc>>()
-                .unwrap_or_else(|e| {
-                    error!("Error parsing reported_at: {e}");
-                    DateTime::<Utc>::UNIX_EPOCH
-                }),
+            reported_at: parse_time(&calibration.reported_at, "reported_at"),
+            invalidated_at: calibration
+                .invalidated_at
+                .map(|time| parse_time(&time, "invalidated_at")),
         }
     }
 }
 
-impl queue::QueueJob for ReportMetadata {
-    const LABEL: &'static str = "calibration";
-
-    /// A calibration is uploadable the moment it is queued.
-    fn ready_at(&self) -> DateTime<Utc> {
-        DateTime::<Utc>::MIN_UTC
-    }
-
-    fn name(&self) -> String {
-        let mut name = format!("calibration of {}", self.component);
-        if let Some(role) = &self.role {
-            name.push_str(&format!(" (role {role})"));
-        }
-        if let Some(aspect) = &self.aspect {
-            name.push_str(&format!(" (aspect {aspect})"));
-        }
-        format!("{name} received at {}", self.reported_at.to_rfc3339())
-    }
+fn parse_time(value: &str, field: &str) -> DateTime<Utc> {
+    value.parse::<DateTime<Utc>>().unwrap_or_else(|e| {
+        error!("Error parsing {field}: {e}");
+        DateTime::<Utc>::UNIX_EPOCH
+    })
 }
 
 /// The file holding the data of the report queued as `entry_id`.
@@ -141,14 +129,6 @@ fn invalid(reason: &str) -> CalibrationsErr {
         trace: trace!(),
     })
 }
-
-pub type Queue = queue::FileQueue<ReportMetadata>;
-
-pub type QueueEntry = queue::QueueEntry<ReportMetadata>;
-
-pub type QueueSnapshot = queue::QueueSnapshot<ReportMetadata>;
-
-pub type QueueSnapshotFile = queue::QueueSnapshotFile<ReportMetadata>;
 
 #[cfg(test)]
 mod tests {
@@ -201,6 +181,24 @@ mod tests {
                 ..other.clone()
             };
             assert!(!later.is_as_new_as(&arm), "{other:?}");
+        }
+    }
+
+    // ================================ KEY ================================= //
+    #[test]
+    fn key_joins_the_parts_it_has() {
+        let cases = [
+            (reported("arm", None, None), "arm"),
+            (reported("arm", Some("left"), None), "arm-left"),
+            (reported("arm", None, Some("pose")), "arm-pose"),
+            (reported("arm", Some("left"), Some("pose")), "arm-left-pose"),
+            (reported("arm", Some(""), Some("pose")), "arm-pose"),
+            (reported("arm", Some("left"), Some("")), "arm-left"),
+            (reported("", Some("left"), Some("pose")), "left-pose"),
+        ];
+
+        for (metadata, want) in cases {
+            assert_eq!(metadata.key(), want, "{metadata:?}");
         }
     }
 }

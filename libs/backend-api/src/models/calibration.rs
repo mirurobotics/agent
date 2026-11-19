@@ -24,12 +24,6 @@ pub struct Calibration {
     /// ID of the component the calibrated unit belongs to.
     #[serde(rename = "component_id")]
     pub component_id: String,
-    /// ID of the component role the calibrated unit fills; null if no role was reported.
-    #[serde(rename = "role_id", deserialize_with = "Option::deserialize")]
-    pub role_id: Option<String>,
-    /// ID of the component aspect that was calibrated; null if no aspect was reported.
-    #[serde(rename = "aspect_id", deserialize_with = "Option::deserialize")]
-    pub aspect_id: Option<String>,
     /// Serial number of the physical unit that was calibrated, not of the device, such as `SN-1234`, or null if none was reported. Free text, at most 255 characters.
     #[serde(rename = "serial_number", deserialize_with = "Option::deserialize")]
     pub serial_number: Option<String>,
@@ -48,6 +42,12 @@ pub struct Calibration {
     /// Timestamp of when the calibration was reported to the agent on the device. The agent may upload it much later, for example after an outage, so this can be well before `created_at`.
     #[serde(rename = "reported_at")]
     pub reported_at: String,
+    /// Timestamp of when the device marked the calibration invalid, or null if it is valid. Set once and never cleared.
+    #[serde(rename = "invalidated_at", deserialize_with = "Option::deserialize")]
+    pub invalidated_at: Option<String>,
+    /// Why the device marked the calibration invalid, such as `power cycle`, or null if it is valid. Free text, at most 512 characters.
+    #[serde(rename = "invalidation_reason", deserialize_with = "Option::deserialize")]
+    pub invalidation_reason: Option<String>,
     /// Timestamp of when Miru recorded the calibration.
     #[serde(rename = "created_at")]
     pub created_at: String,
@@ -69,20 +69,20 @@ pub struct Calibration {
 
 impl Calibration {
     /// A calibration recorded by Miru.
-    pub fn new(object: Object, id: String, device_id: String, component_id: String, role_id: Option<String>, aspect_id: Option<String>, serial_number: Option<String>, digest: String, deployment_id: Option<String>, reported_by_id: Option<String>, report_id: uuid::Uuid, reported_at: String, created_at: String, component_slug: String, role_slug: Option<String>, aspect_slug: Option<String>, format: models::InstanceFormat) -> Calibration {
+    pub fn new(object: Object, id: String, device_id: String, component_id: String, serial_number: Option<String>, digest: String, deployment_id: Option<String>, reported_by_id: Option<String>, report_id: uuid::Uuid, reported_at: String, invalidated_at: Option<String>, invalidation_reason: Option<String>, created_at: String, component_slug: String, role_slug: Option<String>, aspect_slug: Option<String>, format: models::InstanceFormat) -> Calibration {
         Calibration {
             object,
             id,
             device_id,
             component_id,
-            role_id,
-            aspect_id,
             serial_number,
             digest,
             deployment_id,
             reported_by_id,
             report_id,
             reported_at,
+            invalidated_at,
+            invalidation_reason,
             created_at,
             component_slug,
             role_slug,

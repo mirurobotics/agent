@@ -28,6 +28,7 @@ async fn list_latest_includes_a_created_report() {
         reported_by: Some("Ada Lovelace".to_string()),
         deployment_id: None,
         reported_at: received_at(),
+        invalidated_at: None,
     };
     assert_eq!(latest.unwrap(), [metadata]);
 }
@@ -42,7 +43,7 @@ async fn list_latest_applies_the_filter() {
     };
     let created = f.create(leg).await.unwrap();
     let filter = Filter {
-        component: vec!["leg".to_string()],
+        legacy_component: vec!["leg".to_string()],
         ..Filter::default()
     };
 
