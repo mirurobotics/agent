@@ -6,7 +6,7 @@ use crate::trace;
 // external crates
 use aws_sdk_s3::primitives::{ByteStream, Length};
 
-/// Bytes per read and per frame sent. The SDK's default is 4 KiB.
+/// Bytes per read and per frame sent.
 const READ_SIZE: usize = 32 * 1024;
 
 /// A local file to upload and its size when the upload started. The file is
