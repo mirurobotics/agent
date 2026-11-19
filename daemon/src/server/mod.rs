@@ -3,12 +3,16 @@ use crate::filesys;
 
 pub mod auth;
 pub mod errors;
+pub mod request;
+pub mod response;
 pub mod routes;
+pub mod sse;
 pub mod state;
 pub mod tcp;
 #[cfg(unix)]
 pub mod unix;
 pub mod v02;
+pub mod v03;
 
 pub use self::errors::ServerErr;
 pub use self::state::State;

@@ -30,11 +30,14 @@ pub struct Calibration {
     /// Timestamp of when the agent received the calibration.
     #[serde(rename = "reported_at")]
     pub reported_at: String,
+    /// Timestamp of when a device app marked this calibration invalid, or null if it is valid. A newer calibration for the component replaces it.
+    #[serde(rename = "invalidated_at", deserialize_with = "Option::deserialize")]
+    pub invalidated_at: Option<String>,
 }
 
 impl Calibration {
     /// The newest calibration the device has for one component.
-    pub fn new(object: Object, report_id: uuid::Uuid, component: String, serial_number: Option<String>, reported_by: Option<String>, reported_at: String) -> Calibration {
+    pub fn new(object: Object, report_id: uuid::Uuid, component: String, serial_number: Option<String>, reported_by: Option<String>, reported_at: String, invalidated_at: Option<String>) -> Calibration {
         Calibration {
             object,
             report_id,
@@ -42,6 +45,7 @@ impl Calibration {
             serial_number,
             reported_by,
             reported_at,
+            invalidated_at,
         }
     }
 }

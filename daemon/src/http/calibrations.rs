@@ -8,7 +8,9 @@ use crate::http::{
     query::{Page, QueryParams, MAX_PAGE_LIMIT},
     request, ClientI,
 };
-use backend_api::models::{Calibration, CalibrationList, CreateCalibrationRequest};
+use backend_api::models::{
+    Calibration, CalibrationList, CreateCalibrationRequest, InvalidateCalibrationRequest,
+};
 
 /// Calibration content can be up to 1 MiB, so a request that carries it gets
 /// more time than the default request timeout.
@@ -34,6 +36,11 @@ pub struct ListAllLatestParams<'a> {
 
 pub struct GetContentParams<'a> {
     pub id: &'a str,
+    pub token: &'a str,
+}
+
+pub struct InvalidateParams<'a> {
+    pub payload: &'a InvalidateCalibrationRequest,
     pub token: &'a str,
 }
 
@@ -104,4 +111,14 @@ pub async fn get_content(
         .with_token(params.token);
     let (text, _meta) = client.execute(request).await?;
     Ok(text)
+}
+
+pub async fn invalidate(
+    client: &impl ClientI,
+    params: InvalidateParams<'_>,
+) -> Result<Calibration, HTTPErr> {
+    let url = path::url(client.base_url(), &["calibrations", "invalidate"])?;
+    let request = request::Params::post(&url, request::marshal_json(params.payload)?)
+        .with_token(params.token);
+    super::client::fetch(client, request).await
 }
