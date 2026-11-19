@@ -13,12 +13,12 @@ pub struct SystemInfo {
 }
 
 impl SystemInfo {
-    pub fn new() -> Self {
+    pub fn new() -> Result<Self, sysinfo::Error> {
         // create a new system
-        let sys = System::new_all();
+        let sys = System::new_all()?;
 
         // gather system info
-        SystemInfo {
+        Ok(SystemInfo {
             host_name: Self::host_name(),
             arch: Self::arch(),
             os: Self::os(),
@@ -26,7 +26,7 @@ impl SystemInfo {
             tot_mem: sys.total_memory(),
             tot_swap: sys.total_swap(),
             system: sys,
-        }
+        })
     }
 
     pub fn host_name() -> String {

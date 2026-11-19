@@ -3,7 +3,7 @@ use miru_daemon::telemetry::SystemInfo;
 
 #[test]
 fn test_system_info_new() {
-    let info = SystemInfo::new();
+    let info = SystemInfo::new().unwrap();
     assert!(!info.host_name.is_empty(), "host_name should not be empty");
     assert!(!info.arch.is_empty(), "arch should not be empty");
     assert!(!info.os.is_empty(), "os should not be empty");
@@ -40,7 +40,7 @@ fn test_kernel_version_returns_stable_string() {
 
 #[test]
 fn test_memory_methods() {
-    let info = SystemInfo::new();
+    let info = SystemInfo::new().unwrap();
     assert!(
         info.free_mem() <= info.tot_mem,
         "free_mem should be <= tot_mem"
