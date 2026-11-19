@@ -10,7 +10,7 @@ members = [
 [workspace.package]
 edition = "2021"
 homepage = "https://mirurobotics.com"
-rust-version = "1.93.0"
+rust-version = "1.93.1"
 version = "0.13.0"
 
 [workspace.metadata]
