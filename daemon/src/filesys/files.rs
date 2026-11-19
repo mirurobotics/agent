@@ -1,4 +1,5 @@
 // standard crates
+use std::fmt::Write as _;
 use std::io::Write;
 use std::time::{Duration, SystemTime};
 
@@ -67,8 +68,12 @@ pub async fn sha256_and_crc32c(file: &File) -> Result<(String, u32), FileSysErr>
 }
 
 fn format_sha256(digest: &[u8]) -> String {
-    let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
-    format!("sha256:{hex}")
+    let mut out = String::with_capacity("sha256:".len() + digest.len() * 2);
+    out.push_str("sha256:");
+    for b in digest {
+        let _ = write!(out, "{b:02x}");
+    }
+    out
 }
 
 /// Reads `file` through a fixed 8 KiB buffer, passing each chunk to `on_chunk`.
