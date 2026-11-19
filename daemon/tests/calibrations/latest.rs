@@ -1,8 +1,9 @@
 //! The latest calibrations store: its keys and capacity, write order, merging,
-//! listing, content, the prune when its worker starts, and shutdown.
+//! listing, content, invalidation, the prune when its worker starts, and
+//! shutdown.
 
 // internal crates
-use crate::test_utils::calibrations::{latest_cals_layout, latest_store, reported};
+use crate::test_utils::calibrations::{latest_cals_layout, latest_store, received_at, reported};
 use crate::test_utils::filesys::dirs as test_dirs;
 use miru_daemon::calibrations::{
     latest, CalibrationsErr, Filter, LatestStore, Report, ReportMetadata,
@@ -95,6 +96,26 @@ impl Fixture {
             .await
             .unwrap();
     }
+
+    /// Write an index holding `arm` with role `left` and, a second later,
+    /// `arm-left`, with both contents, as an agent that keyed the store by
+    /// component, role and aspect could have left them. Returns the two.
+    async fn write_duplicate_keys(&self) -> (ReportMetadata, ReportMetadata) {
+        let split = reported("arm", Some("left"), None);
+        let joined = ReportMetadata {
+            component: "arm-left".to_string(),
+            role: None,
+            ..reported_after(&split, 1)
+        };
+        let index = serde_json::json!({ "entries": [split, joined] });
+        files::write_json(&self.layout.index(), &index, WriteOptions::OVERWRITE_ATOMIC)
+            .await
+            .unwrap();
+        for report_id in [split.report_id, joined.report_id] {
+            self.write_orphan(report_id).await;
+        }
+        (split, joined)
+    }
 }
 
 /// A newer report for `metadata`'s key, with a fresh `report_id` as intake
@@ -150,6 +171,27 @@ async fn spawn_keeps_the_contents_when_the_index_is_corrupt() {
     f.reopen().await;
 
     assert_eq!(f.content_ids().await, [orphan]);
+}
+
+#[tokio::test]
+async fn spawn_keeps_an_older_splits_content_until_a_put_drops_it() {
+    let f = Fixture::new().await;
+    let (split, joined) = f.write_duplicate_keys().await;
+
+    f.reopen().await;
+
+    assert_eq!(f.entries().await, std::slice::from_ref(&joined));
+    let mut both = [split.report_id, joined.report_id];
+    both.sort();
+    assert_eq!(f.content_ids().await, both);
+
+    let leg = reported("leg", None, None);
+    put_all(&f.store, &[&leg]).await;
+    f.reopen().await;
+
+    let mut kept = [joined.report_id, leg.report_id];
+    kept.sort();
+    assert_eq!(f.content_ids().await, kept);
 }
 
 // =============================== CAPACITY =============================== //
@@ -213,6 +255,23 @@ async fn put_replaces_the_keys_entry_and_deletes_its_content() {
 }
 
 #[tokio::test]
+async fn put_replaces_the_entry_of_another_split_of_its_key() {
+    let f = Fixture::new().await;
+    let split = reported("arm", Some("left"), None);
+    let joined = ReportMetadata {
+        component: "arm-left".to_string(),
+        role: None,
+        ..newer(&split)
+    };
+    put_all(&f.store, &[&split]).await;
+
+    f.store.put(joined.clone(), DATA).await.unwrap();
+
+    assert_eq!(f.entries().await, std::slice::from_ref(&joined));
+    assert_eq!(f.content_ids().await, [joined.report_id]);
+}
+
+#[tokio::test]
 async fn putting_the_same_report_again_keeps_its_content() {
     let f = Fixture::new().await;
     let arm = reported("arm", None, None);
@@ -232,8 +291,8 @@ async fn role_and_aspect_are_part_of_the_key() {
 
     put_all(&f.store, &[&bare, &with_role, &with_aspect]).await;
 
-    // in key order, a missing slug first
-    assert_eq!(f.entries().await, [bare, with_aspect, with_role]);
+    // in key order: `arm`, `arm-left`, `arm-pose`
+    assert_eq!(f.entries().await, [bare, with_role, with_aspect]);
 }
 
 #[tokio::test]
@@ -322,6 +381,23 @@ async fn put_if_newer_keeps_an_entry_reported_at_the_same_time_or_later() {
 }
 
 #[tokio::test]
+async fn put_if_newer_keeps_a_newer_entry_of_another_split() {
+    let f = Fixture::new().await;
+    let split = reported("arm", Some("left"), None);
+    let joined = ReportMetadata {
+        component: "arm-left".to_string(),
+        role: None,
+        ..reported_after(&split, 1)
+    };
+    put_all(&f.store, &[&joined]).await;
+
+    assert!(!f.store.put_if_newer(split, DATA).await.unwrap());
+
+    assert_eq!(f.entries().await, std::slice::from_ref(&joined));
+    assert_eq!(f.content_ids().await, [joined.report_id]);
+}
+
+#[tokio::test]
 async fn put_if_newer_rejects_a_new_key_at_capacity() {
     let f = Fixture::with_capacity(1).await;
     let arm = reported("arm", None, None);
@@ -357,15 +433,16 @@ async fn put_if_newer_checks_and_puts_in_one_command() {
 
 // ================================= LIST ================================= //
 #[tokio::test]
-async fn list_sorts_by_component_then_role_then_aspect() {
+async fn list_sorts_by_key() {
     let f = Fixture::new().await;
-    // in sorted order, where a missing role or aspect sorts first
+    // in key order: `arm`, `arm-left`, `arm-left-offset`, `arm-left-pose`,
+    // `arm-pose`, `arm-right`, `leg`
     let sorted = [
         reported("arm", None, None),
-        reported("arm", None, Some("pose")),
         reported("arm", Some("left"), None),
         reported("arm", Some("left"), Some("offset")),
         reported("arm", Some("left"), Some("pose")),
+        reported("arm", None, Some("pose")),
         reported("arm", Some("right"), None),
         reported("leg", None, None),
     ];
@@ -403,9 +480,10 @@ async fn list_filters_by_component_role_and_aspect() {
     let cases = [
         (
             Filter {
-                component: vec!["arm".to_string(), "wrist".to_string()],
+                legacy_component: vec!["arm".to_string(), "wrist".to_string()],
                 role: vec![Some("left".to_string())],
                 aspect: vec![Some("pose".to_string())],
+                component: vec![],
             },
             &matched,
         ),
@@ -421,6 +499,24 @@ async fn list_filters_by_component_role_and_aspect() {
     ];
 
     for (filter, want) in cases {
+        let entries = f.store.list(&filter).await.unwrap();
+        assert_eq!(entries, std::slice::from_ref(want), "{filter:?}");
+    }
+}
+
+#[tokio::test]
+async fn list_filters_by_component() {
+    let f = Fixture::new().await;
+    let bare = reported("arm", None, None);
+    let with_role = reported("arm", Some("left"), None);
+    put_all(&f.store, &[&bare, &with_role]).await;
+    let cases = [("arm-left", &with_role), ("arm", &bare)];
+
+    for (key, want) in cases {
+        let filter = Filter {
+            component: vec![key.to_string()],
+            ..Filter::default()
+        };
         let entries = f.store.list(&filter).await.unwrap();
         assert_eq!(entries, std::slice::from_ref(want), "{filter:?}");
     }
@@ -476,6 +572,84 @@ async fn get_is_not_found_when_its_content_file_is_missing() {
     assert!(matches!(err, CalibrationsErr::NotFoundErr(_)), "{err:?}");
 }
 
+// ============================== INVALIDATE ============================== //
+#[tokio::test]
+async fn invalidate_marks_the_entry_and_returns_it() {
+    let f = Fixture::new().await;
+    let arm = reported("arm", None, None);
+    put_all(&f.store, &[&arm]).await;
+    let invalidated_at = received_at() + TimeDelta::hours(1);
+
+    let invalidated = f
+        .store
+        .invalidate(arm.report_id, invalidated_at)
+        .await
+        .unwrap();
+
+    let expected = ReportMetadata {
+        invalidated_at: Some(invalidated_at),
+        ..arm
+    };
+    assert_eq!(invalidated, expected);
+    assert_eq!(
+        f.reopen().await.list(&Filter::default()).await.unwrap(),
+        [expected]
+    );
+}
+
+#[tokio::test]
+async fn invalidate_keeps_the_first_invalidation() {
+    let f = Fixture::new().await;
+    let arm = reported("arm", None, None);
+    put_all(&f.store, &[&arm]).await;
+    let first = f
+        .store
+        .invalidate(arm.report_id, received_at())
+        .await
+        .unwrap();
+
+    let second = f
+        .store
+        .invalidate(arm.report_id, received_at() + TimeDelta::hours(1))
+        .await
+        .unwrap();
+
+    assert_eq!(second, first);
+    assert_eq!(f.entries().await, [first]);
+}
+
+#[tokio::test]
+async fn invalidate_is_not_found_for_a_replaced_or_unknown_report() {
+    let f = Fixture::new().await;
+    let arm = reported("arm", None, None);
+    put_all(&f.store, &[&arm, &newer(&arm)]).await;
+
+    for report_id in [arm.report_id, Uuid::new_v4()] {
+        let err = f
+            .store
+            .invalidate(report_id, received_at())
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CalibrationsErr::NotFoundErr(_)), "{err:?}");
+    }
+}
+
+#[tokio::test]
+async fn a_newer_report_replaces_an_invalidated_entry() {
+    let f = Fixture::new().await;
+    let arm = reported("arm", None, None);
+    put_all(&f.store, &[&arm]).await;
+    f.store
+        .invalidate(arm.report_id, received_at())
+        .await
+        .unwrap();
+    let replacement = newer(&arm);
+
+    put_all(&f.store, &[&replacement]).await;
+
+    assert_eq!(f.entries().await, [replacement]);
+}
+
 // ================================ ERRORS ================================ //
 #[tokio::test]
 async fn a_corrupt_index_fails_every_call() {
@@ -489,6 +663,10 @@ async fn a_corrupt_index_fails_every_call() {
         f.store.put_if_newer(arm.clone(), DATA).await.unwrap_err(),
         f.store.list(&Filter::default()).await.unwrap_err(),
         f.store.get(arm.report_id).await.unwrap_err(),
+        f.store
+            .invalidate(arm.report_id, received_at())
+            .await
+            .unwrap_err(),
     ];
 
     for err in errs {

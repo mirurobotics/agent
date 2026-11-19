@@ -17,10 +17,10 @@ pub struct CreateCalibrationRequest {
     /// ID of the deployment the device is on. Omitted if the device is on no deployment.
     #[serde(rename = "deployment_id", skip_serializing_if = "Option::is_none")]
     pub deployment_id: Option<String>,
-    /// Slug of the component the calibrated unit belongs to, such as `arm`. Miru resolves it to the component, creating the component the first time it is reported.
+    /// Slug of the calibrated unit's component, such as `arm`, kept on the calibration as reported. Miru joins it with `role` and `aspect` into the slug of the component the calibration belongs to.
     #[serde(rename = "component")]
     pub component: String,
-    /// Slug of the role the calibrated unit fills on the device, such as `left` or `front-left`. Distinguishes several units of one component on a device. Validated like a slug; `null` is reserved. Miru resolves it to one of the component's `roles`, creating the role the first time it is reported.
+    /// Slug of the role the calibrated unit fills on the device, such as `left` or `front-left`. Distinguishes several units of one component on a device. Validated like a slug; `null` is reserved. Miru joins it after `component` with `-` (`meca500` and `aligner-1` give `meca500-aligner-1`) and keeps it on the calibration as reported.
     #[serde(rename = "role", skip_serializing_if = "Option::is_none")]
     pub role: Option<String>,
     /// Serial number of the physical unit that was calibrated, not of the device, such as `SN-1234`. Free text, at most 255 characters.
@@ -29,7 +29,7 @@ pub struct CreateCalibrationRequest {
     /// Who reported the calibration, as the device named them, such as `Benjamin Smidt`. Free text, at most 255 characters.
     #[serde(rename = "reported_by", skip_serializing_if = "Option::is_none")]
     pub reported_by: Option<String>,
-    /// Slug of the aspect of the unit that was calibrated, when it has more than one, e.g. `intrinsics` vs `extrinsics`, or `pose` vs `joint-offsets`. Validated like a slug; `null` is reserved. Miru resolves it to one of the component's `aspects`, creating the aspect the first time it is reported.
+    /// Slug of the aspect of the unit that was calibrated, when it has more than one, e.g. `intrinsics` vs `extrinsics`, or `pose` vs `joint-offsets`. Validated like a slug; `null` is reserved. Miru joins it after `component` and `role` with `-` (`optic-flipper` and `pose` give `optic-flipper-pose`) and keeps it on the calibration as reported.
     #[serde(rename = "aspect", skip_serializing_if = "Option::is_none")]
     pub aspect: Option<String>,
     /// The calibration's content, at most 1 MiB.

@@ -22,27 +22,27 @@ pub struct Device {
     pub name: String,
     #[serde(rename = "status")]
     pub status: models::DeviceStatus,
-    /// Timestamp of when the device was last synced.
-    #[serde(rename = "last_synced_at")]
-    pub last_synced_at: String,
-    /// Timestamp of the last successful connection event with the backend.
-    #[serde(rename = "last_connected_at")]
-    pub last_connected_at: String,
-    /// Timestamp of the last successful disconnection event with the backend.
-    #[serde(rename = "last_disconnected_at")]
-    pub last_disconnected_at: String,
+    /// Seconds since the device last synced, as measured by the agent when it built this response, or null if it hasn't synced since the agent last started.
+    #[serde(rename = "last_synced_secs_ago", deserialize_with = "Option::deserialize")]
+    pub last_synced_secs_ago: Option<i64>,
+    /// Seconds since the device last connected to the backend, as measured by the agent when it built this response, or null if it hasn't connected since the agent last started.
+    #[serde(rename = "last_connected_secs_ago", deserialize_with = "Option::deserialize")]
+    pub last_connected_secs_ago: Option<i64>,
+    /// Seconds since the device last disconnected from the backend, as measured by the agent when it built this response, or null if it hasn't disconnected since the agent last started.
+    #[serde(rename = "last_disconnected_secs_ago", deserialize_with = "Option::deserialize")]
+    pub last_disconnected_secs_ago: Option<i64>,
 }
 
 impl Device {
-    pub fn new(object: Object, id: String, name: String, status: models::DeviceStatus, last_synced_at: String, last_connected_at: String, last_disconnected_at: String) -> Device {
+    pub fn new(object: Object, id: String, name: String, status: models::DeviceStatus, last_synced_secs_ago: Option<i64>, last_connected_secs_ago: Option<i64>, last_disconnected_secs_ago: Option<i64>) -> Device {
         Device {
             object,
             id,
             name,
             status,
-            last_synced_at,
-            last_connected_at,
-            last_disconnected_at,
+            last_synced_secs_ago,
+            last_connected_secs_ago,
+            last_disconnected_secs_ago,
         }
     }
 }

@@ -2,6 +2,7 @@
 use crate::cache;
 use crate::calibrations::CalibrationsErr;
 use crate::disk::DiskErr;
+use crate::errors::{Code, HTTPCode, Trace};
 use crate::events;
 use crate::filesys;
 use crate::http;
@@ -17,6 +18,44 @@ pub struct FileRulesNotExpandedErr {
 }
 
 impl crate::errors::Error for FileRulesNotExpandedErr {}
+
+/// An invalidation's reason is blank or longer than the control plane
+/// accepts: 422 `invalid_request`.
+#[derive(Debug, thiserror::Error)]
+#[error("an invalidation reason must not be blank or over {max_chars} characters")]
+pub struct InvalidReasonErr {
+    pub max_chars: usize,
+    pub trace: Box<Trace>,
+}
+
+impl crate::errors::Error for InvalidReasonErr {
+    fn code(&self) -> Code {
+        Code::InvalidRequest
+    }
+
+    fn http_status(&self) -> HTTPCode {
+        HTTPCode::UNPROCESSABLE_ENTITY
+    }
+}
+
+/// The component has no latest calibration, or `report_id` is not its latest:
+/// 404 `resource_not_found`.
+#[derive(Debug, thiserror::Error)]
+#[error("no latest calibration of {component} matches")]
+pub struct LatestCalibrationNotFoundErr {
+    pub component: String,
+    pub trace: Box<Trace>,
+}
+
+impl crate::errors::Error for LatestCalibrationNotFoundErr {
+    fn code(&self) -> Code {
+        Code::ResourceNotFound
+    }
+
+    fn http_status(&self) -> HTTPCode {
+        HTTPCode::NOT_FOUND
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum ServiceErr {
@@ -38,6 +77,10 @@ pub enum ServiceErr {
     FileRulesNotExpanded(FileRulesNotExpandedErr),
     #[error(transparent)]
     CalibrationsErr(CalibrationsErr),
+    #[error(transparent)]
+    InvalidReasonErr(InvalidReasonErr),
+    #[error(transparent)]
+    LatestCalibrationNotFoundErr(LatestCalibrationNotFoundErr),
 }
 
 impl From<cache::CacheErr> for ServiceErr {
@@ -94,6 +137,18 @@ impl From<CalibrationsErr> for ServiceErr {
     }
 }
 
+impl From<InvalidReasonErr> for ServiceErr {
+    fn from(e: InvalidReasonErr) -> Self {
+        Self::InvalidReasonErr(e)
+    }
+}
+
+impl From<LatestCalibrationNotFoundErr> for ServiceErr {
+    fn from(e: LatestCalibrationNotFoundErr) -> Self {
+        Self::LatestCalibrationNotFoundErr(e)
+    }
+}
+
 crate::impl_error!(ServiceErr {
     CacheErr,
     EventsErr,
@@ -104,4 +159,6 @@ crate::impl_error!(ServiceErr {
     SyncErr,
     FileRulesNotExpanded,
     CalibrationsErr,
+    InvalidReasonErr,
+    LatestCalibrationNotFoundErr,
 });

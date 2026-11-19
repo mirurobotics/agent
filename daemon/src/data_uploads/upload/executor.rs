@@ -238,7 +238,6 @@ where
         }),
         digest: job.digest.clone(),
         size: i64::try_from(job.size).unwrap_or(i64::MAX),
-        incomplete: None,
         deployment_id: job.deployment_id.clone(),
     }
 }
