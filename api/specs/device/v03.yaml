@@ -11,17 +11,16 @@ info:
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
-  x-release-version: v0.3.0-next
+  x-release-version: v0.3.0
   x-git-commit:
-    sha: 36f589410c2088909607a1f68ccde69ccabb8fc0
-    url: https://github.com/mirurobotics/openapi/commit/36f589410c2088909607a1f68ccde69ccabb8fc0
-    message: 'refactor(calibrations)!: flatten components, remove roles and aspects
-      (#470)'
+    sha: 13ce9431f6c8183218bb62bcfe1d025852c08de6
+    url: https://github.com/mirurobotics/openapi/commit/13ce9431f6c8183218bb62bcfe1d025852c08de6
+    message: 'chore(device): bump the Device API version (#518)'
     author: Ben's Agent
-    branch: main
+    branch: HEAD
     dirty: false
   x-build:
-    built_at: '2026-11-16T02:23:07.828510+00:00'
+    built_at: '2026-11-17T04:03:18.344137+00:00'
 servers:
 - url: http://localhost/v0.3
   description: localhost
@@ -57,6 +56,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/VersionResponse'
+  /sync:
+    post:
+      tags:
+      - Agent
+      summary: Sync
+      description: Manually force a device sync with the edits made in the dashboard.
+      operationId: sync
+      responses:
+        '200':
+          description: Successfully synced the device.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncResponse'
   /calibrations:
     post:
       tags:
@@ -100,7 +113,6 @@ paths:
       summary: Download Latest
       operationId: getLatestCalibrationContent
       description: Download the content of a latest calibration by its report ID.
-        An older report returns 404.
       parameters:
       - $ref: '#/components/parameters/report_id'
       responses:
@@ -121,6 +133,28 @@ paths:
                 type: string
                 format: binary
                 description: The raw calibration content, exactly as it was reported.
+  /calibrations/latest/invalidate:
+    post:
+      tags:
+      - Calibrations
+      summary: Invalidate Latest
+      operationId: invalidateLatestCalibration
+      description: Mark a component's latest calibration invalid.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InvalidateCalibrationRequest'
+      responses:
+        '200':
+          description: The agent marked the calibration invalid and will upload the
+            invalidation to Miru. If the calibration is already invalid, the agent
+            returns it unchanged.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Calibration'
   /deployments/{deployment_id}:
     get:
       tags:
@@ -165,20 +199,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Device'
-  /device/sync:
-    post:
-      tags:
-      - Device
-      summary: Sync
-      description: Manually force a device sync with the edits made in the dashboard.
-      operationId: syncDevice
-      responses:
-        '200':
-          description: Successfully synced the device.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SyncDeviceResponse'
   /file_rules/{file_rule_id}:
     get:
       tags:
@@ -320,14 +340,14 @@ components:
     ReleaseVersion:
       type: string
       enum:
-      - v0.3.0-next
+      - v0.3.0
       x-enum-varnames:
       - RELEASE_VERSION
       x-stainless-const: true
     APIGitCommit:
       type: string
       enum:
-      - 36f589410c2088909607a1f68ccde69ccabb8fc0
+      - 13ce9431f6c8183218bb62bcfe1d025852c08de6
       x-enum-varnames:
       - API_GIT_COMMIT
       x-stainless-const: true
@@ -475,7 +495,7 @@ components:
         api_release_version:
           type: string
           description: The API release version of the agent.
-          example: v0.3.0-next
+          example: v0.3.0
         rust_version:
           type: string
           description: The version of Rust.
@@ -498,11 +518,74 @@ components:
         git_commit: a1b2c3d4
         api_version: v0.3
         api_git_commit: a1b2c3d4
-        api_release_version: v0.3.0-next
+        api_release_version: v0.3.0
         rust_version: 1.93.0
         build_date: '2026-02-24T10:30:00Z'
         os: linux
         arch: aarch64
+    SyncResult:
+      type: string
+      description: The result of attempting to sync the device.
+      enum:
+      - success
+      - network_connection_error
+      - in_cooldown
+      x-enum-varnames:
+      - SYNC_RESULT_SUCCESS
+      - SYNC_RESULT_NETWORK_CONNECTION_ERROR
+      - SYNC_RESULT_IN_COOLDOWN
+    SyncResponse:
+      title: Sync Response
+      type: object
+      required:
+      - code
+      - message
+      - last_synced_secs_ago
+      - last_attempted_sync_secs_ago
+      - in_cooldown
+      - cooldown_ends_in_secs
+      properties:
+        code:
+          $ref: '#/components/schemas/SyncResult'
+        message:
+          type: string
+          example: The device is in cooldown and can sync again in 25 seconds.
+          description: The message of the result.
+        last_synced_secs_ago:
+          type: integer
+          format: int64
+          minimum: 0
+          nullable: true
+          example: 120
+          description: Seconds since the device last synced, as measured by the agent
+            when it built this response, or null if it hasn't synced since the agent
+            last started.
+        last_attempted_sync_secs_ago:
+          type: integer
+          format: int64
+          minimum: 0
+          example: 5
+          description: Seconds since the device last *attempted* to sync, as measured
+            by the agent when it built this response.
+        in_cooldown:
+          type: boolean
+          example: true
+          description: Whether the device is currently in cooldown.
+        cooldown_ends_in_secs:
+          type: integer
+          format: int64
+          minimum: 0
+          example: 25
+          description: Seconds until the cooldown ends, rounded up, as measured by
+            the agent when it built this response. `0` exactly when `in_cooldown`
+            is false.
+      example:
+        code: in_cooldown
+        message: The device is in cooldown and can sync again in 25 seconds.
+        last_synced_secs_ago: 120
+        last_attempted_sync_secs_ago: 5
+        in_cooldown: true
+        cooldown_ends_in_secs: 25
     InstanceFormat:
       title: Instance Format
       type: string
@@ -619,6 +702,7 @@ components:
       - serial_number
       - reported_by
       - reported_at
+      - invalidated_at
       properties:
         object:
           type: string
@@ -657,6 +741,14 @@ components:
           format: date-time
           example: '2026-03-10T12:00:00Z'
           description: Timestamp of when the agent received the calibration.
+        invalidated_at:
+          type: string
+          format: date-time
+          nullable: true
+          example: '2026-03-11T08:00:00Z'
+          description: Timestamp of when a device app marked this calibration invalid,
+            or null if it is valid. A newer calibration for the component replaces
+            it.
       example:
         object: calibration
         report_id: 0b6f3c2e-6a51-4e0f-9a43-2f1d7c9e8b10
@@ -664,6 +756,7 @@ components:
         serial_number: SN-1234
         reported_by: Benjamin Smidt
         reported_at: '2026-03-10T12:00:00Z'
+        invalidated_at: null
     LatestCalibrationsResponse:
       title: Latest Calibrations Response
       type: object
@@ -683,6 +776,33 @@ components:
           serial_number: SN-1234
           reported_by: Benjamin Smidt
           reported_at: '2026-03-10T12:00:00Z'
+          invalidated_at: null
+    InvalidateCalibrationRequest:
+      title: Invalidate Calibration Request
+      type: object
+      required:
+      - component
+      - reason
+      properties:
+        component:
+          type: string
+          example: arm
+          description: Slug of the component whose latest calibration to invalidate,
+            such as `arm`.
+        report_id:
+          type: string
+          format: uuid
+          example: 0b6f3c2e-6a51-4e0f-9a43-2f1d7c9e8b10
+          description: Report ID of the calibration the caller expects to be `component`'s
+            latest. If it is not `component`'s current latest calibration, the agent
+            invalidates nothing. Leave it out to invalidate whatever is latest.
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 512
+          example: power cycle
+          description: Why the calibration is no longer valid, such as `power cycle`.
+            Free text, at most 512 characters, and not blank.
     DeploymentStatus:
       type: string
       description: 'This status merges the ''activity_status'' and ''error_status''
@@ -886,9 +1006,9 @@ components:
       - id
       - name
       - status
-      - last_synced_at
-      - last_connected_at
-      - last_disconnected_at
+      - last_synced_secs_ago
+      - last_connected_secs_ago
+      - last_disconnected_secs_ago
       properties:
         object:
           type: string
@@ -907,85 +1027,41 @@ components:
           description: Name of the device.
         status:
           $ref: '#/components/schemas/DeviceStatus'
-        last_synced_at:
-          type: string
-          format: date-time
-          example: '2021-01-01T00:00:00Z'
-          description: Timestamp of when the device was last synced.
-        last_connected_at:
-          type: string
-          format: date-time
-          example: '2021-01-01T00:00:00Z'
-          description: Timestamp of the last successful connection event with the
-            backend.
-        last_disconnected_at:
-          type: string
-          format: date-time
-          example: '2021-01-01T00:00:00Z'
-          description: Timestamp of the last successful disconnection event with the
-            backend.
+        last_synced_secs_ago:
+          type: integer
+          format: int64
+          minimum: 0
+          nullable: true
+          example: 42
+          description: Seconds since the device last synced, as measured by the agent
+            when it built this response, or null if it hasn't synced since the agent
+            last started.
+        last_connected_secs_ago:
+          type: integer
+          format: int64
+          minimum: 0
+          nullable: true
+          example: 3600
+          description: Seconds since the device last connected to the backend, as
+            measured by the agent when it built this response, or null if it hasn't
+            connected since the agent last started.
+        last_disconnected_secs_ago:
+          type: integer
+          format: int64
+          minimum: 0
+          nullable: true
+          example: 3605
+          description: Seconds since the device last disconnected from the backend,
+            as measured by the agent when it built this response, or null if it hasn't
+            disconnected since the agent last started.
       example:
         object: device
         id: dvc_123
         name: My Device
         status: online
-        last_synced_at: '2021-01-01T00:00:00Z'
-        last_connected_at: '2021-01-01T00:00:00Z'
-        last_disconnected_at: '2021-01-01T00:00:00Z'
-    SyncDeviceResult:
-      type: string
-      description: The result of attempting to sync the device.
-      enum:
-      - success
-      - network_connection_error
-      - in_cooldown
-      x-enum-varnames:
-      - SYNC_DEVICE_RESULT_SUCCESS
-      - SYNC_DEVICE_RESULT_NETWORK_CONNECTION_ERROR
-      - SYNC_DEVICE_RESULT_IN_COOLDOWN
-    SyncDeviceResponse:
-      title: Sync Device Response
-      type: object
-      required:
-      - code
-      - message
-      - last_synced_at
-      - last_attempted_sync_at
-      - in_cooldown
-      - cooldown_ends_at
-      properties:
-        code:
-          $ref: '#/components/schemas/SyncDeviceResult'
-        message:
-          type: string
-          example: Device is not connected to the backend.
-          description: The message of the result.
-        last_synced_at:
-          type: string
-          format: date-time
-          example: '2021-01-01T00:00:00Z'
-          description: Timestamp of when the device was last synced.
-        last_attempted_sync_at:
-          type: string
-          format: date-time
-          example: '2021-01-01T00:00:00Z'
-          description: Timestamp of when the last *attempted* sync occurred.
-        in_cooldown:
-          type: boolean
-          example: true
-          description: Whether the device is currently in cooldown.
-        cooldown_ends_at:
-          type: string
-          format: date-time
-          example: '2021-01-01T00:00:00Z'
-          description: Timestamp of when the cooldown will end.
-      example:
-        code: in_cooldown
-        message: Device is not connected to the backend.
-        last_synced_at: '2021-01-01T00:00:00Z'
-        last_attempted_sync_at: '2021-01-01T00:00:00Z'
-        in_cooldown: true
-        cooldown_ends_at: '2021-01-01T00:00:00Z'
+        last_synced_secs_ago: 42
+        last_connected_secs_ago: 3600
+        last_disconnected_secs_ago: 3605
     OS:
       title: OS
       type: string
