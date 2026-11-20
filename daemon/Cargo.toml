@@ -31,6 +31,7 @@ http = { workspace = true }
 md5 = { workspace = true }
 backend-api = { workspace = true }
 device-api-v02 = { workspace = true }
+device-api-v03 = { workspace = true }
 pem-rfc7468 = { workspace = true }
 reqwest = { workspace = true }
 rumqttc = { workspace = true }

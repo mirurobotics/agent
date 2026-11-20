@@ -1,7 +1,8 @@
 # Dockerfile - Build the Miru Daemon using the pinned builder image
 #
 # The builder image is pinned here by digest, because its tag can be re-pushed.
-# When Dockerfile.builder changes, update both the tag and the digest.
+# To repin after a Dockerfile.builder change merges, copy the reference from the
+# summary of the Builder Image run on main, not a tag picked from the registry.
 # See Dockerfile.builder for the toolchain definition.
 #
 # Targets:
