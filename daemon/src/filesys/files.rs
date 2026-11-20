@@ -1,4 +1,5 @@
 // standard crates
+use std::fmt::Write as _;
 use std::io::Write;
 use std::time::{Duration, SystemTime};
 
@@ -49,8 +50,7 @@ pub async fn read_bytes(file: &File) -> Result<Vec<u8>, FileSysErr> {
 pub async fn sha256(file: &File) -> Result<String, FileSysErr> {
     let mut hasher = Sha256::new();
     read_chunks(file, |chunk| hasher.update(chunk)).await?;
-    let digest = hasher.finalize();
-    Ok(format!("sha256:{digest:x}"))
+    Ok(format_sha256(&hasher.finalize()))
 }
 
 /// Computes `file`'s [`sha256`] digest and its CRC32C (Castagnoli) checksum in
@@ -63,9 +63,17 @@ pub async fn sha256_and_crc32c(file: &File) -> Result<(String, u32), FileSysErr>
         crc32c.update(chunk);
     })
     .await?;
-    let digest = hasher.finalize();
     // CRC-32 values fit in the low 32 bits of crc-fast's u64
-    Ok((format!("sha256:{digest:x}"), crc32c.finalize() as u32))
+    Ok((format_sha256(&hasher.finalize()), crc32c.finalize() as u32))
+}
+
+fn format_sha256(digest: &[u8]) -> String {
+    let mut out = String::with_capacity("sha256:".len() + digest.len() * 2);
+    out.push_str("sha256:");
+    for b in digest {
+        let _ = write!(out, "{b:02x}");
+    }
+    out
 }
 
 /// Reads `file` through a fixed 8 KiB buffer, passing each chunk to `on_chunk`.
