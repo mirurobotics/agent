@@ -5,10 +5,12 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use crate::mocks::http_client::{self as mock, Call, CapturedRequest, MockClient};
 use backend_api::models::{
     Calibration, CalibrationList, CreateCalibrationRequest, InstanceContent, InstanceFormat,
+    InvalidateCalibrationRequest,
 };
 use miru_daemon::errors::Error;
 use miru_daemon::http::calibrations::{
-    self, CreateParams, GetContentParams, ListAllLatestParams, ListLatestParams, CONTENT_TIMEOUT,
+    self, CreateParams, GetContentParams, InvalidateParams, ListAllLatestParams, ListLatestParams,
+    CONTENT_TIMEOUT,
 };
 use miru_daemon::http::errors::MockErr;
 use miru_daemon::http::query::Page;
@@ -415,5 +417,61 @@ pub mod get_content {
         assert_eq!(timeout.request.timeout, CONTENT_TIMEOUT);
         assert!(start.elapsed() >= CONTENT_TIMEOUT);
         assert!(err.is_network_conn_err());
+    }
+}
+
+pub mod invalidate {
+    use super::*;
+
+    fn payload() -> InvalidateCalibrationRequest {
+        InvalidateCalibrationRequest {
+            report_id: report_id(),
+            invalidated_at: "2026-10-20T12:00:00Z".to_string(),
+            reason: "sensor was bumped".to_string(),
+        }
+    }
+
+    async fn invalidate(client: &impl http::ClientI) -> Result<Calibration, HTTPErr> {
+        let payload = payload();
+        calibrations::invalidate(
+            client,
+            InvalidateParams {
+                payload: &payload,
+                token: "test-token",
+            },
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn success() {
+        let mock = MockClient::default();
+        mock.set_invalidate_calibration(|| Ok(calibration()));
+
+        let result = invalidate(&mock).await.unwrap();
+
+        assert_eq!(result, calibration());
+        assert_eq!(
+            mock.requests(),
+            vec![CapturedRequest {
+                call: Call::InvalidateCalibration,
+                method: reqwest::Method::POST,
+                path: "/calibrations/invalidate".into(),
+                url: "http://mock/calibrations/invalidate".into(),
+                query: vec![],
+                body: Some(serde_json::to_string(&payload()).unwrap()),
+                token: Some("test-token".into()),
+            }]
+        );
+    }
+
+    #[tokio::test]
+    async fn error_propagates() {
+        let mock = MockClient::default();
+        mock.set_invalidate_calibration(|| Err(mock_err()));
+
+        let result = invalidate(&mock).await;
+
+        assert!(matches!(result, Err(HTTPErr::MockErr(_))));
     }
 }

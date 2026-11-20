@@ -2,7 +2,7 @@
 use std::sync::Arc;
 
 // internal crates
-use crate::server::{state::State, v02};
+use crate::server::{state::State, v02, v03};
 
 // external crates
 use axum::{
@@ -26,7 +26,8 @@ pub const MAX_REQUEST_BYTES: usize = 2 * 1024 * 1024 + 64 * 1024;
 
 /// Build the router both transports serve, including shared middleware.
 pub fn router(state: Arc<State>) -> Router {
-    middleware(v02::routes::table().with_state(state))
+    let routes = v02::routes::table().merge(v03::routes::table());
+    middleware(routes.with_state(state))
 }
 
 /// Authorization redaction, request tracing and the request body limit
