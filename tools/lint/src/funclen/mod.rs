@@ -134,7 +134,7 @@ impl<'ast> Visit<'ast> for FnVisitor<'_> {
 
     fn visit_expr_closure(&mut self, node: &'ast syn::ExprClosure) {
         if let syn::Expr::Block(body) = &*node.body {
-            let line = node.or1_token.span.start().line;
+            let line = node.inputs_begin.span.start().line;
             self.check_block(&body.block, line, None);
         }
         syn::visit::visit_expr_closure(self, node);
