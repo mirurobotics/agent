@@ -23,9 +23,6 @@ pub struct CreateUploadRequest {
     /// The size of the file in bytes.
     #[serde(rename = "size")]
     pub size: i64,
-    /// Whether the file was incomplete when collected (e.g. it was never closed cleanly / has no finalization marker). Sets the upload's `incomplete` flag. Defaults to false.
-    #[serde(rename = "incomplete", skip_serializing_if = "Option::is_none")]
-    pub incomplete: Option<bool>,
     /// ID of the deployment the device is currently on.
     #[serde(rename = "deployment_id")]
     pub deployment_id: String,
@@ -38,7 +35,6 @@ impl CreateUploadRequest {
             source: Box::new(source),
             digest,
             size,
-            incomplete: None,
             deployment_id,
         }
     }

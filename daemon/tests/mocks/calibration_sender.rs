@@ -3,7 +3,9 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 // internal crates
-use miru_daemon::calibrations::{CalibrationsErr, Report, Sender};
+use miru_daemon::calibrations::{
+    CalibrationsErr, Invalidation, Report, ReportNotRecordedErr, Sender,
+};
 use miru_daemon::http::errors::{HTTPErr, MockErr, RequestFailed};
 use miru_daemon::http::request::Params;
 
@@ -11,11 +13,14 @@ use miru_daemon::http::request::Params;
 use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
 
-/// One scripted result for a `MockCalibrationSender::send` call.
+/// One scripted result for a `MockCalibrationSender` call.
 pub enum Step {
     Ok,
     /// Miru rejects the report for good (HTTP 422).
     Terminal,
+    /// The control plane hasn't recorded the report an invalidation names
+    /// (HTTP 404).
+    NotRecorded,
     /// Miru fails (HTTP 500).
     Server,
     /// Miru can't be reached.
@@ -25,21 +30,24 @@ pub enum Step {
     Hang(oneshot::Receiver<()>),
 }
 
-/// A scripted [`Sender`]. An empty script succeeds.
+/// A scripted [`Sender`]. Both calls take the next step; an empty script
+/// succeeds.
 pub struct MockCalibrationSender {
     script: Mutex<VecDeque<Step>>,
     sent: Mutex<Vec<Report>>,
+    invalidated: Mutex<Vec<Invalidation>>,
     started_tx: mpsc::UnboundedSender<()>,
 }
 
 impl MockCalibrationSender {
-    /// The mock and a receiver signalled at the start of every `send`, after
+    /// The mock and a receiver signalled at the start of every call, after
     /// the call is recorded.
     pub fn new() -> (Arc<Self>, mpsc::UnboundedReceiver<()>) {
         let (started_tx, started_rx) = mpsc::unbounded_channel();
         let mock = Self {
             script: Mutex::new(VecDeque::new()),
             sent: Mutex::new(Vec::new()),
+            invalidated: Mutex::new(Vec::new()),
             started_tx,
         };
         (Arc::new(mock), started_rx)
@@ -65,26 +73,24 @@ impl MockCalibrationSender {
     pub fn reports(&self) -> Vec<Report> {
         self.sent.lock().unwrap().clone()
     }
-}
 
-fn request_failed(status: u16) -> CalibrationsErr {
-    CalibrationsErr::HTTPErr(HTTPErr::RequestFailed(RequestFailed {
-        request: Params::get("http://mock/calibrations").meta().unwrap(),
-        status: reqwest::StatusCode::from_u16(status).unwrap(),
-        error: None,
-        trace: miru_daemon::trace!(),
-    }))
-}
+    /// Every invalidation `invalidate` was called with, in order.
+    pub fn invalidations(&self) -> Vec<Invalidation> {
+        self.invalidated.lock().unwrap().clone()
+    }
 
-impl Sender for MockCalibrationSender {
-    async fn send(&self, report: Report) -> Result<(), CalibrationsErr> {
-        self.sent.lock().unwrap().push(report);
+    /// Signal the call's start, then play the next step.
+    async fn play_next_step(&self) -> Result<(), CalibrationsErr> {
         let step = self.script.lock().unwrap().pop_front();
-        // both guards are dropped: never hold a std Mutex across an await
+        // the guard is dropped: never hold a std Mutex across an await
         let _ = self.started_tx.send(());
         match step {
             None | Some(Step::Ok) => Ok(()),
             Some(Step::Terminal) => Err(request_failed(422)),
+            Some(Step::NotRecorded) => Err(CalibrationsErr::from(ReportNotRecordedErr {
+                report_id: Uuid::nil(),
+                source: failed_request(404),
+            })),
             Some(Step::Server) => Err(request_failed(500)),
             Some(Step::Network) => Err(CalibrationsErr::HTTPErr(HTTPErr::MockErr(MockErr {
                 is_network_conn_err: true,
@@ -94,5 +100,30 @@ impl Sender for MockCalibrationSender {
                 Ok(())
             }
         }
+    }
+}
+
+fn request_failed(status: u16) -> CalibrationsErr {
+    CalibrationsErr::HTTPErr(HTTPErr::RequestFailed(failed_request(status)))
+}
+
+fn failed_request(status: u16) -> RequestFailed {
+    RequestFailed {
+        request: Params::get("http://mock/calibrations").meta().unwrap(),
+        status: reqwest::StatusCode::from_u16(status).unwrap(),
+        error: None,
+        trace: miru_daemon::trace!(),
+    }
+}
+
+impl Sender for MockCalibrationSender {
+    async fn send(&self, report: Report) -> Result<(), CalibrationsErr> {
+        self.sent.lock().unwrap().push(report);
+        self.play_next_step().await
+    }
+
+    async fn invalidate(&self, invalidation: Invalidation) -> Result<(), CalibrationsErr> {
+        self.invalidated.lock().unwrap().push(invalidation);
+        self.play_next_step().await
     }
 }

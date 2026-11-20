@@ -137,6 +137,43 @@ async fn keeps_an_entry_as_new_or_newer_without_downloading() {
     assert_eq!(fx.client.call_count(Call::GetCalibrationContent), 0);
 }
 
+/// `arm` with role `left`, reported `secs` after the control plane's `arm-left`.
+fn left_arm_after(secs: i64) -> ReportMetadata {
+    ReportMetadata {
+        role: Some("left".to_string()),
+        ..reported_after("arm", secs)
+    }
+}
+
+#[tokio::test]
+async fn replaces_an_older_entry_under_another_split() {
+    let fx = Fixture::new();
+    seed(&fx, &[left_arm_after(-1)]).await;
+    fx.serve(&["arm-left"]);
+
+    fx.pull(latest::DEFAULT_CAPACITY).await.unwrap();
+
+    let arm_left = report("arm-left").metadata;
+    assert_eq!(fx.entries().await, std::slice::from_ref(&arm_left));
+    // replaced in the index itself, not only hidden by a read
+    let index_file = latest_cals_layout(&fx.dir).index();
+    let index: serde_json::Value = files::read_json(&index_file).await.unwrap();
+    assert_eq!(index, serde_json::json!({ "entries": [arm_left] }));
+}
+
+#[tokio::test]
+async fn keeps_a_newer_entry_under_another_split_without_downloading() {
+    let fx = Fixture::new();
+    let stored = vec![left_arm_after(0)];
+    seed(&fx, &stored).await;
+    fx.serve(&["arm-left"]);
+
+    fx.pull(latest::DEFAULT_CAPACITY).await.unwrap();
+
+    assert_eq!(fx.entries().await, stored);
+    assert_eq!(fx.client.call_count(Call::GetCalibrationContent), 0);
+}
+
 #[tokio::test]
 async fn keeps_keys_the_control_plane_does_not_have() {
     let fx = Fixture::new();
