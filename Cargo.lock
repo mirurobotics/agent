@@ -712,7 +712,7 @@ dependencies = [
 
 [[package]]
 name = "backend-api"
-version = "0.12.4"
+version = "0.13.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -1252,7 +1252,7 @@ dependencies = [
 
 [[package]]
 name = "device-api-v02"
-version = "0.12.4"
+version = "0.13.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -1261,7 +1261,7 @@ dependencies = [
 
 [[package]]
 name = "device-api-v03"
-version = "0.12.4"
+version = "0.13.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2319,7 +2319,7 @@ dependencies = [
 
 [[package]]
 name = "miru-daemon"
-version = "0.12.4"
+version = "0.13.0"
 dependencies = [
  "atomicwrites",
  "aws-lc-rs",
@@ -2334,6 +2334,7 @@ dependencies = [
  "chrono",
  "crc-fast",
  "device-api-v02",
+ "device-api-v03",
  "futures",
  "glob",
  "http 1.5.0",

@@ -2,8 +2,11 @@
 use crate::authn::AuthnErr;
 use crate::errors::{Code, HTTPCode, Trace};
 use crate::filesys::FileSysErr;
-use crate::http::HTTPErr;
+use crate::http::{errors::RequestFailed, HTTPErr};
 use crate::queue::{EnqueueErr, QueueFullErr};
+
+// external crates
+use uuid::Uuid;
 
 pub type SendActorMessageErr = crate::cache::errors::SendActorMessageErr;
 pub type ReceiveActorMessageErr = crate::cache::errors::ReceiveActorMessageErr;
@@ -116,6 +119,18 @@ impl crate::errors::Error for InvalidReportErr {
     }
 }
 
+/// The control plane has no report with an invalidation's `report_id` yet,
+/// usually because the report is still queued. Not terminal, so the worker
+/// retries the invalidation.
+#[derive(Debug, thiserror::Error)]
+#[error("the control plane has not recorded report {report_id} yet: {source}")]
+pub struct ReportNotRecordedErr {
+    pub report_id: Uuid,
+    pub source: RequestFailed,
+}
+
+impl crate::errors::Error for ReportNotRecordedErr {}
+
 /// Getting a device token for an upload or a pull failed. Never terminal,
 /// whatever the token request's status: a token failure says nothing about the
 /// calibration, so the caller retries.
@@ -143,6 +158,8 @@ pub enum CalibrationsErr {
     FileSysErr(FileSysErr),
     #[error(transparent)]
     InvalidReportErr(InvalidReportErr),
+    #[error(transparent)]
+    ReportNotRecordedErr(ReportNotRecordedErr),
     #[error(transparent)]
     HTTPErr(HTTPErr),
     #[error(transparent)]
@@ -187,6 +204,12 @@ impl From<CalibrationNotFoundErr> for CalibrationsErr {
     }
 }
 
+impl From<ReportNotRecordedErr> for CalibrationsErr {
+    fn from(e: ReportNotRecordedErr) -> Self {
+        Self::ReportNotRecordedErr(e)
+    }
+}
+
 impl From<HTTPErr> for CalibrationsErr {
     fn from(e: HTTPErr) -> Self {
         Self::HTTPErr(e)
@@ -206,6 +229,7 @@ crate::impl_error!(CalibrationsErr {
     NotFoundErr,
     FileSysErr,
     InvalidReportErr,
+    ReportNotRecordedErr,
     HTTPErr,
     TokenErr,
     SendActorMessageErr,

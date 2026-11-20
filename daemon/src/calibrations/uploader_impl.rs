@@ -5,12 +5,15 @@ use std::sync::Arc;
 // internal crates
 use crate::calibrations::{
     errors::{CalibrationTooLargeErr, CalibrationsErr},
-    report::{self, Queue, QueueEntry, QueueSnapshotFile, Report, ReportMetadata},
+    invalidation::Invalidation,
+    job::Job,
+    queue::{Queue, QueueEntry, QueueSnapshotFile},
+    report::{self, Report},
     sender::Sender,
 };
 use crate::errors::Error;
 use crate::filesys::{dirs, files, Dir, File, WriteOptions};
-use crate::queue::{self, Persistence, RetryPolicy, Verdict};
+use crate::queue::{self, Persistence, QueueJob, RetryPolicy, Verdict};
 use crate::trace;
 
 // external crates
@@ -20,12 +23,13 @@ use uuid::Uuid;
 
 #[derive(Debug, Clone)]
 pub struct UploaderOptions {
-    /// The most reports queued at once; intake is rejected beyond it.
+    /// The most reports and invalidations queued at once; intake is rejected
+    /// beyond it.
     pub capacity: usize,
     /// The largest report data accepted, in bytes.
     pub max_report_bytes: u64,
-    /// When a failed report is retried and when it is dropped. Its age is
-    /// measured from `reported_at`.
+    /// When a failed job is retried and when it is dropped. Its age counts
+    /// from when it was queued.
     pub retry: RetryPolicy,
 }
 
@@ -47,7 +51,7 @@ impl Default for UploaderOptions {
 }
 
 /// What the queue holds for the worker to do next.
-pub(crate) type NextAttempt = queue::NextAttempt<ReportMetadata>;
+pub(crate) type NextAttempt = queue::NextAttempt<Job>;
 
 /// Single-threaded calibration uploader state and logic: the queue of report
 /// metadata, the directory of report files, and the sender that uploads them.
@@ -118,16 +122,30 @@ where
     /// before the report file, so a crash between the two leaves an entry
     /// without a file, which [`Self::attempt`] fails for good. On error nothing
     /// is queued.
-    pub(crate) async fn enqueue(&mut self, report: &Report) -> Result<Uuid, CalibrationsErr> {
+    pub(crate) async fn enqueue_report(
+        &mut self,
+        report: &Report,
+    ) -> Result<Uuid, CalibrationsErr> {
         let bytes = report.data.as_bytes();
         self.verify_size(bytes.len() as u64)?;
-        let id = self.queue.enqueue(report.metadata.clone()).await?;
+        let job = Job::Report(report.metadata.clone());
+        let id = self.queue.enqueue(job).await?;
         let file = self.report_file(id);
         if let Err(e) = files::write_bytes(&file, bytes, WriteOptions::OVERWRITE_ATOMIC).await {
             self.queue.ack(id).await;
             return Err(e.into());
         }
         Ok(id)
+    }
+
+    /// Queue the upload of `invalidation`. The job has no report file. On
+    /// error nothing is queued.
+    pub(crate) async fn enqueue_invalidation(
+        &mut self,
+        invalidation: Invalidation,
+    ) -> Result<Uuid, CalibrationsErr> {
+        let job = Job::Invalidation(invalidation);
+        Ok(self.queue.enqueue(job).await?)
     }
 
     pub(crate) fn len(&self) -> usize {
@@ -141,20 +159,26 @@ where
         self.queue.next_attempt(now, horizon).await
     }
 
-    /// Upload the report queued as `entry`: read its file, then send it. The
-    /// future owns what it needs and borrows nothing from `self`, so the
-    /// worker can serve commands while it runs. The metadata is cloned into
-    /// the future, which is cheap: the data is read from disk inside it.
+    /// Upload the job queued as `entry`: send its invalidation, or read its
+    /// report file and send the report. The future owns what it needs and
+    /// borrows nothing from `self`, so the worker can serve commands while it
+    /// runs. The job is cloned into the future, which is cheap: the data
+    /// is read from disk inside it.
     pub(crate) fn attempt(
         &self,
         entry: &QueueEntry,
     ) -> impl Future<Output = Result<(), CalibrationsErr>> {
         let sender = self.sender.clone();
         let file = self.report_file(entry.id);
-        let metadata = entry.job.clone();
+        let job = entry.job.clone();
         async move {
-            let data = report::read_data(&file).await?;
-            sender.send(Report { metadata, data }).await
+            match job {
+                Job::Report(metadata) => {
+                    let data = report::read_data(&file).await?;
+                    sender.send(Report { metadata, data }).await
+                }
+                Job::Invalidation(invalidation) => sender.invalidate(invalidation).await,
+            }
         }
     }
 
@@ -178,7 +202,7 @@ where
     /// errors are expected and don't count toward the attempt budget; any
     /// other failure does.
     async fn handle_failure(&mut self, mut entry: QueueEntry, err: CalibrationsErr) {
-        let age = (self.now_fn)() - entry.job.reported_at;
+        let age = (self.now_fn)() - entry.job.queued_at();
         match self.options.retry.on_failure(&err, entry.attempts, age) {
             Verdict::Retry {
                 attempts,
@@ -245,32 +269,33 @@ where
     }
 
     fn log_network_conn_err(entry: &QueueEntry, err: &CalibrationsErr) {
-        let id = entry.id;
-        debug!("calibrations: failed to reach Miru with report {id}; will retry: {err}");
+        let (id, name) = (entry.id, entry.job.name());
+        debug!("calibrations: failed to reach the control plane with {name} ({id}): {err}");
     }
 
     fn log_counted_failure(entry: &QueueEntry, err: &CalibrationsErr) {
-        let (id, attempts) = (entry.id, entry.attempts);
-        warn!("calibrations: attempt {attempts} to upload report {id} failed; will retry: {err}");
+        let (id, name, attempts) = (entry.id, entry.job.name(), entry.attempts);
+        warn!("calibrations: attempt {attempts} to upload {name} ({id}) failed; will retry: {err}");
     }
 
     fn log_success(entry: &QueueEntry) {
-        info!("calibrations: uploaded report {}", entry.id);
+        let (id, name) = (entry.id, entry.job.name());
+        info!("calibrations: uploaded {name} ({id})");
     }
 
     fn log_dropped(entry: &QueueEntry, err: &CalibrationsErr) {
-        let (id, attempts) = (entry.id, entry.attempts);
-        error!("calibrations: dropping report {id} after {attempts} attempts: {err}");
+        let (id, name, attempts) = (entry.id, entry.job.name(), entry.attempts);
+        error!("calibrations: dropping {name} ({id}) after {attempts} attempts: {err}");
     }
 
     fn log_age_drop(entry: &QueueEntry, age: TimeDelta, err: &CalibrationsErr) {
-        let (id, days) = (entry.id, age.num_days());
-        error!("calibrations: dropping report {id}, still unsent after {days} days: {err}");
+        let (id, name, days) = (entry.id, entry.job.name(), age.num_days());
+        error!("calibrations: dropping {name} ({id}), still unsent after {days} days: {err}");
     }
 
     fn log_terminal_drop(entry: &QueueEntry, err: &CalibrationsErr) {
-        let id = entry.id;
-        error!("calibrations: dropping report {id}, which can never be uploaded: {err}");
+        let (id, name) = (entry.id, entry.job.name());
+        error!("calibrations: dropping {name} ({id}), which can never be uploaded: {err}");
     }
 }
 
@@ -283,9 +308,9 @@ mod tests {
     // internal crates
     use super::{NextAttempt, QueueEntry, UploaderImpl, UploaderOptions};
     use crate::test_utils::calibration_sender::{MockCalibrationSender, Step};
-    use crate::test_utils::calibrations::{layout, received_at, report};
+    use crate::test_utils::calibrations::{layout, received_at, report, report_id};
     use crate::test_utils::filesys::dirs as test_dirs;
-    use miru_daemon::calibrations::{CalibrationsErr, Queue, QueueSnapshotFile};
+    use miru_daemon::calibrations::{CalibrationsErr, Invalidation, Job, Queue, QueueSnapshotFile};
     use miru_daemon::disk::layout::CalibrationsLayout;
     use miru_daemon::filesys::{dirs, files, File, PathExt, WriteOptions};
     use miru_daemon::queue::{Persistence, RetryPolicy};
@@ -382,7 +407,7 @@ mod tests {
         let mut ids = Vec::with_capacity(slugs.len());
         for slug in slugs {
             let report = report(slug);
-            let id = queue.enqueue(report.metadata).await.unwrap();
+            let id = queue.enqueue(Job::Report(report.metadata)).await.unwrap();
             files::write_string(
                 &f.report_file(id),
                 &report.data,
@@ -420,6 +445,15 @@ mod tests {
         names.iter().map(|name| name.to_string()).collect()
     }
 
+    /// An invalidation of report `a` made at `at`.
+    fn invalidation_at(at: DateTime<Utc>) -> Invalidation {
+        Invalidation {
+            report_id: report_id("a"),
+            invalidated_at: at,
+            reason: "power cycle".to_string(),
+        }
+    }
+
     // =============================== OPTIONS ================================ //
     #[test]
     fn default_options_are_1000_reports_of_1_mib() {
@@ -434,7 +468,7 @@ mod tests {
         let f = Fixture::new();
         let mut u = f.uploader_on(None, UploaderOptions::default());
 
-        u.enqueue(&report("a")).await.unwrap();
+        u.enqueue_report(&report("a")).await.unwrap();
 
         assert_eq!(u.len(), 1);
         assert!(!f.layout.queue().exists());
@@ -502,17 +536,36 @@ mod tests {
         let f = Fixture::new();
         let mut u = f.uploader().await;
 
-        let id = u.enqueue(&report("a")).await.unwrap();
+        let id = u.enqueue_report(&report("a")).await.unwrap();
 
         let entry = QueueEntry {
             id,
-            job: report("a").metadata,
+            job: Job::Report(report("a").metadata),
             attempts: 0,
             next_attempt_at: None,
         };
         assert_eq!(f.queued_on_disk().await, [entry]);
         let data = files::read_string(&f.report_file(id)).await.unwrap();
         assert_eq!(data, report("a").data);
+    }
+
+    #[tokio::test]
+    async fn queues_an_invalidation_without_a_report_file() {
+        let f = Fixture::new();
+        let mut u = f.uploader().await;
+        let invalidation = invalidation_at(received_at());
+
+        let id = u.enqueue_invalidation(invalidation.clone()).await.unwrap();
+
+        let job = Job::Invalidation(invalidation);
+        let entry = QueueEntry {
+            id,
+            job,
+            attempts: 0,
+            next_attempt_at: None,
+        };
+        assert_eq!(f.queued_on_disk().await, [entry]);
+        assert!(!f.report_file(id).exists());
     }
 
     #[tokio::test]
@@ -526,7 +579,7 @@ mod tests {
         let mut big = report("arm");
         big.data = "x".repeat(200);
 
-        let err = u.enqueue(&big).await.unwrap_err();
+        let err = u.enqueue_report(&big).await.unwrap_err();
 
         assert!(matches!(err, CalibrationsErr::TooLargeErr(_)), "{err:?}");
         assert_eq!(u.len(), 0);
@@ -541,9 +594,9 @@ mod tests {
             ..UploaderOptions::default()
         };
         let mut u = f.uploader_with(options).await;
-        u.enqueue(&report("a")).await.unwrap();
+        u.enqueue_report(&report("a")).await.unwrap();
 
-        let err = u.enqueue(&report("b")).await.unwrap_err();
+        let err = u.enqueue_report(&report("b")).await.unwrap_err();
 
         assert!(matches!(err, CalibrationsErr::QueueFullErr(_)), "{err:?}");
         assert_eq!(u.len(), 1);
@@ -560,7 +613,7 @@ mod tests {
             .await
             .unwrap();
 
-        let err = u.enqueue(&report("a")).await.unwrap_err();
+        let err = u.enqueue_report(&report("a")).await.unwrap_err();
 
         assert!(matches!(err, CalibrationsErr::FileSysErr(_)), "{err:?}");
         assert_eq!(u.len(), 0);
@@ -577,7 +630,7 @@ mod tests {
             .unwrap();
         let mut u = f.uploader().await;
 
-        let err = u.enqueue(&report("a")).await.unwrap_err();
+        let err = u.enqueue_report(&report("a")).await.unwrap_err();
 
         assert!(matches!(err, CalibrationsErr::FileSysErr(_)), "{err:?}");
         assert_eq!(u.len(), 0);
@@ -605,7 +658,7 @@ mod tests {
         let mut u = f.uploader().await;
         let report = report("a");
         let id = report.metadata.report_id;
-        u.enqueue(&report).await.unwrap();
+        u.enqueue_report(&report).await.unwrap();
 
         run_next_attempt(&mut u).await;
         f.advance_secs(10);
@@ -663,12 +716,44 @@ mod tests {
         assert_backoff(&mut u, 10).await;
     }
 
+    #[tokio::test]
+    async fn an_invalidation_is_sent_as_one_and_dequeued() {
+        let f = Fixture::new();
+        let mut u = f.uploader().await;
+        let invalidation = invalidation_at(received_at());
+        u.enqueue_invalidation(invalidation.clone()).await.unwrap();
+
+        run_next_attempt(&mut u).await;
+
+        assert_eq!(f.sender.invalidations(), [invalidation]);
+        assert!(f.sent().is_empty());
+        assert_empty(&mut u).await;
+    }
+
+    #[tokio::test]
+    async fn an_invalidation_of_an_unrecorded_report_is_retried() {
+        // the second wait doubles, so the 404 counts as an attempt
+        let f = Fixture::new();
+        f.sender.push(Step::NotRecorded);
+        f.sender.push(Step::NotRecorded);
+        let mut u = f.uploader().await;
+        u.enqueue_invalidation(invalidation_at(received_at()))
+            .await
+            .unwrap();
+
+        run_next_attempt(&mut u).await;
+        f.advance_secs(10);
+        run_next_attempt(&mut u).await;
+
+        assert_backoff(&mut u, 20).await;
+    }
+
     // ============================ FINISH ATTEMPT ============================ //
     #[tokio::test]
     async fn a_sent_report_is_dequeued_and_its_file_deleted() {
         let f = Fixture::new();
         let mut u = f.uploader().await;
-        let id = u.enqueue(&report("a")).await.unwrap();
+        let id = u.enqueue_report(&report("a")).await.unwrap();
 
         run_next_attempt(&mut u).await;
 
@@ -685,7 +770,7 @@ mod tests {
         let mut u = f.uploader().await;
         let entry = QueueEntry {
             id: ids[0],
-            job: report("a").metadata,
+            job: Job::Report(report("a").metadata),
             attempts: 0,
             next_attempt_at: None,
         };
@@ -707,7 +792,7 @@ mod tests {
             f.sender.push(Step::Server);
         }
         let mut u = f.uploader().await;
-        u.enqueue(&report("a")).await.unwrap();
+        u.enqueue_report(&report("a")).await.unwrap();
 
         for expected in [10, 20, 40, 80, 160, 320, 640, 1280, 2560, 3600, 3600] {
             run_next_attempt(&mut u).await;
@@ -723,7 +808,7 @@ mod tests {
             f.sender.push(Step::Network);
         }
         let mut u = f.uploader().await;
-        u.enqueue(&report("a")).await.unwrap();
+        u.enqueue_report(&report("a")).await.unwrap();
 
         for _ in 0..3 {
             run_next_attempt(&mut u).await;
@@ -746,7 +831,7 @@ mod tests {
             ..UploaderOptions::default()
         };
         let mut u = f.uploader_with(options).await;
-        u.enqueue(&report("a")).await.unwrap();
+        u.enqueue_report(&report("a")).await.unwrap();
 
         for _ in 0..3 {
             run_next_attempt(&mut u).await;
@@ -784,7 +869,7 @@ mod tests {
         let f = Fixture::new();
         f.sender.push(Step::Terminal);
         let mut u = f.uploader().await;
-        let id = u.enqueue(&report("a")).await.unwrap();
+        let id = u.enqueue_report(&report("a")).await.unwrap();
 
         run_next_attempt(&mut u).await;
 
@@ -806,7 +891,7 @@ mod tests {
             ..UploaderOptions::default()
         };
         let mut u = f.uploader_with(options).await;
-        u.enqueue(&report("a")).await.unwrap();
+        u.enqueue_report(&report("a")).await.unwrap();
 
         for wait in [10, 20] {
             run_next_attempt(&mut u).await;
@@ -824,7 +909,7 @@ mod tests {
         f.sender.push(Step::Network);
         f.advance(TimeDelta::days(89));
         let mut u = f.uploader().await;
-        u.enqueue(&report("a")).await.unwrap();
+        u.enqueue_report(&report("a")).await.unwrap();
 
         run_next_attempt(&mut u).await;
 
@@ -837,7 +922,7 @@ mod tests {
         f.sender.push(Step::Network);
         f.advance(TimeDelta::days(90));
         let mut u = f.uploader().await;
-        u.enqueue(&report("a")).await.unwrap();
+        u.enqueue_report(&report("a")).await.unwrap();
 
         run_next_attempt(&mut u).await;
 
@@ -850,10 +935,24 @@ mod tests {
         f.sender.push(Step::Server);
         f.advance(TimeDelta::days(90));
         let mut u = f.uploader().await;
-        u.enqueue(&report("a")).await.unwrap();
+        u.enqueue_report(&report("a")).await.unwrap();
 
         run_next_attempt(&mut u).await;
 
         assert_empty(&mut u).await;
+    }
+
+    #[tokio::test]
+    async fn an_invalidation_ages_from_when_it_was_made() {
+        let f = Fixture::new();
+        f.sender.push(Step::Network);
+        f.advance(TimeDelta::days(100));
+        let mut u = f.uploader().await;
+        let invalidation = invalidation_at(received_at() + TimeDelta::days(99));
+        u.enqueue_invalidation(invalidation).await.unwrap();
+
+        run_next_attempt(&mut u).await;
+
+        assert_backoff(&mut u, 10).await;
     }
 }

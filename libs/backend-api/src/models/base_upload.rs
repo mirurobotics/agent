@@ -23,6 +23,9 @@ pub struct BaseUpload {
     /// ID of the file rule that produced the upload.
     #[serde(rename = "file_rule_id")]
     pub file_rule_id: String,
+    /// ID of the upload collection the producing file rule uploads to.
+    #[serde(rename = "upload_collection_id")]
+    pub upload_collection_id: String,
     /// The name of the upload collection the producing file rule uploads to.
     #[serde(rename = "upload_collection_name")]
     pub upload_collection_name: String,
@@ -40,9 +43,6 @@ pub struct BaseUpload {
     pub size: i64,
     #[serde(rename = "status")]
     pub status: models::UploadStatus,
-    /// Whether the file was incomplete when collected (the mint request carried `incomplete: true`). Independent of `status`.
-    #[serde(rename = "incomplete")]
-    pub incomplete: bool,
     /// ID of the release the device was on when the upload was produced.
     #[serde(rename = "release_id")]
     pub release_id: String,
@@ -58,31 +58,27 @@ pub struct BaseUpload {
     /// Timestamp of when the upload was last updated.
     #[serde(rename = "updated_at")]
     pub updated_at: String,
-    /// ID of the workspace that owns the upload.
-    #[serde(rename = "workspace_id")]
-    pub workspace_id: String,
 }
 
 impl BaseUpload {
-    pub fn new(object: Object, id: String, device_id: String, file_rule_id: String, upload_collection_name: String, source: models::UploadSource, destination: models::UploadDestination, digest: String, size: i64, status: models::UploadStatus, incomplete: bool, release_id: String, deployment_id: String, uploaded_at: Option<String>, created_at: String, updated_at: String, workspace_id: String) -> BaseUpload {
+    pub fn new(object: Object, id: String, device_id: String, file_rule_id: String, upload_collection_id: String, upload_collection_name: String, source: models::UploadSource, destination: models::UploadDestination, digest: String, size: i64, status: models::UploadStatus, release_id: String, deployment_id: String, uploaded_at: Option<String>, created_at: String, updated_at: String) -> BaseUpload {
         BaseUpload {
             object,
             id,
             device_id,
             file_rule_id,
+            upload_collection_id,
             upload_collection_name,
             source: Box::new(source),
             destination: Box::new(destination),
             digest,
             size,
             status,
-            incomplete,
             release_id,
             deployment_id,
             uploaded_at,
             created_at,
             updated_at,
-            workspace_id,
         }
     }
 }
