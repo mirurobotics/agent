@@ -7,6 +7,7 @@ on:
     branches: ["release/*"]
   pull_request:
     branches: [main, "release/*"]
+  merge_group:
   workflow_dispatch:
   workflow_call:
 
@@ -38,7 +39,7 @@ jobs:
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
       - name: Install Cargo Tools (binstall)
-        uses: cargo-bins/cargo-binstall@851112458b5f28a29e5bc14a690c3f283d9dcc6f # main
+        uses: cargo-bins/cargo-binstall@5885714d0a40a14b2535c6ffc051fd8e49aa9665 # main
 
       - name: Install Linters
         run: |
@@ -218,7 +219,7 @@ jobs:
 
       # Credentials for the real-GCS and real-S3 upload tests. Fork and
       # Dependabot PRs get no OIDC token, so these steps and those tests skip
-      # there.
+      # there. Merge queue runs always authenticate: the PR is approved by then.
       - name: Authenticate to Google Cloud
         id: gcs
         if: github.actor != 'dependabot[bot]' && !github.event.pull_request.head.repo.fork
@@ -260,7 +261,7 @@ jobs:
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
       - name: Install Cargo Tools (binstall)
-        uses: cargo-bins/cargo-binstall@851112458b5f28a29e5bc14a690c3f283d9dcc6f # main
+        uses: cargo-bins/cargo-binstall@5885714d0a40a14b2535c6ffc051fd8e49aa9665 # main
 
       - name: Install Tools
         run: |

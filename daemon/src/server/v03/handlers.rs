@@ -1,0 +1,289 @@
+// standard crates
+use std::future::Future;
+use std::sync::Arc;
+
+// internal crates
+use crate::calibrations::Filter;
+use crate::errors::Error;
+use crate::server::{
+    errors::*,
+    request::{reject_body, reject_query},
+    response::calibration_content,
+    state::State,
+    v03::{request, response},
+};
+use crate::services::{
+    calibration as calibration_svc, deployment as dpl_svc, device as dvc_svc,
+    file_rule as file_rule_svc, git_commit as git_cmt_svc, release as rls_svc, HttpBackend,
+};
+use crate::version;
+use device_api_v03::models as device_server;
+
+// external crates
+use axum::{
+    extract::{
+        rejection::{JsonRejection, QueryRejection},
+        Path, Query, State as AxumState,
+    },
+    http::StatusCode,
+    response::{IntoResponse, Response},
+    Json,
+};
+use chrono::Utc;
+use serde::Serialize;
+use serde_json::{json, Value};
+use tracing::error;
+
+// =================================== AGENT ======================================= //
+pub async fn health() -> impl IntoResponse {
+    (
+        StatusCode::OK,
+        Json(device_server::HealthResponse {
+            status: "ok".to_string(),
+        }),
+    )
+}
+
+pub async fn version() -> impl IntoResponse {
+    (
+        StatusCode::OK,
+        Json(device_server::VersionResponse {
+            version: version::VERSION.to_string(),
+            git_commit: version::COMMIT.to_string(),
+            api_version: device_server::ApiVersion::API_VERSION.to_string(),
+            api_git_commit: device_server::ApiGitCommit::API_GIT_COMMIT.to_string(),
+            api_release_version: device_server::ReleaseVersion::RELEASE_VERSION.to_string(),
+            rust_version: version::RUST_VERSION.to_string(),
+            build_date: version::BUILD_DATE.to_string(),
+            os: version::OS.to_string(),
+            arch: version::ARCH.to_string(),
+        }),
+    )
+}
+
+pub async fn sync(AxumState(state): AxumState<Arc<State>>) -> impl IntoResponse {
+    handle(
+        async move {
+            let outcome = dvc_svc::sync(state.syncer.as_ref()).await?;
+            Ok::<_, ServerErr>(response::sync(&outcome, Utc::now()))
+        },
+        "Error syncing device",
+    )
+    .await
+}
+
+// ================================= DEVICE ======================================== //
+pub async fn get_device(AxumState(state): AxumState<Arc<State>>) -> impl IntoResponse {
+    handle(
+        async move {
+            let device = dvc_svc::get(&state.storage.device).await?;
+            Ok::<_, ServerErr>(response::device(&device, Utc::now()))
+        },
+        "Error getting device",
+    )
+    .await
+}
+
+// ================================ DEPLOYMENTS ==================================== //
+pub async fn get_deployment(
+    AxumState(state): AxumState<Arc<State>>,
+    Path(deployment_id): Path<String>,
+) -> impl IntoResponse {
+    handle(
+        async {
+            let backend = HttpBackend::new(state.http_client.as_ref(), state.token_mngr.as_ref());
+            let dpl = dpl_svc::get(&state.storage.deployments, &backend, deployment_id).await?;
+            Ok::<_, ServerErr>(device_server::Deployment::from(&dpl))
+        },
+        "Error getting deployment",
+    )
+    .await
+}
+
+pub async fn get_current_deployment(AxumState(state): AxumState<Arc<State>>) -> impl IntoResponse {
+    handle(
+        async {
+            let dpl = dpl_svc::get_current(&state.storage.deployments).await?;
+            Ok::<_, ServerErr>(device_server::Deployment::from(&dpl))
+        },
+        "Error getting current deployment",
+    )
+    .await
+}
+
+// ================================= RELEASES ====================================== //
+pub async fn get_release(
+    AxumState(state): AxumState<Arc<State>>,
+    Path(release_id): Path<String>,
+) -> impl IntoResponse {
+    handle(
+        async {
+            let backend = HttpBackend::new(state.http_client.as_ref(), state.token_mngr.as_ref());
+            let release = rls_svc::get(
+                &state.storage.releases,
+                &state.storage.file_rules,
+                &backend,
+                release_id,
+            )
+            .await?;
+            Ok::<_, ServerErr>(device_server::Release::from(&release))
+        },
+        "Error getting release",
+    )
+    .await
+}
+
+pub async fn get_current_release(AxumState(state): AxumState<Arc<State>>) -> impl IntoResponse {
+    handle(
+        async {
+            let backend = HttpBackend::new(state.http_client.as_ref(), state.token_mngr.as_ref());
+            let release = rls_svc::get_current(
+                &state.storage.deployments,
+                &state.storage.releases,
+                &state.storage.file_rules,
+                &backend,
+            )
+            .await?;
+            Ok::<_, ServerErr>(device_server::Release::from(&release))
+        },
+        "Error getting current release",
+    )
+    .await
+}
+
+// ================================ GIT COMMITS ==================================== //
+pub async fn get_git_commit(
+    AxumState(state): AxumState<Arc<State>>,
+    Path(git_commit_id): Path<String>,
+) -> impl IntoResponse {
+    handle(
+        async {
+            let backend = HttpBackend::new(state.http_client.as_ref(), state.token_mngr.as_ref());
+            let gc = git_cmt_svc::get(&state.storage.git_commits, &backend, git_commit_id).await?;
+            Ok::<_, ServerErr>(device_server::GitCommit::from(&gc))
+        },
+        "Error getting git commit",
+    )
+    .await
+}
+
+// ================================ FILE RULES ===================================== //
+pub async fn get_file_rule(
+    AxumState(state): AxumState<Arc<State>>,
+    Path(file_rule_id): Path<String>,
+) -> impl IntoResponse {
+    handle(
+        async {
+            let backend = HttpBackend::new(state.http_client.as_ref(), state.token_mngr.as_ref());
+            let rule =
+                file_rule_svc::get(&state.storage.file_rules, &backend, file_rule_id).await?;
+            Ok::<_, ServerErr>(device_server::BaseFileRule::from(&rule))
+        },
+        "Error getting file rule",
+    )
+    .await
+}
+
+// =============================== CALIBRATIONS ==================================== //
+pub async fn create_calibration(
+    AxumState(state): AxumState<Arc<State>>,
+    request: Result<Json<request::CreateCalibrationBody>, JsonRejection>,
+) -> impl IntoResponse {
+    handle(
+        async {
+            let Json(request) = request.map_err(reject_body)?;
+            let params = calibration_svc::CreateParams::try_from(request)
+                .map_err(ServerErr::InvalidRequestErr)?;
+            let created = calibration_svc::create(
+                &state.cal_uploader,
+                &state.storage.deployments,
+                params,
+                Utc::now(),
+            )
+            .await?;
+            Ok::<_, ServerErr>(device_server::CreateCalibrationResponse::from(&created))
+        },
+        "Error creating calibration",
+    )
+    .await
+}
+
+pub async fn list_latest_calibrations(
+    AxumState(state): AxumState<Arc<State>>,
+    query: Result<Query<request::LatestCalibrationsQuery>, QueryRejection>,
+) -> impl IntoResponse {
+    handle(
+        async {
+            let Query(query) = query.map_err(reject_query)?;
+            let filter = Filter::try_from(query).map_err(ServerErr::InvalidRequestErr)?;
+            let latest = calibration_svc::list_latest(&state.latest_cals, &filter).await?;
+            Ok::<_, ServerErr>(response::latest_calibrations(&latest))
+        },
+        "Error listing latest calibrations",
+    )
+    .await
+}
+
+pub async fn invalidate_latest_calibration(
+    AxumState(state): AxumState<Arc<State>>,
+    request: Result<Json<device_server::InvalidateCalibrationRequest>, JsonRejection>,
+) -> impl IntoResponse {
+    handle(
+        async {
+            let Json(request) = request.map_err(reject_body)?;
+            let invalidated = calibration_svc::invalidate(
+                &state.cal_uploader,
+                &state.latest_cals,
+                calibration_svc::InvalidateParams::from(request),
+                Utc::now(),
+            )
+            .await?;
+            Ok::<_, ServerErr>(device_server::Calibration::from(&invalidated))
+        },
+        "Error invalidating latest calibration",
+    )
+    .await
+}
+
+/// The content's bytes on success, rather than JSON.
+pub async fn get_latest_calibration_content(
+    AxumState(state): AxumState<Arc<State>>,
+    Path(report_id): Path<String>,
+) -> Response {
+    match calibration_svc::get_content(&state.latest_cals, &report_id).await {
+        Ok(content) => calibration_content(content),
+        Err(e) => error_response(e.into(), "Error getting calibration content").into_response(),
+    }
+}
+
+// ================================ UTILITIES ====================================== //
+async fn handle<F, T, E>(service: F, err_msg: &str) -> (StatusCode, Json<Value>)
+where
+    F: Future<Output = Result<T, E>>,
+    T: Serialize,
+    E: Into<ServerErr>,
+{
+    match service.await {
+        Ok(val) => (StatusCode::OK, Json(json!(val))),
+        Err(e) => error_response(e.into(), err_msg),
+    }
+}
+
+fn error_response(e: ServerErr, err_msg: &str) -> (StatusCode, Json<Value>) {
+    error!("{err_msg}: {e:?}");
+    (e.http_status(), Json(json!(to_error_response(e))))
+}
+
+fn to_error_response(e: impl Error) -> device_server::ErrorResponse {
+    let params = e
+        .params()
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or_default();
+    device_server::ErrorResponse {
+        error: Box::new(device_server::Error {
+            code: e.code().as_str().to_string(),
+            params,
+            message: e.to_string(),
+        }),
+    }
+}

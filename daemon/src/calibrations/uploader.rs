@@ -6,8 +6,10 @@ use std::time::Duration;
 // internal crates
 use crate::calibrations::{
     errors::{CalibrationsErr, ReceiveActorMessageErr, SendActorMessageErr},
+    invalidation::Invalidation,
     latest::LatestStore,
-    report::{QueueEntry, QueueSnapshotFile, Report},
+    queue::{QueueEntry, QueueSnapshotFile},
+    report::Report,
     sender::Sender,
     uploader_impl::{NextAttempt, UploaderImpl, UploaderOptions},
 };
@@ -36,8 +38,12 @@ pub struct UploaderArgs<S, F, N> {
 
 // ================================== WORKER ======================================= //
 enum Command {
-    Enqueue {
+    EnqueueReport {
         report: Box<Report>,
+        respond_to: oneshot::Sender<Result<(), CalibrationsErr>>,
+    },
+    Invalidate {
+        invalidation: Invalidation,
         respond_to: oneshot::Sender<Result<(), CalibrationsErr>>,
     },
     Len {
@@ -96,13 +102,28 @@ where
     /// Queue `report`, then write it to the latest store. A failed store
     /// write removes the queued report, so on error nothing is queued or
     /// stored.
-    async fn enqueue(&mut self, report: Report) -> Result<(), CalibrationsErr> {
-        let id = self.uploader.enqueue(&report).await?;
+    async fn enqueue_report(&mut self, report: Report) -> Result<(), CalibrationsErr> {
+        let id = self.uploader.enqueue_report(&report).await?;
         if let Err(e) = self.latest.put(report.metadata, &report.data).await {
             self.uploader.remove(id).await;
             return Err(e);
         }
         Ok(())
+    }
+
+    /// Queue the upload of `invalidation`, then mark its report's entry invalid.
+    /// The upload is what counts, so a failed store write keeps it queued, and
+    /// an entry a newer report replaced is skipped.
+    async fn invalidate(&mut self, invalidation: Invalidation) -> Result<(), CalibrationsErr> {
+        let (report_id, invalidated_at) = (invalidation.report_id, invalidation.invalidated_at);
+        self.uploader.enqueue_invalidation(invalidation).await?;
+        match self.latest.invalidate(report_id, invalidated_at).await {
+            Err(CalibrationsErr::NotFoundErr(_)) => {
+                info!("calibrations: skipped marking replaced report {report_id} invalid");
+                Ok(())
+            }
+            result => result.map(|_| ()),
+        }
     }
 
     /// Drive `fut` to completion while serving commands, so intake never
@@ -147,9 +168,16 @@ where
             return Flow::Shutdown;
         };
         match cmd {
-            Command::Enqueue { report, respond_to } => {
-                let result = self.enqueue(*report).await;
-                respond(respond_to, result, "enqueue");
+            Command::EnqueueReport { report, respond_to } => {
+                let result = self.enqueue_report(*report).await;
+                respond(respond_to, result, "enqueue_report");
+            }
+            Command::Invalidate {
+                invalidation,
+                respond_to,
+            } => {
+                let result = self.invalidate(invalidation).await;
+                respond(respond_to, result, "invalidate");
             }
             Command::Len { respond_to } => respond(respond_to, self.uploader.len(), "len"),
             Command::Shutdown { respond_to } => {
@@ -169,10 +197,10 @@ fn respond<T>(respond_to: oneshot::Sender<T>, value: T, op: &str) {
 
 // ================================== HANDLE ======================================= //
 /// Handle to the calibration uploader: one task that owns the calibration
-/// queue, writes intake to it and the latest store, and uploads reports to
-/// Miru one at a time, oldest due first, retrying a failed report at the tail
-/// after its own backoff. It keeps serving intake during an upload or a
-/// backoff.
+/// queue, writes intake and invalidations to it and the latest store, and
+/// uploads them to the control plane one at a time, oldest due first, retrying
+/// a failed one at the tail after its own backoff. It keeps serving intake
+/// during an upload or a backoff.
 #[derive(Debug)]
 pub struct Uploader {
     sender: mpsc::Sender<Command>,
@@ -210,14 +238,25 @@ impl Uploader {
     /// [`CalibrationsErr::StoreFullErr`], and a report over the size cap the
     /// 413 [`CalibrationsErr::TooLargeErr`].
     pub async fn report(&self, report: Report) -> Result<(), CalibrationsErr> {
-        self.send_command("enqueue", |respond_to| Command::Enqueue {
+        self.send_command("enqueue_report", |respond_to| Command::EnqueueReport {
             report: Box::new(report),
             respond_to,
         })
         .await?
     }
 
-    /// The number of queued reports, including one being uploaded.
+    /// Queue the upload of `invalidation`, then mark its report's entry invalid
+    /// unless a newer report replaced it. A failed store write still leaves the
+    /// upload queued.
+    pub async fn invalidate(&self, invalidation: Invalidation) -> Result<(), CalibrationsErr> {
+        self.send_command("invalidate", |respond_to| Command::Invalidate {
+            invalidation,
+            respond_to,
+        })
+        .await?
+    }
+
+    /// The number of queued jobs, including one being uploaded.
     pub async fn num_queued_uploads(&self) -> Result<usize, CalibrationsErr> {
         self.send_command("len", |respond_to| Command::Len { respond_to })
             .await

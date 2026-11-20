@@ -29,10 +29,11 @@ async fn queues_the_report_stamped_with_its_id_and_the_time() {
             reported_by: Some("Ada Lovelace".to_string()),
             deployment_id: None,
             reported_at: received_at(),
+            invalidated_at: None,
         },
         data: params().data,
     };
-    assert_eq!(f.uploaded().await, expected);
+    assert_eq!(f.uploaded_report().await, expected);
 }
 
 #[tokio::test]
@@ -43,7 +44,7 @@ async fn stamps_the_deployed_deployment() {
 
     f.create(params()).await.unwrap();
 
-    let uploaded = f.uploaded().await;
+    let uploaded = f.uploaded_report().await;
     assert_eq!(uploaded.metadata.deployment_id.as_deref(), Some("dpl_1"));
 }
 
@@ -54,7 +55,7 @@ async fn stamps_no_deployment_when_none_is_deployed() {
 
     f.create(params()).await.unwrap();
 
-    assert_eq!(f.uploaded().await.metadata.deployment_id, None);
+    assert_eq!(f.uploaded_report().await.metadata.deployment_id, None);
 }
 
 #[tokio::test]
