@@ -19,7 +19,7 @@ Before a PR leaves draft, ask these of the full diff. Fix each finding, or answe
 3. What does the closest sibling do? Match its layout, harness and tests.
 4. Is it in the right layer and file (`ARCHITECTURE.md`), or does a shared helper already exist?
 5. Does the name say exactly what it does, with one name per concept and no clash with an existing meaning?
-6. Is each comment short, and will it stay true?
+6. Does it add a comment, or reword one beyond keeping it true?
 
 This copies the review questions from the `miru-internal` plugin's rules because cloud sessions don't load the plugin yet. Delete it once they do.
 
