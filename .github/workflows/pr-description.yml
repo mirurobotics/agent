@@ -13,4 +13,4 @@ permissions:
 
 jobs:
   pr-description:
-    uses: mirurobotics/workflows/.github/workflows/pr-description.yml@aba8fd51d888a53d082843f81d4f788e7d1caae0
+    uses: mirurobotics/workflows/.github/workflows/pr-description.yml@7f73016946866f04e6152f27276711549474e2f8
