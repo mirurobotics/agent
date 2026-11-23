@@ -3,7 +3,7 @@
 //! Mirrors `daemon/tests/models/harnesses.rs`: the actual assertions live in a
 //! plain (non-`#[test]`) function, `assert_error`. Because that function carries
 //! no `#[test]` / `#[tokio::test]` attribute, the repo's field-by-field-assert
-//! lint (`tools/lint/src/asserts/detect.rs`, which only scans functions marked
+//! lint (from `mirurobotics/rusttools`; it only scans functions marked
 //! `#[test]`) never inspects it. Modules that route their trait-surface
 //! assertions through this harness are therefore immune to that lint by
 //! construction and can drop their `// lint:allow(field-by-field-assert)`
