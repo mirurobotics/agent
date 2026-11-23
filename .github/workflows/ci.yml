@@ -44,7 +44,6 @@ jobs:
       - name: Install Linters
         run: |
           cargo binstall --force --no-confirm cargo-machete cargo-audit cargo-diet
-          cargo install --locked --git https://github.com/mirurobotics/rusttools --rev b0534239fff834429fda35f6db13a6ef64dacc2a lint-imports
 
       - name: Run Linter
         run: LINT_FIX=0 ./scripts/lint.sh

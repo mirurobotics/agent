@@ -24,6 +24,8 @@ RUN_DIET="${RUN_DIET:-0}"
 
 echo "Custom Linter"
 echo "-------------"
+# A no-op when this rev is already installed, so local runs match CI.
+cargo install --quiet --locked --git https://github.com/mirurobotics/rusttools --rev b0534239fff834429fda35f6db13a6ef64dacc2a lint-imports
 ASSERT_ARGS=""
 if [ -n "${ASSERT_LINT_PATHS:-}" ]; then
     ASSERT_ARGS="--assert-paths $ASSERT_LINT_PATHS"

@@ -2,7 +2,7 @@
 # Shared lint dependency installer — idempotent, skips already-installed tools.
 #
 # Installs the common lint toolchain: rustup, rustfmt, clippy,
-# cargo-machete, cargo-audit, cargo-diet, lint-imports.
+# cargo-machete, cargo-audit, cargo-diet.
 # Per-crate lint scripts can install additional tools after sourcing this.
 #
 # Skips `rustup update` when CI=true (set automatically by GitHub Actions).
@@ -75,8 +75,3 @@ if ! command_exists cargo-diet && ! has_cargo_subcommand cargo-diet; then
     echo "---------------------"
     install_cargo_tool cargo-diet
 fi
-
-# cargo install reinstalls lint-imports only when the pinned rev changes.
-echo "Installing lint-imports"
-echo "-----------------------"
-cargo install --locked --git https://github.com/mirurobotics/rusttools --rev b0534239fff834429fda35f6db13a6ef64dacc2a lint-imports
