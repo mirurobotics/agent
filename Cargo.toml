@@ -43,7 +43,7 @@ md5 = { package = "md-5", version = "0.11" }
 nix = { version = "0.32.0", default-features = false, features = ["user"] }
 # `std` implies `alloc` (needed for decode_vec/encode_string) and makes its error a
 # std::error::Error.
-pem-rfc7468 = { version = "0.7.0", features = ["std"] }
+pem-rfc7468 = { version = "1.0.0", features = ["std"] }
 reqwest = { version = "0.13.1", features = ["query"] }
 backend-api = { path = "libs/backend-api" }
 device-api-v02 = { path = "libs/device-api-v02" }
