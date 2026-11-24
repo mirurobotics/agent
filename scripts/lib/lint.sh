@@ -17,7 +17,6 @@
 #   RUN_DIET             — 1 = run cargo diet, 0 = skip (default)
 set -e
 
-REPO_ROOT=$(git rev-parse --show-toplevel)
 cd "$CRATE_DIR"
 
 LINT_FIX="${LINT_FIX:-1}"
@@ -25,6 +24,7 @@ RUN_DIET="${RUN_DIET:-0}"
 
 echo "Custom Linter"
 echo "-------------"
+cargo install --quiet --locked --git https://github.com/mirurobotics/rusttools --rev b0534239fff834429fda35f6db13a6ef64dacc2a lint-imports
 ASSERT_ARGS=""
 if [ -n "${ASSERT_LINT_PATHS:-}" ]; then
     ASSERT_ARGS="--assert-paths $ASSERT_LINT_PATHS"
@@ -32,10 +32,10 @@ fi
 for lint_path in $IMPORT_LINT_PATHS; do
     if [ "$LINT_FIX" = "1" ]; then
         # shellcheck disable=SC2086
-        cargo run --manifest-path "$REPO_ROOT/tools/lint/Cargo.toml" -- --path "$lint_path" --fix --config "$IMPORT_LINT_CONFIG" $ASSERT_ARGS
+        lint-imports --path "$lint_path" --fix --config "$IMPORT_LINT_CONFIG" $ASSERT_ARGS
     else
         # shellcheck disable=SC2086
-        cargo run --manifest-path "$REPO_ROOT/tools/lint/Cargo.toml" -- --path "$lint_path" --config "$IMPORT_LINT_CONFIG" $ASSERT_ARGS
+        lint-imports --path "$lint_path" --config "$IMPORT_LINT_CONFIG" $ASSERT_ARGS
     fi
     # Only run assert check on the first iteration to avoid duplicate reports.
     ASSERT_ARGS=""
