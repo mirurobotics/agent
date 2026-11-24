@@ -295,9 +295,9 @@ dependencies = [
 
 [[package]]
 name = "aws-sdk-sts"
-version = "1.127.0"
+version = "1.128.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "35d50661cd8816b7f23a652391c5b6f3645fce499e62e8fc5b3ed4145c5248f7"
+checksum = "29c357588cdf8c9ae96c0d9930fff757f9b678d06b8f68d8e37a1278fe034912"
 dependencies = [
  "arc-swap",
  "aws-credential-types",
@@ -1283,12 +1283,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "downcast"
-version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1435fa1053d8b2fbbe9be7e97eca7f33d37b28409959813daefc1446a14247f1"
-
-[[package]]
 name = "dunce"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1399,15 +1393,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "afa489199eaffb1211795df1c6236ce1ad0d41a6fa45250add73e3b02420f06e"
 dependencies = [
  "percent-encoding",
-]
-
-[[package]]
-name = "fragile"
-version = "2.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8878864ba14bb86e818a412bfd6f18f9eabd4ec0f008a28e8f7eb61db532fcf9"
-dependencies = [
- "futures-core",
 ]
 
 [[package]]
@@ -1982,9 +1967,25 @@ version = "0.2.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "175dc66334db3b9ab9985bf8b61cfed50dc16d20964bb47f9e479adcae984a7f"
 dependencies = [
- "jiff-core",
- "jiff-static",
- "jiff-tzdb-platform",
+ "jiff-core 0.1.8",
+ "jiff-static 0.2.46",
+ "jiff-tzdb-platform 0.1.3",
+ "log",
+ "portable-atomic",
+ "portable-atomic-util",
+ "serde_core",
+ "windows-link",
+]
+
+[[package]]
+name = "jiff"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c5e77cbfb9fff4798e283c2d69dff39fc2c45e7da017e5ce95b654e46ea41236"
+dependencies = [
+ "jiff-core 1.0.1",
+ "jiff-static 1.0.2",
+ "jiff-tzdb-platform 1.0.0",
  "log",
  "portable-atomic",
  "portable-atomic-util",
@@ -2002,15 +2003,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "jiff-core"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b6b46a105a9874634dd96231021526bf24ca04955a5998c59a9c7666e634b7b8"
+dependencies = [
+ "log",
+]
+
+[[package]]
 name = "jiff-static"
 version = "0.2.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c7b1af7547d47354bc438d797e3854601bde8f8d185780c5ba4ab27afa54f1ba"
 dependencies = [
- "jiff-core",
+ "jiff-core 0.1.8",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "jiff-static"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e9067a0b23e5be3147d56b2dcf652b18e6b1364caca93fb157653b6fbcab23a9"
+dependencies = [
+ "jiff-core 1.0.1",
+ "proc-macro2",
+ "quote",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -2020,12 +2042,27 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0980fca2cc272465bd60e82397607ba9f33add9e48defd77923301bbd03808f2"
 
 [[package]]
+name = "jiff-tzdb"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "12e71a1b68a875a44a33bb7a1dd84392cb77145a3367a552a3cfe6a4f5cf3afc"
+
+[[package]]
 name = "jiff-tzdb-platform"
 version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "875a5a69ac2bab1a891711cf5eccbec1ce0341ea805560dcd90b7a2e925132e8"
 dependencies = [
- "jiff-tzdb",
+ "jiff-tzdb 0.1.10",
+]
+
+[[package]]
+name = "jiff-tzdb-platform"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dc65b284afcfa8f6cf189c7274c805505314a7ab975c60e1f548bff56525420e"
+dependencies = [
+ "jiff-tzdb 1.0.0",
 ]
 
 [[package]]
@@ -2294,7 +2331,6 @@ dependencies = [
  "http 1.5.0",
  "http-body-util",
  "md-5",
- "mockall",
  "nix",
  "openssl",
  "pastey",
@@ -2323,32 +2359,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mockall"
-version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f58d964098a5f9c6b63d0798e5372fd04708193510a7af313c22e9f29b7b620b"
-dependencies = [
- "cfg-if",
- "downcast",
- "fragile",
- "mockall_derive",
- "predicates",
- "predicates-tree",
-]
-
-[[package]]
-name = "mockall_derive"
-version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ca41ce716dda6a9be188b385aa78ee5260fc25cd3802cb2a8afdc6afbe6b6dbf"
-dependencies = [
- "cfg-if",
- "proc-macro2",
- "quote",
- "syn 2.0.119",
-]
-
-[[package]]
 name = "multiversion_no_op"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2373,9 +2383,9 @@ dependencies = [
 
 [[package]]
 name = "nix"
-version = "0.31.4"
+version = "0.32.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2bc81ce8148d3b4f3274da811f11cdd824ae661ee4ef732cdb229825cf5be7f7"
+checksum = "77730ed34f01f4990cb2ea67fec715ecebc6fab9a6396cf83c5529b13f581bdc"
 dependencies = [
  "bitflags",
  "cfg-if",
@@ -2621,9 +2631,9 @@ checksum = "df94ce210e5bc13cb6651479fa48d14f601d9858cfe0467f43ae157023b938d3"
 
 [[package]]
 name = "pem-rfc7468"
-version = "0.7.0"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "88b39c9bfcfc231068454382784bb460aae594343fb030d46e9f50a645418412"
+checksum = "a6305423e0e7738146434843d1694d621cce767262b2a86910beab705e4493d9"
 dependencies = [
  "base64ct",
 ]
@@ -2736,32 +2746,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "85eae3c4ed2f50dcfe72643da4befc30deadb458a9b590d720cde2f2b1e97da9"
 dependencies = [
  "zerocopy",
-]
-
-[[package]]
-name = "predicates"
-version = "3.1.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ada8f2932f28a27ee7b70dd6c1c39ea0675c55a36879ab92f3a715eaa1e63cfe"
-dependencies = [
- "anstyle",
- "predicates-core",
-]
-
-[[package]]
-name = "predicates-core"
-version = "1.0.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cad38746f3166b4031b1a0d39ad9f954dd291e7854fcc0eed52ee41a0b50d144"
-
-[[package]]
-name = "predicates-tree"
-version = "1.0.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d0de1b847b39c8131db0467e9df1ff60e6d0562ab8e9a16e568ad0fdb372e2f2"
-dependencies = [
- "predicates-core",
- "termtree",
 ]
 
 [[package]]
@@ -3438,9 +3422,9 @@ dependencies = [
 
 [[package]]
 name = "serde_with"
-version = "3.24.0"
+version = "3.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df9adc193c780ef8f159aee8b61e2d5801aaa555e6eb0947fe45530ec506296f"
+checksum = "56cb1ca7c93ae63d6439b5250f6b6b040f7e121f32e5dd2f5d523dd4149b3204"
 dependencies = [
  "base64 0.23.1",
  "bs58",
@@ -3448,7 +3432,8 @@ dependencies = [
  "hex",
  "indexmap 1.9.3",
  "indexmap 2.14.2",
- "jiff",
+ "jiff 0.2.46",
+ "jiff 1.0.2",
  "schemars 0.9.0",
  "schemars 1.2.3",
  "serde_core",
@@ -3459,9 +3444,9 @@ dependencies = [
 
 [[package]]
 name = "serde_with_macros"
-version = "3.24.0"
+version = "3.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3e17bbc68e28663bbbb90df47e058aa7eda4fb445b89fe70457bb94fbccf6e49"
+checksum = "cff15a7c864bbec77d9586ca6822bc7c369bdf19e9243134a62b0b51ce26b31f"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -3770,12 +3755,6 @@ dependencies = [
  "rustix 1.1.6",
  "windows-sys 0.61.2",
 ]
-
-[[package]]
-name = "termtree"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f50febec83f5ee1df3015341d8bd429f2d1cc62bcba7ea2076759d315084683"
 
 [[package]]
 name = "thiserror"
