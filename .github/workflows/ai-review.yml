@@ -28,7 +28,7 @@ permissions:
 
 jobs:
   ai-review:
-    uses: mirurobotics/workflows/.github/workflows/ai-review.yml@aba8fd51d888a53d082843f81d4f788e7d1caae0
+    uses: mirurobotics/workflows/.github/workflows/ai-review.yml@7f73016946866f04e6152f27276711549474e2f8
     with:
       runs-on: ubuntu-latest # standard GitHub-hosted runners are free in public repos
     secrets:

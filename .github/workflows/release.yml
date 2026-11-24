@@ -240,7 +240,7 @@ jobs:
     permissions: {}
     steps:
       - name: Post to Slack
-        uses: mirurobotics/.github/actions/notify-deploys@f28d0cc569b006bee3e4600f3653f1f3772ec09f # main
+        uses: mirurobotics/workflows/actions/notify-deploys@933d1b4bf17071ae9bb9f8120d57dce4381a37da
         with:
           webhook-url: ${{ secrets.SLACK_DEPLOYS_WEBHOOK_URL }}
           application: Agent
