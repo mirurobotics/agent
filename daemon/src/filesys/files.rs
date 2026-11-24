@@ -64,7 +64,10 @@ pub async fn sha256_and_crc32c(file: &File) -> Result<(String, u32), FileSysErr>
     })
     .await?;
     // CRC-32 values fit in the low 32 bits of crc-fast's u64
-    Ok((format_sha256(hasher.finish().as_ref()), crc32c.finalize() as u32))
+    Ok((
+        format_sha256(hasher.finish().as_ref()),
+        crc32c.finalize() as u32,
+    ))
 }
 
 fn format_sha256(digest: &[u8]) -> String {
