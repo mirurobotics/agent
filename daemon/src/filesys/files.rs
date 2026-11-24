@@ -16,10 +16,10 @@ use crate::trace;
 
 // external crates
 use atomicwrites::{AllowOverwrite, AtomicFile, DisallowOverwrite};
+use aws_lc_rs::digest;
 use crc_fast::CrcAlgorithm;
 use secrecy::{ExposeSecretMut, SecretBox};
 use serde::de::DeserializeOwned;
-use sha2::{Digest, Sha256};
 use tokio::fs::File as TokioFile;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 #[allow(unused_imports)]
@@ -48,15 +48,15 @@ pub async fn read_bytes(file: &File) -> Result<Vec<u8>, FileSysErr> {
 /// CPU-heavy, so callers may wrap this in `tokio::task::spawn_blocking` for very
 /// large files to avoid stalling the async runtime.
 pub async fn sha256(file: &File) -> Result<String, FileSysErr> {
-    let mut hasher = Sha256::new();
+    let mut hasher = digest::Context::new(&digest::SHA256);
     read_chunks(file, |chunk| hasher.update(chunk)).await?;
-    Ok(format_sha256(&hasher.finalize()))
+    Ok(format_sha256(hasher.finish().as_ref()))
 }
 
 /// Computes `file`'s [`sha256`] digest and its CRC32C (Castagnoli) checksum in
 /// one read.
 pub async fn sha256_and_crc32c(file: &File) -> Result<(String, u32), FileSysErr> {
-    let mut hasher = Sha256::new();
+    let mut hasher = digest::Context::new(&digest::SHA256);
     let mut crc32c = crc_fast::Digest::new(CrcAlgorithm::Crc32Iscsi);
     read_chunks(file, |chunk| {
         hasher.update(chunk);
@@ -64,7 +64,7 @@ pub async fn sha256_and_crc32c(file: &File) -> Result<(String, u32), FileSysErr>
     })
     .await?;
     // CRC-32 values fit in the low 32 bits of crc-fast's u64
-    Ok((format_sha256(&hasher.finalize()), crc32c.finalize() as u32))
+    Ok((format_sha256(hasher.finish().as_ref()), crc32c.finalize() as u32))
 }
 
 fn format_sha256(digest: &[u8]) -> String {

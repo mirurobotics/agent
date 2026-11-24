@@ -65,7 +65,6 @@ serial_test = "4.0.1"
 serde = { version = "1.0.215", features = ["derive"] }
 serde_json = "1.0.132"
 serde_with = { version = "3.12.0", features = ["base64"] }
-sha2 = "0.11"
 sysinfo = { version = "0.40.3", default-features = false, features = ["system"] }
 tempfile = "3.25.0"
 thiserror = "2.0.18"
