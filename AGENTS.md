@@ -10,19 +10,6 @@ Agent-specific conventions for AI coding agents. Read this before making changes
 - `daemon/src/main.rs` — entry point (provision vs runtime).
 - `daemon/src/lib.rs` — module listing (all 23 public modules).
 
-## Review questions
-
-Before a PR leaves draft, ask these of the full diff. Fix each finding, or answer it in the PR description.
-
-1. Do we need this? Would deleting it break a requirement of this PR?
-2. Why is this optional? Is it a parameter every caller passes, or a field that always exists?
-3. What does the closest sibling do? Match its layout, harness and tests.
-4. Is it in the right layer and file (`ARCHITECTURE.md`), or does a shared helper already exist?
-5. Does the name say exactly what it does, with one name per concept and no clash with an existing meaning?
-6. Does it add a comment, reword one beyond keeping it true, or leave one stale?
-
-This copies the review questions from the `miru-internal` plugin's rules because cloud sessions don't load the plugin yet. Delete it once they do.
-
 ## Project conventions
 
 ### Import ordering
