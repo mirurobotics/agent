@@ -28,7 +28,7 @@ jobs:
       # successful run, so quiet repos don't rescan the same commit.
       - name: Check for commits since the last scan
         id: check
-        uses: mirurobotics/.github/actions/codeql-gate@d2aec010e6ce5c9dd65fb16e6d06a0f61e437734 # main
+        uses: mirurobotics/workflows/actions/codeql-gate@933d1b4bf17071ae9bb9f8120d57dce4381a37da
 
   codeql:
     needs: changes
